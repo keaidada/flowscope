@@ -9,6 +9,7 @@ import React, {
   startTransition,
   type JSX,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useDebounce } from '../hooks/useDebounce';
 import {
   Table2,
@@ -581,6 +582,7 @@ export function MatrixView({
   controlledState,
   onStateChange,
 }: MatrixViewProps): JSX.Element {
+  const { t } = useTranslation();
   const { state, actions } = useLineage();
   const { result, matrixSubMode } = state;
   const { setMatrixSubMode, highlightSpan, requestNavigation } = actions;
@@ -1081,7 +1083,7 @@ export function MatrixView({
         )}
       >
         <Database className="h-12 w-12 opacity-20" />
-        <p>No analysis result available</p>
+        <p>{t('matrix.noAnalysisResult')}</p>
       </div>
     );
   }

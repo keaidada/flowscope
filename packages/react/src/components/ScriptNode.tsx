@@ -1,5 +1,6 @@
 import { memo, type JSX } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { useTranslation } from 'react-i18next';
 import { FileCode } from 'lucide-react';
 import type { ScriptNodeData } from '../types';
 import {
@@ -18,6 +19,7 @@ import { useColors } from '../hooks/useColors';
  * Displays script name with details in a tooltip.
  */
 function ScriptNodeComponent({ data, selected }: NodeProps): JSX.Element {
+  const { t } = useTranslation();
   const colors = useColors();
   const scriptColors = colors.nodes.script;
   const nodeData = data as ScriptNodeData;
@@ -56,7 +58,7 @@ function ScriptNodeComponent({ data, selected }: NodeProps): JSX.Element {
                   className="truncate text-xs font-medium uppercase tracking-wider mb-0.5"
                   style={{ color: scriptColors.textSecondary }}
                 >
-                  Script
+                  {t('scriptNode.script')}
                 </div>
                 <div
                   className="truncate text-sm font-semibold"

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { FolderOpen, Pencil, Trash2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
@@ -30,6 +31,7 @@ export function ProjectMenuItem({
   onRename,
   onDelete,
 }: ProjectMenuItemProps) {
+  const { t } = useTranslation();
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -159,13 +161,13 @@ export function ProjectMenuItem({
       <span className="flex-1">{project.name}</span>
       {isConfirmingDelete ? (
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-          <span className="text-xs text-destructive">Delete?</span>
+          <span className="text-xs text-destructive">{t('project.deleteConfirm')}</span>
           <Button
             variant="ghost"
             size="icon"
             className="h-6 w-6 text-destructive hover:bg-destructive/10"
             onClick={handleDeleteClick}
-            aria-label={`Confirm delete ${project.name}`}
+            aria-label={t('project.confirmDelete', { name: project.name })}
             data-testid={`confirm-delete-${project.id}`}
           >
             <Trash2 className="h-3 w-3" />
@@ -173,7 +175,7 @@ export function ProjectMenuItem({
         </div>
       ) : (
         <>
-          {isActive && <span className="text-xs text-muted-foreground">Active</span>}
+          {isActive && <span className="text-xs text-muted-foreground">{t('project.active')}</span>}
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-data-highlighted:opacity-100">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -182,7 +184,7 @@ export function ProjectMenuItem({
                   size="icon"
                   className="h-6 w-6 hover:bg-accent"
                   onClick={handleStartRename}
-                  aria-label={`Rename project ${project.name}`}
+                  aria-label={t('project.renameProject', { name: project.name })}
                   data-testid={`rename-project-${project.id}`}
                 >
                   <Pencil className="h-3 w-3" />
@@ -190,7 +192,7 @@ export function ProjectMenuItem({
               </TooltipTrigger>
               <TooltipContent side="bottom">
                 <p>
-                  Rename <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">R</kbd>
+                  {t('project.rename')} <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">R</kbd>
                 </p>
               </TooltipContent>
             </Tooltip>
@@ -202,7 +204,7 @@ export function ProjectMenuItem({
                     size="icon"
                     className="h-6 w-6 hover:bg-destructive/10 hover:text-destructive"
                     onClick={handleDeleteClick}
-                    aria-label={`Delete project ${project.name}`}
+                    aria-label={t('project.deleteProject', { name: project.name })}
                     data-testid={`delete-project-${project.id}`}
                   >
                     <Trash2 className="h-3 w-3" />
@@ -210,7 +212,7 @@ export function ProjectMenuItem({
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
                   <p>
-                    Delete <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">D</kbd>
+                    {t('project.delete')} <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">D</kbd>
                   </p>
                 </TooltipContent>
               </Tooltip>

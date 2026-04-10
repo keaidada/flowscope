@@ -1,10 +1,12 @@
 import type { JSX } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useLineage } from '../store';
 import type { IssuesPanelProps, Issue } from '../types';
 
 const SEVERITY_ORDER = { error: 0, warning: 1, info: 2 };
 
 export function IssuesPanel({ className, onIssueClick }: IssuesPanelProps): JSX.Element {
+  const { t } = useTranslation();
   const { state, actions } = useLineage();
   const { result } = state;
 
@@ -46,7 +48,7 @@ export function IssuesPanel({ className, onIssueClick }: IssuesPanelProps): JSX.
       </div>
       <div className="flowscope-panel-content">
         {sortedIssues.length === 0 ? (
-          <p className="flowscope-hint">Analysis completed without issues</p>
+          <p className="flowscope-hint">{t('issuesPanelReact.completedWithout')}</p>
         ) : (
           <ul className="flowscope-issue-list">
             {sortedIssues.map((issue, idx) => (

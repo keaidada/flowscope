@@ -1,5 +1,6 @@
 import { useState, type ReactNode, type JSX } from 'react';
 import { ChevronDown, ChevronUp, Table2, Database, FileCode, Columns3, Eye } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { COLORS, EDGE_STYLES, PANEL_STYLES } from '../constants';
 
 interface LegendProps {
@@ -11,6 +12,7 @@ interface LegendProps {
  * Collapsible panel that shows in the bottom-left corner of the graph.
  */
 export function Legend({ viewMode = 'table' }: LegendProps): JSX.Element {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
@@ -26,7 +28,7 @@ export function Legend({ viewMode = 'table' }: LegendProps): JSX.Element {
             ${isExpanded ? 'bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'}
           `}
         >
-          <span>Legend</span>
+          <span>{t('legend.title')}</span>
           {isExpanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
         </button>
       </div>
@@ -40,41 +42,41 @@ export function Legend({ viewMode = 'table' }: LegendProps): JSX.Element {
           {/* Nodes section */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-wider mb-2 text-slate-500 dark:text-slate-400">
-              Nodes
+              {t('legend.nodes')}
             </div>
             <div className="space-y-1.5">
               <LegendNodeItem
                 icon={<Table2 className="h-3 w-3" />}
-                label="Table"
+                label={t('legend.table')}
                 color={COLORS.nodes.table.accent}
                 bgColor={COLORS.nodes.table.headerBg}
               />
               <LegendNodeItem
                 icon={<Eye className="h-3 w-3" />}
-                label="View"
-                sublabel="Defined query"
+                label={t('legend.view')}
+                sublabel={t('legend.viewDesc')}
                 color={COLORS.nodes.view.accent}
                 bgColor={COLORS.nodes.view.headerBg}
               />
               <LegendNodeItem
                 icon={<Database className="h-3 w-3" />}
-                label="CTE"
-                sublabel="Temporary result"
+                label={t('legend.cte')}
+                sublabel={t('legend.cteDesc')}
                 color={COLORS.nodes.cte.accent}
                 bgColor={COLORS.nodes.cte.headerBg}
               />
               <LegendNodeItem
                 icon={<Columns3 className="h-3 w-3" />}
-                label="Output"
-                sublabel="Final result"
+                label={t('legend.output')}
+                sublabel={t('legend.outputDesc')}
                 color={COLORS.nodes.virtualOutput.accent}
                 bgColor={COLORS.nodes.virtualOutput.headerBg}
               />
               {viewMode === 'script' && (
                 <LegendNodeItem
                   icon={<FileCode className="h-3 w-3" />}
-                  label="Script"
-                  sublabel="SQL file"
+                  label={t('legend.script')}
+                  sublabel={t('legend.scriptDesc')}
                   color={COLORS.nodes.script.accent}
                   bgColor={COLORS.nodes.script.headerBg}
                 />
@@ -85,26 +87,26 @@ export function Legend({ viewMode = 'table' }: LegendProps): JSX.Element {
           {/* Edges section */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-wider mb-2 text-slate-500 dark:text-slate-400">
-              Edges
+              {t('legend.edges')}
             </div>
             <div className="space-y-1.5">
               <LegendEdgeItem
                 style="solid"
                 color={EDGE_STYLES.dataFlow.stroke}
-                label="Data flow"
-                sublabel="Direct movement"
+                label={t('legend.dataFlow')}
+                sublabel={t('legend.dataFlowDesc')}
               />
               <LegendEdgeItem
                 style="dotted"
                 color={EDGE_STYLES.joinDependency.stroke}
-                label="Join dependency"
-                sublabel="Join-only filter"
+                label={t('legend.joinDependency')}
+                sublabel={t('legend.joinDependencyDesc')}
               />
               <LegendEdgeItem
                 style="dashed"
                 color={EDGE_STYLES.derivation.stroke}
-                label="Derivation"
-                sublabel="Transformation"
+                label={t('legend.derivation')}
+                sublabel={t('legend.derivationDesc')}
               />
             </div>
           </div>
@@ -112,16 +114,16 @@ export function Legend({ viewMode = 'table' }: LegendProps): JSX.Element {
           {/* States section */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-wider mb-2 text-slate-500 dark:text-slate-400">
-              States
+              {t('legend.states')}
             </div>
             <div className="space-y-1.5">
-              <LegendStateItem color={COLORS.interactive.selection} label="Selected" filled />
+              <LegendStateItem color={COLORS.interactive.selection} label={t('legend.selected')} filled />
               <LegendStateItem
                 color={COLORS.interactive.selection}
-                label="Related"
+                label={t('legend.related')}
                 filled={false}
               />
-              <LegendStateItem color={COLORS.recursive} label="Recursive" filled={false} />
+              <LegendStateItem color={COLORS.recursive} label={t('legend.recursive')} filled={false} />
             </div>
           </div>
         </div>

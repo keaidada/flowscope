@@ -1,5 +1,6 @@
 import { useMemo, useCallback } from 'react';
 import { X, Plus, Database, Layers } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -37,6 +38,7 @@ export function NamespaceFilterBar({
   availableDatabases,
   className,
 }: NamespaceFilterBarProps) {
+  const { t } = useTranslation();
   const theme = useThemeStore((state) => state.theme);
   const isDark = resolveTheme(theme) === 'dark';
 
@@ -143,7 +145,7 @@ export function NamespaceFilterBar({
               className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
             >
               <Plus className="h-3 w-3 mr-1" />
-              {hasFilters ? 'Add' : 'Filter by namespace'}
+              {hasFilters ? t('common.add') : t('namespaceFilter.filterByNamespace')}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-48">
@@ -151,7 +153,7 @@ export function NamespaceFilterBar({
               <>
                 <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
                   <Layers className="h-3 w-3" />
-                  Schemas
+                  {t('namespaceFilter.schemas')}
                 </DropdownMenuLabel>
                 {unselectedSchemas.map((schema) => (
                   <DropdownMenuItem
@@ -175,7 +177,7 @@ export function NamespaceFilterBar({
               <>
                 <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
                   <Database className="h-3 w-3" />
-                  Databases
+                  {t('namespaceFilter.databases')}
                 </DropdownMenuLabel>
                 {unselectedDatabases.map((database) => (
                   <DropdownMenuItem
@@ -204,7 +206,7 @@ export function NamespaceFilterBar({
           onClick={clearAll}
           className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground ml-auto"
         >
-          Clear all
+          {t('common.clearAll')}
         </Button>
       )}
     </div>

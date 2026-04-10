@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SqlView } from '@pondpilot/flowscope-react';
 import {
   Dialog,
@@ -18,7 +19,6 @@ interface SchemaEditorProps {
   schemaSQL: string;
   dialect: Dialect;
   onSave: (schemaSQL: string) => void;
-  /** When true, schema is from backend and cannot be edited */
   isReadOnly?: boolean;
 }
 
@@ -29,11 +29,11 @@ export function SchemaEditor({
   onSave,
   isReadOnly = false,
 }: SchemaEditorProps) {
+  const { t } = useTranslation();
   const [editedSQL, setEditedSQL] = useState(schemaSQL);
   const theme = useThemeStore((state) => state.theme);
   const isDark = resolveTheme(theme) === 'dark';
 
-  // Reset to prop value when dialog opens
   const handleOpenChange = useCallback(
     (newOpen: boolean) => {
       if (newOpen) {
@@ -51,19 +51,17 @@ export function SchemaEditor({
   }, [editedSQL, onSave, onOpenChange, isReadOnly]);
 
   const handleClose = useCallback(() => {
-    setEditedSQL(schemaSQL); // Reset to original
+    setEditedSQL(schemaSQL);
     onOpenChange(false);
   }, [schemaSQL, onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[80vh] flex flex-col">
+      <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>{isReadOnly ? 'View Schema' : 'Edit Schema'}</DialogTitle>
+          <DialogTitle>{isReadOnly ? t('schemaEditor.viewTitle') : t('schemaEditor.editTitle')}</DialogTitle>
           <DialogDescription>
-            {isReadOnly
-              ? 'This schema was loaded from the server (database introspection). It cannot be edited in serve mode.'
-              : 'Define your database schema using CREATE TABLE statements. This schema will be used to augment the lineage analysis without appearing in the graph.'}
+            {isReadOnly ? t('schemaEditor.viewDesc') : t('schemaEditor.editDesc')}
           </DialogDescription>
         </DialogHeader>
 
@@ -71,7 +69,7 @@ export function SchemaEditor({
           <SqlView
             value={editedSQL}
             onChange={isReadOnly ? undefined : setEditedSQL}
-            className="h-full"
+            className="h-full [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto"
             editable={!isReadOnly}
             isDark={isDark}
           />
@@ -79,13 +77,13 @@ export function SchemaEditor({
 
         <DialogFooter>
           {isReadOnly ? (
-            <Button onClick={handleClose}>Close</Button>
+            <Button onClick={handleClose}>{t('common.close')}</Button>
           ) : (
             <>
               <Button variant="outline" onClick={handleClose}>
-                Cancel
+                {t('common.cancel')}
               </Button>
-              <Button onClick={handleSave}>Save Schema</Button>
+              <Button onClick={handleSave}>{t('schemaEditor.saveSchema')}</Button>
             </>
           )}
         </DialogFooter>

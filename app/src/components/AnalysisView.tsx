@@ -9,6 +9,7 @@ import {
 } from '@pondpilot/flowscope-react';
 import type { AnalyzeResult, SchemaTable } from '@pondpilot/flowscope-core';
 import { Loader2, Settings } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
 import { useGlobalShortcuts } from '@/hooks';
@@ -57,6 +58,7 @@ export function AnalysisView({
   graphContainerRef: externalGraphRef,
   isAnalyzing = false,
 }: AnalysisViewProps) {
+  const { t } = useTranslation();
   const { state, actions } = useLineage();
   const { result } = state;
   const internalGraphRef = useRef<HTMLDivElement>(null);
@@ -368,13 +370,13 @@ export function AnalysisView({
       >
         <div className="px-4 py-2 border-b flex items-center justify-between bg-muted/10 h-[44px] shrink-0">
           <TabsList>
-            <TabsTrigger value="lineage">Lineage</TabsTrigger>
-            <TabsTrigger value="hierarchy">Hierarchy</TabsTrigger>
-            <TabsTrigger value="matrix">Matrix</TabsTrigger>
-            <TabsTrigger value="schema">Schema</TabsTrigger>
+            <TabsTrigger value="lineage">{t('analysis.lineage')}</TabsTrigger>
+            <TabsTrigger value="hierarchy">{t('analysis.hierarchy')}</TabsTrigger>
+            <TabsTrigger value="matrix">{t('analysis.matrix')}</TabsTrigger>
+            <TabsTrigger value="schema">{t('analysis.schema')}</TabsTrigger>
             {hasIssues && (
               <TabsTrigger value="issues" className="text-warning-light dark:text-warning-dark">
-                Issues ({summary.issueCount.errors + summary.issueCount.warnings})
+                {t('analysis.issuesCount', { count: summary.issueCount.errors + summary.issueCount.warnings })}
               </TabsTrigger>
             )}
           </TabsList>
@@ -399,12 +401,12 @@ export function AnalysisView({
                       className="h-7 text-xs"
                     >
                       <Settings className="h-3 w-3 mr-1" />
-                      Schema
+                      {t('analysis.schema')}
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
                     <p className="flex items-center gap-2">
-                      Edit schema
+                      {t('analysis.editSchema')}
                       <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded border font-mono">
                         {getShortcutDisplay('edit-schema')}
                       </kbd>

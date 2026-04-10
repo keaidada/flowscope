@@ -1,5 +1,6 @@
 import { useCallback, type JSX } from 'react';
 import { toPng } from 'html-to-image';
+import { useTranslation } from 'react-i18next';
 import { Download, Image, FileJson, FileSpreadsheet, FileCode, FileText } from 'lucide-react';
 import { useLineage } from '../store';
 import { UI_CONSTANTS } from '../constants';
@@ -32,6 +33,7 @@ export interface ExportMenuProps {
 }
 
 export function ExportMenu({ graphRef }: ExportMenuProps): JSX.Element {
+  const { t } = useTranslation();
   const { state } = useLineage();
   const { result } = state;
 
@@ -92,7 +94,7 @@ export function ExportMenu({ graphRef }: ExportMenuProps): JSX.Element {
             <DropdownMenuTrigger asChild>
               <button
                 className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-500 transition-all duration-200 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100 focus-visible:outline-hidden"
-                aria-label="Export lineage"
+                aria-label={t('exportMenu.exportLineage')}
               >
                 <Download className="size-4" strokeWidth={1.5} />
               </button>
@@ -100,33 +102,33 @@ export function ExportMenu({ graphRef }: ExportMenuProps): JSX.Element {
           </GraphTooltipTrigger>
           <GraphTooltipPortal>
             <GraphTooltipContent side="bottom">
-              <p>Export lineage</p>
+              <p>{t('exportMenu.exportLineage')}</p>
               <GraphTooltipArrow />
             </GraphTooltipContent>
           </GraphTooltipPortal>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel>Data Formats</DropdownMenuLabel>
+            <DropdownMenuLabel>{t('exportMenu.dataFormats')}</DropdownMenuLabel>
             <DropdownMenuItem onClick={handleDownloadXlsx}>
               <FileSpreadsheet className="size-4 mr-2" />
-              Excel (.xlsx)
+              {t('exportMenu.excel')}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={handleDownloadJson}>
               <FileJson className="size-4 mr-2" />
-              JSON
+              {t('exportMenu.json')}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel>Visual Formats</DropdownMenuLabel>
+            <DropdownMenuLabel>{t('exportMenu.visualFormats')}</DropdownMenuLabel>
             <DropdownMenuItem onClick={handleDownloadPng}>
               <Image className="size-4 mr-2" />
-              PNG Image
+              {t('exportMenu.pngImage')}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={handleDownloadMermaid}>
               <FileCode className="size-4 mr-2" />
-              Mermaid (.md)
+              {t('exportMenu.mermaid')}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={handleDownloadHtml}>
               <FileText className="size-4 mr-2" />
-              HTML Report
+              {t('exportMenu.htmlReport')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

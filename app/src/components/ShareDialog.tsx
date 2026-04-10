@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Copy, Check, AlertTriangle, FileText } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -17,6 +18,7 @@ interface ShareDialogProps {
 }
 
 export function ShareDialog({ open, onOpenChange, project }: ShareDialogProps) {
+  const { t } = useTranslation();
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [includeSchema, setIncludeSchema] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -89,8 +91,8 @@ export function ShareDialog({ open, onOpenChange, project }: ShareDialogProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Share Project</DialogTitle>
-          <DialogDescription>Select which files to include. No data is uploaded.</DialogDescription>
+          <DialogTitle>{t('share.title')}</DialogTitle>
+          <DialogDescription>{t('share.description')}</DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">

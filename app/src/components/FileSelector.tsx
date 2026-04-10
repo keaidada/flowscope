@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ChevronDown, Plus, Upload, FolderUp, Search } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useProject } from '@/lib/project-store';
 import { Input } from '@/components/ui/input';
 import {
@@ -18,6 +19,7 @@ interface FileSelectorProps {
 }
 
 export function FileSelector({ open: controlledOpen, onOpenChange }: FileSelectorProps) {
+  const { t } = useTranslation();
   const {
     currentProject,
     createFile,
@@ -395,7 +397,7 @@ export function FileSelector({ open: controlledOpen, onOpenChange }: FileSelecto
             className="flex h-[30px] items-center justify-between gap-2 rounded-full border border-border-primary-light dark:border-border-primary-dark bg-background px-4 text-xs transition-all duration-200 ease-pondpilot placeholder:text-muted-foreground focus:outline-hidden focus:border-accent-light dark:focus:border-accent-dark disabled:cursor-not-allowed disabled:opacity-60 [&>span]:line-clamp-1 hover:border-accent-light dark:hover:border-accent-dark min-w-0 shrink"
             data-testid="file-selector-trigger"
           >
-            <span className="truncate">{activeFile?.name || 'No file selected'}</span>
+            <span className="truncate">{activeFile?.name || t('editor.noFileSelected')}</span>
             <ChevronDown className="size-4 opacity-50 shrink-0" />
           </button>
         </DropdownMenuTrigger>

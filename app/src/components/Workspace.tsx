@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { Share2, Github } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { useLineageActions, useLineageState } from '@pondpilot/flowscope-react';
 import { Button } from './ui/button';
 import { FlowScopeLogo } from './FlowScopeLogo';
@@ -9,10 +10,16 @@ import type { ImperativePanelHandle } from 'react-resizable-panels';
 
 import { EditorArea } from './EditorArea';
 import { AnalysisView } from './AnalysisView';
+import { SidebarFileTree } from './SidebarFileTree';
+import { SidebarSearch } from './SidebarSearch';
+import { ActivityBar } from './ActivityBar';
+import type { SidebarView } from './ActivityBar';
+import { LayoutModeToggle } from './LayoutModeToggle';
 import { ProjectSelector } from './ProjectSelector';
 import { ShareDialog } from './ShareDialog';
 import { ExportDialog } from './ExportDialog';
 import { ThemeToggle } from './ThemeToggle';
+import { LanguageToggle } from './LanguageToggle';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { CommandPalette } from './CommandPalette';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
@@ -38,9 +45,9 @@ interface WorkspaceProps {
  * - Left: SQL editor with file selector
  * - Right: Lineage visualization
  */
-const EDITOR_PANEL_DEFAULT_SIZE = 33;
 
 export function Workspace({ backendReady, error, onRetry, isRetrying }: WorkspaceProps) {
+  const { t } = useTranslation();
   const { currentProject, selectFile, activeProjectId, isBackendMode } = useProject();
   const { adapter } = useBackend();
   const analysis = useAnalysis(backendReady, { adapter });
@@ -55,11 +62,12 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   } = lineageActions;
   const lineageState = useLineageState();
   const { result, viewMode, layoutAlgorithm } = lineageState;
-  const [fileSelectorOpen, setFileSelectorOpen] = useState(false);
   const [projectSelectorOpen, setProjectSelectorOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [sidebarView, setSidebarView] = useState<SidebarView>('files');
+  const [editorOpen, setEditorOpen] = useState(true);
 
   // Theme cycling for keyboard shortcut
   const { theme, setTheme } = useThemeStore();
@@ -68,7 +76,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
     const currentIndex = themes.indexOf(theme);
     const nextTheme = themes[(currentIndex + 1) % themes.length];
     setTheme(nextTheme);
-    toast.success(`Theme: ${nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1)}`);
+    toast.success(t('theme.changed', { theme: nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1) }));
   }, [theme, setTheme]);
 
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
@@ -90,8 +98,8 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
       const project = currentProjectRef.current;
       if (!project?.files) {
-        toast.error('Cannot open file', {
-          description: 'No project is currently loaded',
+        toast.error(t('errors.cannotOpenFile'), {
+          description: t('errors.noProjectLoaded'),
         });
         return;
       }
@@ -130,8 +138,8 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
             project.files.map((f) => ({ name: f.name, path: f.path }))
           );
         }
-        toast.error('File not found', {
-          description: `Could not locate "${sourceName}" in the project`,
+        toast.error(t('errors.fileNotFound'), {
+          description: t('errors.fileNotLocated', { name: sourceName }),
         });
         return;
       }
@@ -166,7 +174,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       {
         key: 'o',
         cmdOrCtrl: true,
-        handler: () => setFileSelectorOpen((prev) => !prev),
+        handler: () => setSidebarView((prev: SidebarView) => prev === 'files' ? null : 'files'),
       },
       {
         key: 'p',
@@ -229,7 +237,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
           setCommandPaletteOpen(true);
           break;
         case 'open-files':
-          setFileSelectorOpen(true);
+          setSidebarView((prev) => prev === 'files' ? null : 'files');
           break;
         case 'open-projects':
           setProjectSelectorOpen(true);
@@ -286,7 +294,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
           break;
         case 'focus-search':
           // Focus search is context-dependent, use keyboard shortcut
-          toast.info('Press / to focus search');
+          toast.info(t('errors.focusSearch'));
           break;
 
         default:
@@ -321,7 +329,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
           {/* Logo */}
           <div className="flex items-center gap-3">
             <FlowScopeLogo className="w-8 h-8 text-foreground/30 dark:text-white/30" />
-            <span className="text-lg font-semibold text-foreground">FlowScope</span>
+            <span className="text-lg font-semibold text-foreground">{t('app.brandName')}</span>
           </div>
 
           {/* Project Selector */}
@@ -353,7 +361,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                     </TooltipTrigger>
                     <TooltipContent>
                       <p className="flex items-center gap-2">
-                        Share project
+                        {t('app.shareProject')}
                         <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded border font-mono">
                           {getShortcutDisplay('share')}
                         </kbd>
@@ -378,10 +386,27 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>View on GitHub</p>
+                <p>{t('app.viewOnGithub')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          <LayoutModeToggle
+            sidebarOpen={sidebarView !== null}
+            editorOpen={editorOpen}
+            onToggleSidebar={() => setSidebarView(sidebarView ? null : 'files')}
+            onToggleEditor={() => setEditorOpen(!editorOpen)}
+            onToggleAll={() => {
+              const allOpen = sidebarView !== null && editorOpen;
+              if (allOpen) {
+                setSidebarView(null);
+                setEditorOpen(false);
+              } else {
+                setSidebarView('files');
+                setEditorOpen(true);
+              }
+            }}
+          />
+          <LanguageToggle />
           <ThemeToggle />
         </div>
       </header>
@@ -415,7 +440,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
           className="px-4 py-2 bg-destructive/10 text-destructive text-xs font-medium border-b border-destructive/20 flex items-center justify-center gap-3"
           data-testid="error-banner"
         >
-          <span>System Error: {error}</span>
+          <span>{t('app.systemError', { error })}</span>
           {onRetry && (
             <Button
               variant="outline"
@@ -425,50 +450,61 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
               className="h-6 text-xs"
               data-testid="retry-btn"
             >
-              {isRetrying ? 'Retrying...' : 'Retry'}
+              {isRetrying ? t('common.retrying') : t('common.retry')}
             </Button>
           )}
         </div>
       )}
 
-      {/* Main Split View - 2 columns */}
+      {/* Main Content - VS Code style layout */}
       <NavigationProvider projectId={activeProjectId} onNavigateToEditor={handleNavigateToEditor}>
         <FocusRegistryProvider>
-          <div className="flex-1 overflow-hidden">
-            <ResizablePanelGroup direction="horizontal">
-              {/* Left: Editor */}
-              <ResizablePanel
-                ref={editorPanelRef}
-                defaultSize={EDITOR_PANEL_DEFAULT_SIZE}
-                minSize={25}
-                collapsible
-                collapsedSize={0}
-                data-testid="editor-panel"
-              >
-                <EditorArea
-                  backendReady={backendReady}
-                  fileSelectorOpen={fileSelectorOpen}
-                  onFileSelectorOpenChange={setFileSelectorOpen}
-                  analysis={analysis}
-                />
-              </ResizablePanel>
+          <div className="flex-1 overflow-hidden flex">
+            {/* Activity Bar (narrow icon strip) */}
+            <ActivityBar activeView={sidebarView} onViewChange={setSidebarView} />
 
-              <ResizableHandle withHandle />
+            {/* Sidebar (collapsible) */}
+            {sidebarView && (
+              <div className="w-[220px] shrink-0 border-r overflow-hidden">
+                {sidebarView === 'files' && <SidebarFileTree />}
+                {sidebarView === 'search' && <SidebarSearch />}
+              </div>
+            )}
 
-              {/* Right: Visualization */}
-              <ResizablePanel
-                defaultSize={67}
-                minSize={30}
-                collapsible
-                collapsedSize={0}
-                data-testid="analysis-panel"
-              >
-                <AnalysisView
-                  graphContainerRef={graphContainerRef}
-                  isAnalyzing={analysis.isAnalyzing}
-                />
-              </ResizablePanel>
-            </ResizablePanelGroup>
+            {/* Main panels area */}
+            <div className="flex-1 overflow-hidden">
+              <ResizablePanelGroup direction="horizontal">
+                {/* Analysis Panel (Lineage) - always visible */}
+                <ResizablePanel
+                  defaultSize={editorOpen ? 55 : 100}
+                  minSize={30}
+                  data-testid="analysis-panel"
+                >
+                  <AnalysisView
+                    graphContainerRef={graphContainerRef}
+                    isAnalyzing={analysis.isAnalyzing}
+                  />
+                </ResizablePanel>
+
+                {/* Editor Panel - toggleable */}
+                {editorOpen && (
+                  <>
+                    <ResizableHandle withHandle />
+                    <ResizablePanel
+                      ref={editorPanelRef}
+                      defaultSize={45}
+                      minSize={25}
+                      data-testid="editor-panel"
+                    >
+                      <EditorArea
+                        backendReady={backendReady}
+                        analysis={analysis}
+                      />
+                    </ResizablePanel>
+                  </>
+                )}
+              </ResizablePanelGroup>
+            </div>
           </div>
         </FocusRegistryProvider>
       </NavigationProvider>

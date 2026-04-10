@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { FileCode, Table2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useLineage } from '../store';
 import type { LineageViewMode } from '../types';
 import { PANEL_STYLES } from '../constants';
@@ -12,41 +13,42 @@ import {
   GraphTooltipPortal,
 } from './ui/graph-tooltip';
 
-const VIEW_MODES: Array<{
-  value: LineageViewMode;
-  label: string;
-  description: string;
-  icon: React.ElementType;
-}> = [
-  {
-    value: 'script',
-    label: 'Script',
-    description: 'Show relationships between scripts through shared tables',
-    icon: FileCode,
-  },
-  {
-    value: 'table',
-    label: 'Table',
-    description: 'Show tables with relationships (default view)',
-    icon: Table2,
-  },
-];
-
 /**
  * Segmented control for switching between different lineage view modes.
  * Displays two options: Script and Table views.
  */
 export function ViewModeSelector(): JSX.Element {
+  const { t } = useTranslation();
   const { state, actions } = useLineage();
   const { viewMode } = state;
   const { setViewMode } = actions;
+
+  const VIEW_MODES: Array<{
+    value: LineageViewMode;
+    label: string;
+    description: string;
+    icon: React.ElementType;
+  }> = [
+    {
+      value: 'script',
+      label: t('viewMode.script'),
+      description: t('viewMode.scriptDesc'),
+      icon: FileCode,
+    },
+    {
+      value: 'table',
+      label: t('viewMode.table'),
+      description: t('viewMode.tableDesc'),
+      icon: Table2,
+    },
+  ];
 
   return (
     <GraphTooltipProvider>
       <div
         className={PANEL_STYLES.selector}
         role="radiogroup"
-        aria-label="Select lineage view mode"
+        aria-label={t('viewMode.selectMode')}
         data-graph-panel
       >
         {VIEW_MODES.map((mode) => {

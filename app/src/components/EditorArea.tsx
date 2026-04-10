@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { SqlView, useLineageState } from '@pondpilot/flowscope-react';
 import { cn } from '@/lib/utils';
 import { useProject } from '@/lib/project-store';
@@ -22,11 +23,12 @@ interface EditorAnalysisState {
 
 // Fallback component shown when SqlView encounters an error
 function SqlViewFallback() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5 p-4">
       <AlertCircle className="h-8 w-8 text-destructive mb-2" />
-      <p className="text-sm font-medium">Failed to render SQL editor</p>
-      <p className="text-xs mt-1">Try reloading the page</p>
+      <p className="text-sm font-medium">{t('editor.failedToRender')}</p>
+      <p className="text-xs mt-1">{t('editor.tryReloading')}</p>
     </div>
   );
 }
@@ -34,19 +36,16 @@ function SqlViewFallback() {
 interface EditorAreaProps {
   backendReady: boolean;
   className?: string;
-  fileSelectorOpen: boolean;
-  onFileSelectorOpenChange: (open: boolean) => void;
   analysis: EditorAnalysisState;
 }
 
 export function EditorArea({
   backendReady,
   className,
-  fileSelectorOpen,
-  onFileSelectorOpenChange,
   analysis,
 }: EditorAreaProps) {
-  const { currentProject, updateFile, createFile, setRunMode, isReadOnly } = useProject();
+  const { t } = useTranslation();
+  const { currentProject, updateFile, createFile, setRunMode, isReadOnly, setProjectDialect, setTemplateMode } = useProject();
 
   const theme = useThemeStore((state) => state.theme);
   const isDark = resolveTheme(theme) === 'dark';
@@ -73,7 +72,7 @@ export function EditorArea({
   // Show error toast when error occurs
   useEffect(() => {
     if (error) {
-      toast.error('Analysis Error', {
+      toast.error(t('editor.analysisError'), {
         description: error,
         duration: 5000,
       });
@@ -237,12 +236,15 @@ export function EditorArea({
         onAnalyze={handleAnalyze}
         allFileCount={allFileCount}
         selectedCount={selectedCount}
-        fileSelectorOpen={fileSelectorOpen}
-        onFileSelectorOpenChange={onFileSelectorOpenChange}
+        activeFileName={activeFile?.name}
         sqlViewMode={sqlViewMode}
         onSqlViewModeChange={setSqlViewMode}
         showSqlViewToggle={showSqlViewToggle}
         hasResolvedSql={!!resolvedSql}
+        dialect={currentProject.dialect}
+        onDialectChange={(d) => setProjectDialect(currentProject.id, d)}
+        templateMode={currentProject.templateMode}
+        onTemplateModeChange={(m) => setTemplateMode(currentProject.id, m)}
       />
 
       <div
@@ -262,7 +264,7 @@ export function EditorArea({
         </ErrorBoundary>
         {isReadOnly && (
           <div className="absolute top-2 right-5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-muted/80 text-muted-foreground rounded border">
-            Read Only
+            {t('common.readOnly')}
           </div>
         )}
       </div>

@@ -1,31 +1,23 @@
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface ComplexityDotsProps {
-  /** Complexity score from 1-100 */
   score: number;
-  /** Optional className for the container */
   className?: string;
 }
 
-/**
- * Get complexity label based on score.
- */
-function getComplexityLabel(score: number): string {
-  if (score <= 20) return 'Simple';
-  if (score <= 40) return 'Moderate';
-  if (score <= 60) return 'Complex';
-  if (score <= 80) return 'Very Complex';
-  return 'Highly Complex';
-}
-
-/**
- * Visual complexity indicator using filled/half/empty dots.
- * Maps a 1-100 score to a 0.5-5 dot scale with half-dot precision.
- */
 export function ComplexityDots({ score, className }: ComplexityDotsProps) {
-  // Map 1-100 score to 0.5-5 dots in 0.5 increments
-  // 1-10 = 0.5, 11-20 = 1, 21-30 = 1.5, ..., 91-100 = 5
+  const { t } = useTranslation();
+
+  function getComplexityLabel(score: number): string {
+    if (score <= 20) return t('analysis.complexitySimple');
+    if (score <= 40) return t('analysis.complexityModerate');
+    if (score <= 60) return t('analysis.complexityComplex');
+    if (score <= 80) return t('analysis.complexityVeryComplex');
+    return t('analysis.complexityHighlyComplex');
+  }
+
   const dotValue = Math.min(5, Math.max(0.5, Math.ceil(score / 10) / 2));
   const fullDots = Math.floor(dotValue);
   const hasHalfDot = dotValue % 1 !== 0;
@@ -56,7 +48,7 @@ export function ComplexityDots({ score, className }: ComplexityDotsProps) {
         </TooltipTrigger>
         <TooltipContent>
           <p className="font-medium">{getComplexityLabel(score)}</p>
-          <p className="text-xs text-muted-foreground">Complexity score: {score}/100</p>
+          <p className="text-xs text-muted-foreground">{t('analysis.complexityScore', { score })}</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

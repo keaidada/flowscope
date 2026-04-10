@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { Network, Workflow } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useLineage } from '../store';
 import type { LayoutAlgorithm } from '../types';
 import { PANEL_STYLES } from '../constants';
@@ -12,40 +13,41 @@ import {
   GraphTooltipPortal,
 } from './ui/graph-tooltip';
 
-const LAYOUT_OPTIONS: Array<{
-  value: LayoutAlgorithm;
-  label: string;
-  description: string;
-  icon: React.ElementType;
-}> = [
-  {
-    value: 'dagre',
-    label: 'Dagre',
-    description: 'Fast hierarchical layout',
-    icon: Network,
-  },
-  {
-    value: 'elk',
-    label: 'ELK',
-    description: 'Advanced layout with edge crossing minimization',
-    icon: Workflow,
-  },
-];
-
 /**
  * Segmented control for switching between different layout algorithms.
  */
 export function LayoutSelector(): JSX.Element {
+  const { t } = useTranslation();
   const { state, actions } = useLineage();
   const { layoutAlgorithm } = state;
   const { setLayoutAlgorithm } = actions;
+
+  const LAYOUT_OPTIONS: Array<{
+    value: LayoutAlgorithm;
+    label: string;
+    description: string;
+    icon: React.ElementType;
+  }> = [
+    {
+      value: 'dagre',
+      label: t('layout.dagre'),
+      description: t('layout.dagreDesc'),
+      icon: Network,
+    },
+    {
+      value: 'elk',
+      label: t('layout.elk'),
+      description: t('layout.elkDesc'),
+      icon: Workflow,
+    },
+  ];
 
   return (
     <GraphTooltipProvider>
       <div
         className={PANEL_STYLES.selector}
         role="radiogroup"
-        aria-label="Select layout algorithm"
+        aria-label={t('layout.selectAlgorithm')}
         data-graph-panel
       >
         {LAYOUT_OPTIONS.map((option) => {

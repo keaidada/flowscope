@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Search } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { SHORTCUTS, formatShortcut, type ShortcutCategory } from '@/lib/shortcuts';
@@ -64,6 +65,7 @@ function scoreMatch(query: string, target: string): number {
 }
 
 export function CommandPalette({ open, onOpenChange, onExecuteCommand }: CommandPaletteProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -209,7 +211,7 @@ export function CommandPalette({ open, onOpenChange, onExecuteCommand }: Command
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Type a command..."
+            placeholder={t('commandPalette.typeCommand')}
             className="border-0 focus-visible:ring-0 shadow-none h-12 text-base"
           />
         </div>
@@ -218,7 +220,7 @@ export function CommandPalette({ open, onOpenChange, onExecuteCommand }: Command
         <div ref={listRef} className="max-h-80 overflow-y-auto py-2">
           {flatList.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-              No commands found
+              {t('commandPalette.noCommands')}
             </div>
           ) : (
             CATEGORY_ORDER.map((category) => {
@@ -262,16 +264,14 @@ export function CommandPalette({ open, onOpenChange, onExecuteCommand }: Command
         {/* Footer hint */}
         <div className="border-t px-3 py-2 text-xs text-muted-foreground flex items-center justify-between">
           <span>
-            <kbd className="px-1 py-0.5 rounded border bg-muted font-mono text-[10px]">↑↓</kbd> to
-            navigate
+            <kbd className="px-1 py-0.5 rounded border bg-muted font-mono text-[10px]">↑↓</kbd> {t('shortcuts.toNavigate')}
           </span>
           <span>
             <kbd className="px-1 py-0.5 rounded border bg-muted font-mono text-[10px]">Enter</kbd>{' '}
-            to select
+            {t('shortcuts.toSelect')}
           </span>
           <span>
-            <kbd className="px-1 py-0.5 rounded border bg-muted font-mono text-[10px]">Esc</kbd> to
-            close
+            <kbd className="px-1 py-0.5 rounded border bg-muted font-mono text-[10px]">Esc</kbd> {t('shortcuts.toClose')}
           </span>
         </div>
       </DialogContent>

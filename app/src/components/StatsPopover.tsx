@@ -1,4 +1,5 @@
 import { ChevronDown } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -16,18 +17,6 @@ interface StatsPopoverProps {
   className?: string;
 }
 
-/**
- * Get short complexity label based on score.
- */
-function getComplexityLabel(score: number): string {
-  if (score <= 33) return 'Low';
-  if (score <= 66) return 'Med';
-  return 'High';
-}
-
-/**
- * Inline complexity dots for the trigger button.
- */
 function ComplexityDotsInline({ score }: { score: number }) {
   const dotValue = Math.min(5, Math.max(0.5, Math.ceil(score / 10) / 2));
   const fullDots = Math.floor(dotValue);
@@ -55,10 +44,6 @@ function ComplexityDotsInline({ score }: { score: number }) {
   );
 }
 
-/**
- * Stats popover that shows analysis summary in a dropdown.
- * Displays complexity dots as the trigger with stats inside.
- */
 export function StatsPopover({
   tableCount,
   columnCount,
@@ -66,6 +51,14 @@ export function StatsPopover({
   complexityScore,
   className,
 }: StatsPopoverProps) {
+  const { t } = useTranslation();
+
+  function getComplexityLabel(score: number): string {
+    if (score <= 33) return t('analysis.complexityLow');
+    if (score <= 66) return t('analysis.complexityMed');
+    return t('analysis.complexityHigh');
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -83,22 +76,20 @@ export function StatsPopover({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
         <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
-          Analysis Summary
+          {t('analysis.analysisSummary')}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
 
-        {/* Stats rows */}
         <div className="px-2 py-1.5 space-y-1">
-          <StatRow label="Tables" value={tableCount} />
-          <StatRow label="Columns" value={columnCount} />
-          <StatRow label="Joins" value={joinCount} />
+          <StatRow label={t('analysis.tables')} value={tableCount} />
+          <StatRow label={t('analysis.columns')} value={columnCount} />
+          <StatRow label={t('analysis.joins')} value={joinCount} />
         </div>
 
         <DropdownMenuSeparator />
 
-        {/* Complexity section */}
         <div className="px-2 py-1.5">
-          <StatRow label="Complexity" value={getComplexityLabel(complexityScore)} />
+          <StatRow label={t('analysis.complexity')} value={getComplexityLabel(complexityScore)} />
         </div>
       </DropdownMenuContent>
     </DropdownMenu>

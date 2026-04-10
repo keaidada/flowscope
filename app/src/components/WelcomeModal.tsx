@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Database, GitBranch, Shield, Keyboard } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import {
   Dialog,
@@ -17,6 +18,7 @@ interface WelcomeModalProps {
 }
 
 export function WelcomeModal({ onClose }: WelcomeModalProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -36,47 +38,39 @@ export function WelcomeModal({ onClose }: WelcomeModalProps) {
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-xl">Welcome to FlowScope</DialogTitle>
-          <DialogDescription>
-            A privacy-first SQL lineage engine that runs entirely in your browser.
-          </DialogDescription>
+          <DialogTitle className="text-xl">{t('welcome.title')}</DialogTitle>
+          <DialogDescription>{t('welcome.description')}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           <div className="flex items-start gap-3">
             <Database className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
             <div>
-              <p className="font-medium text-sm">SQL Lineage Analysis</p>
-              <p className="text-sm text-muted-foreground">
-                Visualize how data flows through your queries across tables, CTEs, and columns.
-              </p>
+              <p className="font-medium text-sm">{t('welcome.sqlLineage')}</p>
+              <p className="text-sm text-muted-foreground">{t('welcome.sqlLineageDesc')}</p>
             </div>
           </div>
 
           <div className="flex items-start gap-3">
             <GitBranch className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
             <div>
-              <p className="font-medium text-sm">Multi-File Projects</p>
-              <p className="text-sm text-muted-foreground">
-                Organize your SQL files into projects and analyze dependencies across files.
-              </p>
+              <p className="font-medium text-sm">{t('welcome.multiFile')}</p>
+              <p className="text-sm text-muted-foreground">{t('welcome.multiFileDesc')}</p>
             </div>
           </div>
 
           <div className="flex items-start gap-3">
             <Shield className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
             <div>
-              <p className="font-medium text-sm">Privacy First</p>
-              <p className="text-sm text-muted-foreground">
-                All analysis runs locally in your browser. Your SQL never leaves your machine.
-              </p>
+              <p className="font-medium text-sm">{t('welcome.privacyFirst')}</p>
+              <p className="text-sm text-muted-foreground">{t('welcome.privacyFirstDesc')}</p>
             </div>
           </div>
 
           <div className="flex items-start gap-3">
             <Keyboard className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
             <div>
-              <p className="font-medium text-sm">Keyboard Driven</p>
+              <p className="font-medium text-sm">{t('welcome.keyboardDriven')}</p>
               <p className="text-sm text-muted-foreground">
                 <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded border">⌘P</kbd> projects,{' '}
                 <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded border">⌘O</kbd> files,{' '}
@@ -87,7 +81,7 @@ export function WelcomeModal({ onClose }: WelcomeModalProps) {
         </div>
 
         <DialogFooter>
-          <Button onClick={handleClose}>Get Started</Button>
+          <Button onClick={handleClose}>{t('welcome.getStarted')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

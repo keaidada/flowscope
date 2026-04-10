@@ -1,6 +1,7 @@
 import { useCallback, useState, type JSX } from 'react';
 import { toPng } from 'html-to-image';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { gzipSync, strToU8 } from 'fflate';
 import {
   Download,
@@ -143,6 +144,7 @@ export function ExportDialog({
   projectName,
   graphRef,
 }: ExportDialogProps): JSX.Element | null {
+  const { t } = useTranslation();
   const isDarkMode = useIsDarkMode();
 
   // DuckDB export dialog state
@@ -413,7 +415,7 @@ export function ExportDialog({
           <DialogFooter className="sm:justify-center">
             <Button onClick={handleDuckDbExport} disabled={!!schemaError || isExporting}>
               <Download className="size-4 mr-2" />
-              {isExporting ? 'Exporting...' : 'Download'}
+              {isExporting ? t('common.exporting') : t('common.download')}
             </Button>
             <Button
               variant="outline"

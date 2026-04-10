@@ -1,4 +1,5 @@
 import { Sun, Moon, Monitor } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from './ui/button';
 import {
   DropdownMenu,
@@ -9,24 +10,25 @@ import {
 } from './ui/dropdown-menu';
 import { useThemeStore, resolveTheme, type Theme } from '@/lib/theme-store';
 
-const themeOptions: { value: Theme; label: string; icon: typeof Sun }[] = [
-  { value: 'light', label: 'Light', icon: Sun },
-  { value: 'dark', label: 'Dark', icon: Moon },
-  { value: 'system', label: 'System', icon: Monitor },
-];
-
 export function ThemeToggle() {
+  const { t } = useTranslation();
   const { theme, setTheme } = useThemeStore();
   const resolvedTheme = resolveTheme(theme);
 
   const CurrentIcon = resolvedTheme === 'dark' ? Moon : Sun;
+
+  const themeOptions: { value: Theme; label: string; icon: typeof Sun }[] = [
+    { value: 'light', label: t('theme.light'), icon: Sun },
+    { value: 'dark', label: t('theme.dark'), icon: Moon },
+    { value: 'system', label: t('theme.system'), icon: Monitor },
+  ];
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
           <CurrentIcon className="h-4 w-4" />
-          <span className="sr-only">Toggle theme</span>
+          <span className="sr-only">{t('app.toggleTheme')}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

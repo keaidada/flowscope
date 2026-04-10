@@ -1,4 +1,5 @@
 import { useMemo, useEffect, useCallback, useState, memo, type JSX } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ReactFlow,
   Background,
@@ -1008,6 +1009,7 @@ function SchemaViewInner({
 }
 
 export function SchemaView(props: SchemaViewProps): JSX.Element {
+  const { t } = useTranslation();
   if (props.schema.length === 0) {
     return (
       <div
@@ -1019,7 +1021,7 @@ export function SchemaView(props: SchemaViewProps): JSX.Element {
           color: '#9ca3af',
         }}
       >
-        <p>No schema data to display</p>
+        <p>{t('schemaView.noSchemaData')}</p>
       </div>
     );
   }

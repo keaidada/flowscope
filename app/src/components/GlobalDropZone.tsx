@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Upload, FolderUp, AlertCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { useProject } from '@/lib/project-store';
 import { ACCEPTED_FILE_TYPES_ARRAY, FILE_LIMITS } from '@/lib/constants';
@@ -115,6 +116,7 @@ async function processEntry(entry: FileSystemEntry, basePath: string = ''): Prom
 }
 
 export function GlobalDropZone() {
+  const { t } = useTranslation();
   const { importFiles, currentProject, isReadOnly } = useProject();
   const [isDragOver, setIsDragOver] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -295,7 +297,7 @@ export function GlobalDropZone() {
           <AlertCircle className="size-5 text-destructive shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="font-medium text-destructive">
-              {rejectedFiles.length} file{rejectedFiles.length > 1 ? 's' : ''} could not be imported
+              {t('dropZone.importFailed', { count: rejectedFiles.length })}
             </p>
             <ul className="mt-2 text-sm text-muted-foreground space-y-1 max-h-32 overflow-y-auto">
               {rejectedFiles.slice(0, 5).map((file, i) => (

@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { ElementType, JSX } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Filter,
   X,
@@ -63,6 +64,7 @@ function getFilterStatusMessage(
 }
 
 export function TableFilterDropdown(): JSX.Element | null {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -183,11 +185,11 @@ export function TableFilterDropdown(): JSX.Element | null {
               ? 'bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-slate-100'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
           )}
-          aria-label="Filter by tables"
+          aria-label={t('tableFilter.filterByTables')}
           aria-expanded={isOpen}
         >
           <Filter className="size-4" strokeWidth={hasActiveFilter ? 2.5 : 1.5} />
-          <span>Tables</span>
+          <span>{t('tableFilter.tables')}</span>
           {isOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
         </button>
       </div>
@@ -199,7 +201,7 @@ export function TableFilterDropdown(): JSX.Element | null {
           <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                Filter by Tables
+                {t('tableFilter.filterByTables')}
               </span>
               {hasActiveFilter && (
                 <button
@@ -207,7 +209,7 @@ export function TableFilterDropdown(): JSX.Element | null {
                   className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 flex items-center gap-1"
                 >
                   <X className="size-3" />
-                  Clear all
+                  {t('tableFilter.clearAll')}
                 </button>
               )}
             </div>
@@ -215,7 +217,7 @@ export function TableFilterDropdown(): JSX.Element | null {
             <input
               ref={inputRef}
               type="text"
-              placeholder="Search tables..."
+              placeholder={t('tableFilter.searchTables')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full px-2.5 py-1.5 text-sm border border-slate-200 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
@@ -246,13 +248,13 @@ export function TableFilterDropdown(): JSX.Element | null {
                 {hideCTEs && <Check className="size-3 text-white" />}
               </div>
               <Layers className="size-3.5 text-slate-400" />
-              <span>Hide all CTEs</span>
+              <span>{t('tableFilter.hideAllCTEs')}</span>
             </button>
           </div>
 
           {/* Direction selector */}
           <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700">
-            <div className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">Direction</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">{t('tableFilter.direction')}</div>
             <div className="flex gap-1">
               {DIRECTION_OPTIONS.map((option) => {
                 const isActive = tableFilter.direction === option.value;
@@ -281,7 +283,7 @@ export function TableFilterDropdown(): JSX.Element | null {
           <div className="max-h-60 overflow-y-auto py-1">
             {filteredTables.length === 0 ? (
               <div className="px-3 py-4 text-center text-sm text-slate-500 dark:text-slate-400">
-                {searchTerm ? 'No tables match your search' : 'No tables found'}
+                {searchTerm ? t('tableFilter.noTablesMatch') : t('tableFilter.noTablesFound')}
               </div>
             ) : (
               filteredTables.map((table) => {
@@ -324,7 +326,7 @@ export function TableFilterDropdown(): JSX.Element | null {
                     {getTypeIcon(table.type)}
                     <span className="truncate flex-1">{table.label}</span>
                     <span className="text-xs text-slate-400 dark:text-slate-500 ml-auto">
-                      {isDimmed ? '(hidden)' : table.refCount > 1 ? `${table.refCount}x` : ''}
+                      {isDimmed ? t('tableFilter.hidden') : table.refCount > 1 ? `${table.refCount}x` : ''}
                     </span>
                   </button>
                 );

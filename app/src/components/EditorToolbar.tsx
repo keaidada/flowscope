@@ -1,4 +1,5 @@
-import { Play, Loader2, ChevronDown, Braces, Code } from 'lucide-react';
+import { Play, Loader2, ChevronDown, Braces, Code, FileCode } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -9,9 +10,18 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from '@/components/ui/dropdown-menu';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { FileSelector } from './FileSelector';
-import type { RunMode } from '@/lib/project-store';
+import type { RunMode, Dialect } from '@/lib/project-store';
+import { isValidDialect, DIALECT_OPTIONS } from '@/lib/project-store';
+import type { TemplateMode } from '@/types';
+import { isValidTemplateMode, TEMPLATE_MODE_OPTIONS } from '@/types';
 
 export type SqlViewMode = 'template' | 'resolved';
 
@@ -23,12 +33,15 @@ interface EditorToolbarProps {
   onAnalyze: () => void;
   allFileCount: number;
   selectedCount: number;
-  fileSelectorOpen: boolean;
-  onFileSelectorOpenChange: (open: boolean) => void;
+  activeFileName?: string;
   sqlViewMode?: SqlViewMode;
   onSqlViewModeChange?: (mode: SqlViewMode) => void;
   showSqlViewToggle?: boolean;
   hasResolvedSql?: boolean;
+  dialect?: Dialect;
+  onDialectChange?: (dialect: Dialect) => void;
+  templateMode?: TemplateMode;
+  onTemplateModeChange?: (mode: TemplateMode) => void;
 }
 
 export function EditorToolbar({
@@ -39,17 +52,27 @@ export function EditorToolbar({
   onAnalyze,
   allFileCount,
   selectedCount,
-  fileSelectorOpen,
-  onFileSelectorOpenChange,
+  activeFileName,
   sqlViewMode = 'template',
   onSqlViewModeChange,
   showSqlViewToggle = false,
   hasResolvedSql = false,
+  dialect,
+  onDialectChange,
+  templateMode,
+  onTemplateModeChange,
 }: EditorToolbarProps) {
+  const { t } = useTranslation();
+
   return (
     <div className="flex items-center justify-between px-3 py-2 border-b h-[44px] shrink-0 bg-muted/30 overflow-hidden gap-2">
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        <FileSelector open={fileSelectorOpen} onOpenChange={onFileSelectorOpenChange} />
+        <div className="flex items-center gap-1.5 min-w-0 text-sm text-muted-foreground">
+          <FileCode className="h-4 w-4 shrink-0" />
+          <span className="truncate font-medium text-foreground">
+            {activeFileName || t('editor.noFileSelected')}
+          </span>
+        </div>
 
         {showSqlViewToggle && (
           <TooltipProvider>
@@ -62,8 +85,8 @@ export function EditorToolbar({
                   disabled={!hasResolvedSql || !onSqlViewModeChange}
                   aria-label={
                     sqlViewMode === 'template'
-                      ? 'Switch to resolved SQL view'
-                      : 'Switch to template SQL view'
+                      ? t('editor.switchToResolved')
+                      : t('editor.switchToTemplate')
                   }
                   aria-pressed={sqlViewMode === 'resolved'}
                   onClick={() => {
@@ -79,11 +102,11 @@ export function EditorToolbar({
               </TooltipTrigger>
               <TooltipContent>
                 {!hasResolvedSql ? (
-                  <p>Run analysis to see resolved SQL</p>
+                  <p>{t('editor.runAnalysisToSee')}</p>
                 ) : sqlViewMode === 'template' ? (
-                  <p>Viewing template SQL. Click to see resolved.</p>
+                  <p>{t('editor.viewingTemplate')}</p>
                 ) : (
-                  <p>Viewing resolved SQL. Click to see template.</p>
+                  <p>{t('editor.viewingResolved')}</p>
                 )}
               </TooltipContent>
             </Tooltip>
@@ -92,6 +115,48 @@ export function EditorToolbar({
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
+        {dialect && onDialectChange && (
+          <Select
+            value={dialect}
+            onValueChange={(v) => {
+              if (isValidDialect(v)) {
+                onDialectChange(v);
+              }
+            }}
+          >
+            <SelectTrigger className="h-7 w-[120px] text-xs px-2">
+              <SelectValue placeholder="Dialect" />
+            </SelectTrigger>
+            <SelectContent>
+              {DIALECT_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        {templateMode && onTemplateModeChange && (
+          <Select
+            value={templateMode}
+            onValueChange={(v) => {
+              if (isValidTemplateMode(v)) {
+                onTemplateModeChange(v);
+              }
+            }}
+          >
+            <SelectTrigger className="h-7 w-[110px] text-xs px-2">
+              <SelectValue placeholder="Template" />
+            </SelectTrigger>
+            <SelectContent>
+              {TEMPLATE_MODE_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <div className="flex items-center rounded-full overflow-hidden shadow-xs">
           <Button
             onClick={onAnalyze}
@@ -104,7 +169,7 @@ export function EditorToolbar({
             ) : (
               <Play className="h-3.5 w-3.5 fill-current" />
             )}
-            <span className="hidden sm:inline">Run</span>
+            <span className="hidden sm:inline">{t('common.run')}</span>
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -117,23 +182,23 @@ export function EditorToolbar({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Run Configuration</DropdownMenuLabel>
+              <DropdownMenuLabel>{t('editor.runConfig')}</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuRadioGroup
                 value={runMode}
                 onValueChange={(v) => onRunModeChange(v as RunMode)}
               >
                 <DropdownMenuRadioItem value="current" className="text-xs justify-between">
-                  <span>Run Active File Only</span>
+                  <span>{t('editor.runActiveOnly')}</span>
                   <kbd className="ml-4 inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
                     <span className="text-xs">⌘</span>⇧↵
                   </kbd>
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="all" className="text-xs">
-                  Run All Files ({allFileCount})
+                  {t('editor.runAllFiles', { count: allFileCount })}
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="custom" className="text-xs">
-                  Run Selected ({selectedCount})
+                  {t('editor.runSelected', { count: selectedCount })}
                 </DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
               <DropdownMenuSeparator />
@@ -141,7 +206,7 @@ export function EditorToolbar({
                 <kbd className="inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium">
                   <span className="text-xs">⌘</span>↵
                 </kbd>
-                <span className="ml-2">Run in current mode</span>
+                <span className="ml-2">{t('editor.runInCurrentMode')}</span>
               </div>
             </DropdownMenuContent>
           </DropdownMenu>

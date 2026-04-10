@@ -8,6 +8,7 @@ import {
   forwardRef,
   useImperativeHandle,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, X, Table2, FileCode, ScanLine, Eye, Focus } from 'lucide-react';
 import { cn } from './ui/button';
 import { Input } from './ui/input';
@@ -116,6 +117,7 @@ export const SearchAutocomplete = forwardRef<SearchAutocompleteRef, SearchAutoco
     },
     ref
   ) {
+    const { t: translate } = useTranslation();
     const [inputValue, setInputValue] = useState(value ?? initialValue);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
@@ -400,7 +402,7 @@ export const SearchAutocomplete = forwardRef<SearchAutocompleteRef, SearchAutoco
           <button
             onClick={handleClear}
             className="flex size-6 items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors duration-200 ml-1"
-            title="Clear (Escape)"
+            title={translate('search.clearEscape')}
             type="button"
           >
             <X className="size-3.5" />

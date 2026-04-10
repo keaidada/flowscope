@@ -1,4 +1,5 @@
 import { useMemo, useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ReactFlow,
   Background,
@@ -311,6 +312,7 @@ export function GraphView({
   fitViewTrigger,
   namespaceFilter,
 }: GraphViewProps): JSX.Element {
+  const { t } = useTranslation();
   const { state, actions } = useLineage();
   const setLayoutMetrics = useLineageStore((store) => store.setLayoutMetrics);
   const setGraphMetrics = useLineageStore((store) => store.setGraphMetrics);
@@ -990,6 +992,10 @@ export function GraphView({
         fitView={!initialViewport}
         minZoom={0.1}
         maxZoom={2}
+        zoomOnPinch={false}
+        zoomOnScroll={false}
+        panOnScroll={true}
+        panOnDrag={true}
         onlyRenderVisibleElements
       >
         <NodeFocusHandler focusNodeId={focusNodeId} onFocusApplied={onFocusApplied} />
@@ -1003,8 +1009,8 @@ export function GraphView({
             <ToolbarToggleButton
               isActive={showScriptTables}
               onClick={actions.toggleShowScriptTables}
-              ariaLabel="Toggle table details"
-              tooltip={showScriptTables ? 'Hide tables' : 'Show tables'}
+              ariaLabel={t('graph.toggleTableDetails')}
+              tooltip={showScriptTables ? t('graph.hideTables') : t('graph.showTables')}
               icon={<LayoutList className="size-4" strokeWidth={showScriptTables ? 2.5 : 1.5} />}
             />
           )}
