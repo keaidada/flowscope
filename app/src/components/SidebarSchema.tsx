@@ -415,6 +415,15 @@ export function SidebarSchema() {
 
   // On mount or project switch: restore from memory cache, then async from IndexedDB
   const [_dbLoaded, setDbLoaded] = useState(false);
+
+  // Sync merged schema SQL to project store whenever files are loaded/restored
+  const syncSchemaToProject = useCallback((files: SchemaFile[]) => {
+    if (!isBackendMode && activeProjectId && files.length > 0) {
+      const merged = files.map(f => `-- File: ${f.path}\n${f.content}`).join('\n\n');
+      updateSchemaSQL(activeProjectId, merged);
+    }
+  }, [isBackendMode, activeProjectId, updateSchemaSQL]);
+
   useEffect(() => {
     // Restore from memory cache first (fast, handles sidebar switches)
     const cachedFiles = schemaFilesCache.get(cacheKey);
@@ -422,6 +431,7 @@ export function SidebarSchema() {
       setSchemaFilesState(cachedFiles);
       setActiveFileIdState(activeFileIdCache.get(cacheKey) ?? null);
       setExpandedFoldersState(expandedFoldersCache.get(cacheKey) ?? new Set());
+      syncSchemaToProject(cachedFiles);
       setDbLoaded(true);
       return;
     }
@@ -439,11 +449,13 @@ export function SidebarSchema() {
       if (files.length > 0) {
         schemaFilesCache.set(cacheKey, files);
         setSchemaFilesState(files);
+        syncSchemaToProject(files);
       } else if (existingSchemaSQL.trim()) {
         // Last resort fallback: create from schemaSQL stored in project
         const initial = [{ id: crypto.randomUUID(), name: 'schema.sql', path: 'schema.sql', content: existingSchemaSQL }];
         schemaFilesCache.set(cacheKey, initial);
         setSchemaFilesState(initial);
+        // No need to sync — existingSchemaSQL is already in project store
       }
       setDbLoaded(true);
     });
