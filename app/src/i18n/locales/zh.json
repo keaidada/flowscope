@@ -400,7 +400,12 @@
     "clearEscape": "清除 (Escape)",
     "caseSensitive": "区分大小写",
     "resultCount": "{{matches}} 个结果，分布在 {{files}} 个文件中",
-    "noResults": "未找到结果"
+    "noResults": "未找到结果",
+    "modeFiles": "文件",
+    "modeSchema": "Schema",
+    "placeholderFiles": "搜索文件内容...",
+    "placeholderSchema": "搜索 Schema 内容...",
+    "noSchemaFiles": "暂无 Schema 文件"
   },
   "matrix": {
     "self": "（自身）",

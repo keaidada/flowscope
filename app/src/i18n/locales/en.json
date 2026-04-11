@@ -400,7 +400,12 @@
     "clearEscape": "Clear (Escape)",
     "caseSensitive": "Match Case",
     "resultCount": "{{matches}} results in {{files}} files",
-    "noResults": "No results found"
+    "noResults": "No results found",
+    "modeFiles": "Files",
+    "modeSchema": "Schema",
+    "placeholderFiles": "Search file contents...",
+    "placeholderSchema": "Search schema contents...",
+    "noSchemaFiles": "No schema files available"
   },
   "matrix": {
     "self": "(self)",

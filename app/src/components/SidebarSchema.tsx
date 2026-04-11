@@ -30,6 +30,7 @@ import { useThemeStore, resolveTheme } from '@/lib/theme-store';
 import { schemaMetadataToSQL } from '@/lib/schema-parser';
 import { cn } from '@/lib/utils';
 import { saveSchemaFiles, loadSchemaFiles } from '@/lib/schema-storage';
+import { onSchemaFileSelect } from '@/lib/schema-events';
 // Schema files accept a broader set of extensions than the main SQL file tree
 const SCHEMA_ACCEPTED_EXTENSIONS = ['.sql', '.hql', '.ddl', '.txt'] as const;
 
@@ -509,6 +510,36 @@ export function SidebarSchema() {
       return next;
     });
   }, [cacheKey]);
+
+  // Highlight span from search results
+  const [schemaHighlightSpan, setSchemaHighlightSpan] = useState<{ start: number; end: number } | null>(null);
+
+  // Wrapper to clear search highlight when manually selecting a file
+  const handleSelectFile = useCallback((id: string | null | ((prev: string | null) => string | null)) => {
+    setSchemaHighlightSpan(null);
+    setActiveFileId(id);
+  }, [setActiveFileId]);
+
+  // Listen for schema file selection events from SidebarSearch
+  useEffect(() => {
+    return onSchemaFileSelect((payload) => {
+      // Find the file and expand its parent folders
+      const file = schemaFiles.find(f => f.id === payload.fileId);
+      if (file) {
+        const parts = file.path.split('/').filter(Boolean);
+        if (parts.length > 1) {
+          const pathsToExpand: string[] = [];
+          for (let i = 1; i < parts.length; i++) {
+            pathsToExpand.push(parts.slice(0, i).join('/'));
+          }
+          setExpandedFolders(prev => new Set([...prev, ...pathsToExpand]));
+        }
+        setActiveFileId(payload.fileId);
+        setSchemaHighlightSpan(payload.span ?? null);
+      }
+    });
+  }, [schemaFiles, setExpandedFolders, setActiveFileId]);
+
   const [uploadProgress, setUploadProgress] = useState<{
     total: number;
     loaded: number;
@@ -1161,9 +1192,9 @@ export function SidebarSchema() {
           <div className="py-1">
             {sortedRootChildren.map((child) =>
               child.file ? (
-                <SchemaFileNode key={child.file.id} node={child} depth={0} activeFileId={activeFileId} onSelect={setActiveFileId} onDelete={handleDeleteFile} onRenameFile={handleRenameFile} onSelectFolder={setActiveFolderPath} selectedFileIds={selectedFileIds} onToggleSelection={handleToggleSelection} />
+                <SchemaFileNode key={child.file.id} node={child} depth={0} activeFileId={activeFileId} onSelect={handleSelectFile} onDelete={handleDeleteFile} onRenameFile={handleRenameFile} onSelectFolder={setActiveFolderPath} selectedFileIds={selectedFileIds} onToggleSelection={handleToggleSelection} />
               ) : (
-                <SchemaFolderNode key={child.path} node={child} depth={0} activeFileId={activeFileId} activeFolderPath={activeFolderPath} onSelect={setActiveFileId} onDelete={handleDeleteFile} expandedFolders={expandedFolders} onToggleFolder={handleToggleFolder} onSelectFolder={setActiveFolderPath} onDoubleClickFolder={handleDoubleClickCreateFile} onCreateFolderInFolder={handleCreateFolderInFolder} onRenameFolder={handleRenameFolder} onRenameFile={handleRenameFile} selectedFileIds={selectedFileIds} onToggleSelection={handleToggleSelection} />
+                <SchemaFolderNode key={child.path} node={child} depth={0} activeFileId={activeFileId} activeFolderPath={activeFolderPath} onSelect={handleSelectFile} onDelete={handleDeleteFile} expandedFolders={expandedFolders} onToggleFolder={handleToggleFolder} onSelectFolder={setActiveFolderPath} onDoubleClickFolder={handleDoubleClickCreateFile} onCreateFolderInFolder={handleCreateFolderInFolder} onRenameFolder={handleRenameFolder} onRenameFile={handleRenameFile} selectedFileIds={selectedFileIds} onToggleSelection={handleToggleSelection} />
               )
             )}
           </div>
@@ -1225,6 +1256,7 @@ export function SidebarSchema() {
                   editable={!isBackendMode}
                   isDark={isDark}
                   lineWrapping={lineWrapping}
+                  highlightedSpan={schemaHighlightSpan}
                 />
               </div>
             </div>

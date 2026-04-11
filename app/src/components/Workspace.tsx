@@ -467,7 +467,14 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                     className="overflow-hidden"
                   >
                     {sidebarView === 'files' && <SidebarFileTree />}
-                    {sidebarView === 'search' && <SidebarSearch />}
+                    {sidebarView === 'search' && (
+                      <SidebarSearch
+                        onOpenSchemaFile={() => {
+                          setSidebarView('schema');
+                        }}
+                        onHighlightSpan={highlightSpan}
+                      />
+                    )}
                     {sidebarView === 'schema' && <SidebarSchema />}
                   </ResizablePanel>
                   <ResizableHandle />

@@ -10010,3 +10010,133 @@ fn test_schema_type_normalization() {
         "bool should normalize to BOOLEAN"
     );
 }
+
+#[test]
+fn cte_join_only_subquery_aliases_should_connect_to_parent_cte() {
+    // Test 1: Clean SQL with CTE references (this works)
+    let sql_clean = r#"
+        WITH
+        tab1 AS (
+            SELECT vid, app_pv FROM source_table_1 GROUP BY vid
+        ),
+        tab2 AS (
+            SELECT vid FROM source_table_2 WHERE data_dt = '2024-01-01'
+        ),
+        tab3 AS (
+            SELECT vid FROM source_table_3 WHERE c_src = 6 GROUP BY vid
+        ),
+        d AS (
+            SELECT tab1.vid, tab1.app_pv
+            FROM tab1
+            LEFT JOIN tab2 ON tab1.vid = tab2.vid
+            LEFT JOIN tab3 ON tab3.vid = tab1.vid
+            WHERE tab2.vid IS NULL AND tab3.vid IS NULL
+        )
+        SELECT * FROM d;
+    "#;
+
+    // Test 2: Simulate real HQL with inline subqueries instead of CTE references
+    // (this is closer to actual M01_APP_WHOL_DATA_ZBS.HQL structure)
+    let sql_inline = r#"
+        WITH
+        tab1 AS (
+            SELECT vid, app_pv FROM source_table_1 GROUP BY vid
+        ),
+        d AS (
+            SELECT tab1.vid, tab1.app_pv
+            FROM tab1
+            LEFT JOIN
+                (SELECT vid FROM source_table_2 WHERE data_dt = '2024-01-01') tab2
+                ON tab1.vid = tab2.vid
+            LEFT JOIN
+                (SELECT vid FROM source_table_3 WHERE c_src = 6 GROUP BY vid) tab3
+                ON tab3.vid = tab1.vid
+            WHERE tab2.vid IS NULL AND tab3.vid IS NULL
+        )
+        SELECT * FROM d;
+    "#;
+
+    // Test 3: Hive template variables (like ${DATA_DT})
+    let sql_template = r#"
+        WITH
+        tab1 AS (
+            SELECT vid, app_pv FROM source_table_1 GROUP BY vid
+        ),
+        d AS (
+            SELECT tab1.vid, tab1.app_pv
+            FROM tab1
+            LEFT JOIN
+                (SELECT vid FROM source_table_2 WHERE data_dt = '${DATA_DT}') tab2
+                ON tab1.vid = tab2.vid
+            LEFT JOIN
+                (SELECT vid FROM source_table_3 WHERE c_src = 6 GROUP BY vid) tab3
+                ON tab3.vid = tab1.vid
+            WHERE tab2.vid IS NULL AND tab3.vid IS NULL
+        )
+        SELECT * FROM d;
+    "#;
+
+    for (label, sql, dialect) in [
+        ("Clean CTE refs", sql_clean, Dialect::Hive),
+        ("Inline subqueries", sql_inline, Dialect::Hive),
+        ("Template vars", sql_template, Dialect::Hive),
+    ] {
+        eprintln!("\n============================================================");
+        eprintln!("=== Test: {} (dialect: {:?}) ===", label, dialect);
+
+        let result = run_analysis(sql, dialect, None);
+
+        eprintln!("  Issues ({}):", result.issues.len());
+        for issue in &result.issues {
+            eprintln!("    [{:?}] {}", issue.severity, issue.message);
+        }
+
+        // Find CTE d
+        let d_node = result.global_lineage.nodes.iter().find(|n| n.label.as_ref() == "d");
+        eprintln!("  CTE d found: {}", d_node.is_some());
+
+        if let Some(d) = d_node {
+            let edges_to_d: Vec<_> = result.global_lineage.edges.iter()
+                .filter(|e| e.to == d.id)
+                .map(|e| {
+                    let from = result.global_lineage.nodes.iter().find(|n| n.id == e.from);
+                    format!("{:?}({:?}) --{:?}--> d", from.map(|n| n.label.as_ref()), from.map(|n| n.node_type), e.edge_type)
+                })
+                .collect();
+            eprintln!("  Edges TO d: {:?}", edges_to_d);
+
+            let edges_from_d: Vec<_> = result.global_lineage.edges.iter()
+                .filter(|e| e.from == d.id)
+                .map(|e| {
+                    let to = result.global_lineage.nodes.iter().find(|n| n.id == e.to);
+                    format!("d --{:?}--> {:?}({:?})", e.edge_type, to.map(|n| n.label.as_ref()), to.map(|n| n.node_type))
+                })
+                .collect();
+            eprintln!("  Edges FROM d: {:?}", edges_from_d);
+        }
+
+        // Find tab2, tab3
+        for name in ["tab2", "tab3"] {
+            let node = result.global_lineage.nodes.iter().find(|n| n.label.as_ref() == name);
+            if let Some(n) = node {
+                let all_edges: Vec<_> = result.global_lineage.edges.iter()
+                    .filter(|e| e.from == n.id || e.to == n.id)
+                    .map(|e| {
+                        let from = result.global_lineage.nodes.iter().find(|nn| nn.id == e.from);
+                        let to = result.global_lineage.nodes.iter().find(|nn| nn.id == e.to);
+                        format!("{:?} --{:?}--> {:?}", from.map(|n| n.label.as_ref()), e.edge_type, to.map(|n| n.label.as_ref()))
+                    })
+                    .collect();
+                eprintln!("  {} edges: {:?}", name, all_edges);
+            } else {
+                eprintln!("  {} node: NOT FOUND", name);
+            }
+        }
+    }
+
+    // Verify the clean version works
+    let result = run_analysis(sql_clean, Dialect::Hive, None);
+    let d_node = result.global_lineage.nodes.iter().find(|n| n.label.as_ref() == "d").expect("d should exist");
+    let edges_to_d: Vec<_> = result.global_lineage.edges.iter().filter(|e| e.to == d_node.id).collect();
+    assert!(!edges_to_d.is_empty(), "Clean CTE version: d should have incoming edges");
+}

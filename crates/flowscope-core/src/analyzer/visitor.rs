@@ -738,6 +738,18 @@ impl<'a, 'b> Visitor for LineageVisitor<'a, 'b> {
                         .register_table_in_scope(name.clone(), node_id.clone());
                     self.ctx.register_alias_in_scope(name.clone(), name.clone());
                     self.ctx.register_subquery_columns_in_scope(name, columns);
+
+                    // Create edge from derived table to parent target (e.g., CTE d)
+                    // when the derived table appears in a JOIN context.
+                    // Without this, inline subqueries like `LEFT JOIN (SELECT ...) tab2`
+                    // inside a CTE would not be linked to the parent CTE in the lineage graph.
+                    // We also create this edge for FROM-position derived tables that have
+                    // a parent target (i.e., are inside another CTE/derived table).
+                    if let Some(target) = self.target_node.as_deref() {
+                        if target != node_id.as_ref() {
+                            self.analyzer.create_source_edge(self.ctx, &node_id, Some(target));
+                        }
+                    }
                 }
             }
             TableFactor::NestedJoin {
