@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "FlowScope - SQL Lineage Analyzer",
+  "description": "Privacy-first SQL lineage analysis that runs entirely in your browser. Visualize data flows across tables, CTEs, and columns.",
+  "version": "0.6.0",
+  "icons": {
+    "16": "favicon.svg",
+    "48": "favicon.svg",
+    "128": "favicon.svg"
+  },
+  "action": {
+    "default_title": "FlowScope",
+    "default_icon": "favicon.svg"
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "permissions": [
+    "sidePanel",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["wasm/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

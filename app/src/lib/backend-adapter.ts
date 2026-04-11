@@ -255,8 +255,9 @@ export async function createBackendAdapter(
   preferWasm = false,
   restBaseUrl = ''
 ): Promise<BackendDetectionResult> {
-  // If explicitly preferring WASM, skip REST detection
-  if (preferWasm) {
+  // Chrome extension mode: always use WASM (no REST backend)
+  const isChromeExtension = typeof chrome !== 'undefined' && chrome.runtime?.id;
+  if (isChromeExtension || preferWasm) {
     const adapter = new WasmBackendAdapter();
     await adapter.initialize();
     return { adapter, detectedType: 'wasm' };

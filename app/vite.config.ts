@@ -6,9 +6,8 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [react(), wasm(), topLevelAwait()],
-  server: {
-    port: 3000,
-  },
+  // Chrome extension requires relative paths (not absolute /assets/...)
+  base: './',
   resolve: {
     alias: {
       '@pondpilot/flowscope-core': path.resolve(__dirname, '../packages/core/src'),
@@ -21,8 +20,23 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
+    // Chrome extension: output to dist/ with no hash in filenames
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/[name].js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/[name].[ext]',
+      },
+    },
   },
   worker: {
     format: 'es',
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/[name].js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/[name].[ext]',
+      },
+    },
   },
 });

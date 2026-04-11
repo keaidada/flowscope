@@ -31,8 +31,12 @@ export async function initWasm(
 
       // Explicitly initialize the WASM module
       if (typeof wasm.default === 'function') {
-        // Pass through custom URL when provided so host apps can control asset location
-        await wasm.default(options.wasmUrl ?? undefined);
+        // In Chrome extension context, resolve WASM URL via chrome.runtime.getURL
+        let wasmUrl = options.wasmUrl;
+        if (!wasmUrl && typeof chrome !== 'undefined' && chrome.runtime?.getURL) {
+          wasmUrl = chrome.runtime.getURL('wasm/flowscope_wasm_bg.wasm');
+        }
+        await wasm.default(wasmUrl ?? undefined);
         // Allow host apps to enable tracing via init option if supported by the build
         const wasmWithTracing = wasm as typeof wasm & { enable_tracing?: () => void };
         if (options.enableTracing && typeof wasmWithTracing.enable_tracing === 'function') {
