@@ -4,7 +4,7 @@
 
 export const FILE_LIMITS = {
   MAX_SIZE: 10 * 1024 * 1024, // 10MB
-  MAX_COUNT: 1000,
+  MAX_COUNT: 5000,
 } as const;
 
 export const SCHEMA_LIMITS = {
