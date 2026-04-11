@@ -629,6 +629,7 @@ export function AnalysisView({
     useProject();
   const [schemaEditorOpen, setSchemaEditorOpen] = useState(false);
   const [matchedDDL, setMatchedDDL] = useState<string>('');
+  const [schemaLoading, setSchemaLoading] = useState(false);
   const { activeTab, setActiveTab, navigationTarget, clearNavigationTarget } = useNavigation();
   const [lineageFocusNodeId, setLineageFocusNodeId] = useState<string | undefined>(undefined);
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
@@ -639,6 +640,8 @@ export function AnalysisView({
     if (!schemaEditorOpen || isBackendMode || !activeProjectId || !result) {
       return;
     }
+    setSchemaLoading(true);
+    setMatchedDDL('');
 
     // Collect physical table names from analysis result
     const tableNames = new Set<string>();
@@ -658,6 +661,7 @@ export function AnalysisView({
 
     if (tableNames.size === 0) {
       setMatchedDDL(resolvedSchemaToSQL(result?.resolvedSchema));
+      setSchemaLoading(false);
       return;
     }
 
@@ -665,6 +669,7 @@ export function AnalysisView({
     loadSchemaFiles(activeProjectId).then(files => {
       if (files.length === 0) {
         setMatchedDDL(resolvedSchemaToSQL(result?.resolvedSchema));
+        setSchemaLoading(false);
         return;
       }
 
@@ -719,6 +724,7 @@ export function AnalysisView({
       } else {
         setMatchedDDL(resolvedSchemaToSQL(result?.resolvedSchema));
       }
+      setSchemaLoading(false);
     });
   }, [schemaEditorOpen, isBackendMode, activeProjectId, result]);
 
@@ -1208,6 +1214,7 @@ export function AnalysisView({
           dialect={currentProject.dialect}
           onSave={handleSaveSchema}
           isReadOnly
+          loading={!isBackendMode && schemaLoading}
         />
       )}
     </div>

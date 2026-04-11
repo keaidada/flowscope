@@ -203,7 +203,8 @@
     "wrap": "Enable word wrap",
     "nowrap": "Disable word wrap",
     "deduped": "Added {{added}}, updated {{updated}} existing file(s)",
-    "duplicateFile": "File already exists at this path"
+    "duplicateFile": "File already exists at this path",
+    "loading": "Loading Schema DDL..."
   },
   "shortcuts": {
     "title": "Keyboard Shortcuts",

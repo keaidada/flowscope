@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SqlView } from '@pondpilot/flowscope-react';
+import { Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,7 @@ interface SchemaEditorProps {
   dialect: Dialect;
   onSave: (schemaSQL: string) => void;
   isReadOnly?: boolean;
+  loading?: boolean;
 }
 
 export function SchemaEditor({
@@ -28,11 +30,17 @@ export function SchemaEditor({
   schemaSQL,
   onSave,
   isReadOnly = false,
+  loading = false,
 }: SchemaEditorProps) {
   const { t } = useTranslation();
   const [editedSQL, setEditedSQL] = useState(schemaSQL);
   const theme = useThemeStore((state) => state.theme);
   const isDark = resolveTheme(theme) === 'dark';
+
+  // Sync editedSQL when schemaSQL changes (e.g. async loading completes)
+  useEffect(() => {
+    setEditedSQL(schemaSQL);
+  }, [schemaSQL]);
 
   const handleOpenChange = useCallback(
     (newOpen: boolean) => {
@@ -65,14 +73,21 @@ export function SchemaEditor({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 min-h-0 border rounded-md overflow-hidden">
-          <SqlView
-            value={editedSQL}
-            onChange={isReadOnly ? undefined : setEditedSQL}
-            className="h-full [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto"
-            editable={!isReadOnly}
-            isDark={isDark}
-          />
+        <div className="flex-1 min-h-0 border rounded-md overflow-hidden relative">
+          {loading ? (
+            <div className="flex items-center justify-center h-full gap-2 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">{t('schemaEditor.loading')}</span>
+            </div>
+          ) : (
+            <SqlView
+              value={editedSQL}
+              onChange={isReadOnly ? undefined : setEditedSQL}
+              className="h-full [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto"
+              editable={!isReadOnly}
+              isDark={isDark}
+            />
+          )}
         </div>
 
         <DialogFooter>
@@ -83,7 +98,7 @@ export function SchemaEditor({
               <Button variant="outline" onClick={handleClose}>
                 {t('common.cancel')}
               </Button>
-              <Button onClick={handleSave}>{t('schemaEditor.saveSchema')}</Button>
+              <Button onClick={handleSave} disabled={loading}>{t('schemaEditor.saveSchema')}</Button>
             </>
           )}
         </DialogFooter>

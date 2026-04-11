@@ -203,7 +203,8 @@
     "wrap": "开启换行",
     "nowrap": "关闭换行",
     "deduped": "新增 {{added}} 个，更新 {{updated}} 个已有文件",
-    "duplicateFile": "该路径下已存在同名文件"
+    "duplicateFile": "该路径下已存在同名文件",
+    "loading": "正在加载 Schema DDL..."
   },
   "shortcuts": {
     "title": "快捷键",
