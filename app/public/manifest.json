@@ -9,14 +9,10 @@
     "128": "favicon.svg"
   },
   "action": {
-    "default_title": "FlowScope",
+    "default_title": "Open FlowScope",
     "default_icon": "favicon.svg"
   },
-  "side_panel": {
-    "default_path": "index.html"
-  },
   "permissions": [
-    "sidePanel",
     "storage"
   ],
   "background": {
