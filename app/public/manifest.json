@@ -4,13 +4,17 @@
   "description": "Privacy-first SQL lineage analysis that runs entirely in your browser. Visualize data flows across tables, CTEs, and columns.",
   "version": "0.6.0",
   "icons": {
-    "16": "favicon.svg",
-    "48": "favicon.svg",
-    "128": "favicon.svg"
+    "16": "icon-16.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
   },
   "action": {
     "default_title": "Open FlowScope",
-    "default_icon": "favicon.svg"
+    "default_icon": {
+      "16": "icon-16.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
   },
   "permissions": [
     "storage"
