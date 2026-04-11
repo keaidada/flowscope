@@ -9,6 +9,7 @@ import { useViewStateStore, getIssuesStateWithDefaults } from '@/lib/view-state-
 import { FILE_LIMITS, ANALYSIS_SQL_PREVIEW_LIMITS } from '@/lib/constants';
 import { AnalysisErrorCode, isAnalysisError } from '@/types';
 import type { AnalysisState, AnalysisContext, FileValidationResult } from '@/types';
+import { loadSchemaFiles } from '@/lib/schema-storage';
 
 // Maximum retry attempts for file sync errors to prevent infinite loops
 const MAX_FILE_SYNC_RETRIES = 1;
@@ -40,7 +41,7 @@ export interface UseAnalysisOptions {
  */
 export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions) {
   const adapter = options?.adapter;
-  const { currentProject, activeProjectId } = useProject();
+  const { currentProject, activeProjectId, updateSchemaSQL } = useProject();
   const { actions, state: lineageState } = useLineage();
   const { hideCTEs } = lineageState;
   const { getResult, getMetrics, setResult: storeResult, setMetrics } = useAnalysisStore();
@@ -385,10 +386,25 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           actionsRef.current.setSql(activeFileContent);
         }
 
+        // Resolve schemaSQL: use project store value, or load from IndexedDB if empty
+        let schemaSQL = currentProject.schemaSQL ?? '';
+        if (!schemaSQL.trim() && activeProjectId) {
+          try {
+            const schemaFiles = await loadSchemaFiles(activeProjectId);
+            if (schemaFiles.length > 0) {
+              schemaSQL = schemaFiles.map(f => `-- File: ${f.path}\n${f.content}`).join('\n\n');
+              // Also sync back to project store so subsequent analyses don't need to re-load
+              updateSchemaSQL(activeProjectId, schemaSQL);
+            }
+          } catch {
+            // Non-critical: schema loading failure shouldn't block analysis
+          }
+        }
+
         const adapterPayload: AnalysisPayload = {
           files: context.files,
           dialect: currentProject.dialect,
-          schemaSQL: currentProject.schemaSQL ?? '',
+          schemaSQL,
           hideCTEs,
           enableColumnLineage: true,
           enableLinting,
