@@ -86,7 +86,47 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   }, [theme, setTheme]);
 
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
+  const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
+  const sidebarLayoutRef = useRef<HTMLDivElement>(null);
   const graphContainerRef = useRef<HTMLDivElement>(null);
+
+  // Initial sidebar width: start with a sensible default based on project file names.
+  // After render, the file tree reports its actual visible content width and we auto-grow from there.
+  const sidebarDefaultSize = useMemo(() => {
+    if (!currentProject || currentProject.files.length === 0) return 15;
+    let maxLen = 0;
+    for (const f of currentProject.files) {
+      const depth = f.path.split('/').length - 1;
+      const displayLen = f.name.length + depth * 2;
+      if (displayLen > maxLen) maxLen = displayLen;
+    }
+    const pct = Math.round((maxLen * 2 / 3) * 0.5);
+    return Math.max(15, Math.min(35, pct));
+  }, [currentProject?.files]);
+
+  const handleSidebarContentWidthChange = useCallback((contentWidthPx: number) => {
+    const layoutWidth = sidebarLayoutRef.current?.clientWidth;
+    const sidebarPanel = sidebarPanelRef.current;
+    if (!layoutWidth || !sidebarPanel || !contentWidthPx) return;
+
+    // Keep the files sidebar conservative: size it to about 2/3 of the longest visible row.
+    const targetPx = contentWidthPx * (2 / 3);
+    const targetPct = Math.max(15, Math.min(35, (targetPx / layoutWidth) * 100));
+    const currentPct = sidebarPanel.getSize();
+
+    if (Math.abs(targetPct - currentPct) > 0.5) {
+      sidebarPanel.resize(targetPct);
+    }
+  }, []);
+
+  // Reset to the initial size when switching project or reopening the files sidebar.
+  useEffect(() => {
+    if (sidebarView !== 'files' || !sidebarPanelRef.current) return;
+    const raf = requestAnimationFrame(() => {
+      sidebarPanelRef.current?.resize(sidebarDefaultSize);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [activeProjectId, sidebarView, sidebarDefaultSize]);
 
   // Use ref for currentProject to avoid recreating callback on every project change
   const currentProjectRef = useRef(currentProject);
@@ -456,33 +496,39 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
             <ActivityBar activeView={sidebarView} onViewChange={setSidebarView} hideSchema={isBackendMode} />
 
             {/* Main area with optional resizable sidebar */}
-            <ResizablePanelGroup direction="horizontal" className="flex-1">
-              {/* Sidebar (collapsible & resizable) */}
-              {sidebarView && (
-                <>
-                  <ResizablePanel
-                    defaultSize={15}
-                    minSize={10}
-                    maxSize={50}
-                    className="overflow-hidden"
-                  >
-                    {sidebarView === 'files' && <SidebarFileTree />}
-                    {sidebarView === 'search' && (
-                      <SidebarSearch
-                        onOpenSchemaFile={() => {
-                          setSidebarView('schema');
-                        }}
-                        onHighlightSpan={highlightSpan}
-                      />
-                    )}
-                    {sidebarView === 'schema' && <SidebarSchema />}
-                  </ResizablePanel>
-                  <ResizableHandle />
-                </>
-              )}
+            <div ref={sidebarLayoutRef} className="flex-1 min-w-0">
+              <ResizablePanelGroup direction="horizontal" className="h-full">
+                {/* Sidebar (collapsible & resizable) */}
+                {sidebarView && (
+                  <>
+                    <ResizablePanel
+                      ref={sidebarPanelRef}
+                      defaultSize={sidebarDefaultSize}
+                      minSize={10}
+                      maxSize={50}
+                      className="overflow-hidden flex flex-col"
+                    >
+                      {sidebarView === 'files' && (
+                        <SidebarFileTree onContentWidthChange={handleSidebarContentWidthChange} />
+                      )}
+                      {sidebarView === 'search' && (
+                        <SidebarSearch
+                          onOpenSchemaFile={() => {
+                            setSidebarView('schema');
+                          }}
+                          onHighlightSpan={highlightSpan}
+                        />
+                      )}
+                      {sidebarView === 'schema' && (
+                        <SidebarSchema onContentWidthChange={handleSidebarContentWidthChange} />
+                      )}
+                    </ResizablePanel>
+                    <ResizableHandle />
+                  </>
+                )}
 
-              {/* Main panels area */}
-              <ResizablePanel defaultSize={sidebarView ? 85 : 100} minSize={40}>
+                {/* Main panels area */}
+                <ResizablePanel defaultSize={sidebarView ? (100 - sidebarDefaultSize) : 100} minSize={40}>
                 <ResizablePanelGroup direction="horizontal">
                   {/* Analysis Panel (Lineage) - always visible */}
                   <ResizablePanel
@@ -516,6 +562,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                 </ResizablePanelGroup>
               </ResizablePanel>
             </ResizablePanelGroup>
+            </div>
           </div>
         </FocusRegistryProvider>
       </NavigationProvider>

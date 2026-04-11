@@ -12,12 +12,17 @@ import { EditorToolbar } from './EditorToolbar';
 import type { SqlViewMode } from './EditorToolbar';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_FILE_NAMES } from '@/lib/constants';
+import { hasPendingContent, loadPendingContent } from '@/lib/lazy-file-loader';
 import type { RunMode } from '@/lib/project-store';
 
 interface EditorAnalysisState {
   isAnalyzing: boolean;
   error: string | null;
-  runAnalysis: (activeFileContent?: string, activeFilePath?: string) => Promise<void>;
+  runAnalysis: (
+    activeFileContent?: string,
+    activeFilePath?: string,
+    options?: { runModeOverride?: RunMode }
+  ) => Promise<void>;
   setError: (error: string | null) => void;
 }
 
@@ -96,6 +101,17 @@ export function EditorArea({
       createFile(DEFAULT_FILE_NAMES.SCRATCHPAD);
     }
   }, [currentProject, createFile, isReadOnly]);
+
+  // Lazy-load file content for files uploaded without reading content
+  useEffect(() => {
+    if (activeFile && hasPendingContent(activeFile.id) && !activeFile.content) {
+      loadPendingContent(activeFile.id).then((content) => {
+        if (content !== null) {
+          updateFile(activeFile.id, content);
+        }
+      });
+    }
+  }, [activeFile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Focus the editor when active file changes (e.g., new file created)
   useEffect(() => {
@@ -186,16 +202,10 @@ export function EditorArea({
   }, [activeFile, runAnalysis]);
 
   const handleAnalyzeActiveOnly = useCallback(() => {
-    if (activeFile && currentProject) {
-      // Temporarily switch to 'current' mode for this run
-      const originalMode = currentProject.runMode;
-      setRunMode(currentProject.id, 'current');
-      runAnalysis(activeFile.content, activeFile.path).finally(() => {
-        // Restore original mode after analysis
-        setRunMode(currentProject.id, originalMode);
-      });
+    if (activeFile) {
+      runAnalysis(activeFile.content, activeFile.path, { runModeOverride: 'current' });
     }
-  }, [activeFile, currentProject, runAnalysis, setRunMode]);
+  }, [activeFile, runAnalysis]);
 
   // Keyboard shortcuts for running analysis
   const analysisShortcuts = useMemo<GlobalShortcut[]>(

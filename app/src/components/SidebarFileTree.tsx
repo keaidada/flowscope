@@ -8,13 +8,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ACCEPTED_FILE_TYPES, ACCEPTED_FILE_TYPES_ARRAY, FILE_EXTENSIONS, DEFAULT_FILE_NAMES } from '@/lib/constants';
+import { registerPendingFiles } from '@/lib/lazy-file-loader';
 
-export function SidebarFileTree() {
+interface SidebarFileTreeProps {
+  onContentWidthChange?: (widthPx: number) => void;
+}
+
+export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) {
   const { t } = useTranslation();
   const {
     currentProject,
     createFile,
     deleteFile,
+    deleteFiles,
     selectFile,
     importFiles,
     addFilesDirectly,
@@ -77,15 +83,17 @@ export function SidebarFileTree() {
 
     const allFiles = Array.from(e.target.files);
     const total = allFiles.length;
-    let skipped = 0;
 
     setUploadProgress({ total, loaded: 0, skipped: 0, done: false });
 
-    // Phase 1: Filter supported files
+    // Phase 1: Filter supported files (use Set for O(1) lookup)
+    const acceptedSet = new Set(ACCEPTED_FILE_TYPES_ARRAY.map(ext => ext.toLowerCase()));
     const supportedFiles: File[] = [];
+    let skipped = 0;
     for (const file of allFiles) {
-      const ext = '.' + file.name.split('.').pop()?.toLowerCase();
-      if (ACCEPTED_FILE_TYPES_ARRAY.includes(ext as typeof ACCEPTED_FILE_TYPES_ARRAY[number])) {
+      const dotIdx = file.name.lastIndexOf('.');
+      const ext = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : '';
+      if (acceptedSet.has(ext)) {
         supportedFiles.push(file);
       } else {
         skipped++;
@@ -95,9 +103,9 @@ export function SidebarFileTree() {
     const importTotal = supportedFiles.length;
     setUploadProgress({ total: importTotal, loaded: 0, skipped, done: false });
 
-    // Phase 2: Read file contents in batches and build ProjectFile objects directly
-    const BATCH_SIZE = 100;
-    const projectFiles: ProjectFile[] = [];
+    // Phase 2: Create file entries WITHOUT reading content (lazy load on open)
+    const projectFiles: ProjectFile[] = new Array(importTotal);
+    const pendingEntries: Array<{ id: string; file: File }> = new Array(importTotal);
 
     const getFileLanguage = (fileName: string): ProjectFile['language'] => {
       if (fileName.endsWith(FILE_EXTENSIONS.JSON)) return 'json';
@@ -105,32 +113,31 @@ export function SidebarFileTree() {
       return 'text';
     };
 
-    for (let i = 0; i < supportedFiles.length; i += BATCH_SIZE) {
-      const batch = supportedFiles.slice(i, i + BATCH_SIZE);
-      // Read batch and build ProjectFile objects in parallel
-      const batchResults = await Promise.all(batch.map(async (file) => {
-        const content = await file.text();
-        const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-        const path = relativePath || file.name;
-        return {
-          id: crypto.randomUUID(),
-          name: file.name,
-          path,
-          content,
-          language: getFileLanguage(file.name),
-        } as ProjectFile;
-      }));
-      projectFiles.push(...batchResults);
+    for (let i = 0; i < supportedFiles.length; i++) {
+      const file = supportedFiles[i];
+      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+      const id = crypto.randomUUID();
+      projectFiles[i] = {
+        id,
+        name: file.name,
+        path: relativePath || file.name,
+        content: '', // Content loaded lazily when file is opened
+        language: getFileLanguage(file.name),
+      };
+      pendingEntries[i] = { id, file };
 
-      // Yield to UI thread for progress update
-      setUploadProgress({ total: importTotal, loaded: projectFiles.length, skipped, done: false });
-      await new Promise((r) => setTimeout(r, 0));
+      // Update progress every 200 files
+      if ((i + 1) % 200 === 0 || i === supportedFiles.length - 1) {
+        setUploadProgress({ total: importTotal, loaded: i + 1, skipped, done: false });
+        await new Promise((r) => setTimeout(r, 0));
+      }
     }
 
-    // Phase 3: Show "processing" state, then add files directly (no re-reading)
-    setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false });
+    // Register File references for lazy content loading
+    registerPendingFiles(pendingEntries);
 
-    // Use requestAnimationFrame to let the progress UI paint before the heavy setState
+    // Phase 3: Add files in one shot
+    setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false });
     await new Promise((r) => requestAnimationFrame(r));
 
     if (projectFiles.length > 0) {
@@ -225,9 +232,7 @@ export function SidebarFileTree() {
     if (!currentProject) return;
     const ids = [...(currentProject.selectedFileIds || [])];
     if (ids.length > 0) {
-      for (const id of ids) {
-        deleteFile(id);
-      }
+      deleteFiles(ids);
     }
     setConfirmBatchDelete(false);
   };
@@ -446,7 +451,7 @@ export function SidebarFileTree() {
       )}
 
       {/* File tree with full functionality */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overflow-x-auto">
         {filteredFiles.length > 0 ? (
           <FileTree
             files={filteredFiles}
@@ -456,6 +461,8 @@ export function SidebarFileTree() {
             deletingFileId={deletingFileId}
             renamingFileId={renamingFileId}
             renameValue={renameValue}
+            searchQuery={search}
+            onContentWidthChange={onContentWidthChange}
             onSelectFile={handleSelectFile}
             onToggleSelection={handleToggleSelection}
             onToggleFolderSelection={handleToggleFolderSelection}

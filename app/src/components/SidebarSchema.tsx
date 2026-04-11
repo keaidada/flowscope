@@ -31,6 +31,7 @@ import { schemaMetadataToSQL } from '@/lib/schema-parser';
 import { cn } from '@/lib/utils';
 import { saveSchemaFiles, loadSchemaFiles } from '@/lib/schema-storage';
 import { onSchemaFileSelect } from '@/lib/schema-events';
+import { registerPendingFiles, hasPendingContent, loadPendingContent } from '@/lib/lazy-file-loader';
 // Schema files accept a broader set of extensions than the main SQL file tree
 const SCHEMA_ACCEPTED_EXTENSIONS = ['.sql', '.hql', '.ddl', '.txt'] as const;
 
@@ -204,7 +205,8 @@ function SchemaFolderNode({
         />
         {isExpanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
         {isExpanded ? <FolderOpenIcon className="size-4 shrink-0 text-amber-500" /> : <Folder className="size-4 shrink-0 text-amber-500" />}
-        <span className="truncate flex-1">{node.name}</span>
+        <span className="whitespace-nowrap">{node.name}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0 mr-1">({folderFileIds.length})</span>
         <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity">
           <button
             className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
@@ -325,7 +327,7 @@ function SchemaFileNode({
         className="shrink-0 border-muted-foreground"
       />
       <FileCode className="size-4 shrink-0 text-blue-500" />
-      <span className="truncate flex-1">{node.name}</span>
+      <span className="whitespace-nowrap">{node.name}</span>
       {confirming ? (
         <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
           <span className="text-xs text-destructive whitespace-nowrap">Delete?</span>
@@ -382,8 +384,12 @@ function debouncedSaveSchemaFiles(projectId: string, files: SchemaFile[]) {
   );
 }
 
+interface SidebarSchemaProps {
+  onContentWidthChange?: (widthPx: number) => void;
+}
+
 // --- Main component ---
-export function SidebarSchema() {
+export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
   const { t } = useTranslation();
   const { currentProject, updateSchemaSQL, activeProjectId, isBackendMode, backendSchema } =
     useProject();
@@ -481,15 +487,23 @@ export function SidebarSchema() {
   }, [cacheKey]);
 
   // Wrappers that update memory cache + trigger debounced DB save + auto-save merged SQL
+  const prevMergedRef = useRef<string>('');
   const setSchemaFiles = useCallback((updater: SchemaFile[] | ((prev: SchemaFile[]) => SchemaFile[])) => {
     setSchemaFilesState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       schemaFilesCache.set(cacheKey, next);
       debouncedSaveSchemaFiles(cacheKey, next);
-      // Auto-save merged SQL to project store
+      // Auto-save merged SQL to project store (skip files with empty content — lazy-loaded)
+      // Only update if merged content actually changed to avoid triggering unnecessary re-analysis
       if (!isBackendMode && activeProjectId) {
-        const merged = next.map(f => `-- File: ${f.path}\n${f.content}`).join('\n\n');
-        updateSchemaSQL(activeProjectId, merged);
+        const filesWithContent = next.filter(f => f.content);
+        if (filesWithContent.length > 0) {
+          const merged = filesWithContent.map(f => `-- File: ${f.path}\n${f.content}`).join('\n\n');
+          if (merged !== prevMergedRef.current) {
+            prevMergedRef.current = merged;
+            updateSchemaSQL(activeProjectId, merged);
+          }
+        }
       }
       return next;
     });
@@ -560,6 +574,7 @@ export function SidebarSchema() {
   const [activeFolderPath, setActiveFolderPath] = useState<string>('');
   const folderNameInputRef = useRef<HTMLInputElement>(null);
   const fileNameInputRef = useRef<HTMLInputElement>(null);
+  const treeContentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isCreatingFolder && folderNameInputRef.current) {
@@ -575,6 +590,17 @@ export function SidebarSchema() {
 
   // Active file content for editor
   const activeFile = useMemo(() => schemaFiles.find(f => f.id === activeFileId), [schemaFiles, activeFileId]);
+
+  // Lazy-load file content for files uploaded without reading content
+  useEffect(() => {
+    if (activeFile && !activeFile.content && hasPendingContent(activeFile.id)) {
+      loadPendingContent(activeFile.id).then((content) => {
+        if (content !== null) {
+          setSchemaFiles(prev => prev.map(f => f.id === activeFile.id ? { ...f, content } : f));
+        }
+      });
+    }
+  }, [activeFile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Build tree (filtered by search)
   const filteredFiles = useMemo(() => {
@@ -596,19 +622,10 @@ export function SidebarSchema() {
     });
   }, []);
 
-  // Auto-expand first folder when files are loaded
-  useEffect(() => {
-    if (sortedRootChildren.length > 0 && expandedFolders.size === 0) {
-      const firstFolder = sortedRootChildren.find(n => n.children.size > 0 && !n.file);
-      if (firstFolder) {
-        setExpandedFolders(new Set([firstFolder.path]));
-      }
-    }
-  }, [sortedRootChildren]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-expand all folders when searching
+  // Auto-expand folders when searching, collapse when not searching
   useEffect(() => {
     if (search.trim()) {
+      // Expand all parent folders of matched files
       const allPaths = new Set<string>();
       for (const f of filteredFiles) {
         const parts = f.path.split('/');
@@ -616,11 +633,20 @@ export function SidebarSchema() {
           allPaths.add(parts.slice(0, i).join('/'));
         }
       }
-      if (allPaths.size > 0) {
-        setExpandedFolders(prev => new Set([...prev, ...allPaths]));
-      }
+      setExpandedFolders(allPaths);
+    } else {
+      // No search — collapse all
+      setExpandedFolders(new Set());
     }
   }, [search, filteredFiles]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!onContentWidthChange || !treeContentRef.current || filteredFiles.length === 0) return;
+    const raf = requestAnimationFrame(() => {
+      onContentWidthChange(treeContentRef.current?.scrollWidth ?? 0);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [expandedFolders, filteredFiles, onContentWidthChange, search]);
 
   // Resize handler for tree/editor split
   const handleResizeStart = useCallback(
@@ -858,15 +884,17 @@ export function SidebarSchema() {
 
     const allFiles = Array.from(files);
     const totalScanned = allFiles.length;
-    let skipped = 0;
 
     setUploadProgress({ total: totalScanned, loaded: 0, skipped: 0, done: false });
 
-    // Phase 1: Filter supported files
+    // Phase 1: Filter supported files (Set for O(1) lookup)
+    const acceptedSet = new Set(SCHEMA_ACCEPTED_EXTENSIONS.map(ext => ext.toLowerCase()));
     const supportedFiles: File[] = [];
+    let skipped = 0;
     for (const file of allFiles) {
-      const ext = '.' + file.name.split('.').pop()?.toLowerCase();
-      if (SCHEMA_ACCEPTED_EXTENSIONS.includes(ext as (typeof SCHEMA_ACCEPTED_EXTENSIONS)[number])) {
+      const dotIdx = file.name.lastIndexOf('.');
+      const ext = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : '';
+      if (acceptedSet.has(ext)) {
         supportedFiles.push(file);
       } else {
         skipped++;
@@ -884,32 +912,39 @@ export function SidebarSchema() {
       return;
     }
 
-    // Phase 2: Read files in batches of 100
-    const BATCH_SIZE = 100;
-    const newFiles: SchemaFile[] = [];
-    const expandPaths = new Set<string>();
+    // Phase 2: Create file entries WITHOUT reading content (lazy load on open)
+    const newFiles: SchemaFile[] = new Array(importTotal);
+    const pendingEntries: Array<{ id: string; file: File }> = new Array(importTotal);
 
-    for (let i = 0; i < supportedFiles.length; i += BATCH_SIZE) {
-      const batch = supportedFiles.slice(i, i + BATCH_SIZE);
-      const results = await Promise.all(
-        batch.map(async (file) => {
-          const content = await file.text();
-          const relativePath =
-            (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-          const parts = relativePath.split('/').filter(Boolean);
-          for (let j = 1; j < parts.length; j++) {
-            expandPaths.add(parts.slice(0, j).join('/'));
-          }
-          return {
-            id: crypto.randomUUID(),
-            name: file.name,
-            path: relativePath,
-            content,
-          } as SchemaFile;
-        })
-      );
-      newFiles.push(...results);
-      setUploadProgress({ total: importTotal, loaded: newFiles.length, skipped, done: false });
+    for (let i = 0; i < supportedFiles.length; i++) {
+      const file = supportedFiles[i];
+      const relativePath =
+        (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+      const id = crypto.randomUUID();
+      newFiles[i] = {
+        id,
+        name: file.name,
+        path: relativePath,
+        content: '', // Content loaded lazily when file is opened
+      };
+      pendingEntries[i] = { id, file };
+
+      if ((i + 1) % 200 === 0 || i === supportedFiles.length - 1) {
+        setUploadProgress({ total: importTotal, loaded: i + 1, skipped, done: false });
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }
+
+    // Register File references for lazy content loading
+    registerPendingFiles(pendingEntries);
+
+    // Compute expand paths
+    const expandPaths = new Set<string>();
+    for (const nf of newFiles) {
+      const parts = nf.path.split('/').filter(Boolean);
+      for (let j = 1; j < parts.length; j++) {
+        expandPaths.add(parts.slice(0, j).join('/'));
+      }
     }
 
     // Phase 3: Apply results (deduplicate by path)
@@ -1189,7 +1224,7 @@ export function SidebarSchema() {
             {isBackendMode ? t('schemaEditor.viewDesc') : t('schemaEditor.emptyHint')}
           </div>
         ) : (
-          <div className="py-1">
+          <div ref={treeContentRef} className="py-1 min-w-max">
             {sortedRootChildren.map((child) =>
               child.file ? (
                 <SchemaFileNode key={child.file.id} node={child} depth={0} activeFileId={activeFileId} onSelect={handleSelectFile} onDelete={handleDeleteFile} onRenameFile={handleRenameFile} onSelectFolder={setActiveFolderPath} selectedFileIds={selectedFileIds} onToggleSelection={handleToggleSelection} />

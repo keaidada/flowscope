@@ -52,6 +52,10 @@ interface FileTreeProps {
   onCreateFolderInFolder?: (folderPath: string) => void;
   /** Called when user confirms renaming a folder */
   onRenameFolder?: (oldFolderPath: string, newFolderName: string) => void;
+  /** Current search query — when non-empty, auto-expand folders containing matched files */
+  searchQuery?: string;
+  /** Reports the rendered tree content width so the sidebar can auto-resize */
+  onContentWidthChange?: (widthPx: number) => void;
 }
 
 interface TreeNode {
@@ -148,12 +152,24 @@ function collectFileIds(node: TreeNode): string[] {
   return ids;
 }
 
+/** Count total files recursively under a tree node */
+function countFiles(node: TreeNode): number {
+  let count = 0;
+  for (const child of node.children.values()) {
+    if (child.file) count++;
+    if (child.children.size > 0) count += countFiles(child);
+  }
+  return count;
+}
+
 function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: FolderNodeProps) {
   const isExpanded = expandedFolders.has(node.path);
   const sortedChildren = useMemo(
     () => sortTreeNodes(Array.from(node.children.values())),
     [node]
   );
+
+  const fileCount = useMemo(() => countFiles(node), [node]);
 
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(node.name);
@@ -260,7 +276,8 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
         ) : (
           <Folder className="size-4 shrink-0 text-amber-500" />
         )}
-        <span className="truncate flex-1">{node.name}</span>
+        <span className="whitespace-nowrap">{node.name}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0 mr-1">({fileCount})</span>
         {!props.isReadOnly && (
           <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity">
             {props.onCreateFileInFolder && (
@@ -303,11 +320,20 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
 /** Flat file list with render limit */
 function FlatFileList({ sortedChildren, props }: { sortedChildren: TreeNode[]; props: FileTreeProps }) {
   const [renderLimit, setRenderLimit] = useState(FOLDER_RENDER_LIMIT);
+  const rootRef = useRef<HTMLDivElement>(null);
   const visible = sortedChildren.slice(0, renderLimit);
   const remaining = sortedChildren.length - renderLimit;
 
+  useEffect(() => {
+    if (!props.onContentWidthChange || !rootRef.current) return;
+    const raf = requestAnimationFrame(() => {
+      props.onContentWidthChange?.(rootRef.current?.scrollWidth ?? 0);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [visible, remaining, props.onContentWidthChange]);
+
   return (
-    <div className="p-1" role="tree" aria-label="File list">
+    <div ref={rootRef} className="p-1 min-w-max" role="tree" aria-label="File list">
       {visible.map((node) => (
         <FileNode key={node.file?.id} node={node} depth={0} props={props} />
       ))}
@@ -479,7 +505,7 @@ function FileNode({ node, depth, props }: FileNodeProps) {
       <FileCode
         className={cn('size-4 shrink-0', isIncluded ? 'text-primary' : 'text-muted-foreground')}
       />
-      <span className={cn('flex-1 truncate text-sm', isActive && 'font-semibold italic')}>
+      <span className={cn('whitespace-nowrap text-sm', isActive && 'font-semibold italic')}>
         {file.name}
       </span>
       {/* Hide rename/delete actions in read-only mode */}
@@ -555,9 +581,9 @@ function FileNode({ node, depth, props }: FileNodeProps) {
 }
 
 export function FileTree(props: FileTreeProps) {
-  const { files } = props;
+  const { files, searchQuery, onContentWidthChange } = props;
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
-  const hasInitialized = useRef(false);
+  const treeRef = useRef<HTMLDivElement>(null);
 
   const tree = useMemo(() => buildFileTree(files), [files]);
 
@@ -566,24 +592,34 @@ export function FileTree(props: FileTreeProps) {
     return files.some((f) => f.path.includes('/'));
   }, [files]);
 
-  // Auto-expand only top-level folders on first render
+  // When searching, auto-expand all folders that contain matched files.
+  // When not searching, collapse all (default closed).
   useEffect(() => {
-    if (!hasNestedStructure || hasInitialized.current) {
-      return;
-    }
-    hasInitialized.current = true;
+    if (!hasNestedStructure) return;
 
-    const topLevelFolders = new Set<string>();
-    for (const file of files) {
-      const parts = file.path.split('/');
-      if (parts.length > 1) {
-        topLevelFolders.add(parts[0]);
+    if (searchQuery && searchQuery.trim()) {
+      // Expand all parent folders of matched files
+      const foldersToExpand = new Set<string>();
+      for (const file of files) {
+        const parts = file.path.split('/').filter(Boolean);
+        for (let i = 1; i < parts.length; i++) {
+          foldersToExpand.add(parts.slice(0, i).join('/'));
+        }
       }
+      setExpandedFolders(foldersToExpand);
+    } else {
+      // No search — collapse all
+      setExpandedFolders(new Set());
     }
-    if (topLevelFolders.size > 0) {
-      setExpandedFolders(topLevelFolders);
-    }
-  }, [files, hasNestedStructure]);
+  }, [files, hasNestedStructure, searchQuery]);
+
+  useEffect(() => {
+    if (!onContentWidthChange || !treeRef.current) return;
+    const raf = requestAnimationFrame(() => {
+      onContentWidthChange(treeRef.current?.scrollWidth ?? 0);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [expandedFolders, files, onContentWidthChange, searchQuery]);
 
   const toggleFolder = (path: string) => {
     setExpandedFolders((prev) => {
@@ -607,7 +643,7 @@ export function FileTree(props: FileTreeProps) {
   }
 
   return (
-    <div className="p-1" role="tree" aria-label="File tree">
+    <div ref={treeRef} className="p-1 min-w-max" role="tree" aria-label="File tree">
       {sortedChildren.map((node) =>
         node.file ? (
           <FileNode key={node.file.id} node={node} depth={0} props={props} />

@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Search, FileCode, X, Database, ExternalLink } from 'lucide-react';
+import { Search, FileCode, X, Database, ExternalLink, Folder, ChevronDown, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useProject } from '@/lib/project-store';
 import { loadSchemaFiles, type StoredSchemaFile } from '@/lib/schema-storage';
@@ -171,6 +171,69 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
     return groups;
   }, [results]);
 
+  // Build directory tree from grouped results
+  interface DirNode {
+    name: string;
+    path: string;
+    files: Array<{ fileId: string; fileName: string; filePath: string; matches: SearchMatch[] }>;
+    children: Map<string, DirNode>;
+    totalFiles: number;
+  }
+
+  const dirTree = useMemo((): DirNode => {
+    const root: DirNode = { name: '', path: '', files: [], children: new Map(), totalFiles: 0 };
+
+    for (const [fileId, group] of groupedResults) {
+      const parts = group.filePath.split('/').filter(Boolean);
+      let current = root;
+
+      // Navigate/create directory nodes
+      for (let i = 0; i < parts.length - 1; i++) {
+        const dirName = parts[i];
+        const dirPath = parts.slice(0, i + 1).join('/');
+        if (!current.children.has(dirName)) {
+          current.children.set(dirName, {
+            name: dirName,
+            path: dirPath,
+            files: [],
+            children: new Map(),
+            totalFiles: 0,
+          });
+        }
+        current = current.children.get(dirName)!;
+      }
+
+      current.files.push({ fileId, fileName: group.fileName, filePath: group.filePath, matches: group.matches });
+    }
+
+    // Calculate totalFiles counts
+    function calcTotals(node: DirNode): number {
+      let count = node.files.length;
+      for (const child of node.children.values()) {
+        count += calcTotals(child);
+      }
+      node.totalFiles = count;
+      return count;
+    }
+    calcTotals(root);
+
+    return root;
+  }, [groupedResults]);
+
+  // Collapsed directories (default: all expanded)
+  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
+  // Reset collapsed state when query changes
+  useEffect(() => { setCollapsedDirs(new Set()); }, [query]);
+
+  const toggleDir = useCallback((dirPath: string) => {
+    setCollapsedDirs(prev => {
+      const next = new Set(prev);
+      if (next.has(dirPath)) next.delete(dirPath);
+      else next.add(dirPath);
+      return next;
+    });
+  }, []);
+
   const totalFiles = groupedResults.size;
   const totalMatches = results.length;
 
@@ -324,53 +387,19 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
           </div>
         )}
 
-        {Array.from(groupedResults.entries()).map(([fileId, group]) => (
-          <div key={fileId} className="border-b border-border/50">
-            {/* File header */}
-            <div
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-muted/20 cursor-pointer hover:bg-muted/40"
-              onClick={() => handleFileHeaderClick(fileId)}
-            >
-              {searchMode === 'files' ? (
-                <FileCode className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              ) : (
-                <Database className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-              )}
-              <span className="text-xs font-medium truncate">{group.fileName}</span>
-              <span className="text-[10px] text-muted-foreground ml-auto shrink-0 flex items-center gap-1">
-                {group.matches.length}
-                <ExternalLink className="h-2.5 w-2.5" />
-              </span>
-            </div>
-
-            {/* Matches in file */}
-            {group.matches.slice(0, 20).map((match, idx) => (
-              <div
-                key={idx}
-                className="flex items-start gap-2 px-3 py-1 text-xs cursor-pointer hover:bg-muted/30"
-                onClick={() => handleMatchClick(match)}
-                onMouseEnter={(e) => handleMouseEnter(e, match)}
-                onMouseLeave={handleMouseLeave}
-              >
-                <span className="text-muted-foreground shrink-0 w-8 text-right font-mono text-[10px] pt-0.5">
-                  {match.line}
-                </span>
-                <span className="truncate leading-5">
-                  <HighlightedLine
-                    line={match.lineContent}
-                    matchStart={match.matchStart}
-                    matchEnd={match.matchEnd}
-                  />
-                </span>
-              </div>
-            ))}
-            {group.matches.length > 20 && (
-              <div className="px-3 py-1 text-[10px] text-muted-foreground italic">
-                +{group.matches.length - 20} more
-              </div>
-            )}
-          </div>
-        ))}
+        {query && totalMatches > 0 && (
+          <SearchTreeNode
+            node={dirTree}
+            depth={-1}
+            searchMode={searchMode}
+            collapsedDirs={collapsedDirs}
+            onToggleDir={toggleDir}
+            onFileClick={handleFileHeaderClick}
+            onMatchClick={handleMatchClick}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+          />
+        )}
       </div>
 
       {/* Hover preview tooltip */}
@@ -405,6 +434,133 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
         </div>
       )}
     </div>
+  );
+}
+
+/** Recursive tree node for directory-organized search results */
+function SearchTreeNode({
+  node,
+  depth,
+  searchMode,
+  collapsedDirs,
+  onToggleDir,
+  onFileClick,
+  onMatchClick,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  node: { name: string; path: string; files: Array<{ fileId: string; fileName: string; matches: SearchMatch[] }>; children: Map<string, { name: string; path: string; files: Array<{ fileId: string; fileName: string; matches: SearchMatch[] }>; children: Map<string, unknown>; totalFiles: number }>; totalFiles: number };
+  depth: number;
+  searchMode: SearchMode;
+  collapsedDirs: Set<string>;
+  onToggleDir: (path: string) => void;
+  onFileClick: (fileId: string) => void;
+  onMatchClick: (match: SearchMatch) => void;
+  onMouseEnter: (e: React.MouseEvent, match: SearchMatch) => void;
+  onMouseLeave: () => void;
+}) {
+  const isRoot = depth < 0;
+  const isCollapsed = !isRoot && collapsedDirs.has(node.path);
+
+  // Sort: directories first, then files
+  const sortedChildren = Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name));
+  const sortedFiles = [...node.files].sort((a, b) => a.fileName.localeCompare(b.fileName));
+
+  return (
+    <>
+      {/* Directory header (skip for root) */}
+      {!isRoot && (
+        <div
+          className="flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-muted/40 text-xs"
+          style={{ paddingLeft: `${4 + depth * 12}px` }}
+          onClick={() => onToggleDir(node.path)}
+        >
+          {isCollapsed ? (
+            <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+          ) : (
+            <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+          )}
+          <Folder className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+          <span className="font-medium truncate">{node.name}</span>
+          <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
+            {node.totalFiles}
+          </span>
+        </div>
+      )}
+
+      {/* Children (directories + files) */}
+      {(isRoot || !isCollapsed) && (
+        <>
+          {sortedChildren.map((child) => (
+            <SearchTreeNode
+              key={child.path}
+              node={child as typeof node}
+              depth={depth + 1}
+              searchMode={searchMode}
+              collapsedDirs={collapsedDirs}
+              onToggleDir={onToggleDir}
+              onFileClick={onFileClick}
+              onMatchClick={onMatchClick}
+              onMouseEnter={onMouseEnter}
+              onMouseLeave={onMouseLeave}
+            />
+          ))}
+
+          {sortedFiles.map((file) => (
+            <div key={file.fileId}>
+              {/* File header */}
+              <div
+                className="flex items-center gap-1.5 py-1 bg-muted/20 cursor-pointer hover:bg-muted/40"
+                style={{ paddingLeft: `${4 + (depth + 1) * 12}px`, paddingRight: '8px' }}
+                onClick={() => onFileClick(file.fileId)}
+              >
+                {searchMode === 'files' ? (
+                  <FileCode className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                ) : (
+                  <Database className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                )}
+                <span className="text-xs font-medium truncate">{file.fileName}</span>
+                <span className="text-[10px] text-muted-foreground ml-auto shrink-0 flex items-center gap-1">
+                  {file.matches.length}
+                  <ExternalLink className="h-2.5 w-2.5" />
+                </span>
+              </div>
+
+              {/* Matches */}
+              {file.matches.slice(0, 20).map((match, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-start gap-2 py-1 text-xs cursor-pointer hover:bg-muted/30"
+                  style={{ paddingLeft: `${4 + (depth + 2) * 12}px`, paddingRight: '8px' }}
+                  onClick={() => onMatchClick(match)}
+                  onMouseEnter={(e) => onMouseEnter(e, match)}
+                  onMouseLeave={onMouseLeave}
+                >
+                  <span className="text-muted-foreground shrink-0 w-8 text-right font-mono text-[10px] pt-0.5">
+                    {match.line}
+                  </span>
+                  <span className="truncate leading-5">
+                    <HighlightedLine
+                      line={match.lineContent}
+                      matchStart={match.matchStart}
+                      matchEnd={match.matchEnd}
+                    />
+                  </span>
+                </div>
+              ))}
+              {file.matches.length > 20 && (
+                <div
+                  className="py-1 text-[10px] text-muted-foreground italic"
+                  style={{ paddingLeft: `${4 + (depth + 2) * 12}px` }}
+                >
+                  +{file.matches.length - 20} more
+                </div>
+              )}
+            </div>
+          ))}
+        </>
+      )}
+    </>
   );
 }
 

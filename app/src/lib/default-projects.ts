@@ -14,7 +14,7 @@ export const DEFAULT_DBT_PROJECT: Project = {
   name: 'dbt Jaffle Shop',
   activeFileId: 'dbt-file-1',
   dialect: 'snowflake',
-  runMode: 'all',
+  runMode: 'current',
   selectedFileIds: [],
   schemaSQL: `-- dbt Source Tables Schema
 -- These define the raw source tables referenced by source() macros
@@ -428,7 +428,7 @@ export const DEFAULT_PROJECT: Project = {
   name: 'E-commerce Analytics',
   activeFileId: 'file-1',
   dialect: 'postgres',
-  runMode: 'all',
+  runMode: 'current',
   selectedFileIds: [],
   schemaSQL: `/* E-Commerce Analytics Schema Definition
    This schema defines all base tables and their relationships.

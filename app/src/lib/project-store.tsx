@@ -144,6 +144,7 @@ interface ProjectContextType {
   // File actions for active project
   createFile: (name: string, content?: string, path?: string) => void;
   updateFile: (fileId: string, content: string) => void;
+  updateFiles: (updates: Array<{ fileId: string; content: string }>) => void;
   deleteFile: (fileId: string) => void;
   deleteFiles: (fileIds: string[]) => void;
   renameFile: (fileId: string, newName: string) => void;
@@ -305,7 +306,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   // Track backend-specific state separately since it's derived, not persisted.
   const [backendActiveFileId, setBackendActiveFileId] = useState<string | null>(null);
-  const [backendRunMode, setBackendRunMode] = useState<RunMode>('all');
+  const [backendRunMode, setBackendRunMode] = useState<RunMode>('current');
   const [backendSelectedFileIds, setBackendSelectedFileIds] = useState<string[]>([]);
 
   useEffect(() => {
@@ -323,7 +324,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!backendFiles) {
       setBackendSelectedFileIds([]);
-      setBackendRunMode('all');
+      setBackendRunMode('current');
       return;
     }
 
@@ -334,10 +335,10 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     });
   }, [backendFiles]);
 
-  // Reset run mode to 'all' when all selected files are removed
+  // Reset run mode to 'current' when all selected files are removed
   useEffect(() => {
     if (backendSelectedFileIds.length === 0 && backendRunMode === 'custom') {
-      setBackendRunMode('all');
+      setBackendRunMode('current');
     }
   }, [backendSelectedFileIds, backendRunMode]);
 
@@ -345,7 +346,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     if (!isBackendMode) {
       setBackendActiveFileId(null);
       setBackendSelectedFileIds([]);
-      setBackendRunMode('all');
+      setBackendRunMode('current');
     }
   }, [isBackendMode]);
 
@@ -517,7 +518,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         files: [],
         activeFileId: null,
         dialect: 'generic',
-        runMode: 'all',
+        runMode: 'current',
         selectedFileIds: [],
         schemaSQL: '',
         templateMode: 'raw',
@@ -601,7 +602,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       setBackendSelectedFileIds((prev) => {
         const exists = prev.includes(fileId);
         const updated = exists ? prev.filter((id) => id !== fileId) : [...prev, fileId];
-        setBackendRunMode(updated.length > 0 ? 'custom' : 'all');
+        setBackendRunMode(updated.length > 0 ? 'custom' : 'current');
         return updated;
       });
       return;
@@ -617,11 +618,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
         // Automatically switch runMode based on selection:
         // - Selecting files implies the user wants 'custom' mode
-        // - Deselecting all files reverts to 'all' mode as a sensible default
+        // - Deselecting all files reverts to 'current' mode as a sensible default
         return {
           ...p,
           selectedFileIds: newSelected,
-          runMode: newSelected.length > 0 ? 'custom' : 'all',
+          runMode: newSelected.length > 0 ? 'custom' : 'current',
         };
       })
     );
@@ -693,6 +694,27 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           return {
             ...p,
             files: p.files.map((f) => (f.id === fileId ? { ...f, content } : f)),
+          };
+        })
+      );
+    },
+    [activeProjectId]
+  );
+
+  const updateFiles = useCallback(
+    (updates: Array<{ fileId: string; content: string }>) => {
+      if (!activeProjectId || updates.length === 0) return;
+
+      const updatesMap = new Map(updates.map((update) => [update.fileId, update.content]));
+
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          return {
+            ...p,
+            files: p.files.map((f) =>
+              updatesMap.has(f.id) ? { ...f, content: updatesMap.get(f.id) ?? f.content } : f
+            ),
           };
         })
       );
@@ -1009,6 +1031,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     toggleFileSelection,
     createFile,
     updateFile,
+    updateFiles,
     deleteFile,
     deleteFiles,
     renameFile,
