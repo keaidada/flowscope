@@ -192,7 +192,8 @@ export function ProjectMenuItem({
               </TooltipTrigger>
               <TooltipContent side="bottom">
                 <p>
-                  {t('project.rename')} <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">R</kbd>
+                  {t('project.rename')}{' '}
+                  <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">R</kbd>
                 </p>
               </TooltipContent>
             </Tooltip>
@@ -212,7 +213,8 @@ export function ProjectMenuItem({
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
                   <p>
-                    {t('project.delete')} <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">D</kbd>
+                    {t('project.delete')}{' '}
+                    <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">D</kbd>
                   </p>
                 </TooltipContent>
               </Tooltip>

@@ -67,7 +67,9 @@ export function SchemaEditor({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>{isReadOnly ? t('schemaEditor.viewTitle') : t('schemaEditor.editTitle')}</DialogTitle>
+          <DialogTitle>
+            {isReadOnly ? t('schemaEditor.viewTitle') : t('schemaEditor.editTitle')}
+          </DialogTitle>
           <DialogDescription>
             {isReadOnly ? t('schemaEditor.viewDesc') : t('schemaEditor.editDesc')}
           </DialogDescription>
@@ -98,7 +100,9 @@ export function SchemaEditor({
               <Button variant="outline" onClick={handleClose}>
                 {t('common.cancel')}
               </Button>
-              <Button onClick={handleSave} disabled={loading}>{t('schemaEditor.saveSchema')}</Button>
+              <Button onClick={handleSave} disabled={loading}>
+                {t('schemaEditor.saveSchema')}
+              </Button>
             </>
           )}
         </DialogFooter>

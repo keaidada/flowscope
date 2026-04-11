@@ -10092,24 +10092,44 @@ fn cte_join_only_subquery_aliases_should_connect_to_parent_cte() {
         }
 
         // Find CTE d
-        let d_node = result.global_lineage.nodes.iter().find(|n| n.label.as_ref() == "d");
+        let d_node = result
+            .global_lineage
+            .nodes
+            .iter()
+            .find(|n| n.label.as_ref() == "d");
         eprintln!("  CTE d found: {}", d_node.is_some());
 
         if let Some(d) = d_node {
-            let edges_to_d: Vec<_> = result.global_lineage.edges.iter()
+            let edges_to_d: Vec<_> = result
+                .global_lineage
+                .edges
+                .iter()
                 .filter(|e| e.to == d.id)
                 .map(|e| {
                     let from = result.global_lineage.nodes.iter().find(|n| n.id == e.from);
-                    format!("{:?}({:?}) --{:?}--> d", from.map(|n| n.label.as_ref()), from.map(|n| n.node_type), e.edge_type)
+                    format!(
+                        "{:?}({:?}) --{:?}--> d",
+                        from.map(|n| n.label.as_ref()),
+                        from.map(|n| n.node_type),
+                        e.edge_type
+                    )
                 })
                 .collect();
             eprintln!("  Edges TO d: {:?}", edges_to_d);
 
-            let edges_from_d: Vec<_> = result.global_lineage.edges.iter()
+            let edges_from_d: Vec<_> = result
+                .global_lineage
+                .edges
+                .iter()
                 .filter(|e| e.from == d.id)
                 .map(|e| {
                     let to = result.global_lineage.nodes.iter().find(|n| n.id == e.to);
-                    format!("d --{:?}--> {:?}({:?})", e.edge_type, to.map(|n| n.label.as_ref()), to.map(|n| n.node_type))
+                    format!(
+                        "d --{:?}--> {:?}({:?})",
+                        e.edge_type,
+                        to.map(|n| n.label.as_ref()),
+                        to.map(|n| n.node_type)
+                    )
                 })
                 .collect();
             eprintln!("  Edges FROM d: {:?}", edges_from_d);
@@ -10117,14 +10137,30 @@ fn cte_join_only_subquery_aliases_should_connect_to_parent_cte() {
 
         // Find tab2, tab3
         for name in ["tab2", "tab3"] {
-            let node = result.global_lineage.nodes.iter().find(|n| n.label.as_ref() == name);
+            let node = result
+                .global_lineage
+                .nodes
+                .iter()
+                .find(|n| n.label.as_ref() == name);
             if let Some(n) = node {
-                let all_edges: Vec<_> = result.global_lineage.edges.iter()
+                let all_edges: Vec<_> = result
+                    .global_lineage
+                    .edges
+                    .iter()
                     .filter(|e| e.from == n.id || e.to == n.id)
                     .map(|e| {
-                        let from = result.global_lineage.nodes.iter().find(|nn| nn.id == e.from);
+                        let from = result
+                            .global_lineage
+                            .nodes
+                            .iter()
+                            .find(|nn| nn.id == e.from);
                         let to = result.global_lineage.nodes.iter().find(|nn| nn.id == e.to);
-                        format!("{:?} --{:?}--> {:?}", from.map(|n| n.label.as_ref()), e.edge_type, to.map(|n| n.label.as_ref()))
+                        format!(
+                            "{:?} --{:?}--> {:?}",
+                            from.map(|n| n.label.as_ref()),
+                            e.edge_type,
+                            to.map(|n| n.label.as_ref())
+                        )
                     })
                     .collect();
                 eprintln!("  {} edges: {:?}", name, all_edges);
@@ -10136,7 +10172,20 @@ fn cte_join_only_subquery_aliases_should_connect_to_parent_cte() {
 
     // Verify the clean version works
     let result = run_analysis(sql_clean, Dialect::Hive, None);
-    let d_node = result.global_lineage.nodes.iter().find(|n| n.label.as_ref() == "d").expect("d should exist");
-    let edges_to_d: Vec<_> = result.global_lineage.edges.iter().filter(|e| e.to == d_node.id).collect();
-    assert!(!edges_to_d.is_empty(), "Clean CTE version: d should have incoming edges");
+    let d_node = result
+        .global_lineage
+        .nodes
+        .iter()
+        .find(|n| n.label.as_ref() == "d")
+        .expect("d should exist");
+    let edges_to_d: Vec<_> = result
+        .global_lineage
+        .edges
+        .iter()
+        .filter(|e| e.to == d_node.id)
+        .collect();
+    assert!(
+        !edges_to_d.is_empty(),
+        "Clean CTE version: d should have incoming edges"
+    );
 }

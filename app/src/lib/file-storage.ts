@@ -26,7 +26,9 @@ function openDB(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => {
       cachedDB = request.result;
-      cachedDB.onclose = () => { cachedDB = null; };
+      cachedDB.onclose = () => {
+        cachedDB = null;
+      };
       resolve(cachedDB);
     };
     request.onerror = () => reject(request.error);

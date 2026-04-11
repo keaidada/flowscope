@@ -254,7 +254,9 @@ export function TableFilterDropdown(): JSX.Element | null {
 
           {/* Direction selector */}
           <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700">
-            <div className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">{t('tableFilter.direction')}</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+              {t('tableFilter.direction')}
+            </div>
             <div className="flex gap-1">
               {DIRECTION_OPTIONS.map((option) => {
                 const isActive = tableFilter.direction === option.value;
@@ -326,7 +328,11 @@ export function TableFilterDropdown(): JSX.Element | null {
                     {getTypeIcon(table.type)}
                     <span className="truncate flex-1">{table.label}</span>
                     <span className="text-xs text-slate-400 dark:text-slate-500 ml-auto">
-                      {isDimmed ? t('tableFilter.hidden') : table.refCount > 1 ? `${table.refCount}x` : ''}
+                      {isDimmed
+                        ? t('tableFilter.hidden')
+                        : table.refCount > 1
+                          ? `${table.refCount}x`
+                          : ''}
                     </span>
                   </button>
                 );

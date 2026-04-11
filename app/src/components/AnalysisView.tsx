@@ -8,7 +8,15 @@ import {
   useLineage,
 } from '@pondpilot/flowscope-react';
 import type { AnalyzeResult, SchemaTable } from '@pondpilot/flowscope-core';
-import { ArrowRight, ChevronDown, ChevronRight, Database, Loader2, Settings, Table2 } from 'lucide-react';
+import {
+  ArrowRight,
+  ChevronDown,
+  ChevronRight,
+  Database,
+  Loader2,
+  Settings,
+  Table2,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
@@ -46,7 +54,10 @@ interface AnalysisViewProps {
  * @param filterSourceName - If provided, only include statements from this source file.
  *                           Pass undefined/null to include all statements (global schema).
  */
-function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: string | null): SchemaTable[] {
+function extractSchemaFromResult(
+  result: AnalyzeResult,
+  filterSourceName?: string | null
+): SchemaTable[] {
   // Collect all physical table nodes and their edges from (filtered) statements
   const tableMap = new Map<string, { catalog?: string; schema?: string; name: string }>();
   const flowEdges: { source: string; target: string }[] = [];
@@ -85,7 +96,12 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
   //   5. Otherwise → likely an alias or intermediate reference → skip
   // This correctly handles "USE database;" scenarios where the engine prepends the default
   // schema to the canonical name (e.g. "my_table" → "db.my_table" in qualifiedName).
-  const isPhysicalTable = (node: { type: string; qualifiedName?: string; label: string; resolutionSource?: string }) => {
+  const isPhysicalTable = (node: {
+    type: string;
+    qualifiedName?: string;
+    label: string;
+    resolutionSource?: string;
+  }) => {
     if (node.type !== 'table' && node.type !== 'view') return false;
     // Exclude temporary tables — they are intermediate/staging, not real physical tables
     const qName = node.qualifiedName || node.label;
@@ -98,7 +114,7 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
 
   for (const stmt of statements) {
     // Index nodes by id for lookup
-    const nodeById = new Map<string, typeof stmt.nodes[0]>();
+    const nodeById = new Map<string, (typeof stmt.nodes)[0]>();
     for (const node of stmt.nodes) {
       nodeById.set(node.id, node);
     }
@@ -111,7 +127,11 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
           const parts = qName.split('.');
           if (parts.length >= 3) {
             // catalog.schema.table
-            tableMap.set(qName, { catalog: parts[0], schema: parts[1], name: parts.slice(2).join('.') });
+            tableMap.set(qName, {
+              catalog: parts[0],
+              schema: parts[1],
+              name: parts.slice(2).join('.'),
+            });
           } else if (parts.length === 2) {
             tableMap.set(qName, { schema: parts[0], name: parts[1] });
           } else {
@@ -140,7 +160,7 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
     // Temporary tables are treated as intermediate nodes (like CTEs) — the BFS
     // traverses through them to find the real physical tables at the endpoints.
     const physicalNodes = stmt.nodes.filter(isPhysicalTable);
-    const physicalIds = new Set(physicalNodes.map(n => n.id));
+    const physicalIds = new Set(physicalNodes.map((n) => n.id));
 
     // Build adjacency for BFS from physical source to physical target.
     // Include reverse ownership edges (column → owner table) so BFS can
@@ -201,19 +221,24 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
   if (result.globalLineage?.nodes) {
     // In current-file mode, build a set of statement indices we care about
     const relevantStatementIndices = filterSourceName
-      ? new Set(statements.map(s => s.statementIndex))
+      ? new Set(statements.map((s) => s.statementIndex))
       : null; // null = all statements (global mode)
 
     // Helper: check if a global node is relevant (belongs to filtered statements)
     const isRelevantGlobalNode = (node: { statementRefs?: Array<{ statementIndex: number }> }) => {
       if (!relevantStatementIndices) return true; // global mode — all are relevant
-      return node.statementRefs?.some(ref => relevantStatementIndices.has(ref.statementIndex)) ?? false;
+      return (
+        node.statementRefs?.some((ref) => relevantStatementIndices.has(ref.statementIndex)) ?? false
+      );
     };
 
     // Helper: build qualified name from global node's canonicalName
     // Global nodes use `label` for display but `canonicalName` for structure.
     // We need to match against tableMap which uses qualified names like "his_db.med_cover_extend_hour".
-    const getGlobalNodeQName = (node: { label: string; canonicalName?: { catalog?: string; schema?: string; name: string } }): string => {
+    const getGlobalNodeQName = (node: {
+      label: string;
+      canonicalName?: { catalog?: string; schema?: string; name: string };
+    }): string => {
       const cn = node.canonicalName;
       if (cn) {
         const parts = [cn.catalog, cn.schema, cn.name].filter(Boolean);
@@ -228,7 +253,9 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
       const qName = getGlobalNodeQName(node);
       // Physical tables: have resolutionSource, or have a schema in canonicalName
       // CTE/column nodes and temporary tables are excluded
-      const isPhysical = node.type !== 'cte' && node.type !== 'column' &&
+      const isPhysical =
+        node.type !== 'cte' &&
+        node.type !== 'column' &&
         !temporaryTableNames.has(qName) &&
         !temporaryTableNames.has(node.label) &&
         !temporaryTableNames.has(cn?.name || '') &&
@@ -245,7 +272,7 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
     }
 
     // Build adjacency for global lineage BFS (to traverse through temp tables)
-    const globalNodeById = new Map<string, typeof result.globalLineage.nodes[0]>();
+    const globalNodeById = new Map<string, (typeof result.globalLineage.nodes)[0]>();
     for (const node of result.globalLineage.nodes) {
       globalNodeById.set(node.id, node);
     }
@@ -318,11 +345,13 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
   }
 
   // Deduplicate edges using canonical keys
-  const edgeSet = new Set(flowEdges.map(e => {
-    const src = keyToCanonical.get(e.source) || e.source;
-    const tgt = keyToCanonical.get(e.target) || e.target;
-    return `${src}→${tgt}`;
-  }));
+  const edgeSet = new Set(
+    flowEdges.map((e) => {
+      const src = keyToCanonical.get(e.source) || e.source;
+      const tgt = keyToCanonical.get(e.target) || e.target;
+      return `${src}→${tgt}`;
+    })
+  );
   const edgesByTarget = new Map<string, string[]>();
   for (const key of edgeSet) {
     const [source, target] = key.split('→');
@@ -332,7 +361,10 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
 
   // Build a lookup from resolvedSchema for DDL column info.
   // Maps qualified table name (e.g. "his_db.ai_chk_idtfy") → column definitions
-  const resolvedColumnsMap = new Map<string, Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }>>();
+  const resolvedColumnsMap = new Map<
+    string,
+    Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }>
+  >();
   if (result.resolvedSchema?.tables) {
     for (const rst of result.resolvedSchema.tables) {
       // Build all possible name forms for matching
@@ -340,11 +372,14 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
       if (rst.schema) names.push(`${rst.schema}.${rst.name}`);
       if (rst.catalog && rst.schema) names.push(`${rst.catalog}.${rst.schema}.${rst.name}`);
       for (const n of names) {
-        resolvedColumnsMap.set(n.toLowerCase(), rst.columns.map(c => ({
-          name: c.name,
-          dataType: c.dataType,
-          isPrimaryKey: c.isPrimaryKey,
-        })));
+        resolvedColumnsMap.set(
+          n.toLowerCase(),
+          rst.columns.map((c) => ({
+            name: c.name,
+            dataType: c.dataType,
+            isPrimaryKey: c.isPrimaryKey,
+          }))
+        );
       }
     }
   }
@@ -354,7 +389,7 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
     if (!keysToKeep.has(qName)) continue; // skip duplicate shorter-named entries
     // Build columns as FK refs to represent incoming data flow
     const sources = edgesByTarget.get(qName) || [];
-    const flowColumns = sources.map(sourceName => ({
+    const flowColumns = sources.map((sourceName) => ({
       name: `← ${sourceName}`,
       dataType: undefined as string | undefined,
       isPrimaryKey: false,
@@ -401,7 +436,12 @@ function SchemaListView({ schema }: SchemaListViewProps) {
 
   // Separate tables into target tables and source tables, mark data flow status
   const { targetTables, sourceTables } = useMemo(() => {
-    const targets: { fullName: string; table: SchemaTable; sources: string[]; ddlColumns: Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }> }[] = [];
+    const targets: {
+      fullName: string;
+      table: SchemaTable;
+      sources: string[];
+      ddlColumns: Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }>;
+    }[] = [];
     const referencedSourceNames = new Set<string>();
 
     for (const table of schema) {
@@ -409,8 +449,7 @@ function SchemaListView({ schema }: SchemaListViewProps) {
       const incomingSources = (table.columns || [])
         .filter((col) => col.name.startsWith('← '))
         .map((col) => col.name.replace('← ', ''));
-      const ddlColumns = (table.columns || [])
-        .filter((col) => !col.name.startsWith('← '));
+      const ddlColumns = (table.columns || []).filter((col) => !col.name.startsWith('← '));
 
       if (incomingSources.length > 0) {
         targets.push({ fullName, table, sources: incomingSources, ddlColumns });
@@ -421,13 +460,23 @@ function SchemaListView({ schema }: SchemaListViewProps) {
     }
 
     // Source tables: all non-target tables, with data flow indicator
-    const sources: { fullName: string; table: SchemaTable; hasDataFlow: boolean; ddlColumns: Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }> }[] = [];
+    const sources: {
+      fullName: string;
+      table: SchemaTable;
+      hasDataFlow: boolean;
+      ddlColumns: Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }>;
+    }[] = [];
     for (const table of schema) {
       const fullName = [table.catalog, table.schema, table.name].filter(Boolean).join('.');
       const isTarget = targets.some((t) => t.fullName === fullName);
       if (!isTarget) {
         const ddlColumns = (table.columns || []).filter((col) => !col.name.startsWith('← '));
-        sources.push({ fullName, table, hasDataFlow: referencedSourceNames.has(fullName), ddlColumns });
+        sources.push({
+          fullName,
+          table,
+          hasDataFlow: referencedSourceNames.has(fullName),
+          ddlColumns,
+        });
       }
     }
 
@@ -507,11 +556,20 @@ function SchemaListView({ schema }: SchemaListViewProps) {
                           </div>
                           <div className="space-y-0.5">
                             {ddlColumns.map((col, idx) => (
-                              <div key={`${col.name}-${idx}`} className="flex items-center gap-2 text-xs text-foreground/70">
+                              <div
+                                key={`${col.name}-${idx}`}
+                                className="flex items-center gap-2 text-xs text-foreground/70"
+                              >
                                 <span className="w-1.5 h-1.5 rounded-full bg-primary/50 shrink-0" />
                                 <span className="truncate font-mono">{col.name}</span>
-                                {col.dataType && <span className="text-muted-foreground shrink-0">{col.dataType}</span>}
-                                {col.isPrimaryKey && <span className="text-amber-500 text-[10px] shrink-0">PK</span>}
+                                {col.dataType && (
+                                  <span className="text-muted-foreground shrink-0">
+                                    {col.dataType}
+                                  </span>
+                                )}
+                                {col.isPrimaryKey && (
+                                  <span className="text-amber-500 text-[10px] shrink-0">PK</span>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -540,12 +598,19 @@ function SchemaListView({ schema }: SchemaListViewProps) {
               return (
                 <div key={fullName}>
                   <div
-                    className={cn("flex items-center gap-2 px-4 py-2.5", hasColumns && "cursor-pointer hover:bg-muted/50")}
+                    className={cn(
+                      'flex items-center gap-2 px-4 py-2.5',
+                      hasColumns && 'cursor-pointer hover:bg-muted/50'
+                    )}
                     onClick={hasColumns ? () => toggleTable(fullName) : undefined}
                   >
                     {hasColumns ? (
                       <span className="text-muted-foreground shrink-0">
-                        {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
                       </span>
                     ) : (
                       <span className="inline-block w-4 shrink-0" />
@@ -574,11 +639,18 @@ function SchemaListView({ schema }: SchemaListViewProps) {
                       </div>
                       <div className="space-y-0.5">
                         {ddlColumns.map((col, idx) => (
-                          <div key={`${col.name}-${idx}`} className="flex items-center gap-2 text-xs text-foreground/70">
+                          <div
+                            key={`${col.name}-${idx}`}
+                            className="flex items-center gap-2 text-xs text-foreground/70"
+                          >
                             <span className="w-1.5 h-1.5 rounded-full bg-primary/50 shrink-0" />
                             <span className="truncate font-mono">{col.name}</span>
-                            {col.dataType && <span className="text-muted-foreground shrink-0">{col.dataType}</span>}
-                            {col.isPrimaryKey && <span className="text-amber-500 text-[10px] shrink-0">PK</span>}
+                            {col.dataType && (
+                              <span className="text-muted-foreground shrink-0">{col.dataType}</span>
+                            )}
+                            {col.isPrimaryKey && (
+                              <span className="text-amber-500 text-[10px] shrink-0">PK</span>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -666,7 +738,7 @@ export function AnalysisView({
     }
 
     // Load schema files from IndexedDB and extract matching CREATE TABLE blocks
-    loadSchemaFiles(activeProjectId).then(files => {
+    loadSchemaFiles(activeProjectId).then((files) => {
       if (files.length === 0) {
         setMatchedDDL(resolvedSchemaToSQL(result?.resolvedSchema));
         setSchemaLoading(false);
@@ -674,11 +746,12 @@ export function AnalysisView({
       }
 
       const matchedBlocks: string[] = [];
-      const allContent = files.map(f => f.content).join('\n\n');
+      const allContent = files.map((f) => f.content).join('\n\n');
 
       // Split by CREATE TABLE statements — regex to find each CREATE TABLE ... ; block
       // Matches: CREATE [EXTERNAL] TABLE [IF NOT EXISTS] `name`(...); including Hive DDL
-      const createTableRegex = /CREATE\s+(?:EXTERNAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?([^\s(`"]+)[`"]?\s*\(/gi;
+      const createTableRegex =
+        /CREATE\s+(?:EXTERNAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?([^\s(`"]+)[`"]?\s*\(/gi;
       let match;
 
       while ((match = createTableRegex.exec(allContent)) !== null) {
@@ -695,14 +768,22 @@ export function AnalysisView({
           let foundOpenParen = false;
           for (let i = blockStart; i < allContent.length; i++) {
             const ch = allContent[i];
-            if (ch === '(') { depth++; foundOpenParen = true; }
-            else if (ch === ')') { depth--; }
-            else if (ch === ';' && foundOpenParen && depth <= 0) {
+            if (ch === '(') {
+              depth++;
+              foundOpenParen = true;
+            } else if (ch === ')') {
+              depth--;
+            } else if (ch === ';' && foundOpenParen && depth <= 0) {
               blockEnd = i + 1;
               break;
             }
             // Also stop at next CREATE TABLE if no semicolon found
-            if (i > blockStart + 10 && foundOpenParen && depth <= 0 && allContent.substring(i, i + 6).toUpperCase() === 'CREATE') {
+            if (
+              i > blockStart + 10 &&
+              foundOpenParen &&
+              depth <= 0 &&
+              allContent.substring(i, i + 6).toUpperCase() === 'CREATE'
+            ) {
               blockEnd = i;
               break;
             }
@@ -719,7 +800,8 @@ export function AnalysisView({
       if (matchedBlocks.length > 0) {
         setMatchedDDL(
           `-- 匹配到 ${matchedBlocks.length} 个物理表的 DDL 定义\n\n` +
-          matchedBlocks.join(';\n\n') + ';'
+            matchedBlocks.join(';\n\n') +
+            ';'
         );
       } else {
         setMatchedDDL(resolvedSchemaToSQL(result?.resolvedSchema));
@@ -1027,7 +1109,9 @@ export function AnalysisView({
             <TabsTrigger value="schema">{t('analysis.schema')}</TabsTrigger>
             {hasIssues && (
               <TabsTrigger value="issues" className="text-warning-light dark:text-warning-dark">
-                {t('analysis.issuesCount', { count: summary.issueCount.errors + summary.issueCount.warnings })}
+                {t('analysis.issuesCount', {
+                  count: summary.issueCount.errors + summary.issueCount.warnings,
+                })}
               </TabsTrigger>
             )}
           </TabsList>
@@ -1152,7 +1236,9 @@ export function AnalysisView({
                     >
                       {t('analysis.schemaCurrentFile')}
                       {currentFileSchema.length > 0 && (
-                        <span className="ml-1 text-muted-foreground">({currentFileSchema.length})</span>
+                        <span className="ml-1 text-muted-foreground">
+                          ({currentFileSchema.length})
+                        </span>
                       )}
                     </button>
                     <button
@@ -1208,9 +1294,7 @@ export function AnalysisView({
         <SchemaEditor
           open={schemaEditorOpen}
           onOpenChange={setSchemaEditorOpen}
-          schemaSQL={isBackendMode
-            ? schemaMetadataToSQL(backendSchema)
-            : matchedDDL}
+          schemaSQL={isBackendMode ? schemaMetadataToSQL(backendSchema) : matchedDDL}
           dialect={currentProject.dialect}
           onSave={handleSaveSchema}
           isReadOnly

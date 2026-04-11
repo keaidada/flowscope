@@ -82,7 +82,9 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
     const currentIndex = themes.indexOf(theme);
     const nextTheme = themes[(currentIndex + 1) % themes.length];
     setTheme(nextTheme);
-    toast.success(t('theme.changed', { theme: nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1) }));
+    toast.success(
+      t('theme.changed', { theme: nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1) })
+    );
   }, [theme, setTheme]);
 
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
@@ -100,7 +102,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       const displayLen = f.name.length + depth * 2;
       if (displayLen > maxLen) maxLen = displayLen;
     }
-    const pct = Math.round((maxLen * 2 / 3) * 0.5);
+    const pct = Math.round(((maxLen * 2) / 3) * 0.5);
     return Math.max(15, Math.min(35, pct));
   }, [currentProject?.files]);
 
@@ -220,7 +222,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       {
         key: 'o',
         cmdOrCtrl: true,
-        handler: () => setSidebarView((prev: SidebarView) => prev === 'files' ? null : 'files'),
+        handler: () => setSidebarView((prev: SidebarView) => (prev === 'files' ? null : 'files')),
       },
       {
         key: 'p',
@@ -283,7 +285,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
           setCommandPaletteOpen(true);
           break;
         case 'open-files':
-          setSidebarView((prev) => prev === 'files' ? null : 'files');
+          setSidebarView((prev) => (prev === 'files' ? null : 'files'));
           break;
         case 'open-projects':
           setProjectSelectorOpen(true);
@@ -493,7 +495,11 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
         <FocusRegistryProvider>
           <div className="flex-1 overflow-hidden flex">
             {/* Activity Bar (narrow icon strip) */}
-            <ActivityBar activeView={sidebarView} onViewChange={setSidebarView} hideSchema={isBackendMode} />
+            <ActivityBar
+              activeView={sidebarView}
+              onViewChange={setSidebarView}
+              hideSchema={isBackendMode}
+            />
 
             {/* Main area with optional resizable sidebar */}
             <div ref={sidebarLayoutRef} className="flex-1 min-w-0">
@@ -528,40 +534,40 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                 )}
 
                 {/* Main panels area */}
-                <ResizablePanel defaultSize={sidebarView ? (100 - sidebarDefaultSize) : 100} minSize={40}>
-                <ResizablePanelGroup direction="horizontal">
-                  {/* Analysis Panel (Lineage) - always visible */}
-                  <ResizablePanel
-                    defaultSize={editorOpen ? 55 : 100}
-                    minSize={30}
-                    data-testid="analysis-panel"
-                  >
-                    <AnalysisView
-                      graphContainerRef={graphContainerRef}
-                      isAnalyzing={analysis.isAnalyzing}
-                    />
-                  </ResizablePanel>
+                <ResizablePanel
+                  defaultSize={sidebarView ? 100 - sidebarDefaultSize : 100}
+                  minSize={40}
+                >
+                  <ResizablePanelGroup direction="horizontal">
+                    {/* Analysis Panel (Lineage) - always visible */}
+                    <ResizablePanel
+                      defaultSize={editorOpen ? 55 : 100}
+                      minSize={30}
+                      data-testid="analysis-panel"
+                    >
+                      <AnalysisView
+                        graphContainerRef={graphContainerRef}
+                        isAnalyzing={analysis.isAnalyzing}
+                      />
+                    </ResizablePanel>
 
-                  {/* Editor Panel - toggleable */}
-                  {editorOpen && (
-                    <>
-                      <ResizableHandle withHandle />
-                      <ResizablePanel
-                        ref={editorPanelRef}
-                        defaultSize={45}
-                        minSize={25}
-                        data-testid="editor-panel"
-                      >
-                        <EditorArea
-                          backendReady={backendReady}
-                          analysis={analysis}
-                        />
-                      </ResizablePanel>
-                    </>
-                  )}
-                </ResizablePanelGroup>
-              </ResizablePanel>
-            </ResizablePanelGroup>
+                    {/* Editor Panel - toggleable */}
+                    {editorOpen && (
+                      <>
+                        <ResizableHandle withHandle />
+                        <ResizablePanel
+                          ref={editorPanelRef}
+                          defaultSize={45}
+                          minSize={25}
+                          data-testid="editor-panel"
+                        >
+                          <EditorArea backendReady={backendReady} analysis={analysis} />
+                        </ResizablePanel>
+                      </>
+                    )}
+                  </ResizablePanelGroup>
+                </ResizablePanel>
+              </ResizablePanelGroup>
             </div>
           </div>
         </FocusRegistryProvider>

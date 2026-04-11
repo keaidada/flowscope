@@ -117,13 +117,21 @@ export function Legend({ viewMode = 'table' }: LegendProps): JSX.Element {
               {t('legend.states')}
             </div>
             <div className="space-y-1.5">
-              <LegendStateItem color={COLORS.interactive.selection} label={t('legend.selected')} filled />
+              <LegendStateItem
+                color={COLORS.interactive.selection}
+                label={t('legend.selected')}
+                filled
+              />
               <LegendStateItem
                 color={COLORS.interactive.selection}
                 label={t('legend.related')}
                 filled={false}
               />
-              <LegendStateItem color={COLORS.recursive} label={t('legend.recursive')} filled={false} />
+              <LegendStateItem
+                color={COLORS.recursive}
+                label={t('legend.recursive')}
+                filled={false}
+              />
             </div>
           </div>
         </div>

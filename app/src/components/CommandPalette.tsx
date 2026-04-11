@@ -264,14 +264,16 @@ export function CommandPalette({ open, onOpenChange, onExecuteCommand }: Command
         {/* Footer hint */}
         <div className="border-t px-3 py-2 text-xs text-muted-foreground flex items-center justify-between">
           <span>
-            <kbd className="px-1 py-0.5 rounded border bg-muted font-mono text-[10px]">↑↓</kbd> {t('shortcuts.toNavigate')}
+            <kbd className="px-1 py-0.5 rounded border bg-muted font-mono text-[10px]">↑↓</kbd>{' '}
+            {t('shortcuts.toNavigate')}
           </span>
           <span>
             <kbd className="px-1 py-0.5 rounded border bg-muted font-mono text-[10px]">Enter</kbd>{' '}
             {t('shortcuts.toSelect')}
           </span>
           <span>
-            <kbd className="px-1 py-0.5 rounded border bg-muted font-mono text-[10px]">Esc</kbd> {t('shortcuts.toClose')}
+            <kbd className="px-1 py-0.5 rounded border bg-muted font-mono text-[10px]">Esc</kbd>{' '}
+            {t('shortcuts.toClose')}
           </span>
         </div>
       </DialogContent>

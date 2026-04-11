@@ -20,13 +20,19 @@ const ACTIVITY_ITEMS: Array<{
 }> = [
   { id: 'files', icon: FolderOpen, labelKey: 'activityBar.files', shortcut: '⌘⇧E' },
   { id: 'search', icon: Search, labelKey: 'activityBar.search', shortcut: '⌘⇧F' },
-  { id: 'schema', icon: Database, labelKey: 'activityBar.schema', shortcut: '⌘⇧K', hideKey: 'schema' },
+  {
+    id: 'schema',
+    icon: Database,
+    labelKey: 'activityBar.schema',
+    shortcut: '⌘⇧K',
+    hideKey: 'schema',
+  },
 ];
 
 export function ActivityBar({ activeView, onViewChange, hideSchema }: ActivityBarProps) {
   const { t } = useTranslation();
 
-  const visibleItems = ACTIVITY_ITEMS.filter(item => {
+  const visibleItems = ACTIVITY_ITEMS.filter((item) => {
     if (item.hideKey === 'schema' && hideSchema) return false;
     return true;
   });

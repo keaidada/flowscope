@@ -75,7 +75,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               textAlign: 'center',
             }}
           >
-            {this.state.error?.message || (i18n.isInitialized ? i18n.t('errorBoundaryReact.unexpectedError') : 'An unexpected error occurred')}
+            {this.state.error?.message ||
+              (i18n.isInitialized
+                ? i18n.t('errorBoundaryReact.unexpectedError')
+                : 'An unexpected error occurred')}
           </div>
           <button
             onClick={() => this.setState({ hasError: false, error: null })}
@@ -162,7 +165,9 @@ export class GraphErrorBoundary extends Component<ErrorBoundaryProps, ErrorBound
               marginBottom: '0.5rem',
             }}
           >
-            {i18n.isInitialized ? i18n.t('errorBoundaryReact.graphVisualizationError') : 'Graph Visualization Error'}
+            {i18n.isInitialized
+              ? i18n.t('errorBoundaryReact.graphVisualizationError')
+              : 'Graph Visualization Error'}
           </div>
           <div
             style={{
@@ -173,7 +178,9 @@ export class GraphErrorBoundary extends Component<ErrorBoundaryProps, ErrorBound
               textAlign: 'center',
             }}
           >
-            {i18n.isInitialized ? i18n.t('errorBoundaryReact.graphErrorDesc') : 'There was an error rendering the graph. This might be due to invalid data or a rendering issue.'}
+            {i18n.isInitialized
+              ? i18n.t('errorBoundaryReact.graphErrorDesc')
+              : 'There was an error rendering the graph. This might be due to invalid data or a rendering issue.'}
           </div>
           <button
             onClick={() => this.setState({ hasError: false, error: null })}

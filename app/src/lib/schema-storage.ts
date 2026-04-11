@@ -30,7 +30,9 @@ function openDB(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => {
       cachedDB = request.result;
-      cachedDB.onclose = () => { cachedDB = null; };
+      cachedDB.onclose = () => {
+        cachedDB = null;
+      };
       resolve(cachedDB);
     };
     request.onerror = () => reject(request.error);
@@ -83,6 +85,9 @@ export async function deleteSchemaFiles(projectId: string): Promise<void> {
       tx.onerror = () => reject(tx.error);
     });
   } catch (error) {
-    console.error(`[schema-storage] Failed to delete schema files for project ${projectId}:`, error);
+    console.error(
+      `[schema-storage] Failed to delete schema files for project ${projectId}:`,
+      error
+    );
   }
 }

@@ -15,7 +15,7 @@ fn main() {
     };
 
     let result = analyze(&req);
-    
+
     println!("=== Resolved Schema ===");
     if let Some(schema) = &result.resolved_schema {
         println!("Tables: {}", schema.tables.len());
@@ -25,7 +25,12 @@ fn main() {
             } else {
                 table.name.clone()
             };
-            println!("\n  {} (origin: {:?}, columns: {})", full_name, table.origin, table.columns.len());
+            println!(
+                "\n  {} (origin: {:?}, columns: {})",
+                full_name,
+                table.origin,
+                table.columns.len()
+            );
             for col in &table.columns {
                 println!("    - {} ({:?})", col.name, col.data_type);
             }

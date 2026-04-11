@@ -252,10 +252,7 @@ export function resolveOutputMapping(
   }
 
   const outputNodeIds = new Set(explicitOutputNodeIds);
-  if (
-    isSelect &&
-    columnNodes.some((col) => columnToTableMap.get(col.id) === virtualOutputNodeId)
-  ) {
+  if (isSelect && columnNodes.some((col) => columnToTableMap.get(col.id) === virtualOutputNodeId)) {
     outputNodeIds.add(virtualOutputNodeId);
   }
 

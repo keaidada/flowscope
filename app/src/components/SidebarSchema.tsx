@@ -31,7 +31,11 @@ import { schemaMetadataToSQL } from '@/lib/schema-parser';
 import { cn } from '@/lib/utils';
 import { saveSchemaFiles, loadSchemaFiles } from '@/lib/schema-storage';
 import { onSchemaFileSelect } from '@/lib/schema-events';
-import { registerPendingFiles, hasPendingContent, loadPendingContent } from '@/lib/lazy-file-loader';
+import {
+  registerPendingFiles,
+  hasPendingContent,
+  loadPendingContent,
+} from '@/lib/lazy-file-loader';
 // Schema files accept a broader set of extensions than the main SQL file tree
 const SCHEMA_ACCEPTED_EXTENSIONS = ['.sql', '.hql', '.ddl', '.txt'] as const;
 
@@ -134,8 +138,9 @@ function SchemaFolderNode({
   const isActiveFolder = activeFolderPath === node.path;
   const sorted = useMemo(() => sortNodes(Array.from(node.children.values())), [node]);
   const folderFileIds = useMemo(() => collectFileIds(node), [node]);
-  const allSelected = folderFileIds.length > 0 && folderFileIds.every(id => selectedFileIds.has(id));
-  const someSelected = !allSelected && folderFileIds.some(id => selectedFileIds.has(id));
+  const allSelected =
+    folderFileIds.length > 0 && folderFileIds.every((id) => selectedFileIds.has(id));
+  const someSelected = !allSelected && folderFileIds.some((id) => selectedFileIds.has(id));
 
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(node.name);
@@ -171,19 +176,55 @@ function SchemaFolderNode({
             className="h-6 flex-1 text-sm bg-background border rounded px-1"
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === 'Enter') { e.preventDefault(); handleConfirmRename(); }
-              if (e.key === 'Escape') { e.preventDefault(); setIsRenaming(false); setRenameValue(node.name); }
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleConfirmRename();
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setIsRenaming(false);
+                setRenameValue(node.name);
+              }
             }}
             onBlur={handleConfirmRename}
           />
         </div>
-        {isExpanded && sorted.map((child) =>
-          child.file ? (
-            <SchemaFileNode key={child.file.id} node={child} depth={depth + 1} activeFileId={activeFileId} onSelect={onSelect} onDelete={onDelete} onRenameFile={onRenameFile} onSelectFolder={onSelectFolder} selectedFileIds={selectedFileIds} onToggleSelection={onToggleSelection} />
-          ) : (
-            <SchemaFolderNode key={child.path} node={child} depth={depth + 1} activeFileId={activeFileId} activeFolderPath={activeFolderPath} onSelect={onSelect} onDelete={onDelete} expandedFolders={expandedFolders} onToggleFolder={onToggleFolder} onSelectFolder={onSelectFolder} onDoubleClickFolder={onDoubleClickFolder} onCreateFolderInFolder={onCreateFolderInFolder} onRenameFolder={onRenameFolder} onRenameFile={onRenameFile} selectedFileIds={selectedFileIds} onToggleSelection={onToggleSelection} />
-          )
-        )}
+        {isExpanded &&
+          sorted.map((child) =>
+            child.file ? (
+              <SchemaFileNode
+                key={child.file.id}
+                node={child}
+                depth={depth + 1}
+                activeFileId={activeFileId}
+                onSelect={onSelect}
+                onDelete={onDelete}
+                onRenameFile={onRenameFile}
+                onSelectFolder={onSelectFolder}
+                selectedFileIds={selectedFileIds}
+                onToggleSelection={onToggleSelection}
+              />
+            ) : (
+              <SchemaFolderNode
+                key={child.path}
+                node={child}
+                depth={depth + 1}
+                activeFileId={activeFileId}
+                activeFolderPath={activeFolderPath}
+                onSelect={onSelect}
+                onDelete={onDelete}
+                expandedFolders={expandedFolders}
+                onToggleFolder={onToggleFolder}
+                onSelectFolder={onSelectFolder}
+                onDoubleClickFolder={onDoubleClickFolder}
+                onCreateFolderInFolder={onCreateFolderInFolder}
+                onRenameFolder={onRenameFolder}
+                onRenameFile={onRenameFile}
+                selectedFileIds={selectedFileIds}
+                onToggleSelection={onToggleSelection}
+              />
+            )
+          )}
       </div>
     );
   }
@@ -196,48 +237,105 @@ function SchemaFolderNode({
           isActiveFolder ? 'bg-muted/40 text-foreground' : 'text-muted-foreground'
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        onClick={() => { onToggleFolder(node.path); onSelectFolder(node.path); }}
+        onClick={() => {
+          onToggleFolder(node.path);
+          onSelectFolder(node.path);
+        }}
       >
         <Checkbox
           checked={allSelected ? true : someSelected ? 'indeterminate' : false}
-          onClick={(e) => { e.stopPropagation(); onToggleSelection(folderFileIds, !allSelected); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleSelection(folderFileIds, !allSelected);
+          }}
           className="shrink-0 border-muted-foreground"
         />
-        {isExpanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
-        {isExpanded ? <FolderOpenIcon className="size-4 shrink-0 text-amber-500" /> : <Folder className="size-4 shrink-0 text-amber-500" />}
+        {isExpanded ? (
+          <ChevronDown className="size-4 shrink-0" />
+        ) : (
+          <ChevronRight className="size-4 shrink-0" />
+        )}
+        {isExpanded ? (
+          <FolderOpenIcon className="size-4 shrink-0 text-amber-500" />
+        ) : (
+          <Folder className="size-4 shrink-0 text-amber-500" />
+        )}
         <span className="whitespace-nowrap">{node.name}</span>
-        <span className="text-[10px] text-muted-foreground shrink-0 mr-1">({folderFileIds.length})</span>
+        <span className="text-[10px] text-muted-foreground shrink-0 mr-1">
+          ({folderFileIds.length})
+        </span>
         <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity">
           <button
             className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-            onClick={(e) => { e.stopPropagation(); onSelectFolder(node.path); onDoubleClickFolder(node.path); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectFolder(node.path);
+              onDoubleClickFolder(node.path);
+            }}
             title="New file"
           >
             <Plus className="size-3" />
           </button>
           <button
             className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-            onClick={(e) => { e.stopPropagation(); onSelectFolder(node.path); onCreateFolderInFolder(node.path); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectFolder(node.path);
+              onCreateFolderInFolder(node.path);
+            }}
             title="New folder"
           >
             <FolderPlus className="size-3" />
           </button>
           <button
             className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-            onClick={(e) => { e.stopPropagation(); setRenameValue(node.name); setIsRenaming(true); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setRenameValue(node.name);
+              setIsRenaming(true);
+            }}
             title="Rename"
           >
             <Pencil className="size-3" />
           </button>
         </div>
       </div>
-      {isExpanded && sorted.map((child) =>
-        child.file ? (
-          <SchemaFileNode key={child.file.id} node={child} depth={depth + 1} activeFileId={activeFileId} onSelect={onSelect} onDelete={onDelete} onRenameFile={onRenameFile} onSelectFolder={onSelectFolder} selectedFileIds={selectedFileIds} onToggleSelection={onToggleSelection} />
-        ) : (
-          <SchemaFolderNode key={child.path} node={child} depth={depth + 1} activeFileId={activeFileId} activeFolderPath={activeFolderPath} onSelect={onSelect} onDelete={onDelete} expandedFolders={expandedFolders} onToggleFolder={onToggleFolder} onSelectFolder={onSelectFolder} onDoubleClickFolder={onDoubleClickFolder} onCreateFolderInFolder={onCreateFolderInFolder} onRenameFolder={onRenameFolder} onRenameFile={onRenameFile} selectedFileIds={selectedFileIds} onToggleSelection={onToggleSelection} />
-        )
-      )}
+      {isExpanded &&
+        sorted.map((child) =>
+          child.file ? (
+            <SchemaFileNode
+              key={child.file.id}
+              node={child}
+              depth={depth + 1}
+              activeFileId={activeFileId}
+              onSelect={onSelect}
+              onDelete={onDelete}
+              onRenameFile={onRenameFile}
+              onSelectFolder={onSelectFolder}
+              selectedFileIds={selectedFileIds}
+              onToggleSelection={onToggleSelection}
+            />
+          ) : (
+            <SchemaFolderNode
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              activeFileId={activeFileId}
+              activeFolderPath={activeFolderPath}
+              onSelect={onSelect}
+              onDelete={onDelete}
+              expandedFolders={expandedFolders}
+              onToggleFolder={onToggleFolder}
+              onSelectFolder={onSelectFolder}
+              onDoubleClickFolder={onDoubleClickFolder}
+              onCreateFolderInFolder={onCreateFolderInFolder}
+              onRenameFolder={onRenameFolder}
+              onRenameFile={onRenameFile}
+              selectedFileIds={selectedFileIds}
+              onToggleSelection={onToggleSelection}
+            />
+          )
+        )}
     </div>
   );
 }
@@ -303,8 +401,14 @@ function SchemaFileNode({
           className="h-6 flex-1 text-sm bg-background border rounded px-1"
           onKeyDown={(e) => {
             e.stopPropagation();
-            if (e.key === 'Enter') { e.preventDefault(); handleConfirmRename(); }
-            if (e.key === 'Escape') { e.preventDefault(); setIsRenaming(false); }
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              handleConfirmRename();
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              setIsRenaming(false);
+            }
           }}
           onBlur={handleConfirmRename}
         />
@@ -319,11 +423,18 @@ function SchemaFileNode({
         isActive ? 'bg-muted text-foreground' : 'text-muted-foreground'
       )}
       style={{ paddingLeft: `${depth * 12 + 8}px` }}
-      onClick={() => { setConfirming(false); onSelect(node.file!.id); onSelectFolder(parentFolder); }}
+      onClick={() => {
+        setConfirming(false);
+        onSelect(node.file!.id);
+        onSelectFolder(parentFolder);
+      }}
     >
       <Checkbox
         checked={isSelected}
-        onClick={(e) => { e.stopPropagation(); onToggleSelection([node.file!.id], !isSelected); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleSelection([node.file!.id], !isSelected);
+        }}
         className="shrink-0 border-muted-foreground"
       />
       <FileCode className="size-4 shrink-0 text-blue-500" />
@@ -348,13 +459,20 @@ function SchemaFileNode({
         <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity">
           <button
             className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-            onClick={(e) => { e.stopPropagation(); setRenameValue(node.name); setIsRenaming(true); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setRenameValue(node.name);
+              setIsRenaming(true);
+            }}
           >
             <Pencil className="size-3" />
           </button>
           <button
             className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
-            onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirming(true);
+            }}
           >
             <Trash2 className="size-3" />
           </button>
@@ -421,15 +539,18 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
   );
 
   // On mount or project switch: restore from memory cache, then async from IndexedDB
-  const [_dbLoaded, setDbLoaded] = useState(false);
+  const [, setDbLoaded] = useState(false);
 
   // Sync merged schema SQL to project store whenever files are loaded/restored
-  const syncSchemaToProject = useCallback((files: SchemaFile[]) => {
-    if (!isBackendMode && activeProjectId && files.length > 0) {
-      const merged = files.map(f => `-- File: ${f.path}\n${f.content}`).join('\n\n');
-      updateSchemaSQL(activeProjectId, merged);
-    }
-  }, [isBackendMode, activeProjectId, updateSchemaSQL]);
+  const syncSchemaToProject = useCallback(
+    (files: SchemaFile[]) => {
+      if (!isBackendMode && activeProjectId && files.length > 0) {
+        const merged = files.map((f) => `-- File: ${f.path}\n${f.content}`).join('\n\n');
+        updateSchemaSQL(activeProjectId, merged);
+      }
+    },
+    [isBackendMode, activeProjectId, updateSchemaSQL]
+  );
 
   useEffect(() => {
     // Restore from memory cache first (fast, handles sidebar switches)
@@ -451,7 +572,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
 
     // Then try IndexedDB
     let cancelled = false;
-    loadSchemaFiles(cacheKey).then(files => {
+    loadSchemaFiles(cacheKey).then((files) => {
       if (cancelled) return;
       if (files.length > 0) {
         schemaFilesCache.set(cacheKey, files);
@@ -459,15 +580,24 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
         syncSchemaToProject(files);
       } else if (existingSchemaSQL.trim()) {
         // Last resort fallback: create from schemaSQL stored in project
-        const initial = [{ id: crypto.randomUUID(), name: 'schema.sql', path: 'schema.sql', content: existingSchemaSQL }];
+        const initial = [
+          {
+            id: crypto.randomUUID(),
+            name: 'schema.sql',
+            path: 'schema.sql',
+            content: existingSchemaSQL,
+          },
+        ];
         schemaFilesCache.set(cacheKey, initial);
         setSchemaFilesState(initial);
         // No need to sync — existingSchemaSQL is already in project store
       }
       setDbLoaded(true);
     });
-    return () => { cancelled = true; };
-  }, [cacheKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheKey, existingSchemaSQL, syncSchemaToProject]);
 
   // Flush pending schema saves on page unload
   useEffect(() => {
@@ -488,57 +618,74 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
 
   // Wrappers that update memory cache + trigger debounced DB save + auto-save merged SQL
   const prevMergedRef = useRef<string>('');
-  const setSchemaFiles = useCallback((updater: SchemaFile[] | ((prev: SchemaFile[]) => SchemaFile[])) => {
-    setSchemaFilesState(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      schemaFilesCache.set(cacheKey, next);
-      debouncedSaveSchemaFiles(cacheKey, next);
-      // Auto-save merged SQL to project store (skip files with empty content — lazy-loaded)
-      // Only update if merged content actually changed to avoid triggering unnecessary re-analysis
-      if (!isBackendMode && activeProjectId) {
-        const filesWithContent = next.filter(f => f.content);
-        if (filesWithContent.length > 0) {
-          const merged = filesWithContent.map(f => `-- File: ${f.path}\n${f.content}`).join('\n\n');
-          if (merged !== prevMergedRef.current) {
-            prevMergedRef.current = merged;
-            updateSchemaSQL(activeProjectId, merged);
+  const setSchemaFiles = useCallback(
+    (updater: SchemaFile[] | ((prev: SchemaFile[]) => SchemaFile[])) => {
+      setSchemaFilesState((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        schemaFilesCache.set(cacheKey, next);
+        debouncedSaveSchemaFiles(cacheKey, next);
+        // Auto-save merged SQL to project store (skip files with empty content — lazy-loaded)
+        // Only update if merged content actually changed to avoid triggering unnecessary re-analysis
+        if (!isBackendMode && activeProjectId) {
+          const filesWithContent = next.filter((f) => f.content);
+          if (filesWithContent.length > 0) {
+            const merged = filesWithContent
+              .map((f) => `-- File: ${f.path}\n${f.content}`)
+              .join('\n\n');
+            if (merged !== prevMergedRef.current) {
+              prevMergedRef.current = merged;
+              updateSchemaSQL(activeProjectId, merged);
+            }
           }
         }
-      }
-      return next;
-    });
-  }, [cacheKey, isBackendMode, activeProjectId, updateSchemaSQL]);
+        return next;
+      });
+    },
+    [cacheKey, isBackendMode, activeProjectId, updateSchemaSQL]
+  );
 
-  const setActiveFileId = useCallback((updater: string | null | ((prev: string | null) => string | null)) => {
-    setActiveFileIdState(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      activeFileIdCache.set(cacheKey, next);
-      return next;
-    });
-  }, [cacheKey]);
+  const setActiveFileId = useCallback(
+    (updater: string | null | ((prev: string | null) => string | null)) => {
+      setActiveFileIdState((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        activeFileIdCache.set(cacheKey, next);
+        return next;
+      });
+    },
+    [cacheKey]
+  );
 
-  const setExpandedFolders = useCallback((updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
-    setExpandedFoldersState(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      expandedFoldersCache.set(cacheKey, next);
-      return next;
-    });
-  }, [cacheKey]);
+  const setExpandedFolders = useCallback(
+    (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+      setExpandedFoldersState((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        expandedFoldersCache.set(cacheKey, next);
+        return next;
+      });
+    },
+    [cacheKey]
+  );
 
   // Highlight span from search results
-  const [schemaHighlightSpan, setSchemaHighlightSpan] = useState<{ start: number; end: number } | null>(null);
+  const [schemaHighlightSpan, setSchemaHighlightSpan] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
 
   // Wrapper to clear search highlight when manually selecting a file
-  const handleSelectFile = useCallback((id: string | null | ((prev: string | null) => string | null)) => {
-    setSchemaHighlightSpan(null);
-    setActiveFileId(id);
-  }, [setActiveFileId]);
+  const handleSelectFile = useCallback(
+    (id: string | null | ((prev: string | null) => string | null)) => {
+      setSchemaHighlightSpan(null);
+      setActiveFileId(id);
+    },
+    [setActiveFileId]
+  );
 
   // Listen for schema file selection events from SidebarSearch
   useEffect(() => {
     return onSchemaFileSelect((payload) => {
       // Find the file and expand its parent folders
-      const file = schemaFiles.find(f => f.id === payload.fileId);
+      const file = schemaFiles.find((f) => f.id === payload.fileId);
       if (file) {
         const parts = file.path.split('/').filter(Boolean);
         if (parts.length > 1) {
@@ -546,7 +693,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
           for (let i = 1; i < parts.length; i++) {
             pathsToExpand.push(parts.slice(0, i).join('/'));
           }
-          setExpandedFolders(prev => new Set([...prev, ...pathsToExpand]));
+          setExpandedFolders((prev) => new Set([...prev, ...pathsToExpand]));
         }
         setActiveFileId(payload.fileId);
         setSchemaHighlightSpan(payload.span ?? null);
@@ -589,32 +736,37 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
   }, [isCreatingFile]);
 
   // Active file content for editor
-  const activeFile = useMemo(() => schemaFiles.find(f => f.id === activeFileId), [schemaFiles, activeFileId]);
+  const activeFile = useMemo(
+    () => schemaFiles.find((f) => f.id === activeFileId),
+    [schemaFiles, activeFileId]
+  );
 
   // Lazy-load file content for files uploaded without reading content
   useEffect(() => {
     if (activeFile && !activeFile.content && hasPendingContent(activeFile.id)) {
       loadPendingContent(activeFile.id).then((content) => {
         if (content !== null) {
-          setSchemaFiles(prev => prev.map(f => f.id === activeFile.id ? { ...f, content } : f));
+          setSchemaFiles((prev) =>
+            prev.map((f) => (f.id === activeFile.id ? { ...f, content } : f))
+          );
         }
       });
     }
-  }, [activeFile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeFile, setSchemaFiles]);
 
   // Build tree (filtered by search)
   const filteredFiles = useMemo(() => {
     if (!search.trim()) return schemaFiles;
     const q = search.toLowerCase();
-    return schemaFiles.filter(f =>
-      f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q)
+    return schemaFiles.filter(
+      (f) => f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q)
     );
   }, [schemaFiles, search]);
   const tree = useMemo(() => buildTree(filteredFiles), [filteredFiles]);
   const sortedRootChildren = useMemo(() => sortNodes(Array.from(tree.children.values())), [tree]);
 
   const handleToggleFolder = useCallback((path: string) => {
-    setExpandedFolders(prev => {
+    setExpandedFolders((prev) => {
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
       else next.add(path);
@@ -638,7 +790,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       // No search — collapse all
       setExpandedFolders(new Set());
     }
-  }, [search, filteredFiles]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filteredFiles, search, setExpandedFolders]);
 
   useEffect(() => {
     if (!onContentWidthChange || !treeContentRef.current || filteredFiles.length === 0) return;
@@ -679,7 +831,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
     if (allSelected) {
       setSelectedFileIds(new Set());
     } else {
-      setSelectedFileIds(new Set(schemaFiles.map(f => f.id)));
+      setSelectedFileIds(new Set(schemaFiles.map((f) => f.id)));
     }
   }, [allSelected, schemaFiles]);
 
@@ -687,7 +839,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
   const activeParentFolder = useMemo(() => {
     if (activeFolderPath) return activeFolderPath;
     if (!activeFileId) return '';
-    const file = schemaFiles.find(f => f.id === activeFileId);
+    const file = schemaFiles.find((f) => f.id === activeFileId);
     if (!file) return '';
     const parts = file.path.split('/');
     if (parts.length <= 1) return ''; // file is at root
@@ -701,29 +853,42 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
     const folderPath = activeParentFolder ? `${activeParentFolder}/${trimmed}` : trimmed;
     const filePath = `${folderPath}/new_schema.sql`;
     // Check for duplicate path
-    const existingPaths = new Set(schemaFiles.map(f => f.path));
+    const existingPaths = new Set(schemaFiles.map((f) => f.path));
     if (existingPaths.has(filePath)) {
       toast.info(t('schemaEditor.duplicateFile'));
       return;
     }
-    const newFile: SchemaFile = { id: crypto.randomUUID(), name: 'new_schema.sql', path: filePath, content: '' };
-    setSchemaFiles(prev => [...prev, newFile]);
+    const newFile: SchemaFile = {
+      id: crypto.randomUUID(),
+      name: 'new_schema.sql',
+      path: filePath,
+      content: '',
+    };
+    setSchemaFiles((prev) => [...prev, newFile]);
     // Expand all ancestor folders + the new folder itself
     const parts = folderPath.split('/');
     const pathsToExpand: string[] = [];
     for (let i = 1; i <= parts.length; i++) {
       pathsToExpand.push(parts.slice(0, i).join('/'));
     }
-    setExpandedFolders(prev => new Set([...prev, ...pathsToExpand]));
+    setExpandedFolders((prev) => new Set([...prev, ...pathsToExpand]));
     setActiveFolderPath(folderPath);
     setActiveFileId(newFile.id);
     setIsCreatingFolder(false);
     setNewFolderName('');
-  }, [newFolderName, activeParentFolder, schemaFiles, t, setSchemaFiles, setExpandedFolders, setActiveFileId]);
+  }, [
+    newFolderName,
+    activeParentFolder,
+    schemaFiles,
+    t,
+    setSchemaFiles,
+    setExpandedFolders,
+    setActiveFileId,
+  ]);
 
   // Toggle selection for file IDs
   const handleToggleSelection = useCallback((ids: string[], select: boolean) => {
-    setSelectedFileIds(prev => {
+    setSelectedFileIds((prev) => {
       const next = new Set(prev);
       for (const id of ids) {
         if (select) next.add(id);
@@ -742,9 +907,9 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
 
   const handleConfirmBatchDelete = useCallback(() => {
     if (selectedFileIds.size === 0) return;
-    setSchemaFiles(prev => prev.filter(f => !selectedFileIds.has(f.id)));
+    setSchemaFiles((prev) => prev.filter((f) => !selectedFileIds.has(f.id)));
     if (activeFileId && selectedFileIds.has(activeFileId)) {
-      const remaining = schemaFiles.filter(f => !selectedFileIds.has(f.id));
+      const remaining = schemaFiles.filter((f) => !selectedFileIds.has(f.id));
       setActiveFileId(remaining[0]?.id ?? null);
     }
     setSelectedFileIds(new Set());
@@ -756,8 +921,8 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
     const inputName = newFileName.trim() || 'new_schema.sql';
     // Ensure .sql extension if none provided
     const name = /\.\w+$/.test(inputName) ? inputName : `${inputName}.sql`;
-    const existingPaths = new Set(schemaFiles.map(f => f.path));
-    const buildPath = (n: string) => activeParentFolder ? `${activeParentFolder}/${n}` : n;
+    const existingPaths = new Set(schemaFiles.map((f) => f.path));
+    const buildPath = (n: string) => (activeParentFolder ? `${activeParentFolder}/${n}` : n);
     let finalName = name;
     let i = 1;
     while (existingPaths.has(buildPath(finalName))) {
@@ -767,8 +932,13 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       i++;
     }
     const filePath = buildPath(finalName);
-    const newFile: SchemaFile = { id: crypto.randomUUID(), name: finalName, path: filePath, content: '' };
-    setSchemaFiles(prev => [...prev, newFile]);
+    const newFile: SchemaFile = {
+      id: crypto.randomUUID(),
+      name: finalName,
+      path: filePath,
+      content: '',
+    };
+    setSchemaFiles((prev) => [...prev, newFile]);
     // Expand parent folders if needed
     if (activeParentFolder) {
       const parts = activeParentFolder.split('/');
@@ -776,258 +946,316 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       for (let j = 1; j <= parts.length; j++) {
         pathsToExpand.push(parts.slice(0, j).join('/'));
       }
-      setExpandedFolders(prev => new Set([...prev, ...pathsToExpand]));
+      setExpandedFolders((prev) => new Set([...prev, ...pathsToExpand]));
     }
     setActiveFileId(newFile.id);
     setIsCreatingFile(false);
     setNewFileName('');
-  }, [newFileName, schemaFiles, activeParentFolder, setSchemaFiles, setExpandedFolders, setActiveFileId]);
+  }, [
+    newFileName,
+    schemaFiles,
+    activeParentFolder,
+    setSchemaFiles,
+    setExpandedFolders,
+    setActiveFileId,
+  ]);
 
   // Quick-create a file via double-click (in specified folder or root)
-  const handleDoubleClickCreateFile = useCallback((folderPath: string) => {
-    if (isBackendMode) return;
-    const existingPaths = new Set(schemaFiles.map(f => f.path));
-    const buildPath = (n: string) => folderPath ? `${folderPath}/${n}` : n;
-    let name = 'new_schema.sql';
-    let i = 1;
-    while (existingPaths.has(buildPath(name))) {
-      name = `new_schema_${i}.sql`;
-      i++;
-    }
-    const filePath = buildPath(name);
-    const newFile: SchemaFile = { id: crypto.randomUUID(), name, path: filePath, content: '' };
-    setSchemaFiles(prev => [...prev, newFile]);
-    if (folderPath) {
-      const parts = folderPath.split('/');
+  const handleDoubleClickCreateFile = useCallback(
+    (folderPath: string) => {
+      if (isBackendMode) return;
+      const existingPaths = new Set(schemaFiles.map((f) => f.path));
+      const buildPath = (n: string) => (folderPath ? `${folderPath}/${n}` : n);
+      let name = 'new_schema.sql';
+      let i = 1;
+      while (existingPaths.has(buildPath(name))) {
+        name = `new_schema_${i}.sql`;
+        i++;
+      }
+      const filePath = buildPath(name);
+      const newFile: SchemaFile = { id: crypto.randomUUID(), name, path: filePath, content: '' };
+      setSchemaFiles((prev) => [...prev, newFile]);
+      if (folderPath) {
+        const parts = folderPath.split('/');
+        const pathsToExpand: string[] = [];
+        for (let j = 1; j <= parts.length; j++) {
+          pathsToExpand.push(parts.slice(0, j).join('/'));
+        }
+        setExpandedFolders((prev) => new Set([...prev, ...pathsToExpand]));
+      }
+      setActiveFolderPath(folderPath);
+      setActiveFileId(newFile.id);
+    },
+    [isBackendMode, schemaFiles, setSchemaFiles, setExpandedFolders, setActiveFileId]
+  );
+
+  // Create a sub-folder inside the specified folder (with a placeholder file)
+  const handleCreateFolderInFolder = useCallback(
+    (parentPath: string) => {
+      if (isBackendMode) return;
+      const existingPaths = new Set(schemaFiles.map((f) => f.path));
+      let folderName = 'new_folder';
+      let i = 1;
+      const buildFolderFile = (fn: string) => `${parentPath}/${fn}/new_schema.sql`;
+      while (existingPaths.has(buildFolderFile(folderName))) {
+        folderName = `new_folder_${i}`;
+        i++;
+      }
+      const filePath = buildFolderFile(folderName);
+      const newFile: SchemaFile = {
+        id: crypto.randomUUID(),
+        name: 'new_schema.sql',
+        path: filePath,
+        content: '',
+      };
+      setSchemaFiles((prev) => [...prev, newFile]);
+      // Expand all ancestors + parent + new folder
+      const newFolderPath = `${parentPath}/${folderName}`;
+      const parts = newFolderPath.split('/');
       const pathsToExpand: string[] = [];
       for (let j = 1; j <= parts.length; j++) {
         pathsToExpand.push(parts.slice(0, j).join('/'));
       }
-      setExpandedFolders(prev => new Set([...prev, ...pathsToExpand]));
-    }
-    setActiveFolderPath(folderPath);
-    setActiveFileId(newFile.id);
-  }, [isBackendMode, schemaFiles, setSchemaFiles, setExpandedFolders, setActiveFileId]);
-
-  // Create a sub-folder inside the specified folder (with a placeholder file)
-  const handleCreateFolderInFolder = useCallback((parentPath: string) => {
-    if (isBackendMode) return;
-    const existingPaths = new Set(schemaFiles.map(f => f.path));
-    let folderName = 'new_folder';
-    let i = 1;
-    const buildFolderFile = (fn: string) => `${parentPath}/${fn}/new_schema.sql`;
-    while (existingPaths.has(buildFolderFile(folderName))) {
-      folderName = `new_folder_${i}`;
-      i++;
-    }
-    const filePath = buildFolderFile(folderName);
-    const newFile: SchemaFile = { id: crypto.randomUUID(), name: 'new_schema.sql', path: filePath, content: '' };
-    setSchemaFiles(prev => [...prev, newFile]);
-    // Expand all ancestors + parent + new folder
-    const newFolderPath = `${parentPath}/${folderName}`;
-    const parts = newFolderPath.split('/');
-    const pathsToExpand: string[] = [];
-    for (let j = 1; j <= parts.length; j++) {
-      pathsToExpand.push(parts.slice(0, j).join('/'));
-    }
-    setExpandedFolders(prev => new Set([...prev, ...pathsToExpand]));
-    setActiveFolderPath(newFolderPath);
-    setActiveFileId(newFile.id);
-  }, [isBackendMode, schemaFiles, setSchemaFiles, setExpandedFolders, setActiveFileId]);
+      setExpandedFolders((prev) => new Set([...prev, ...pathsToExpand]));
+      setActiveFolderPath(newFolderPath);
+      setActiveFileId(newFile.id);
+    },
+    [isBackendMode, schemaFiles, setSchemaFiles, setExpandedFolders, setActiveFileId]
+  );
 
   // Edit active file content
-  const handleEditorChange = useCallback((value: string) => {
-    if (!activeFileId) return;
-    setSchemaFiles(prev => prev.map(f => f.id === activeFileId ? { ...f, content: value } : f));
-  }, [activeFileId, setSchemaFiles]);
+  const handleEditorChange = useCallback(
+    (value: string) => {
+      if (!activeFileId) return;
+      setSchemaFiles((prev) =>
+        prev.map((f) => (f.id === activeFileId ? { ...f, content: value } : f))
+      );
+    },
+    [activeFileId, setSchemaFiles]
+  );
 
   // Upload single file(s)
-  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const newFiles: SchemaFile[] = [];
-    for (const file of Array.from(files)) {
-      const content = await file.text();
-      newFiles.push({ id: crypto.randomUUID(), name: file.name, path: file.name, content });
-    }
-    // Deduplicate: update existing files by path, add new ones
-    setSchemaFiles(prev => {
-      const existingPaths = new Map(prev.map(f => [f.path, f]));
-      let added = 0;
-      let updated = 0;
-      for (const nf of newFiles) {
-        if (existingPaths.has(nf.path)) {
-          const existing = existingPaths.get(nf.path)!;
-          existing.content = nf.content;
-          updated++;
-        } else {
-          existingPaths.set(nf.path, nf);
-          added++;
+  const handleFileUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
+      const newFiles: SchemaFile[] = [];
+      for (const file of Array.from(files)) {
+        const content = await file.text();
+        newFiles.push({ id: crypto.randomUUID(), name: file.name, path: file.name, content });
+      }
+      // Deduplicate: update existing files by path, add new ones
+      setSchemaFiles((prev) => {
+        const existingPaths = new Map(prev.map((f) => [f.path, f]));
+        let added = 0;
+        let updated = 0;
+        for (const nf of newFiles) {
+          if (existingPaths.has(nf.path)) {
+            const existing = existingPaths.get(nf.path)!;
+            existing.content = nf.content;
+            updated++;
+          } else {
+            existingPaths.set(nf.path, nf);
+            added++;
+          }
         }
+        if (updated > 0) {
+          toast.info(t('schemaEditor.deduped', { added, updated }));
+        }
+        return Array.from(existingPaths.values());
+      });
+      if (newFiles.length > 0 && !activeFileId) {
+        setActiveFileId(newFiles[0].id);
       }
-      if (updated > 0) {
-        toast.info(t('schemaEditor.deduped', { added, updated }));
-      }
-      return Array.from(existingPaths.values());
-    });
-    if (newFiles.length > 0 && !activeFileId) {
-      setActiveFileId(newFiles[0].id);
-    }
-    toast.success(t('schemaEditor.imported', { name: `${newFiles.length} file(s)` }));
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }, [activeFileId, t, setSchemaFiles, setActiveFileId]);
+      toast.success(t('schemaEditor.imported', { name: `${newFiles.length} file(s)` }));
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    },
+    [activeFileId, t, setSchemaFiles, setActiveFileId]
+  );
 
   // Upload folder with progress
-  const handleFolderUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const handleFolderUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
 
-    const allFiles = Array.from(files);
-    const totalScanned = allFiles.length;
+      const allFiles = Array.from(files);
+      const totalScanned = allFiles.length;
 
-    setUploadProgress({ total: totalScanned, loaded: 0, skipped: 0, done: false });
+      setUploadProgress({ total: totalScanned, loaded: 0, skipped: 0, done: false });
 
-    // Phase 1: Filter supported files (Set for O(1) lookup)
-    const acceptedSet = new Set(SCHEMA_ACCEPTED_EXTENSIONS.map(ext => ext.toLowerCase()));
-    const supportedFiles: File[] = [];
-    let skipped = 0;
-    for (const file of allFiles) {
-      const dotIdx = file.name.lastIndexOf('.');
-      const ext = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : '';
-      if (acceptedSet.has(ext)) {
-        supportedFiles.push(file);
-      } else {
-        skipped++;
-      }
-    }
-
-    const importTotal = supportedFiles.length;
-    setUploadProgress({ total: importTotal, loaded: 0, skipped, done: false });
-
-    if (importTotal === 0) {
-      setUploadProgress({ total: 0, loaded: 0, skipped, done: true });
-      setTimeout(() => setUploadProgress(null), 1500);
-      toast.info(t('schemaEditor.noSupportedFiles'));
-      if (folderInputRef.current) folderInputRef.current.value = '';
-      return;
-    }
-
-    // Phase 2: Create file entries WITHOUT reading content (lazy load on open)
-    const newFiles: SchemaFile[] = new Array(importTotal);
-    const pendingEntries: Array<{ id: string; file: File }> = new Array(importTotal);
-
-    for (let i = 0; i < supportedFiles.length; i++) {
-      const file = supportedFiles[i];
-      const relativePath =
-        (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-      const id = crypto.randomUUID();
-      newFiles[i] = {
-        id,
-        name: file.name,
-        path: relativePath,
-        content: '', // Content loaded lazily when file is opened
-      };
-      pendingEntries[i] = { id, file };
-
-      if ((i + 1) % 200 === 0 || i === supportedFiles.length - 1) {
-        setUploadProgress({ total: importTotal, loaded: i + 1, skipped, done: false });
-        await new Promise((r) => setTimeout(r, 0));
-      }
-    }
-
-    // Register File references for lazy content loading
-    registerPendingFiles(pendingEntries);
-
-    // Compute expand paths
-    const expandPaths = new Set<string>();
-    for (const nf of newFiles) {
-      const parts = nf.path.split('/').filter(Boolean);
-      for (let j = 1; j < parts.length; j++) {
-        expandPaths.add(parts.slice(0, j).join('/'));
-      }
-    }
-
-    // Phase 3: Apply results (deduplicate by path)
-    setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false });
-    await new Promise((r) => requestAnimationFrame(r));
-
-    setSchemaFiles((prev) => {
-      const existingPaths = new Map(prev.map(f => [f.path, f]));
-      for (const nf of newFiles) {
-        if (existingPaths.has(nf.path)) {
-          existingPaths.get(nf.path)!.content = nf.content;
+      // Phase 1: Filter supported files (Set for O(1) lookup)
+      const acceptedSet = new Set(SCHEMA_ACCEPTED_EXTENSIONS.map((ext) => ext.toLowerCase()));
+      const supportedFiles: File[] = [];
+      let skipped = 0;
+      for (const file of allFiles) {
+        const dotIdx = file.name.lastIndexOf('.');
+        const ext = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : '';
+        if (acceptedSet.has(ext)) {
+          supportedFiles.push(file);
         } else {
-          existingPaths.set(nf.path, nf);
+          skipped++;
         }
       }
-      return Array.from(existingPaths.values());
-    });
-    setExpandedFolders((prev) => new Set([...prev, ...expandPaths]));
-    if (!activeFileId && newFiles.length > 0) {
-      setActiveFileId(newFiles[0].id);
-    }
 
-    setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: true });
-    setTimeout(() => setUploadProgress(null), 1500);
-    if (folderInputRef.current) folderInputRef.current.value = '';
-  }, [activeFileId, t, setSchemaFiles, setExpandedFolders, setActiveFileId]);
+      const importTotal = supportedFiles.length;
+      setUploadProgress({ total: importTotal, loaded: 0, skipped, done: false });
+
+      if (importTotal === 0) {
+        setUploadProgress({ total: 0, loaded: 0, skipped, done: true });
+        setTimeout(() => setUploadProgress(null), 1500);
+        toast.info(t('schemaEditor.noSupportedFiles'));
+        if (folderInputRef.current) folderInputRef.current.value = '';
+        return;
+      }
+
+      // Phase 2: Create file entries WITHOUT reading content (lazy load on open)
+      const newFiles: SchemaFile[] = new Array(importTotal);
+      const pendingEntries: Array<{ id: string; file: File }> = new Array(importTotal);
+
+      for (let i = 0; i < supportedFiles.length; i++) {
+        const file = supportedFiles[i];
+        const relativePath =
+          (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+        const id = crypto.randomUUID();
+        newFiles[i] = {
+          id,
+          name: file.name,
+          path: relativePath,
+          content: '', // Content loaded lazily when file is opened
+        };
+        pendingEntries[i] = { id, file };
+
+        if ((i + 1) % 200 === 0 || i === supportedFiles.length - 1) {
+          setUploadProgress({ total: importTotal, loaded: i + 1, skipped, done: false });
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      }
+
+      // Register File references for lazy content loading
+      registerPendingFiles(pendingEntries);
+
+      // Compute expand paths
+      const expandPaths = new Set<string>();
+      for (const nf of newFiles) {
+        const parts = nf.path.split('/').filter(Boolean);
+        for (let j = 1; j < parts.length; j++) {
+          expandPaths.add(parts.slice(0, j).join('/'));
+        }
+      }
+
+      // Phase 3: Apply results (deduplicate by path)
+      setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false });
+      await new Promise((r) => requestAnimationFrame(r));
+
+      setSchemaFiles((prev) => {
+        const existingPaths = new Map(prev.map((f) => [f.path, f]));
+        for (const nf of newFiles) {
+          if (existingPaths.has(nf.path)) {
+            existingPaths.get(nf.path)!.content = nf.content;
+          } else {
+            existingPaths.set(nf.path, nf);
+          }
+        }
+        return Array.from(existingPaths.values());
+      });
+      setExpandedFolders((prev) => new Set([...prev, ...expandPaths]));
+      if (!activeFileId && newFiles.length > 0) {
+        setActiveFileId(newFiles[0].id);
+      }
+
+      setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: true });
+      setTimeout(() => setUploadProgress(null), 1500);
+      if (folderInputRef.current) folderInputRef.current.value = '';
+    },
+    [activeFileId, t, setSchemaFiles, setExpandedFolders, setActiveFileId]
+  );
 
   // Delete a file
-  const handleDeleteFile = useCallback((fileId: string) => {
-    setSchemaFiles(prev => prev.filter(f => f.id !== fileId));
-    if (activeFileId === fileId) {
-      setActiveFileId(() => {
-        const remaining = schemaFiles.filter(f => f.id !== fileId);
-        return remaining[0]?.id ?? null;
-      });
-    }
-  }, [activeFileId, schemaFiles, setSchemaFiles, setActiveFileId]);
+  const handleDeleteFile = useCallback(
+    (fileId: string) => {
+      setSchemaFiles((prev) => prev.filter((f) => f.id !== fileId));
+      if (activeFileId === fileId) {
+        setActiveFileId(() => {
+          const remaining = schemaFiles.filter((f) => f.id !== fileId);
+          return remaining[0]?.id ?? null;
+        });
+      }
+    },
+    [activeFileId, schemaFiles, setSchemaFiles, setActiveFileId]
+  );
 
   // Rename a schema file
-  const handleRenameFile = useCallback((fileId: string, newName: string) => {
-    setSchemaFiles(prev => prev.map(f => {
-      if (f.id !== fileId) return f;
-      const lastSlash = f.path.lastIndexOf('/');
-      const newPath = lastSlash === -1 ? newName : `${f.path.slice(0, lastSlash + 1)}${newName}`;
-      return { ...f, name: newName, path: newPath };
-    }));
-  }, [setSchemaFiles]);
+  const handleRenameFile = useCallback(
+    (fileId: string, newName: string) => {
+      setSchemaFiles((prev) =>
+        prev.map((f) => {
+          if (f.id !== fileId) return f;
+          const lastSlash = f.path.lastIndexOf('/');
+          const newPath =
+            lastSlash === -1 ? newName : `${f.path.slice(0, lastSlash + 1)}${newName}`;
+          return { ...f, name: newName, path: newPath };
+        })
+      );
+    },
+    [setSchemaFiles]
+  );
 
   // Rename a schema folder (update all files under it)
-  const handleRenameFolder = useCallback((oldFolderPath: string, newFolderName: string) => {
-    const lastSlash = oldFolderPath.lastIndexOf('/');
-    const newFolderPath = lastSlash === -1 ? newFolderName : `${oldFolderPath.slice(0, lastSlash + 1)}${newFolderName}`;
-    const prefix = `${oldFolderPath}/`;
-    setSchemaFiles(prev => prev.map(f => {
-      if (f.path === oldFolderPath || f.path.startsWith(prefix)) {
-        const newPath = newFolderPath + f.path.slice(oldFolderPath.length);
-        const newFileName = newPath.split('/').pop() || f.name;
-        return { ...f, path: newPath, name: newFileName };
-      }
-      return f;
-    }));
-    // Update expanded folders
-    setExpandedFolders(prev => {
-      const next = new Set<string>();
-      for (const p of prev) {
-        if (p === oldFolderPath) {
-          next.add(newFolderPath);
-        } else if (p.startsWith(prefix)) {
-          next.add(newFolderPath + p.slice(oldFolderPath.length));
-        } else {
-          next.add(p);
+  const handleRenameFolder = useCallback(
+    (oldFolderPath: string, newFolderName: string) => {
+      const lastSlash = oldFolderPath.lastIndexOf('/');
+      const newFolderPath =
+        lastSlash === -1
+          ? newFolderName
+          : `${oldFolderPath.slice(0, lastSlash + 1)}${newFolderName}`;
+      const prefix = `${oldFolderPath}/`;
+      setSchemaFiles((prev) =>
+        prev.map((f) => {
+          if (f.path === oldFolderPath || f.path.startsWith(prefix)) {
+            const newPath = newFolderPath + f.path.slice(oldFolderPath.length);
+            const newFileName = newPath.split('/').pop() || f.name;
+            return { ...f, path: newPath, name: newFileName };
+          }
+          return f;
+        })
+      );
+      // Update expanded folders
+      setExpandedFolders((prev) => {
+        const next = new Set<string>();
+        for (const p of prev) {
+          if (p === oldFolderPath) {
+            next.add(newFolderPath);
+          } else if (p.startsWith(prefix)) {
+            next.add(newFolderPath + p.slice(oldFolderPath.length));
+          } else {
+            next.add(p);
+          }
         }
-      }
-      return next;
-    });
-  }, [setSchemaFiles, setExpandedFolders]);
+        return next;
+      });
+    },
+    [setSchemaFiles, setExpandedFolders]
+  );
 
   return (
     <div className="flex flex-col h-full bg-background relative">
       {/* Hidden file inputs */}
-      <input ref={fileInputRef} type="file" accept=".sql,.hql,.ddl,.txt" multiple className="hidden" onChange={handleFileUpload} />
-      {/* @ts-expect-error webkitdirectory is a non-standard attribute */}
-      <input ref={folderInputRef} type="file" webkitdirectory="" className="hidden" onChange={handleFolderUpload} />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".sql,.hql,.ddl,.txt"
+        multiple
+        className="hidden"
+        onChange={handleFileUpload}
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFolderUpload}
+        {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+      />
 
       {/* Header toolbar */}
       <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
@@ -1049,10 +1277,12 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
             {!isBackendMode && (
               <>
                 {/* Delete selected */}
-                {selectedFileIds.size > 0 && (
-                  confirmBatchDelete ? (
+                {selectedFileIds.size > 0 &&
+                  (confirmBatchDelete ? (
                     <div className="flex items-center gap-0.5">
-                      <span className="text-xs text-destructive whitespace-nowrap">{t('sidebar.confirmDelete')}</span>
+                      <span className="text-xs text-destructive whitespace-nowrap">
+                        {t('sidebar.confirmDelete')}
+                      </span>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -1082,16 +1312,24 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom"><p>{t('sidebar.deleteSelected')}</p></TooltipContent>
+                      <TooltipContent side="bottom">
+                        <p>{t('sidebar.deleteSelected')}</p>
+                      </TooltipContent>
                     </Tooltip>
-                  )
-                )}
+                  ))}
                 {/* Select all / Deselect all */}
                 {schemaFiles.length > 0 && (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleSelectAll}>
-                        <CheckSquare className={`h-3.5 w-3.5 ${allSelected ? 'text-primary' : ''}`} />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={handleSelectAll}
+                      >
+                        <CheckSquare
+                          className={`h-3.5 w-3.5 ${allSelected ? 'text-primary' : ''}`}
+                        />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
@@ -1102,38 +1340,74 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
                 {/* New file */}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setActiveFolderPath(''); setIsCreatingFile(true); setIsCreatingFolder(false); }}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => {
+                        setActiveFolderPath('');
+                        setIsCreatingFile(true);
+                        setIsCreatingFolder(false);
+                      }}
+                    >
                       <Plus className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom"><p>{t('common.new')}</p></TooltipContent>
+                  <TooltipContent side="bottom">
+                    <p>{t('common.new')}</p>
+                  </TooltipContent>
                 </Tooltip>
                 {/* Upload files */}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => fileInputRef.current?.click()}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
                       <Upload className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom"><p>{t('schemaEditor.import')}</p></TooltipContent>
+                  <TooltipContent side="bottom">
+                    <p>{t('schemaEditor.import')}</p>
+                  </TooltipContent>
                 </Tooltip>
                 {/* Upload folder */}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => folderInputRef.current?.click()}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => folderInputRef.current?.click()}
+                    >
                       <FolderUp className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom"><p>{t('schemaEditor.importFolder')}</p></TooltipContent>
+                  <TooltipContent side="bottom">
+                    <p>{t('schemaEditor.importFolder')}</p>
+                  </TooltipContent>
                 </Tooltip>
                 {/* New folder */}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setActiveFolderPath(''); setIsCreatingFolder(true); setIsCreatingFile(false); }}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => {
+                        setActiveFolderPath('');
+                        setIsCreatingFolder(true);
+                        setIsCreatingFile(false);
+                      }}
+                    >
                       <FolderPlus className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom"><p>{t('sidebar.newFolder')}</p></TooltipContent>
+                  <TooltipContent side="bottom">
+                    <p>{t('sidebar.newFolder')}</p>
+                  </TooltipContent>
                 </Tooltip>
               </>
             )}
@@ -1152,7 +1426,19 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
               className="h-7 text-xs pl-7"
             />
             <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
             </span>
             {search && (
               <button
@@ -1170,7 +1456,9 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       {isCreatingFolder && (
         <div className="px-2 py-1.5 border-b shrink-0">
           {activeParentFolder && (
-            <div className="text-[10px] text-muted-foreground/70 mb-1 truncate pl-6">{activeParentFolder}/</div>
+            <div className="text-[10px] text-muted-foreground/70 mb-1 truncate pl-6">
+              {activeParentFolder}/
+            </div>
           )}
           <div className="flex items-center gap-1.5">
             <FolderPlus className="h-4 w-4 text-amber-500 shrink-0" />
@@ -1181,10 +1469,22 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
               placeholder={t('sidebar.folderName')}
               className="h-7 text-xs flex-1"
               onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); handleCreateFolder(); }
-                if (e.key === 'Escape') { e.preventDefault(); setIsCreatingFolder(false); setNewFolderName(''); }
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleCreateFolder();
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setIsCreatingFolder(false);
+                  setNewFolderName('');
+                }
               }}
-              onBlur={() => { if (!newFolderName.trim()) { setIsCreatingFolder(false); setNewFolderName(''); } }}
+              onBlur={() => {
+                if (!newFolderName.trim()) {
+                  setIsCreatingFolder(false);
+                  setNewFolderName('');
+                }
+              }}
             />
           </div>
         </div>
@@ -1194,7 +1494,9 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       {isCreatingFile && (
         <div className="px-2 py-1.5 border-b shrink-0">
           {activeParentFolder && (
-            <div className="text-[10px] text-muted-foreground/70 mb-1 truncate pl-6">{activeParentFolder}/</div>
+            <div className="text-[10px] text-muted-foreground/70 mb-1 truncate pl-6">
+              {activeParentFolder}/
+            </div>
           )}
           <div className="flex items-center gap-1.5">
             <FileCode className="h-4 w-4 text-blue-500 shrink-0" />
@@ -1205,10 +1507,22 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
               placeholder="new_schema.sql"
               className="h-7 text-xs flex-1"
               onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); handleCreateFile(); }
-                if (e.key === 'Escape') { e.preventDefault(); setIsCreatingFile(false); setNewFileName(''); }
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleCreateFile();
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setIsCreatingFile(false);
+                  setNewFileName('');
+                }
               }}
-              onBlur={() => { if (!newFileName.trim()) { setIsCreatingFile(false); setNewFileName(''); } }}
+              onBlur={() => {
+                if (!newFileName.trim()) {
+                  setIsCreatingFile(false);
+                  setNewFileName('');
+                }
+              }}
             />
           </div>
         </div>
@@ -1227,9 +1541,37 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
           <div ref={treeContentRef} className="py-1 min-w-max">
             {sortedRootChildren.map((child) =>
               child.file ? (
-                <SchemaFileNode key={child.file.id} node={child} depth={0} activeFileId={activeFileId} onSelect={handleSelectFile} onDelete={handleDeleteFile} onRenameFile={handleRenameFile} onSelectFolder={setActiveFolderPath} selectedFileIds={selectedFileIds} onToggleSelection={handleToggleSelection} />
+                <SchemaFileNode
+                  key={child.file.id}
+                  node={child}
+                  depth={0}
+                  activeFileId={activeFileId}
+                  onSelect={handleSelectFile}
+                  onDelete={handleDeleteFile}
+                  onRenameFile={handleRenameFile}
+                  onSelectFolder={setActiveFolderPath}
+                  selectedFileIds={selectedFileIds}
+                  onToggleSelection={handleToggleSelection}
+                />
               ) : (
-                <SchemaFolderNode key={child.path} node={child} depth={0} activeFileId={activeFileId} activeFolderPath={activeFolderPath} onSelect={handleSelectFile} onDelete={handleDeleteFile} expandedFolders={expandedFolders} onToggleFolder={handleToggleFolder} onSelectFolder={setActiveFolderPath} onDoubleClickFolder={handleDoubleClickCreateFile} onCreateFolderInFolder={handleCreateFolderInFolder} onRenameFolder={handleRenameFolder} onRenameFile={handleRenameFile} selectedFileIds={selectedFileIds} onToggleSelection={handleToggleSelection} />
+                <SchemaFolderNode
+                  key={child.path}
+                  node={child}
+                  depth={0}
+                  activeFileId={activeFileId}
+                  activeFolderPath={activeFolderPath}
+                  onSelect={handleSelectFile}
+                  onDelete={handleDeleteFile}
+                  expandedFolders={expandedFolders}
+                  onToggleFolder={handleToggleFolder}
+                  onSelectFolder={setActiveFolderPath}
+                  onDoubleClickFolder={handleDoubleClickCreateFile}
+                  onCreateFolderInFolder={handleCreateFolderInFolder}
+                  onRenameFolder={handleRenameFolder}
+                  onRenameFile={handleRenameFile}
+                  selectedFileIds={selectedFileIds}
+                  onToggleSelection={handleToggleSelection}
+                />
               )
             )}
           </div>
@@ -1253,7 +1595,9 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
           <div className="flex-1 min-h-0 overflow-hidden">
             <div className="flex flex-col h-full">
               <div className="flex items-center justify-between px-3 py-1 border-b shrink-0 bg-muted/10">
-                <span className="text-[11px] text-muted-foreground truncate flex-1">{activeFile.path}</span>
+                <span className="text-[11px] text-muted-foreground truncate flex-1">
+                  {activeFile.path}
+                </span>
                 <TooltipProvider delayDuration={300}>
                   <div className="flex items-center gap-0.5 shrink-0">
                     <Tooltip>
@@ -1265,7 +1609,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
                               ? 'bg-muted text-foreground'
                               : 'text-muted-foreground hover:text-foreground'
                           )}
-                          onClick={() => setLineWrapping(prev => !prev)}
+                          onClick={() => setLineWrapping((prev) => !prev)}
                         >
                           <WrapText className="size-3.5" />
                         </button>
@@ -1310,9 +1654,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
                 <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
               )}
               <span className="text-sm font-medium">
-                {uploadProgress.done
-                  ? t('sidebar.uploadDone')
-                  : t('sidebar.uploading')}
+                {uploadProgress.done ? t('sidebar.uploadDone') : t('sidebar.uploading')}
               </span>
             </div>
 
@@ -1327,10 +1669,12 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
             </div>
 
             <div className="text-xs text-muted-foreground space-y-0.5">
-              <p>{t('sidebar.uploadProgress', {
-                loaded: uploadProgress.loaded,
-                total: uploadProgress.total,
-              })}</p>
+              <p>
+                {t('sidebar.uploadProgress', {
+                  loaded: uploadProgress.loaded,
+                  total: uploadProgress.total,
+                })}
+              </p>
               {uploadProgress.skipped > 0 && (
                 <p className="text-muted-foreground/70">
                   {t('sidebar.uploadResult', {

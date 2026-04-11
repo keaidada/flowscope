@@ -1,5 +1,15 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Upload, FolderUp, Plus, Search, FolderPlus, Loader2, CheckCircle2, Trash2, CheckSquare } from 'lucide-react';
+import {
+  Upload,
+  FolderUp,
+  Plus,
+  Search,
+  FolderPlus,
+  Loader2,
+  CheckCircle2,
+  Trash2,
+  CheckSquare,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useProject } from '@/lib/project-store';
 import type { ProjectFile } from '@/lib/project-store';
@@ -7,7 +17,12 @@ import { FileTree } from '@/components/FileTree';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { ACCEPTED_FILE_TYPES, ACCEPTED_FILE_TYPES_ARRAY, FILE_EXTENSIONS, DEFAULT_FILE_NAMES } from '@/lib/constants';
+import {
+  ACCEPTED_FILE_TYPES,
+  ACCEPTED_FILE_TYPES_ARRAY,
+  FILE_EXTENSIONS,
+  DEFAULT_FILE_NAMES,
+} from '@/lib/constants';
 import { registerPendingFiles } from '@/lib/lazy-file-loader';
 
 interface SidebarFileTreeProps {
@@ -25,6 +40,7 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
     importFiles,
     addFilesDirectly,
     toggleFileSelection,
+    setFileSelection,
     renameFile,
     renameFolder,
     isReadOnly,
@@ -78,77 +94,84 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleFolderUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
+  const handleFolderUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files || e.target.files.length === 0) return;
 
-    const allFiles = Array.from(e.target.files);
-    const total = allFiles.length;
+      const allFiles = Array.from(e.target.files);
+      const total = allFiles.length;
 
-    setUploadProgress({ total, loaded: 0, skipped: 0, done: false });
+      setUploadProgress({ total, loaded: 0, skipped: 0, done: false });
 
-    // Phase 1: Filter supported files (use Set for O(1) lookup)
-    const acceptedSet = new Set(ACCEPTED_FILE_TYPES_ARRAY.map(ext => ext.toLowerCase()));
-    const supportedFiles: File[] = [];
-    let skipped = 0;
-    for (const file of allFiles) {
-      const dotIdx = file.name.lastIndexOf('.');
-      const ext = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : '';
-      if (acceptedSet.has(ext)) {
-        supportedFiles.push(file);
-      } else {
-        skipped++;
+      // Phase 1: Filter supported files (use Set for O(1) lookup)
+      const acceptedSet = new Set(ACCEPTED_FILE_TYPES_ARRAY.map((ext) => ext.toLowerCase()));
+      const supportedFiles: File[] = [];
+      let skipped = 0;
+      for (const file of allFiles) {
+        const dotIdx = file.name.lastIndexOf('.');
+        const ext = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : '';
+        if (acceptedSet.has(ext)) {
+          supportedFiles.push(file);
+        } else {
+          skipped++;
+        }
       }
-    }
 
-    const importTotal = supportedFiles.length;
-    setUploadProgress({ total: importTotal, loaded: 0, skipped, done: false });
+      const importTotal = supportedFiles.length;
+      setUploadProgress({ total: importTotal, loaded: 0, skipped, done: false });
 
-    // Phase 2: Create file entries WITHOUT reading content (lazy load on open)
-    const projectFiles: ProjectFile[] = new Array(importTotal);
-    const pendingEntries: Array<{ id: string; file: File }> = new Array(importTotal);
+      // Phase 2: Create file entries WITHOUT reading content (lazy load on open)
+      const projectFiles: ProjectFile[] = new Array(importTotal);
+      const pendingEntries: Array<{ id: string; file: File }> = new Array(importTotal);
 
-    const getFileLanguage = (fileName: string): ProjectFile['language'] => {
-      if (fileName.endsWith(FILE_EXTENSIONS.JSON)) return 'json';
-      if (fileName.endsWith(FILE_EXTENSIONS.SQL) || fileName.toLowerCase().endsWith(FILE_EXTENSIONS.HQL)) return 'sql';
-      return 'text';
-    };
-
-    for (let i = 0; i < supportedFiles.length; i++) {
-      const file = supportedFiles[i];
-      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-      const id = crypto.randomUUID();
-      projectFiles[i] = {
-        id,
-        name: file.name,
-        path: relativePath || file.name,
-        content: '', // Content loaded lazily when file is opened
-        language: getFileLanguage(file.name),
+      const getFileLanguage = (fileName: string): ProjectFile['language'] => {
+        if (fileName.endsWith(FILE_EXTENSIONS.JSON)) return 'json';
+        if (
+          fileName.endsWith(FILE_EXTENSIONS.SQL) ||
+          fileName.toLowerCase().endsWith(FILE_EXTENSIONS.HQL)
+        )
+          return 'sql';
+        return 'text';
       };
-      pendingEntries[i] = { id, file };
 
-      // Update progress every 200 files
-      if ((i + 1) % 200 === 0 || i === supportedFiles.length - 1) {
-        setUploadProgress({ total: importTotal, loaded: i + 1, skipped, done: false });
-        await new Promise((r) => setTimeout(r, 0));
+      for (let i = 0; i < supportedFiles.length; i++) {
+        const file = supportedFiles[i];
+        const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+        const id = crypto.randomUUID();
+        projectFiles[i] = {
+          id,
+          name: file.name,
+          path: relativePath || file.name,
+          content: '', // Content loaded lazily when file is opened
+          language: getFileLanguage(file.name),
+        };
+        pendingEntries[i] = { id, file };
+
+        // Update progress every 200 files
+        if ((i + 1) % 200 === 0 || i === supportedFiles.length - 1) {
+          setUploadProgress({ total: importTotal, loaded: i + 1, skipped, done: false });
+          await new Promise((r) => setTimeout(r, 0));
+        }
       }
-    }
 
-    // Register File references for lazy content loading
-    registerPendingFiles(pendingEntries);
+      // Register File references for lazy content loading
+      registerPendingFiles(pendingEntries);
 
-    // Phase 3: Add files in one shot
-    setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false });
-    await new Promise((r) => requestAnimationFrame(r));
+      // Phase 3: Add files in one shot
+      setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false });
+      await new Promise((r) => requestAnimationFrame(r));
 
-    if (projectFiles.length > 0) {
-      addFilesDirectly(projectFiles);
-    }
+      if (projectFiles.length > 0) {
+        addFilesDirectly(projectFiles);
+      }
 
-    setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: true });
-    setTimeout(() => setUploadProgress(null), 1500);
+      setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: true });
+      setTimeout(() => setUploadProgress(null), 1500);
 
-    if (folderInputRef.current) folderInputRef.current.value = '';
-  }, [addFilesDirectly]);
+      if (folderInputRef.current) folderInputRef.current.value = '';
+    },
+    [addFilesDirectly]
+  );
 
   const handleSelectFile = (fileId: string) => {
     selectFile(fileId);
@@ -207,17 +230,13 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
     }
   };
 
-  const handleToggleFolderSelection = (fileIds: string[], select: boolean) => {
-    if (!currentProject) return;
-    for (const fileId of fileIds) {
-      const isSelected = currentProject.selectedFileIds.includes(fileId);
-      if (select && !isSelected) {
-        toggleFileSelection(currentProject.id, fileId);
-      } else if (!select && isSelected) {
-        toggleFileSelection(currentProject.id, fileId);
-      }
-    }
-  };
+  const handleToggleFolderSelection = useCallback(
+    (fileIds: string[], select: boolean) => {
+      if (!currentProject) return;
+      setFileSelection(currentProject.id, fileIds, select);
+    },
+    [currentProject, setFileSelection]
+  );
 
   if (!currentProject) return null;
 
@@ -237,27 +256,17 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
     setConfirmBatchDelete(false);
   };
 
-  const allSelected = currentProject.files.length > 0
-    && selectedCount === currentProject.files.length;
+  const allSelected =
+    currentProject.files.length > 0 && selectedCount === currentProject.files.length;
 
-  const handleSelectAll = () => {
+  const handleSelectAll = useCallback(() => {
     if (!currentProject) return;
-    if (allSelected) {
-      // Deselect all
-      for (const file of currentProject.files) {
-        if (currentProject.selectedFileIds.includes(file.id)) {
-          toggleFileSelection(currentProject.id, file.id);
-        }
-      }
-    } else {
-      // Select all
-      for (const file of currentProject.files) {
-        if (!currentProject.selectedFileIds.includes(file.id)) {
-          toggleFileSelection(currentProject.id, file.id);
-        }
-      }
-    }
-  };
+    setFileSelection(
+      currentProject.id,
+      currentProject.files.map((file) => file.id),
+      !allSelected
+    );
+  }, [allSelected, currentProject, setFileSelection]);
 
   const filteredFiles = useMemo(() => {
     if (!search.trim()) return currentProject.files;
@@ -277,9 +286,7 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
             {t('common.files')}
           </span>
           {currentProject.files.length > 0 && (
-            <span className="text-xs text-muted-foreground">
-              ({currentProject.files.length})
-            </span>
+            <span className="text-xs text-muted-foreground">({currentProject.files.length})</span>
           )}
           {selectedCount > 0 && (
             <span className="text-xs text-muted-foreground">
@@ -291,10 +298,12 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
           <TooltipProvider delayDuration={300}>
             <div className="flex items-center gap-0.5">
               {/* Delete selected */}
-              {selectedCount > 0 && (
-                confirmBatchDelete ? (
+              {selectedCount > 0 &&
+                (confirmBatchDelete ? (
                   <div className="flex items-center gap-0.5">
-                    <span className="text-xs text-destructive whitespace-nowrap">{t('sidebar.confirmDelete')}</span>
+                    <span className="text-xs text-destructive whitespace-nowrap">
+                      {t('sidebar.confirmDelete')}
+                    </span>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -324,10 +333,11 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom"><p>{t('sidebar.deleteSelected')}</p></TooltipContent>
+                    <TooltipContent side="bottom">
+                      <p>{t('sidebar.deleteSelected')}</p>
+                    </TooltipContent>
                   </Tooltip>
-                )
-              )}
+                ))}
               {/* Select all / Deselect all */}
               {currentProject.files.length > 0 && (
                 <Tooltip>
@@ -357,7 +367,9 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
                     <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom"><p>{t('common.new')}</p></TooltipContent>
+                <TooltipContent side="bottom">
+                  <p>{t('common.new')}</p>
+                </TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -370,7 +382,9 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
                     <FolderPlus className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom"><p>{t('sidebar.newFolder')}</p></TooltipContent>
+                <TooltipContent side="bottom">
+                  <p>{t('sidebar.newFolder')}</p>
+                </TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -383,7 +397,9 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
                     <Upload className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom"><p>{t('common.files')}</p></TooltipContent>
+                <TooltipContent side="bottom">
+                  <p>{t('common.files')}</p>
+                </TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -396,7 +412,9 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
                     <FolderUp className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom"><p>{t('sidebar.addFolder')}</p></TooltipContent>
+                <TooltipContent side="bottom">
+                  <p>{t('sidebar.addFolder')}</p>
+                </TooltipContent>
               </Tooltip>
             </div>
           </TooltipProvider>
@@ -477,12 +495,16 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
             renameInputRef={renameInputRef}
             isReadOnly={isReadOnly}
             onCreateFileInFolder={(folderPath) => {
-              createFile(DEFAULT_FILE_NAMES.NEW_QUERY, '', `${folderPath}/${DEFAULT_FILE_NAMES.NEW_QUERY}`);
+              createFile(
+                DEFAULT_FILE_NAMES.NEW_QUERY,
+                '',
+                `${folderPath}/${DEFAULT_FILE_NAMES.NEW_QUERY}`
+              );
             }}
             onCreateFolderInFolder={(folderPath) => {
               if (!currentProject) return;
               // Deduplicate folder name by checking existing file paths
-              const existingPaths = currentProject.files.map(f => f.path.toLowerCase());
+              const existingPaths = currentProject.files.map((f) => f.path.toLowerCase());
               const prefix = `${folderPath}/`.toLowerCase();
               // Collect existing direct child folder names
               const existingFolders = new Set<string>();
@@ -499,7 +521,11 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
                 subFolderName = `new_folder_${counter}`;
                 counter++;
               }
-              createFile(DEFAULT_FILE_NAMES.NEW_QUERY, '', `${folderPath}/${subFolderName}/${DEFAULT_FILE_NAMES.NEW_QUERY}`);
+              createFile(
+                DEFAULT_FILE_NAMES.NEW_QUERY,
+                '',
+                `${folderPath}/${subFolderName}/${DEFAULT_FILE_NAMES.NEW_QUERY}`
+              );
             }}
             onRenameFolder={(oldPath, newName) => renameFolder(oldPath, newName)}
           />
@@ -539,9 +565,7 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
                 <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
               )}
               <span className="text-sm font-medium">
-                {uploadProgress.done
-                  ? t('sidebar.uploadDone')
-                  : t('sidebar.uploading')}
+                {uploadProgress.done ? t('sidebar.uploadDone') : t('sidebar.uploading')}
               </span>
             </div>
 
@@ -556,15 +580,19 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
             </div>
 
             <div className="text-xs text-muted-foreground space-y-0.5">
-              <p>{t('sidebar.uploadProgress', {
-                loaded: uploadProgress.loaded,
-                total: uploadProgress.total,
-              })}</p>
+              <p>
+                {t('sidebar.uploadProgress', {
+                  loaded: uploadProgress.loaded,
+                  total: uploadProgress.total,
+                })}
+              </p>
               {uploadProgress.done && (
-                <p>{t('sidebar.uploadResult', {
-                  imported: uploadProgress.total - uploadProgress.skipped,
-                  skipped: uploadProgress.skipped,
-                })}</p>
+                <p>
+                  {t('sidebar.uploadResult', {
+                    imported: uploadProgress.total - uploadProgress.skipped,
+                    skipped: uploadProgress.skipped,
+                  })}
+                </p>
               )}
             </div>
           </div>

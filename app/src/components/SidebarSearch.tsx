@@ -1,5 +1,14 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Search, FileCode, X, Database, ExternalLink, Folder, ChevronDown, ChevronRight } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect, useRef, useDeferredValue, memo } from 'react';
+import {
+  Search,
+  FileCode,
+  X,
+  Database,
+  ExternalLink,
+  Folder,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useProject } from '@/lib/project-store';
 import { loadSchemaFiles, type StoredSchemaFile } from '@/lib/schema-storage';
@@ -37,26 +46,14 @@ interface SidebarSearchProps {
   onHighlightSpan?: (span: { start: number; end: number }) => void;
 }
 
-/** Build file content index for fast context lookup */
-type FileContentIndex = Map<string, string[]>;
-
-function buildContentIndex(
-  files: Array<{ id: string; content: string }>
-): FileContentIndex {
-  const index = new Map<string, string[]>();
-  for (const file of files) {
-    index.set(file.id, file.content.split('\n'));
-  }
-  return index;
-}
-
 function getMatchContext(
-  contentIndex: FileContentIndex,
+  content: string | undefined,
   match: SearchMatch,
   contextSize = 5
 ): MatchContext {
-  const fileLines = contentIndex.get(match.fileId);
-  if (!fileLines) return { lines: [] };
+  if (!content) return { lines: [] };
+
+  const fileLines = content.split('\n');
 
   const startLine = Math.max(0, match.line - 1 - contextSize);
   const endLine = Math.min(fileLines.length, match.line + contextSize);
@@ -118,6 +115,7 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
   const { t } = useTranslation();
   const { currentProject, selectFile, activeProjectId } = useProject();
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [searchMode, setSearchMode] = useState<SearchMode>('files');
   const [schemaFiles, setSchemaFiles] = useState<StoredSchemaFile[]>([]);
@@ -136,28 +134,23 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
   // File search results
   const fileResults = useMemo((): SearchMatch[] => {
     if (searchMode !== 'files' || !currentProject) return [];
-    return searchInFiles(currentProject.files, query, caseSensitive);
-  }, [currentProject, query, caseSensitive, searchMode]);
+    return searchInFiles(currentProject.files, deferredQuery, caseSensitive);
+  }, [currentProject, deferredQuery, caseSensitive, searchMode]);
 
   // Schema search results
   const schemaResults = useMemo((): SearchMatch[] => {
     if (searchMode !== 'schema') return [];
-    return searchInFiles(schemaFiles, query, caseSensitive);
-  }, [schemaFiles, query, caseSensitive, searchMode]);
+    return searchInFiles(schemaFiles, deferredQuery, caseSensitive);
+  }, [schemaFiles, deferredQuery, caseSensitive, searchMode]);
 
   const results = searchMode === 'files' ? fileResults : schemaResults;
 
-  // Content index for hover context preview
-  const contentIndex = useMemo<FileContentIndex>(() => {
-    if (searchMode === 'files' && currentProject) {
-      return buildContentIndex(currentProject.files);
-    }
-    return buildContentIndex(schemaFiles);
-  }, [searchMode, currentProject, schemaFiles]);
-
   // Group by file
   const groupedResults = useMemo(() => {
-    const groups = new Map<string, { fileName: string; filePath: string; matches: SearchMatch[] }>();
+    const groups = new Map<
+      string,
+      { fileName: string; filePath: string; matches: SearchMatch[] }
+    >();
     for (const match of results) {
       if (!groups.has(match.fileId)) {
         groups.set(match.fileId, {
@@ -203,7 +196,12 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
         current = current.children.get(dirName)!;
       }
 
-      current.files.push({ fileId, fileName: group.fileName, filePath: group.filePath, matches: group.matches });
+      current.files.push({
+        fileId,
+        fileName: group.fileName,
+        filePath: group.filePath,
+        matches: group.matches,
+      });
     }
 
     // Calculate totalFiles counts
@@ -223,10 +221,12 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
   // Collapsed directories (default: all expanded)
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
   // Reset collapsed state when query changes
-  useEffect(() => { setCollapsedDirs(new Set()); }, [query]);
+  useEffect(() => {
+    setCollapsedDirs(new Set());
+  }, [query]);
 
   const toggleDir = useCallback((dirPath: string) => {
-    setCollapsedDirs(prev => {
+    setCollapsedDirs((prev) => {
       const next = new Set(prev);
       if (next.has(dirPath)) next.delete(dirPath);
       else next.add(dirPath);
@@ -250,10 +250,14 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
           onOpenSchemaFile(match.fileId);
         }
         // Delay emit to let Schema sidebar mount and register its listener
-        setTimeout(() => emitSchemaFileSelect({
-          fileId: match.fileId,
-          span: { start: match.charStart, end: match.charEnd },
-        }), 100);
+        setTimeout(
+          () =>
+            emitSchemaFileSelect({
+              fileId: match.fileId,
+              span: { start: match.charStart, end: match.charEnd },
+            }),
+          100
+        );
       }
     },
     [selectFile, searchMode, onOpenSchemaFile, onHighlightSpan]
@@ -273,17 +277,14 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
     [selectFile, searchMode, onOpenSchemaFile]
   );
 
-  const handleMouseEnter = useCallback(
-    (e: React.MouseEvent, match: SearchMatch) => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-      hoverTimerRef.current = setTimeout(() => {
-        setHoveredMatch(match);
-        setTooltipPos({ x: rect.right + 8, y: rect.top });
-      }, 300);
-    },
-    []
-  );
+  const handleMouseEnter = useCallback((e: React.MouseEvent, match: SearchMatch) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      setHoveredMatch(match);
+      setTooltipPos({ x: rect.right + 8, y: rect.top });
+    }, 300);
+  }, []);
 
   const handleMouseLeave = useCallback(() => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
@@ -300,8 +301,12 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
   // Hover preview context
   const previewContext = useMemo(() => {
     if (!hoveredMatch) return null;
-    return getMatchContext(contentIndex, hoveredMatch);
-  }, [hoveredMatch, contentIndex]);
+
+    const files = searchMode === 'files' ? currentProject?.files : schemaFiles;
+    const hoveredFile = files?.find((file) => file.id === hoveredMatch.fileId);
+
+    return getMatchContext(hoveredFile?.content, hoveredMatch);
+  }, [hoveredMatch, searchMode, currentProject?.files, schemaFiles]);
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -341,7 +346,9 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={searchMode === 'files' ? t('search.placeholderFiles') : t('search.placeholderSchema')}
+            placeholder={
+              searchMode === 'files' ? t('search.placeholderFiles') : t('search.placeholderSchema')
+            }
             className="h-7 pl-7 pr-8 text-xs bg-muted/30 border-transparent focus:border-border"
             autoFocus
           />
@@ -438,7 +445,7 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
 }
 
 /** Recursive tree node for directory-organized search results */
-function SearchTreeNode({
+const SearchTreeNode = memo(function SearchTreeNode({
   node,
   depth,
   searchMode,
@@ -449,7 +456,22 @@ function SearchTreeNode({
   onMouseEnter,
   onMouseLeave,
 }: {
-  node: { name: string; path: string; files: Array<{ fileId: string; fileName: string; matches: SearchMatch[] }>; children: Map<string, { name: string; path: string; files: Array<{ fileId: string; fileName: string; matches: SearchMatch[] }>; children: Map<string, unknown>; totalFiles: number }>; totalFiles: number };
+  node: {
+    name: string;
+    path: string;
+    files: Array<{ fileId: string; fileName: string; matches: SearchMatch[] }>;
+    children: Map<
+      string,
+      {
+        name: string;
+        path: string;
+        files: Array<{ fileId: string; fileName: string; matches: SearchMatch[] }>;
+        children: Map<string, unknown>;
+        totalFiles: number;
+      }
+    >;
+    totalFiles: number;
+  };
   depth: number;
   searchMode: SearchMode;
   collapsedDirs: Set<string>;
@@ -462,9 +484,14 @@ function SearchTreeNode({
   const isRoot = depth < 0;
   const isCollapsed = !isRoot && collapsedDirs.has(node.path);
 
-  // Sort: directories first, then files
-  const sortedChildren = Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name));
-  const sortedFiles = [...node.files].sort((a, b) => a.fileName.localeCompare(b.fileName));
+  const sortedChildren = useMemo(
+    () => Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name)),
+    [node.children]
+  );
+  const sortedFiles = useMemo(
+    () => [...node.files].sort((a, b) => a.fileName.localeCompare(b.fileName)),
+    [node.files]
+  );
 
   return (
     <>
@@ -562,7 +589,7 @@ function SearchTreeNode({
       )}
     </>
   );
-}
+});
 
 function HighlightedLine({
   line,
@@ -586,7 +613,11 @@ function HighlightedLine({
     <>
       {prefix}
       <span className="text-muted-foreground">{before}</span>
-      <span className={cn('bg-yellow-200 dark:bg-yellow-800/60 text-foreground font-medium rounded-sm px-0.5')}>
+      <span
+        className={cn(
+          'bg-yellow-200 dark:bg-yellow-800/60 text-foreground font-medium rounded-sm px-0.5'
+        )}
+      >
         {matched}
       </span>
       <span className="text-muted-foreground">{after}</span>

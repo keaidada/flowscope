@@ -352,14 +352,24 @@ export const HierarchyView = forwardRef<HierarchyViewRef, HierarchyViewProps>(
         // Check if source is a table/cte and target is a column owned by another table/cte
         const fromNode = getNode(e.from);
         const toOwner = ownerOf.get(e.to);
-        if (fromNode && ['table', 'view', 'cte'].includes(fromNode.type) && toOwner && toOwner !== e.from) {
+        if (
+          fromNode &&
+          ['table', 'view', 'cte'].includes(fromNode.type) &&
+          toOwner &&
+          toOwner !== e.from
+        ) {
           hasDownstream.add(e.from);
           hasUpstream.add(toOwner);
         }
         // Check if source is a column owned by a table/cte and target is another table/cte
         const fromOwner = ownerOf.get(e.from);
         const toNode = getNode(e.to);
-        if (fromOwner && toNode && ['table', 'view', 'cte'].includes(toNode.type) && fromOwner !== e.to) {
+        if (
+          fromOwner &&
+          toNode &&
+          ['table', 'view', 'cte'].includes(toNode.type) &&
+          fromOwner !== e.to
+        ) {
           hasDownstream.add(fromOwner);
           hasUpstream.add(e.to);
         }
@@ -386,7 +396,9 @@ export const HierarchyView = forwardRef<HierarchyViewRef, HierarchyViewProps>(
     // Pre-compute indirect upstream table relationships for buildUpstreamTree.
     // Maps table/cte ID → set of upstream table/cte IDs (via column-level edges).
     const indirectUpstream = useMemo(() => {
-      const tableNodeIds = new Set(nodes.filter((n) => ['table', 'view', 'cte'].includes(n.type)).map((n) => n.id));
+      const tableNodeIds = new Set(
+        nodes.filter((n) => ['table', 'view', 'cte'].includes(n.type)).map((n) => n.id)
+      );
       const outputNodeIds = new Set(nodes.filter((n) => n.type === 'output').map((n) => n.id));
       const ownerOf = new Map<string, string>();
       edges.forEach((e) => {
@@ -421,7 +433,12 @@ export const HierarchyView = forwardRef<HierarchyViewRef, HierarchyViewProps>(
       // The backend also generates DataFlow edges for join-only tables in CTEs,
       // so this is mainly a safety net for edge cases.
       edges.forEach((e) => {
-        if (e.type === 'join_dependency' && tableNodeIds.has(e.from) && tableNodeIds.has(e.to) && e.from !== e.to) {
+        if (
+          e.type === 'join_dependency' &&
+          tableNodeIds.has(e.from) &&
+          tableNodeIds.has(e.to) &&
+          e.from !== e.to
+        ) {
           if (!upstream.has(e.to)) upstream.set(e.to, new Set());
           upstream.get(e.to)!.add(e.from);
         }
@@ -492,20 +509,30 @@ export const HierarchyView = forwardRef<HierarchyViewRef, HierarchyViewProps>(
       const filterLower = filter.toLowerCase().trim();
 
       // Debug: dump all global lineage edges for tab2/tab3/d analysis
-      const dNode = nodes.find(n => n.label === 'd');
-      const tab2Node = nodes.find(n => n.label === 'tab2');
-      const tab3Node = nodes.find(n => n.label === 'tab3');
+      const dNode = nodes.find((n) => n.label === 'd');
+      const tab2Node = nodes.find((n) => n.label === 'tab2');
+      const tab3Node = nodes.find((n) => n.label === 'tab3');
       if (dNode || tab2Node || tab3Node) {
         console.group('[HierarchyView] Global lineage debug');
-        console.log('All table/CTE nodes:', nodes.filter(n => ['table','view','cte'].includes(n.type)).map(n => `${n.label}(${n.type}) id=${n.id}`));
-        console.log('All edges with tab2/tab3/d:', edges.filter(e => {
-          const ids = [dNode?.id, tab2Node?.id, tab3Node?.id].filter(Boolean);
-          return ids.some(id => e.from === id || e.to === id);
-        }).map(e => {
-          const from = getNode(e.from);
-          const to = getNode(e.to);
-          return `${from?.label ?? e.from}(${from?.type ?? '?'}) --${e.type}--> ${to?.label ?? e.to}(${to?.type ?? '?'})`;
-        }));
+        console.log(
+          'All table/CTE nodes:',
+          nodes
+            .filter((n) => ['table', 'view', 'cte'].includes(n.type))
+            .map((n) => `${n.label}(${n.type}) id=${n.id}`)
+        );
+        console.log(
+          'All edges with tab2/tab3/d:',
+          edges
+            .filter((e) => {
+              const ids = [dNode?.id, tab2Node?.id, tab3Node?.id].filter(Boolean);
+              return ids.some((id) => e.from === id || e.to === id);
+            })
+            .map((e) => {
+              const from = getNode(e.from);
+              const to = getNode(e.to);
+              return `${from?.label ?? e.from}(${from?.type ?? '?'}) --${e.type}--> ${to?.label ?? e.to}(${to?.type ?? '?'})`;
+            })
+        );
         if (dNode) console.log('d node id:', dNode.id);
         if (tab2Node) console.log('tab2 node id:', tab2Node.id);
         if (tab3Node) console.log('tab3 node id:', tab3Node.id);
@@ -1159,16 +1186,18 @@ function DetailsPanel({ details }: { details: NodeDetails }) {
             To ({details.downstreamMappings.length})
           </div>
           <div className="space-y-0.5 font-mono text-[11px]">
-            {details.downstreamMappings.slice(0, expandedDownstream ? undefined : 10).map((m, i) => (
-              <div key={i} className="flex items-start gap-1 text-muted-foreground">
-                <span className="text-muted-foreground/50 shrink-0 w-5 text-right">{i + 1}.</span>
-                <span className="break-all">{m.fromCol}</span>
-                <ArrowRight className="w-3 h-3 shrink-0 mt-0.5" />
-                <span className="break-all">
-                  {m.toTable}.{m.toCol}
-                </span>
-              </div>
-            ))}
+            {details.downstreamMappings
+              .slice(0, expandedDownstream ? undefined : 10)
+              .map((m, i) => (
+                <div key={i} className="flex items-start gap-1 text-muted-foreground">
+                  <span className="text-muted-foreground/50 shrink-0 w-5 text-right">{i + 1}.</span>
+                  <span className="break-all">{m.fromCol}</span>
+                  <ArrowRight className="w-3 h-3 shrink-0 mt-0.5" />
+                  <span className="break-all">
+                    {m.toTable}.{m.toCol}
+                  </span>
+                </div>
+              ))}
             {!expandedDownstream && details.downstreamMappings.length > 10 && (
               <button
                 onClick={() => setExpandedDownstream(true)}

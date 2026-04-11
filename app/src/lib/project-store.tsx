@@ -1,6 +1,21 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, startTransition } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  startTransition,
+} from 'react';
 import type { FileSource, SchemaMetadata } from '@pondpilot/flowscope-core';
-import { STORAGE_KEYS, FILE_EXTENSIONS, SHARE_LIMITS, DEFAULT_FILE_LANGUAGE, ACCEPTED_FILE_TYPES_ARRAY } from './constants';
+import {
+  STORAGE_KEYS,
+  FILE_EXTENSIONS,
+  SHARE_LIMITS,
+  DEFAULT_FILE_LANGUAGE,
+  ACCEPTED_FILE_TYPES_ARRAY,
+} from './constants';
 import type { SharePayload } from './share';
 import { parseTemplateMode } from '@/types';
 import type { TemplateMode } from '@/types';
@@ -140,6 +155,7 @@ interface ProjectContextType {
   setRunMode: (projectId: string, mode: RunMode) => void;
   setTemplateMode: (projectId: string, mode: TemplateMode) => void;
   toggleFileSelection: (projectId: string, fileId: string) => void;
+  setFileSelection: (projectId: string, fileIds: string[], select: boolean) => void;
 
   // File actions for active project
   createFile: (name: string, content?: string, path?: string) => void;
@@ -382,7 +398,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   // Compute a lightweight signature for a project's files
   const computeFileSignature = (files: ProjectFile[]): string => {
-    return files.map(f => `${f.id}:${f.path}:${f.content.length}`).join('|');
+    return files.map((f) => `${f.id}:${f.path}:${f.content.length}`).join('|');
   };
 
   // Save project settings to localStorage (sync, lightweight)
@@ -442,7 +458,10 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
       if (cancelled) return;
 
-      const projectsWithFiles = updatedProjects.filter(Boolean) as { id: string; files: ProjectFile[] }[];
+      const projectsWithFiles = updatedProjects.filter(Boolean) as {
+        id: string;
+        files: ProjectFile[];
+      }[];
 
       // Mark loaded BEFORE setState so the save effect doesn't re-save stale data
       filesLoadedRef.current = true;
@@ -475,7 +494,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     };
 
     loadFiles();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []); // Run once on mount
 
   useEffect(() => {
@@ -489,14 +510,15 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   // In backend mode, default to backend project
   const effectiveActiveProjectId = isBackendMode ? BACKEND_PROJECT_ID : activeProjectId;
 
-  const currentProjectRaw = effectiveProjects.find((p) => p.id === effectiveActiveProjectId) || null;
+  const currentProjectRaw =
+    effectiveProjects.find((p) => p.id === effectiveActiveProjectId) || null;
   const currentProject = useMemo(() => {
     if (!currentProjectRaw) return null;
     // Use the override activeFileId if set (avoids triggering full project serialization)
-    const effectiveActiveFileId = activeFileIdOverride
-      && currentProjectRaw.files.some((f) => f.id === activeFileIdOverride)
-      ? activeFileIdOverride
-      : currentProjectRaw.activeFileId;
+    const effectiveActiveFileId =
+      activeFileIdOverride && currentProjectRaw.files.some((f) => f.id === activeFileIdOverride)
+        ? activeFileIdOverride
+        : currentProjectRaw.activeFileId;
     return effectiveActiveFileId !== currentProjectRaw.activeFileId
       ? { ...currentProjectRaw, activeFileId: effectiveActiveFileId }
       : currentProjectRaw;
@@ -628,9 +650,79 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  const setFileSelection = useCallback((projectId: string, fileIds: string[], select: boolean) => {
+    if (fileIds.length === 0) {
+      return;
+    }
+
+    const fileIdSet = new Set(fileIds);
+
+    if (projectId === BACKEND_PROJECT_ID) {
+      setBackendSelectedFileIds((prev) => {
+        const next = new Set(prev);
+        let changed = false;
+
+        for (const fileId of fileIdSet) {
+          if (select) {
+            if (!next.has(fileId)) {
+              next.add(fileId);
+              changed = true;
+            }
+          } else if (next.delete(fileId)) {
+            changed = true;
+          }
+        }
+
+        if (!changed) {
+          return prev;
+        }
+
+        const updated = Array.from(next);
+        setBackendRunMode(updated.length > 0 ? 'custom' : 'current');
+        return updated;
+      });
+      return;
+    }
+
+    setProjects((prev) =>
+      prev.map((p) => {
+        if (p.id !== projectId) return p;
+
+        const next = new Set(p.selectedFileIds || []);
+        let changed = false;
+
+        for (const fileId of fileIdSet) {
+          if (select) {
+            if (!next.has(fileId)) {
+              next.add(fileId);
+              changed = true;
+            }
+          } else if (next.delete(fileId)) {
+            changed = true;
+          }
+        }
+
+        if (!changed) {
+          return p;
+        }
+
+        const selectedFileIds = Array.from(next);
+        return {
+          ...p,
+          selectedFileIds,
+          runMode: selectedFileIds.length > 0 ? 'custom' : 'current',
+        };
+      })
+    );
+  }, []);
+
   const getFileLanguage = (fileName: string): ProjectFile['language'] => {
     if (fileName.endsWith(FILE_EXTENSIONS.JSON)) return 'json';
-    if (fileName.endsWith(FILE_EXTENSIONS.SQL) || fileName.toLowerCase().endsWith(FILE_EXTENSIONS.HQL)) return 'sql';
+    if (
+      fileName.endsWith(FILE_EXTENSIONS.SQL) ||
+      fileName.toLowerCase().endsWith(FILE_EXTENSIONS.HQL)
+    )
+      return 'sql';
     return 'text';
   };
 
@@ -655,9 +747,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             const ext = dotIndex > 0 ? name.slice(dotIndex) : '';
             let counter = 2;
             // Derive the folder prefix from the original path
-            const folderPrefix = path && path.includes('/')
-              ? path.slice(0, path.lastIndexOf('/') + 1)
-              : '';
+            const folderPrefix =
+              path && path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : '';
             while (existingPaths.has(`${folderPrefix}${baseName}_${counter}${ext}`.toLowerCase())) {
               counter++;
             }
@@ -823,9 +914,10 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           if (p.id !== activeProjectId) return p;
           // Compute new folder path: replace last segment of oldFolderPath
           const lastSlash = oldFolderPath.lastIndexOf('/');
-          const newFolderPath = lastSlash === -1
-            ? newFolderName
-            : `${oldFolderPath.slice(0, lastSlash + 1)}${newFolderName}`;
+          const newFolderPath =
+            lastSlash === -1
+              ? newFolderName
+              : `${oldFolderPath.slice(0, lastSlash + 1)}${newFolderName}`;
           const prefix = `${oldFolderPath}/`;
           return {
             ...p,
@@ -875,7 +967,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       for (const file of files) {
         // Filter by accepted file types
         const ext = '.' + file.name.split('.').pop()?.toLowerCase();
-        if (!ACCEPTED_FILE_TYPES_ARRAY.includes(ext as typeof ACCEPTED_FILE_TYPES_ARRAY[number])) {
+        if (
+          !ACCEPTED_FILE_TYPES_ARRAY.includes(ext as (typeof ACCEPTED_FILE_TYPES_ARRAY)[number])
+        ) {
           continue;
         }
         const content = await file.text();
@@ -916,7 +1010,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
       for (const file of files) {
         const ext = '.' + file.name.split('.').pop()?.toLowerCase();
-        if (!ACCEPTED_FILE_TYPES_ARRAY.includes(ext as typeof ACCEPTED_FILE_TYPES_ARRAY[number])) {
+        if (
+          !ACCEPTED_FILE_TYPES_ARRAY.includes(ext as (typeof ACCEPTED_FILE_TYPES_ARRAY)[number])
+        ) {
           continue;
         }
         const content = await file.text();
@@ -1029,6 +1125,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     setRunMode,
     setTemplateMode,
     toggleFileSelection,
+    setFileSelection,
     createFile,
     updateFile,
     updateFiles,

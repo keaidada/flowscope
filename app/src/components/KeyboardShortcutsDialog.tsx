@@ -155,7 +155,8 @@ export function KeyboardShortcutsDialog({
         <div className="border-t pt-3 mt-auto">
           <p className="text-xs text-muted-foreground text-center">
             Press{' '}
-            <kbd className="px-1 py-0.5 text-[10px] bg-muted rounded border font-mono">Esc</kbd> {t('shortcuts.toClose')}
+            <kbd className="px-1 py-0.5 text-[10px] bg-muted rounded border font-mono">Esc</kbd>{' '}
+            {t('shortcuts.toClose')}
           </p>
         </div>
       </DialogContent>

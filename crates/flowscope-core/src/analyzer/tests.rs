@@ -1085,17 +1085,24 @@ ON t2.channel_id = t3.id
 
     // Target table should be present
     assert!(
-        node_labels.iter().any(|l| l.to_lowercase() == "b10_info_act"),
+        node_labels
+            .iter()
+            .any(|l| l.to_lowercase() == "b10_info_act"),
         "target table 'B10_Info_Act' should be in nodes, got: {:?}",
         node_labels
     );
 
     // Source tables should be present
-    for expected in ["ams_base_activity", "ams_base_activity_channel", "ams_base_channel"] {
+    for expected in [
+        "ams_base_activity",
+        "ams_base_activity_channel",
+        "ams_base_channel",
+    ] {
         assert!(
             node_labels.iter().any(|l| l.to_lowercase() == expected),
             "source table '{}' should be in nodes, got: {:?}",
-            expected, node_labels
+            expected,
+            node_labels
         );
     }
 }

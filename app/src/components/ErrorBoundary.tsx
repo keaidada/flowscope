@@ -63,13 +63,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <div className="max-w-md p-6 bg-card border border-destructive/20 rounded-lg shadow-lg">
             <div className="flex items-center gap-3 mb-4">
               <AlertCircle className="h-6 w-6 text-destructive" />
-              <h2 className="text-xl font-semibold text-foreground">{t('errors.somethingWentWrong')}</h2>
+              <h2 className="text-xl font-semibold text-foreground">
+                {t('errors.somethingWentWrong')}
+              </h2>
             </div>
 
             <div className="mb-4">
-              <p className="text-sm text-muted-foreground mb-2">
-                {t('errors.unexpectedError')}
-              </p>
+              <p className="text-sm text-muted-foreground mb-2">{t('errors.unexpectedError')}</p>
 
               {this.state.error && (
                 <details className="mt-3">

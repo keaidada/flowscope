@@ -27,10 +27,7 @@ export function LanguageToggle() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuRadioGroup
-          value={i18n.language}
-          onValueChange={(value) => setLanguage(value)}
-        >
+        <DropdownMenuRadioGroup value={i18n.language} onValueChange={(value) => setLanguage(value)}>
           {languageOptions.map(({ value, label }) => (
             <DropdownMenuRadioItem key={value} value={value} className="gap-2">
               {label}

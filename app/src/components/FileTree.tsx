@@ -164,10 +164,7 @@ function countFiles(node: TreeNode): number {
 
 function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: FolderNodeProps) {
   const isExpanded = expandedFolders.has(node.path);
-  const sortedChildren = useMemo(
-    () => sortTreeNodes(Array.from(node.children.values())),
-    [node]
-  );
+  const sortedChildren = useMemo(() => sortTreeNodes(Array.from(node.children.values())), [node]);
 
   const fileCount = useMemo(() => countFiles(node), [node]);
 
@@ -190,7 +187,10 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
   };
 
   // Folder selection state — only compute when expanded or checkboxes shown
-  const folderFileIds = useMemo(() => props.showCheckboxes ? collectFileIds(node) : [], [node, props.showCheckboxes]);
+  const folderFileIds = useMemo(
+    () => (props.showCheckboxes ? collectFileIds(node) : []),
+    [node, props.showCheckboxes]
+  );
   const selectedSet = useMemo(() => new Set(props.selectedFileIds), [props.selectedFileIds]);
   const { allSelected, someSelected } = useMemo(() => {
     if (folderFileIds.length === 0) return { allSelected: false, someSelected: false };
@@ -227,14 +227,27 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
             className="h-7 flex-1 text-sm"
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === 'Enter') { e.preventDefault(); handleConfirmRename(); }
-              if (e.key === 'Escape') { e.preventDefault(); setIsRenaming(false); setRenameValue(node.name); }
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleConfirmRename();
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setIsRenaming(false);
+                setRenameValue(node.name);
+              }
             }}
             onBlur={handleConfirmRename}
           />
         </div>
         {isExpanded && (
-          <FolderChildren sortedChildren={sortedChildren} depth={depth} props={props} expandedFolders={expandedFolders} onToggleFolder={onToggleFolder} />
+          <FolderChildren
+            sortedChildren={sortedChildren}
+            depth={depth}
+            props={props}
+            expandedFolders={expandedFolders}
+            onToggleFolder={onToggleFolder}
+          />
         )}
       </div>
     );
@@ -283,7 +296,10 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
             {props.onCreateFileInFolder && (
               <button
                 className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                onClick={(e) => { e.stopPropagation(); props.onCreateFileInFolder!(node.path); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onCreateFileInFolder!(node.path);
+                }}
                 title="New file"
               >
                 <Plus className="size-3" />
@@ -292,7 +308,10 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
             {props.onCreateFolderInFolder && (
               <button
                 className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                onClick={(e) => { e.stopPropagation(); props.onCreateFolderInFolder!(node.path); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onCreateFolderInFolder!(node.path);
+                }}
                 title="New folder"
               >
                 <FolderPlus className="size-3" />
@@ -301,7 +320,11 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
             {props.onRenameFolder && (
               <button
                 className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                onClick={(e) => { e.stopPropagation(); setRenameValue(node.name); setIsRenaming(true); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRenameValue(node.name);
+                  setIsRenaming(true);
+                }}
                 title="Rename"
               >
                 <Pencil className="size-3" />
@@ -311,14 +334,26 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
         )}
       </div>
       {isExpanded && (
-        <FolderChildren sortedChildren={sortedChildren} depth={depth} props={props} expandedFolders={expandedFolders} onToggleFolder={onToggleFolder} />
+        <FolderChildren
+          sortedChildren={sortedChildren}
+          depth={depth}
+          props={props}
+          expandedFolders={expandedFolders}
+          onToggleFolder={onToggleFolder}
+        />
       )}
     </div>
   );
 }
 
 /** Flat file list with render limit */
-function FlatFileList({ sortedChildren, props }: { sortedChildren: TreeNode[]; props: FileTreeProps }) {
+function FlatFileList({
+  sortedChildren,
+  props,
+}: {
+  sortedChildren: TreeNode[];
+  props: FileTreeProps;
+}) {
   const [renderLimit, setRenderLimit] = useState(FOLDER_RENDER_LIMIT);
   const rootRef = useRef<HTMLDivElement>(null);
   const visible = sortedChildren.slice(0, renderLimit);
@@ -350,8 +385,13 @@ function FlatFileList({ sortedChildren, props }: { sortedChildren: TreeNode[]; p
 }
 
 /** Renders folder children with a render limit to avoid blocking the UI */
-function FolderChildren({ sortedChildren, depth, props, expandedFolders, onToggleFolder }: {
-
+function FolderChildren({
+  sortedChildren,
+  depth,
+  props,
+  expandedFolders,
+  onToggleFolder,
+}: {
   sortedChildren: TreeNode[];
   depth: number;
   props: FileTreeProps;
@@ -637,9 +677,7 @@ export function FileTree(props: FileTreeProps) {
 
   // If no nested structure, render flat list (no need for tree)
   if (!hasNestedStructure) {
-    return (
-      <FlatFileList sortedChildren={sortedChildren} props={props} />
-    );
+    return <FlatFileList sortedChildren={sortedChildren} props={props} />;
   }
 
   return (

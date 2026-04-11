@@ -747,7 +747,8 @@ impl<'a, 'b> Visitor for LineageVisitor<'a, 'b> {
                     // a parent target (i.e., are inside another CTE/derived table).
                     if let Some(target) = self.target_node.as_deref() {
                         if target != node_id.as_ref() {
-                            self.analyzer.create_source_edge(self.ctx, &node_id, Some(target));
+                            self.analyzer
+                                .create_source_edge(self.ctx, &node_id, Some(target));
                         }
                     }
                 }

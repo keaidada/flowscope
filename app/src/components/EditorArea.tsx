@@ -44,13 +44,17 @@ interface EditorAreaProps {
   analysis: EditorAnalysisState;
 }
 
-export function EditorArea({
-  backendReady,
-  className,
-  analysis,
-}: EditorAreaProps) {
+export function EditorArea({ backendReady, className, analysis }: EditorAreaProps) {
   const { t } = useTranslation();
-  const { currentProject, updateFile, createFile, setRunMode, isReadOnly, setProjectDialect, setTemplateMode } = useProject();
+  const {
+    currentProject,
+    updateFile,
+    createFile,
+    setRunMode,
+    isReadOnly,
+    setProjectDialect,
+    setTemplateMode,
+  } = useProject();
 
   const theme = useThemeStore((state) => state.theme);
   const isDark = resolveTheme(theme) === 'dark';
@@ -111,7 +115,7 @@ export function EditorArea({
         }
       });
     }
-  }, [activeFile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeFile, updateFile]);
 
   // Focus the editor when active file changes (e.g., new file created)
   useEffect(() => {
@@ -240,7 +244,9 @@ export function EditorArea({
     return lower.endsWith('.sql') || lower.endsWith('.hql');
   }).length;
   const fileIdSet = new Set(currentProject.files.map((f) => f.id));
-  const selectedCount = (currentProject.selectedFileIds || []).filter((id) => fileIdSet.has(id)).length;
+  const selectedCount = (currentProject.selectedFileIds || []).filter((id) =>
+    fileIdSet.has(id)
+  ).length;
 
   return (
     <div className={cn('flex flex-col h-full bg-background', className)}>

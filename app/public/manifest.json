@@ -16,9 +16,7 @@
       "128": "icon-128.png"
     }
   },
-  "permissions": [
-    "storage"
-  ],
+  "permissions": ["storage"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

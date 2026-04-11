@@ -17,8 +17,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::error::Error;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 /// Known dialect variants that must match the Dialect enum in types/request.rs.
 const KNOWN_DIALECTS: &[&str] = &[
@@ -325,15 +326,48 @@ fn validate_dialect_coverage(
 // Code Generation
 // ============================================================================
 
+fn format_rust_code(content: &str) -> String {
+    let mut child = match Command::new("rustfmt")
+        .arg("--edition")
+        .arg("2021")
+        .arg("--emit")
+        .arg("stdout")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return content.to_string(),
+    };
+
+    let Some(mut stdin) = child.stdin.take() else {
+        return content.to_string();
+    };
+
+    if stdin.write_all(content.as_bytes()).is_err() {
+        return content.to_string();
+    }
+    drop(stdin);
+
+    match child.wait_with_output() {
+        Ok(output) if output.status.success() => {
+            String::from_utf8(output.stdout).unwrap_or_else(|_| content.to_string())
+        }
+        _ => content.to_string(),
+    }
+}
+
 fn write_if_changed(path: &Path, content: &str) -> Result<(), Box<dyn Error>> {
+    let formatted_content = format_rust_code(content);
+
     let write_needed = match fs::read_to_string(path) {
-        Ok(existing) => existing != content,
+        Ok(existing) => existing != formatted_content,
         Err(err) if err.kind() == io::ErrorKind::NotFound => true,
         Err(err) => return Err(format!("Failed to read {path:?}: {err}").into()),
     };
 
     if write_needed {
-        if let Err(err) = fs::write(path, content) {
+        if let Err(err) = fs::write(path, &formatted_content) {
             return Err(format!("Failed to write {path:?}: {err}").into());
         }
     }

@@ -31,10 +31,15 @@ export async function initWasm(
 
       // Explicitly initialize the WASM module
       if (typeof wasm.default === 'function') {
-        // In Chrome extension context, resolve WASM URL via chrome.runtime.getURL
+        // In Chrome extension context, resolve WASM URL via runtime.getURL when available
         let wasmUrl = options.wasmUrl;
-        if (!wasmUrl && typeof chrome !== 'undefined' && chrome.runtime?.getURL) {
-          wasmUrl = chrome.runtime.getURL('wasm/flowscope_wasm_bg.wasm');
+        const runtimeGetUrl = (
+          globalThis as typeof globalThis & {
+            chrome?: { runtime?: { getURL?: (path: string) => string } };
+          }
+        ).chrome?.runtime?.getURL;
+        if (!wasmUrl && typeof runtimeGetUrl === 'function') {
+          wasmUrl = runtimeGetUrl('wasm/flowscope_wasm_bg.wasm');
         }
         await wasm.default(wasmUrl ?? undefined);
         // Allow host apps to enable tracing via init option if supported by the build

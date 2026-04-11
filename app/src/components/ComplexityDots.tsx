@@ -48,7 +48,9 @@ export function ComplexityDots({ score, className }: ComplexityDotsProps) {
         </TooltipTrigger>
         <TooltipContent>
           <p className="font-medium">{getComplexityLabel(score)}</p>
-          <p className="text-xs text-muted-foreground">{t('analysis.complexityScore', { score })}</p>
+          <p className="text-xs text-muted-foreground">
+            {t('analysis.complexityScore', { score })}
+          </p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

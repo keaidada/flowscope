@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, startTransition } from 'react';
-import { useLineage } from '@pondpilot/flowscope-react';
+import { useLineageStore } from '@pondpilot/flowscope-react';
 import { analyzeWithWorker, getCachedAnalysis, syncAnalysisFiles } from '@/lib/analysis-worker';
 import type { BackendAdapter, AnalysisPayload } from '@/lib/backend-adapter';
 import { useProject } from '@/lib/project-store';
@@ -49,8 +49,9 @@ interface PreparedAnalysisFile {
 export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions) {
   const adapter = options?.adapter;
   const { currentProject, activeProjectId, updateSchemaSQL, updateFiles } = useProject();
-  const { actions, state: lineageState } = useLineage();
-  const { hideCTEs } = lineageState;
+  const hideCTEs = useLineageStore((state) => state.hideCTEs);
+  const setLineageResult = useLineageStore((state) => state.setResult);
+  const setLineageSql = useLineageStore((state) => state.setSql);
   const { getResult, getMetrics, setResult: storeResult, setMetrics } = useAnalysisStore();
   const getViewState = useViewStateStore((s) => s.getViewState);
   const enableLinting = activeProjectId
@@ -67,12 +68,6 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
   useEffect(() => {
     currentProjectRef.current = currentProject;
   }, [currentProject]);
-
-  // Use ref for actions to avoid dependency issues (actions object changes every render)
-  const actionsRef = useRef(actions);
-  useEffect(() => {
-    actionsRef.current = actions;
-  }, [actions]);
 
   const setAnalyzing = useCallback((isAnalyzing: boolean) => {
     setState((prev) => ({ ...prev, isAnalyzing }));
@@ -242,7 +237,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     const memoryCacheStart = nowMs();
 
     if (!activeProjectId) {
-      actionsRef.current.setResult(null);
+      setLineageResult(null);
       return;
     }
 
@@ -254,7 +249,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     // Use startTransition to make the result update low-priority,
     // allowing UI interactions and worker callbacks to proceed without blocking
     startTransition(() => {
-      actionsRef.current.setResult(cachedResult);
+      setLineageResult(cachedResult);
     });
 
     if (cachedResult || !backendReady) {
@@ -345,7 +340,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
       // Use startTransition to make the result update low-priority,
       // allowing UI interactions and worker callbacks to proceed without blocking
       startTransition(() => {
-        actionsRef.current.setResult(cached.result);
+        setLineageResult(cached.result);
       });
       storeResult(activeProjectId, cached.result, hideCTEs);
       setMetrics(activeProjectId, {
@@ -444,9 +439,9 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           const representativeSql = context.files
             .map((f) => `-- File: ${f.name}\n${f.content}`)
             .join('\n\n');
-          actionsRef.current.setSql(representativeSql);
+          setLineageSql(representativeSql);
         } else if (activeFileContent !== undefined) {
-          actionsRef.current.setSql(activeFileContent);
+          setLineageSql(activeFileContent);
         }
 
         // Resolve schemaSQL: use project store value, or load from IndexedDB if empty
@@ -544,7 +539,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           // Use startTransition to make the result update low-priority,
           // allowing UI interactions and worker callbacks to proceed without blocking
           startTransition(() => {
-            actionsRef.current.setResult(analysisResponse.result);
+            setLineageResult(analysisResponse.result);
           });
           if (activeProjectId) {
             storeResult(activeProjectId, analysisResponse.result, hideCTEs);
