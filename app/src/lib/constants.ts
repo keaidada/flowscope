@@ -53,11 +53,12 @@ export const UI_CONFIG = {
 
 export const FILE_EXTENSIONS = {
   SQL: '.sql',
+  HQL: '.hql',
   JSON: '.json',
   TEXT: '.txt',
 } as const;
 
-export const ACCEPTED_FILE_TYPES_ARRAY = [FILE_EXTENSIONS.SQL] as const;
+export const ACCEPTED_FILE_TYPES_ARRAY = [FILE_EXTENSIONS.SQL, FILE_EXTENSIONS.HQL] as const;
 
 export const ACCEPTED_FILE_TYPES = ACCEPTED_FILE_TYPES_ARRAY.join(',');
 

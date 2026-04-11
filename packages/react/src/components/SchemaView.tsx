@@ -990,6 +990,10 @@ function SchemaViewInner({
         fitView
         minZoom={0.05}
         maxZoom={2}
+        zoomOnPinch={true}
+        zoomOnScroll={false}
+        panOnScroll={true}
+        panOnDrag={true}
       >
         <Background color={isDark ? '#334155' : '#e2e8f0'} gap={20} size={1} />
         <Controls />

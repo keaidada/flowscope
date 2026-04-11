@@ -11,7 +11,7 @@ import type {
   GlobalLineage,
   Node as LineageNode,
 } from '@pondpilot/flowscope-core';
-import type { Node as FlowNode, Edge as FlowEdge } from '@xyflow/react';
+import type { Node as FlowNode, Edge as FlowEdge, MarkerType } from '@xyflow/react';
 import type {
   GraphBuildRequest,
   ScriptGraphBuildRequest,
@@ -101,6 +101,11 @@ function deserializeEdges(edges: SerializedFlowEdge[]): FlowEdge[] {
     zIndex: edge.zIndex,
     data: edge.data,
     style: edge.style,
+    markerEnd: {
+      type: 'arrowclosed' as MarkerType,
+      width: 12,
+      height: 12,
+    },
   }));
 }
 

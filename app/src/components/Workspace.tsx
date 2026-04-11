@@ -1,9 +1,16 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { Share2, Github } from 'lucide-react';
+import { Share2, Github, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useLineageActions, useLineageState } from '@pondpilot/flowscope-react';
 import { Button } from './ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 import { FlowScopeLogo } from './FlowScopeLogo';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './ui/resizable';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
@@ -12,6 +19,7 @@ import { EditorArea } from './EditorArea';
 import { AnalysisView } from './AnalysisView';
 import { SidebarFileTree } from './SidebarFileTree';
 import { SidebarSearch } from './SidebarSearch';
+import { SidebarSchema } from './SidebarSchema';
 import { ActivityBar } from './ActivityBar';
 import type { SidebarView } from './ActivityBar';
 import { LayoutModeToggle } from './LayoutModeToggle';
@@ -22,7 +30,6 @@ import { ThemeToggle } from './ThemeToggle';
 import { LanguageToggle } from './LanguageToggle';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { CommandPalette } from './CommandPalette';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { useProject } from '@/lib/project-store';
 import { NavigationProvider } from '@/lib/navigation-context';
 import { FocusRegistryProvider } from '@/lib/focus-registry';
@@ -30,7 +37,6 @@ import { useGlobalShortcuts, useAnalysis } from '@/hooks';
 import type { GlobalShortcut } from '@/hooks';
 import { useThemeStore, type Theme } from '@/lib/theme-store';
 import { useViewStateStore } from '@/lib/view-state-store';
-import { getShortcutDisplay } from '@/lib/shortcuts';
 import { useBackend } from '@/lib/backend-context';
 
 interface WorkspaceProps {
@@ -338,58 +344,6 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
         {/* Header Actions */}
         <div className="flex items-center gap-1">
-          {currentProject && (
-            <>
-              <ExportDialog
-                result={result}
-                projectName={currentProject.name}
-                graphRef={graphContainerRef}
-              />
-              {/* Hide Share button in serve mode - files come from CLI */}
-              {!isBackendMode && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => setShareDialogOpen(true)}
-                      >
-                        <Share2 className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p className="flex items-center gap-2">
-                        {t('app.shareProject')}
-                        <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded border font-mono">
-                          {getShortcutDisplay('share')}
-                        </kbd>
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-            </>
-          )}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                  <a
-                    href="https://github.com/pondpilot/flowscope"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <Github className="h-4 w-4" />
-                  </a>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{t('app.viewOnGithub')}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
           <LayoutModeToggle
             sidebarOpen={sidebarView !== null}
             editorOpen={editorOpen}
@@ -406,8 +360,46 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
               }
             }}
           />
-          <LanguageToggle />
-          <ThemeToggle />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8">
+                <Settings className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {currentProject && (
+                <>
+                  <ExportDialog
+                    result={result}
+                    projectName={currentProject.name}
+                    graphRef={graphContainerRef}
+                  />
+                  {!isBackendMode && (
+                    <DropdownMenuItem onClick={() => setShareDialogOpen(true)}>
+                      <Share2 className="h-4 w-4 mr-2" />
+                      {t('app.shareProject')}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuItem asChild>
+                <a
+                  href="https://github.com/pondpilot/flowscope"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Github className="h-4 w-4 mr-2" />
+                  {t('app.viewOnGithub')}
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <div className="flex flex-col gap-1 px-2 py-1.5">
+                <LanguageToggle />
+                <ThemeToggle />
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
@@ -461,50 +453,62 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
         <FocusRegistryProvider>
           <div className="flex-1 overflow-hidden flex">
             {/* Activity Bar (narrow icon strip) */}
-            <ActivityBar activeView={sidebarView} onViewChange={setSidebarView} />
+            <ActivityBar activeView={sidebarView} onViewChange={setSidebarView} hideSchema={isBackendMode} />
 
-            {/* Sidebar (collapsible) */}
-            {sidebarView && (
-              <div className="w-[220px] shrink-0 border-r overflow-hidden">
-                {sidebarView === 'files' && <SidebarFileTree />}
-                {sidebarView === 'search' && <SidebarSearch />}
-              </div>
-            )}
+            {/* Main area with optional resizable sidebar */}
+            <ResizablePanelGroup direction="horizontal" className="flex-1">
+              {/* Sidebar (collapsible & resizable) */}
+              {sidebarView && (
+                <>
+                  <ResizablePanel
+                    defaultSize={15}
+                    minSize={10}
+                    maxSize={50}
+                    className="overflow-hidden"
+                  >
+                    {sidebarView === 'files' && <SidebarFileTree />}
+                    {sidebarView === 'search' && <SidebarSearch />}
+                    {sidebarView === 'schema' && <SidebarSchema />}
+                  </ResizablePanel>
+                  <ResizableHandle />
+                </>
+              )}
 
-            {/* Main panels area */}
-            <div className="flex-1 overflow-hidden">
-              <ResizablePanelGroup direction="horizontal">
-                {/* Analysis Panel (Lineage) - always visible */}
-                <ResizablePanel
-                  defaultSize={editorOpen ? 55 : 100}
-                  minSize={30}
-                  data-testid="analysis-panel"
-                >
-                  <AnalysisView
-                    graphContainerRef={graphContainerRef}
-                    isAnalyzing={analysis.isAnalyzing}
-                  />
-                </ResizablePanel>
+              {/* Main panels area */}
+              <ResizablePanel defaultSize={sidebarView ? 85 : 100} minSize={40}>
+                <ResizablePanelGroup direction="horizontal">
+                  {/* Analysis Panel (Lineage) - always visible */}
+                  <ResizablePanel
+                    defaultSize={editorOpen ? 55 : 100}
+                    minSize={30}
+                    data-testid="analysis-panel"
+                  >
+                    <AnalysisView
+                      graphContainerRef={graphContainerRef}
+                      isAnalyzing={analysis.isAnalyzing}
+                    />
+                  </ResizablePanel>
 
-                {/* Editor Panel - toggleable */}
-                {editorOpen && (
-                  <>
-                    <ResizableHandle withHandle />
-                    <ResizablePanel
-                      ref={editorPanelRef}
-                      defaultSize={45}
-                      minSize={25}
-                      data-testid="editor-panel"
-                    >
-                      <EditorArea
-                        backendReady={backendReady}
-                        analysis={analysis}
-                      />
-                    </ResizablePanel>
-                  </>
-                )}
-              </ResizablePanelGroup>
-            </div>
+                  {/* Editor Panel - toggleable */}
+                  {editorOpen && (
+                    <>
+                      <ResizableHandle withHandle />
+                      <ResizablePanel
+                        ref={editorPanelRef}
+                        defaultSize={45}
+                        minSize={25}
+                        data-testid="editor-panel"
+                      >
+                        <EditorArea
+                          backendReady={backendReady}
+                          analysis={analysis}
+                        />
+                      </ResizablePanel>
+                    </>
+                  )}
+                </ResizablePanelGroup>
+              </ResizablePanel>
+            </ResizablePanelGroup>
           </div>
         </FocusRegistryProvider>
       </NavigationProvider>

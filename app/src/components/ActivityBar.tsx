@@ -1,13 +1,14 @@
-import { FolderOpen, Search } from 'lucide-react';
+import { FolderOpen, Search, Database } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-export type SidebarView = 'files' | 'search' | null;
+export type SidebarView = 'files' | 'search' | 'schema' | null;
 
 interface ActivityBarProps {
   activeView: SidebarView;
   onViewChange: (view: SidebarView) => void;
+  hideSchema?: boolean;
 }
 
 const ACTIVITY_ITEMS: Array<{
@@ -15,18 +16,25 @@ const ACTIVITY_ITEMS: Array<{
   icon: React.ElementType;
   labelKey: string;
   shortcut?: string;
+  hideKey?: string;
 }> = [
   { id: 'files', icon: FolderOpen, labelKey: 'activityBar.files', shortcut: '⌘⇧E' },
   { id: 'search', icon: Search, labelKey: 'activityBar.search', shortcut: '⌘⇧F' },
+  { id: 'schema', icon: Database, labelKey: 'activityBar.schema', shortcut: '⌘⇧K', hideKey: 'schema' },
 ];
 
-export function ActivityBar({ activeView, onViewChange }: ActivityBarProps) {
+export function ActivityBar({ activeView, onViewChange, hideSchema }: ActivityBarProps) {
   const { t } = useTranslation();
+
+  const visibleItems = ACTIVITY_ITEMS.filter(item => {
+    if (item.hideKey === 'schema' && hideSchema) return false;
+    return true;
+  });
 
   return (
     <div className="flex flex-col items-center w-12 bg-muted/30 border-r shrink-0 py-2 gap-1">
       <TooltipProvider delayDuration={300}>
-        {ACTIVITY_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeView === item.id;
 

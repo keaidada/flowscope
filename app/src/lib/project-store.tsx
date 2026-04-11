@@ -1,12 +1,13 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, startTransition } from 'react';
 import type { FileSource, SchemaMetadata } from '@pondpilot/flowscope-core';
-import { STORAGE_KEYS, FILE_EXTENSIONS, SHARE_LIMITS, DEFAULT_FILE_LANGUAGE } from './constants';
+import { STORAGE_KEYS, FILE_EXTENSIONS, SHARE_LIMITS, DEFAULT_FILE_LANGUAGE, ACCEPTED_FILE_TYPES_ARRAY } from './constants';
 import type { SharePayload } from './share';
 import { parseTemplateMode } from '@/types';
 import type { TemplateMode } from '@/types';
 import { DEFAULT_PROJECT, DEFAULT_DBT_PROJECT } from './default-projects';
 import { useBackend } from './backend-context';
 import { useBackendFiles } from '@/hooks/useBackendFiles';
+import { saveProjectFiles, loadProjectFiles, deleteProjectFiles } from './file-storage';
 
 const uuidv4 = () => crypto.randomUUID();
 
@@ -144,7 +145,9 @@ interface ProjectContextType {
   createFile: (name: string, content?: string, path?: string) => void;
   updateFile: (fileId: string, content: string) => void;
   deleteFile: (fileId: string) => void;
+  deleteFiles: (fileIds: string[]) => void;
   renameFile: (fileId: string, newName: string) => void;
+  renameFolder: (oldFolderPath: string, newFolderName: string) => void;
   selectFile: (fileId: string) => void;
 
   // Schema SQL management
@@ -152,6 +155,9 @@ interface ProjectContextType {
 
   // Import/Export
   importFiles: (files: FileList | File[]) => Promise<void>;
+  replaceWithFiles: (files: FileList | File[]) => Promise<void>;
+  /** Directly add pre-built ProjectFile objects (no file reading needed) */
+  addFilesDirectly: (files: ProjectFile[]) => void;
 
   // Import from shared URL
   importProject: (payload: SharePayload) => string;
@@ -171,23 +177,31 @@ interface ProjectContextType {
 
 const ProjectContext = createContext<ProjectContextType | null>(null);
 
+/** Lightweight project settings stored in localStorage (no file data) */
+interface ProjectSettings {
+  id: string;
+  name: string;
+  dialect: Dialect;
+  templateMode: TemplateMode;
+  schemaSQL: string;
+  runMode: RunMode;
+}
+
 const loadProjectsFromStorage = (): Project[] => {
   try {
     const saved = localStorage.getItem(STORAGE_KEYS.PROJECTS);
     if (saved) {
       const parsed = JSON.parse(saved);
       return parsed.map((p: Partial<Project>) => ({
-        ...p,
+        id: p.id || crypto.randomUUID(),
+        name: p.name || 'Untitled',
         dialect: p.dialect || 'generic',
-        runMode: p.runMode || 'all',
-        selectedFileIds: p.selectedFileIds || [],
-        schemaSQL: p.schemaSQL || '', // Default to empty string for older projects
-        templateMode: parseTemplateMode(p.templateMode), // Validate and default to 'raw' for older/corrupted projects
-        // Migrate files to include path if missing
-        files: (p.files || []).map((f: Partial<ProjectFile>) => ({
-          ...f,
-          path: f.path || f.name || '', // Default path to filename for older files
-        })),
+        runMode: 'current' as RunMode, // Default to current file — user can switch to 'all' manually
+        selectedFileIds: [],
+        schemaSQL: p.schemaSQL || '',
+        templateMode: parseTemplateMode(p.templateMode),
+        files: [], // Files are loaded from IndexedDB asynchronously
+        activeFileId: null,
       }));
     }
   } catch (error) {
@@ -196,12 +210,39 @@ const loadProjectsFromStorage = (): Project[] => {
   return [DEFAULT_PROJECT, DEFAULT_DBT_PROJECT];
 };
 
-const saveProjectsToStorage = (projects: Project[]) => {
+/**
+ * Persist project settings to localStorage (lightweight, sync).
+ * File contents are saved to IndexedDB separately (async, no size limit).
+ */
+const saveProjectSettingsToStorage = (projects: Project[]) => {
   try {
-    localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(projects));
+    const settings: ProjectSettings[] = projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      dialect: p.dialect,
+      templateMode: p.templateMode,
+      schemaSQL: p.schemaSQL,
+      runMode: p.runMode,
+    }));
+    localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(settings));
   } catch (error) {
-    console.error('Failed to save projects to storage:', error);
+    console.error('Failed to save project settings to storage:', error);
   }
+};
+
+/** Debounced IndexedDB file save — 500ms delay to avoid frequent writes */
+const fileSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const debouncedSaveFiles = (projectId: string, files: ProjectFile[]) => {
+  const existing = fileSaveTimers.get(projectId);
+  if (existing) clearTimeout(existing);
+  fileSaveTimers.set(
+    projectId,
+    setTimeout(() => {
+      saveProjectFiles(projectId, files);
+      fileSaveTimers.delete(projectId);
+    }, 500)
+  );
 };
 
 const loadActiveProjectIdFromStorage = (projects: Project[]): string | null => {
@@ -247,6 +288,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(() =>
     loadActiveProjectIdFromStorage(projects)
   );
+  // Track active file separately to avoid triggering full project serialization on file switch
+  const [activeFileIdOverride, setActiveFileIdOverride] = useState<string | null>(null);
 
   // Get backend state
   const { backendType } = useBackend();
@@ -331,9 +374,108 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     backendSelectedFileIds,
   ]);
 
+  // Track whether IndexedDB files have been loaded (prevent overwriting on mount)
+  const filesLoadedRef = useRef(false);
+  // Track previous file signatures per project to detect changes (id+path+content length)
+  const prevFileSignaturesRef = useRef<Map<string, string>>(new Map());
+
+  // Compute a lightweight signature for a project's files
+  const computeFileSignature = (files: ProjectFile[]): string => {
+    return files.map(f => `${f.id}:${f.path}:${f.content.length}`).join('|');
+  };
+
+  // Save project settings to localStorage (sync, lightweight)
   useEffect(() => {
-    saveProjectsToStorage(projects);
+    saveProjectSettingsToStorage(projects);
   }, [projects]);
+
+  // Save project files to IndexedDB — detect changes by signature, not just count
+  useEffect(() => {
+    if (!filesLoadedRef.current) return;
+    for (const project of projects) {
+      const prevSig = prevFileSignaturesRef.current.get(project.id);
+      const currentSig = computeFileSignature(project.files);
+      // Save if signature changed (covers add/delete/rename/content-length changes)
+      if (prevSig !== currentSig && project.files.length > 0) {
+        debouncedSaveFiles(project.id, project.files);
+      }
+    }
+    // Update tracking
+    const newSigs = new Map<string, string>();
+    for (const p of projects) {
+      newSigs.set(p.id, computeFileSignature(p.files));
+    }
+    prevFileSignaturesRef.current = newSigs;
+  }, [projects]);
+
+  // Flush pending saves on page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Fire off immediate saves for any pending debounced writes
+      for (const project of projects) {
+        const timer = fileSaveTimers.get(project.id);
+        if (timer) {
+          clearTimeout(timer);
+          fileSaveTimers.delete(project.id);
+          // Fire-and-forget — can't await in beforeunload, but the write is initiated
+          saveProjectFiles(project.id, project.files);
+        }
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [projects]);
+
+  // Load files from IndexedDB on mount (non-blocking)
+  useEffect(() => {
+    let cancelled = false;
+    const loadFiles = async () => {
+      const updatedProjects = await Promise.all(
+        projects.map(async (p) => {
+          if (p.files.length > 0) return null;
+          const files = await loadProjectFiles(p.id);
+          if (files.length === 0) return null;
+          return { id: p.id, files };
+        })
+      );
+
+      if (cancelled) return;
+
+      const projectsWithFiles = updatedProjects.filter(Boolean) as { id: string; files: ProjectFile[] }[];
+
+      // Mark loaded BEFORE setState so the save effect doesn't re-save stale data
+      filesLoadedRef.current = true;
+
+      // Initialize signature tracking so save effect doesn't immediately trigger
+      const newSigs = new Map<string, string>();
+      for (const p of projects) {
+        const loaded = projectsWithFiles.find((u) => u.id === p.id);
+        const files = loaded ? loaded.files : p.files;
+        newSigs.set(p.id, computeFileSignature(files));
+      }
+      prevFileSignaturesRef.current = newSigs;
+
+      if (projectsWithFiles.length > 0) {
+        // Use startTransition to avoid blocking the UI while React processes 700+ files
+        startTransition(() => {
+          setProjects((prev) =>
+            prev.map((p) => {
+              const loaded = projectsWithFiles.find((u) => u.id === p.id);
+              if (!loaded) return p;
+              return {
+                ...p,
+                files: loaded.files,
+                activeFileId: loaded.files[0]?.id || null,
+              };
+            })
+          );
+        });
+      }
+    };
+
+    loadFiles();
+    return () => { cancelled = true; };
+  }, []); // Run once on mount
 
   useEffect(() => {
     saveActiveProjectIdToStorage(activeProjectId);
@@ -346,7 +488,18 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   // In backend mode, default to backend project
   const effectiveActiveProjectId = isBackendMode ? BACKEND_PROJECT_ID : activeProjectId;
 
-  const currentProject = effectiveProjects.find((p) => p.id === effectiveActiveProjectId) || null;
+  const currentProjectRaw = effectiveProjects.find((p) => p.id === effectiveActiveProjectId) || null;
+  const currentProject = useMemo(() => {
+    if (!currentProjectRaw) return null;
+    // Use the override activeFileId if set (avoids triggering full project serialization)
+    const effectiveActiveFileId = activeFileIdOverride
+      && currentProjectRaw.files.some((f) => f.id === activeFileIdOverride)
+      ? activeFileIdOverride
+      : currentProjectRaw.activeFileId;
+    return effectiveActiveFileId !== currentProjectRaw.activeFileId
+      ? { ...currentProjectRaw, activeFileId: effectiveActiveFileId }
+      : currentProjectRaw;
+  }, [currentProjectRaw, activeFileIdOverride]);
   const isReadOnly = isBackendMode && currentProject?.id === BACKEND_PROJECT_ID;
 
   const createProject = useCallback(
@@ -378,6 +531,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const deleteProject = useCallback(
     (id: string) => {
       setProjects((prev) => prev.filter((p) => p.id !== id));
+      deleteProjectFiles(id); // Clean up IndexedDB
       if (activeProjectId === id) {
         setActiveProjectId(null);
       }
@@ -407,6 +561,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   const selectProject = useCallback((id: string) => {
     setActiveProjectId(id);
+    setActiveFileIdOverride(null);
   }, []);
 
   const setProjectDialect = useCallback((projectId: string, dialect: Dialect) => {
@@ -474,7 +629,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   const getFileLanguage = (fileName: string): ProjectFile['language'] => {
     if (fileName.endsWith(FILE_EXTENSIONS.JSON)) return 'json';
-    if (fileName.endsWith(FILE_EXTENSIONS.SQL)) return 'sql';
+    if (fileName.endsWith(FILE_EXTENSIONS.SQL) || fileName.toLowerCase().endsWith(FILE_EXTENSIONS.HQL)) return 'sql';
     return 'text';
   };
 
@@ -482,28 +637,37 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     (name: string, content: string = '', path?: string) => {
       if (!activeProjectId) return;
 
+      const newFileId = uuidv4();
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id !== activeProjectId) return p;
 
-          // Generate a unique file name by appending an incrementing suffix
-          const existingNames = new Set(p.files.map((f) => f.name.toLowerCase()));
+          // When path is provided, deduplicate by full path (allows same name in different folders)
+          // When no path, deduplicate by file name (flat file list)
+          const existingPaths = new Set(p.files.map((f) => f.path.toLowerCase()));
           let uniqueName = name;
-          if (existingNames.has(uniqueName.toLowerCase())) {
+          let uniquePath = path || name;
+
+          if (existingPaths.has(uniquePath.toLowerCase())) {
             const dotIndex = name.lastIndexOf('.');
             const baseName = dotIndex > 0 ? name.slice(0, dotIndex) : name;
             const ext = dotIndex > 0 ? name.slice(dotIndex) : '';
             let counter = 2;
-            while (existingNames.has(`${baseName}_${counter}${ext}`.toLowerCase())) {
+            // Derive the folder prefix from the original path
+            const folderPrefix = path && path.includes('/')
+              ? path.slice(0, path.lastIndexOf('/') + 1)
+              : '';
+            while (existingPaths.has(`${folderPrefix}${baseName}_${counter}${ext}`.toLowerCase())) {
               counter++;
             }
             uniqueName = `${baseName}_${counter}${ext}`;
+            uniquePath = `${folderPrefix}${uniqueName}`;
           }
 
           const newFile: ProjectFile = {
-            id: uuidv4(),
+            id: newFileId,
             name: uniqueName,
-            path: path || uniqueName,
+            path: uniquePath,
             content,
             language: getFileLanguage(uniqueName),
           };
@@ -511,10 +675,10 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           return {
             ...p,
             files: [...p.files, newFile],
-            activeFileId: newFile.id,
           };
         })
       );
+      setActiveFileIdOverride(newFileId);
     },
     [activeProjectId]
   );
@@ -540,21 +704,63 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     (fileId: string) => {
       if (!activeProjectId) return;
 
-      setProjects((prev) =>
-        prev.map((p) => {
+      setProjects((prev) => {
+        const project = prev.find((p) => p.id === activeProjectId);
+        if (!project) return prev;
+
+        const remainingFiles = project.files.filter((f) => f.id !== fileId);
+        // If deleting the active file, switch to first remaining
+        const currentActive = activeFileIdOverride || project.activeFileId;
+        if (currentActive === fileId) {
+          setActiveFileIdOverride(remainingFiles[0]?.id || null);
+        }
+
+        // Immediately persist to IndexedDB (skip debounce to avoid data loss on HMR/reload)
+        saveProjectFiles(activeProjectId, remainingFiles);
+
+        return prev.map((p) => {
           if (p.id !== activeProjectId) return p;
-          const remainingFiles = p.files.filter((f) => f.id !== fileId);
           return {
             ...p,
             files: remainingFiles,
-            activeFileId:
-              p.activeFileId === fileId ? remainingFiles[0]?.id || null : p.activeFileId,
             selectedFileIds: (p.selectedFileIds || []).filter((id) => id !== fileId),
           };
-        })
-      );
+        });
+      });
     },
-    [activeProjectId]
+    [activeProjectId, activeFileIdOverride]
+  );
+
+  const deleteFiles = useCallback(
+    (fileIds: string[]) => {
+      if (!activeProjectId || fileIds.length === 0) return;
+      const idsSet = new Set(fileIds);
+
+      setProjects((prev) => {
+        const project = prev.find((p) => p.id === activeProjectId);
+        if (!project) return prev;
+
+        const remainingFiles = project.files.filter((f) => !idsSet.has(f.id));
+
+        const currentActive = activeFileIdOverride || project.activeFileId;
+        if (currentActive && idsSet.has(currentActive)) {
+          setActiveFileIdOverride(remainingFiles[0]?.id || null);
+        }
+
+        // Immediately persist to IndexedDB (skip debounce to avoid data loss on HMR/reload)
+        saveProjectFiles(activeProjectId, remainingFiles);
+
+        return prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          return {
+            ...p,
+            files: remainingFiles,
+            selectedFileIds: (p.selectedFileIds || []).filter((id) => !idsSet.has(id)),
+          };
+        });
+      });
+    },
+    [activeProjectId, activeFileIdOverride]
   );
 
   const renameFile = useCallback(
@@ -586,24 +792,46 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     [activeProjectId]
   );
 
-  const selectFile = useCallback(
-    (fileId: string) => {
-      // In backend mode, update the backend-specific active file state
-      if (isBackendMode) {
-        setBackendActiveFileId(fileId);
-        return;
-      }
-
+  const renameFolder = useCallback(
+    (oldFolderPath: string, newFolderName: string) => {
       if (!activeProjectId) return;
 
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id !== activeProjectId) return p;
-          return { ...p, activeFileId: fileId };
+          // Compute new folder path: replace last segment of oldFolderPath
+          const lastSlash = oldFolderPath.lastIndexOf('/');
+          const newFolderPath = lastSlash === -1
+            ? newFolderName
+            : `${oldFolderPath.slice(0, lastSlash + 1)}${newFolderName}`;
+          const prefix = `${oldFolderPath}/`;
+          return {
+            ...p,
+            files: p.files.map((f) => {
+              if (f.path === oldFolderPath || f.path.startsWith(prefix)) {
+                const newPath = newFolderPath + f.path.slice(oldFolderPath.length);
+                // Update name only if the file sits directly in this folder
+                const newName = newPath.split('/').pop() || f.name;
+                return { ...f, path: newPath, name: newName };
+              }
+              return f;
+            }),
+          };
         })
       );
     },
-    [activeProjectId, isBackendMode]
+    [activeProjectId]
+  );
+
+  const selectFile = useCallback(
+    (fileId: string) => {
+      if (isBackendMode) {
+        setBackendActiveFileId(fileId);
+        return;
+      }
+      setActiveFileIdOverride(fileId);
+    },
+    [isBackendMode]
   );
 
   const updateSchemaSQL = useCallback((projectId: string, schemaSQL: string) => {
@@ -623,6 +851,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       const files = Array.from(fileList);
 
       for (const file of files) {
+        // Filter by accepted file types
+        const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+        if (!ACCEPTED_FILE_TYPES_ARRAY.includes(ext as typeof ACCEPTED_FILE_TYPES_ARRAY[number])) {
+          continue;
+        }
         const content = await file.text();
         // Use webkitRelativePath if available (folder upload), otherwise just filename
         const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
@@ -636,16 +869,77 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         });
       }
 
+      if (newFiles.length === 0) return;
+
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id !== activeProjectId) return p;
           return {
             ...p,
             files: [...p.files, ...newFiles],
-            activeFileId: newFiles[0]?.id || p.activeFileId,
           };
         })
       );
+      setActiveFileIdOverride(newFiles[0].id);
+    },
+    [activeProjectId]
+  );
+
+  const replaceWithFiles = useCallback(
+    async (fileList: FileList | File[]) => {
+      if (!activeProjectId) return;
+
+      const newFiles: ProjectFile[] = [];
+      const files = Array.from(fileList);
+
+      for (const file of files) {
+        const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+        if (!ACCEPTED_FILE_TYPES_ARRAY.includes(ext as typeof ACCEPTED_FILE_TYPES_ARRAY[number])) {
+          continue;
+        }
+        const content = await file.text();
+        const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+        const path = relativePath || file.name;
+        newFiles.push({
+          id: uuidv4(),
+          name: file.name,
+          path,
+          content,
+          language: getFileLanguage(file.name),
+        });
+      }
+
+      if (newFiles.length === 0) return;
+
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          return {
+            ...p,
+            files: newFiles,
+            selectedFileIds: [],
+          };
+        })
+      );
+      setActiveFileIdOverride(newFiles[0].id);
+    },
+    [activeProjectId]
+  );
+
+  const addFilesDirectly = useCallback(
+    (newFiles: ProjectFile[]) => {
+      if (!activeProjectId || newFiles.length === 0) return;
+
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          return {
+            ...p,
+            files: [...p.files, ...newFiles],
+          };
+        })
+      );
+      setActiveFileIdOverride(newFiles[0].id);
     },
     [activeProjectId]
   );
@@ -716,10 +1010,14 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     createFile,
     updateFile,
     deleteFile,
+    deleteFiles,
     renameFile,
+    renameFolder,
     selectFile,
     updateSchemaSQL,
     importFiles,
+    replaceWithFiles,
+    addFilesDirectly,
     importProject,
     // Backend mode state
     isBackendMode,

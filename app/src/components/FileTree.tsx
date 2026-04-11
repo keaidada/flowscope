@@ -4,9 +4,11 @@ import {
   ChevronDown,
   Folder,
   FolderOpen,
+  FolderPlus,
   FileCode,
   Pencil,
   Trash2,
+  Plus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -14,6 +16,9 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { ProjectFile } from '@/lib/project-store';
+
+/** Max children to render at once in a folder before showing "load more" */
+const FOLDER_RENDER_LIMIT = 50;
 
 interface FileTreeProps {
   files: ProjectFile[];
@@ -28,6 +33,8 @@ interface FileTreeProps {
   onToggleSelection: (e: React.MouseEvent, fileId: string) => void;
   /** Toggle selection via keyboard (Space key) */
   onToggleSelectionKeyboard?: (fileId: string) => void;
+  /** Toggle all files under a folder path */
+  onToggleFolderSelection?: (fileIds: string[], select: boolean) => void;
   onStartRename: (fileId: string, currentName: string) => void;
   onConfirmRename: () => void;
   onCancelRename: () => void;
@@ -39,6 +46,12 @@ interface FileTreeProps {
   renameInputRef: React.RefObject<HTMLInputElement | null>;
   /** When true, hides rename/delete buttons (backend mode) */
   isReadOnly?: boolean;
+  /** Called when user clicks the "+" button on a folder row — receives the folder path */
+  onCreateFileInFolder?: (folderPath: string) => void;
+  /** Called when user clicks the folder+ button on a folder row — receives the folder path */
+  onCreateFolderInFolder?: (folderPath: string) => void;
+  /** Called when user confirms renaming a folder */
+  onRenameFolder?: (oldFolderPath: string, newFolderName: string) => void;
 }
 
 interface TreeNode {
@@ -121,9 +134,95 @@ interface FolderNodeProps {
   onToggleFolder: (path: string) => void;
 }
 
+/** Recursively collect all file IDs under a tree node */
+function collectFileIds(node: TreeNode): string[] {
+  const ids: string[] = [];
+  for (const child of node.children.values()) {
+    if (child.file) {
+      ids.push(child.file.id);
+    }
+    if (child.children.size > 0) {
+      ids.push(...collectFileIds(child));
+    }
+  }
+  return ids;
+}
+
 function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: FolderNodeProps) {
   const isExpanded = expandedFolders.has(node.path);
-  const sortedChildren = sortTreeNodes(Array.from(node.children.values()));
+  const sortedChildren = useMemo(
+    () => sortTreeNodes(Array.from(node.children.values())),
+    [node]
+  );
+
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(node.name);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isRenaming && renameInputRef.current) {
+      setTimeout(() => renameInputRef.current?.focus(), 0);
+    }
+  }, [isRenaming]);
+
+  const handleConfirmRename = () => {
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== node.name && props.onRenameFolder) {
+      props.onRenameFolder(node.path, trimmed);
+    }
+    setIsRenaming(false);
+  };
+
+  // Folder selection state — only compute when expanded or checkboxes shown
+  const folderFileIds = useMemo(() => props.showCheckboxes ? collectFileIds(node) : [], [node, props.showCheckboxes]);
+  const selectedSet = useMemo(() => new Set(props.selectedFileIds), [props.selectedFileIds]);
+  const { allSelected, someSelected } = useMemo(() => {
+    if (folderFileIds.length === 0) return { allSelected: false, someSelected: false };
+    let selectedCount = 0;
+    for (const id of folderFileIds) {
+      if (selectedSet.has(id)) selectedCount++;
+    }
+    return {
+      allSelected: selectedCount === folderFileIds.length,
+      someSelected: selectedCount > 0 && selectedCount < folderFileIds.length,
+    };
+  }, [folderFileIds, selectedSet]);
+
+  const handleFolderCheckbox = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (props.onToggleFolderSelection) {
+      props.onToggleFolderSelection(folderFileIds, !allSelected);
+    }
+  };
+
+  if (isRenaming) {
+    return (
+      <div role="treeitem">
+        <div
+          className="flex items-center gap-1 py-1 px-2"
+          style={{ paddingLeft: `${depth * 12 + 8}px` }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Folder className="size-4 shrink-0 text-amber-500" />
+          <Input
+            ref={renameInputRef}
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            className="h-7 flex-1 text-sm"
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') { e.preventDefault(); handleConfirmRename(); }
+              if (e.key === 'Escape') { e.preventDefault(); setIsRenaming(false); setRenameValue(node.name); }
+            }}
+            onBlur={handleConfirmRename}
+          />
+        </div>
+        {isExpanded && (
+          <FolderChildren sortedChildren={sortedChildren} depth={depth} props={props} expandedFolders={expandedFolders} onToggleFolder={onToggleFolder} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div role="treeitem" aria-expanded={isExpanded}>
@@ -144,6 +243,13 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
         role="button"
         aria-label={`${isExpanded ? 'Collapse' : 'Expand'} folder ${node.name}`}
       >
+        {props.showCheckboxes && (
+          <Checkbox
+            checked={allSelected ? true : someSelected ? 'indeterminate' : false}
+            onClick={handleFolderCheckbox}
+            className="shrink-0 border-muted-foreground"
+          />
+        )}
         {isExpanded ? (
           <ChevronDown className="size-4 shrink-0" />
         ) : (
@@ -154,24 +260,105 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
         ) : (
           <Folder className="size-4 shrink-0 text-amber-500" />
         )}
-        <span className="truncate">{node.name}</span>
+        <span className="truncate flex-1">{node.name}</span>
+        {!props.isReadOnly && (
+          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity">
+            {props.onCreateFileInFolder && (
+              <button
+                className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                onClick={(e) => { e.stopPropagation(); props.onCreateFileInFolder!(node.path); }}
+                title="New file"
+              >
+                <Plus className="size-3" />
+              </button>
+            )}
+            {props.onCreateFolderInFolder && (
+              <button
+                className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                onClick={(e) => { e.stopPropagation(); props.onCreateFolderInFolder!(node.path); }}
+                title="New folder"
+              >
+                <FolderPlus className="size-3" />
+              </button>
+            )}
+            {props.onRenameFolder && (
+              <button
+                className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                onClick={(e) => { e.stopPropagation(); setRenameValue(node.name); setIsRenaming(true); }}
+                title="Rename"
+              >
+                <Pencil className="size-3" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
       {isExpanded && (
-        <div role="group">
-          {sortedChildren.map((child) =>
-            child.file ? (
-              <FileNode key={child.file.id} node={child} depth={depth + 1} props={props} />
-            ) : (
-              <FolderNode
-                key={child.path}
-                node={child}
-                depth={depth + 1}
-                props={props}
-                expandedFolders={expandedFolders}
-                onToggleFolder={onToggleFolder}
-              />
-            )
-          )}
+        <FolderChildren sortedChildren={sortedChildren} depth={depth} props={props} expandedFolders={expandedFolders} onToggleFolder={onToggleFolder} />
+      )}
+    </div>
+  );
+}
+
+/** Flat file list with render limit */
+function FlatFileList({ sortedChildren, props }: { sortedChildren: TreeNode[]; props: FileTreeProps }) {
+  const [renderLimit, setRenderLimit] = useState(FOLDER_RENDER_LIMIT);
+  const visible = sortedChildren.slice(0, renderLimit);
+  const remaining = sortedChildren.length - renderLimit;
+
+  return (
+    <div className="p-1" role="tree" aria-label="File list">
+      {visible.map((node) => (
+        <FileNode key={node.file?.id} node={node} depth={0} props={props} />
+      ))}
+      {remaining > 0 && (
+        <div
+          className="py-1 px-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground"
+          onClick={() => setRenderLimit((prev) => prev + FOLDER_RENDER_LIMIT)}
+        >
+          +{remaining} more...
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Renders folder children with a render limit to avoid blocking the UI */
+function FolderChildren({ sortedChildren, depth, props, expandedFolders, onToggleFolder }: {
+
+  sortedChildren: TreeNode[];
+  depth: number;
+  props: FileTreeProps;
+  expandedFolders: Set<string>;
+  onToggleFolder: (path: string) => void;
+}) {
+  const [renderLimit, setRenderLimit] = useState(FOLDER_RENDER_LIMIT);
+  const visible = sortedChildren.slice(0, renderLimit);
+  const remaining = sortedChildren.length - renderLimit;
+
+  return (
+    <div role="group">
+      {visible.map((child) =>
+        child.file ? (
+          <FileNode key={child.file.id} node={child} depth={depth + 1} props={props} />
+        ) : (
+          <FolderNode
+            key={child.path}
+            node={child}
+            depth={depth + 1}
+            props={props}
+            expandedFolders={expandedFolders}
+            onToggleFolder={onToggleFolder}
+          />
+        )
+      )}
+      {remaining > 0 && (
+        <div
+          className="py-1 px-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground"
+          style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
+          onClick={() => setRenderLimit((prev) => prev + FOLDER_RENDER_LIMIT)}
+        >
+          +{remaining} more...
         </div>
       )}
     </div>
@@ -370,6 +557,7 @@ function FileNode({ node, depth, props }: FileNodeProps) {
 export function FileTree(props: FileTreeProps) {
   const { files } = props;
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const hasInitialized = useRef(false);
 
   const tree = useMemo(() => buildFileTree(files), [files]);
 
@@ -378,23 +566,24 @@ export function FileTree(props: FileTreeProps) {
     return files.some((f) => f.path.includes('/'));
   }, [files]);
 
-  // Auto-expand all folders on initial render if there's nested structure
+  // Auto-expand only top-level folders on first render
   useEffect(() => {
-    if (!hasNestedStructure || expandedFolders.size > 0) {
+    if (!hasNestedStructure || hasInitialized.current) {
       return;
     }
+    hasInitialized.current = true;
 
-    const allFolderPaths = new Set<string>();
+    const topLevelFolders = new Set<string>();
     for (const file of files) {
       const parts = file.path.split('/');
-      for (let i = 1; i < parts.length; i++) {
-        allFolderPaths.add(parts.slice(0, i).join('/'));
+      if (parts.length > 1) {
+        topLevelFolders.add(parts[0]);
       }
     }
-    if (allFolderPaths.size > 0) {
-      setExpandedFolders(allFolderPaths);
+    if (topLevelFolders.size > 0) {
+      setExpandedFolders(topLevelFolders);
     }
-  }, [files, hasNestedStructure, expandedFolders.size]);
+  }, [files, hasNestedStructure]);
 
   const toggleFolder = (path: string) => {
     setExpandedFolders((prev) => {
@@ -413,11 +602,7 @@ export function FileTree(props: FileTreeProps) {
   // If no nested structure, render flat list (no need for tree)
   if (!hasNestedStructure) {
     return (
-      <div className="p-1" role="tree" aria-label="File list">
-        {sortedChildren.map((node) => (
-          <FileNode key={node.file?.id} node={node} depth={0} props={props} />
-        ))}
-      </div>
+      <FlatFileList sortedChildren={sortedChildren} props={props} />
     );
   }
 

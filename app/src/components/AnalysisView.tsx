@@ -8,10 +8,11 @@ import {
   useLineage,
 } from '@pondpilot/flowscope-react';
 import type { AnalyzeResult, SchemaTable } from '@pondpilot/flowscope-core';
-import { Loader2, Settings } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronRight, Database, Loader2, Settings, Table2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { useGlobalShortcuts } from '@/hooks';
 import type { GlobalShortcut } from '@/hooks';
 import { getShortcutDisplay } from '@/lib/shortcuts';
@@ -23,7 +24,7 @@ import { usePersistedSchemaState } from '@/hooks/usePersistedSchemaState';
 import { isValidTab, useNavigation } from '@/lib/navigation-context';
 import { useViewStateStore, getNamespaceFilterStateWithDefaults } from '@/lib/view-state-store';
 import { useProject } from '@/lib/project-store';
-import { schemaMetadataToSQL } from '@/lib/schema-parser';
+import { schemaMetadataToSQL, resolvedSchemaToSQL } from '@/lib/schema-parser';
 import { HierarchyView, type HierarchyViewRef } from './HierarchyView';
 import { StatsPopover } from './StatsPopover';
 import { NamespaceFilterBar } from './NamespaceFilterBar';
@@ -36,19 +37,486 @@ interface AnalysisViewProps {
 }
 
 /**
- * Extract schema tables from the analysis result using resolved schema metadata.
- * When no schema is provided, returns empty array (Schema tab will show "No schema data").
+ * Extract physical tables and their data flow relationships from lineage results.
+ * This builds a simplified schema showing only table-to-table connections,
+ * derived from the blood lineage analysis (not from column-level schema inference).
  */
-function extractSchemaFromResult(result: AnalyzeResult): SchemaTable[] {
-  // Only show schema when explicitly provided via resolvedSchema
-  // This has origin tracking and complete metadata from user-provided schema or DDL
+/**
+ * @param filterSourceName - If provided, only include statements from this source file.
+ *                           Pass undefined/null to include all statements (global schema).
+ */
+function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: string | null): SchemaTable[] {
+  // Collect all physical table nodes and their edges from (filtered) statements
+  const tableMap = new Map<string, { catalog?: string; schema?: string; name: string }>();
+  const flowEdges: { source: string; target: string }[] = [];
+
+  // Filter statements by sourceName when in "current file" mode
+  const statements = filterSourceName
+    ? result.statements.filter((s) => s.sourceName === filterSourceName)
+    : result.statements;
+
+  // Build a set of temporary table names from resolvedSchema.
+  // Temporary tables (CREATE TEMPORARY TABLE) should NOT appear as physical tables
+  // in the schema list — they are intermediate/staging tables within the script.
+  const temporaryTableNames = new Set<string>();
   if (result.resolvedSchema?.tables) {
-    return result.resolvedSchema.tables;
+    for (const rst of result.resolvedSchema.tables) {
+      if (rst.temporary) {
+        // Add all possible name forms: unqualified, schema-qualified, fully-qualified
+        temporaryTableNames.add(rst.name);
+        if (rst.schema) {
+          temporaryTableNames.add(`${rst.schema}.${rst.name}`);
+        }
+        if (rst.catalog && rst.schema) {
+          temporaryTableNames.add(`${rst.catalog}.${rst.schema}.${rst.name}`);
+        }
+      }
+    }
   }
 
-  // No schema available - return empty array
-  // Schema tab will display "No schema data to display"
-  return [];
+  // Helper: check if a node is a real physical table (not a CTE, alias, subquery, or temp table).
+  // Strategy (in order of reliability):
+  //   1. Must be table or view type
+  //   2. Must NOT be a temporary table (checked against resolvedSchema)
+  //   3. resolutionSource is set (imported/implied/unknown) → physical table for sure
+  //      (CTE, derived tables, and aliases never have resolutionSource set by the engine)
+  //   4. qualifiedName contains '.' → has schema/catalog prefix → physical table
+  //   5. Otherwise → likely an alias or intermediate reference → skip
+  // This correctly handles "USE database;" scenarios where the engine prepends the default
+  // schema to the canonical name (e.g. "my_table" → "db.my_table" in qualifiedName).
+  const isPhysicalTable = (node: { type: string; qualifiedName?: string; label: string; resolutionSource?: string }) => {
+    if (node.type !== 'table' && node.type !== 'view') return false;
+    // Exclude temporary tables — they are intermediate/staging, not real physical tables
+    const qName = node.qualifiedName || node.label;
+    if (temporaryTableNames.has(qName) || temporaryTableNames.has(node.label)) return false;
+    // Physical tables always get a resolutionSource from the analyzer
+    if (node.resolutionSource) return true;
+    // Fallback: check for schema-qualified name
+    return qName.includes('.');
+  };
+
+  for (const stmt of statements) {
+    // Index nodes by id for lookup
+    const nodeById = new Map<string, typeof stmt.nodes[0]>();
+    for (const node of stmt.nodes) {
+      nodeById.set(node.id, node);
+    }
+
+    // Collect only physical tables (schema-qualified names)
+    for (const node of stmt.nodes) {
+      if (isPhysicalTable(node)) {
+        const qName = node.qualifiedName || node.label;
+        if (!tableMap.has(qName)) {
+          const parts = qName.split('.');
+          if (parts.length >= 3) {
+            // catalog.schema.table
+            tableMap.set(qName, { catalog: parts[0], schema: parts[1], name: parts.slice(2).join('.') });
+          } else if (parts.length === 2) {
+            tableMap.set(qName, { schema: parts[0], name: parts[1] });
+          } else {
+            tableMap.set(qName, { name: qName });
+          }
+        }
+      }
+    }
+
+    // Collect data flow edges between physical tables
+    for (const edge of stmt.edges) {
+      if (edge.type === 'ownership') continue;
+      const fromNode = nodeById.get(edge.from);
+      const toNode = nodeById.get(edge.to);
+      if (!fromNode || !toNode) continue;
+
+      if (isPhysicalTable(fromNode) && isPhysicalTable(toNode)) {
+        const sourceQName = fromNode.qualifiedName || fromNode.label;
+        const targetQName = toNode.qualifiedName || toNode.label;
+        flowEdges.push({ source: sourceQName, target: targetQName });
+      }
+    }
+
+    // Trace indirect flows: physical table → intermediate → physical table
+    // This handles paths through CTEs, aliases, subqueries, AND temporary tables.
+    // Temporary tables are treated as intermediate nodes (like CTEs) — the BFS
+    // traverses through them to find the real physical tables at the endpoints.
+    const physicalNodes = stmt.nodes.filter(isPhysicalTable);
+    const physicalIds = new Set(physicalNodes.map(n => n.id));
+
+    // Build adjacency for BFS from physical source to physical target.
+    // Include reverse ownership edges (column → owner table) so BFS can
+    // traverse: source_table → CTE → target_column → target_table.
+    // Without reverse ownership, the BFS cannot reach the INSERT target table
+    // because data flows through columns that are owned by the target table
+    // via ownership edges (table → column), but we need column → table direction.
+    const adj = new Map<string, string[]>();
+    for (const edge of stmt.edges) {
+      if (edge.type === 'ownership') {
+        // Reverse: column → owner table (so BFS can reach target table from its columns)
+        if (!adj.has(edge.to)) adj.set(edge.to, []);
+        adj.get(edge.to)!.push(edge.from);
+      } else {
+        if (!adj.has(edge.from)) adj.set(edge.from, []);
+        adj.get(edge.from)!.push(edge.to);
+      }
+    }
+
+    // For each physical source, BFS to find reachable physical targets
+    for (const src of physicalNodes) {
+      const visited = new Set<string>();
+      const queue = [src.id];
+      visited.add(src.id);
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const next of adj.get(current) || []) {
+          if (visited.has(next)) continue;
+          visited.add(next);
+          if (physicalIds.has(next)) {
+            // Found a physical target — record edge
+            const targetNode = nodeById.get(next)!;
+            const sourceQName = src.qualifiedName || src.label;
+            const targetQName = targetNode.qualifiedName || targetNode.label;
+            if (sourceQName !== targetQName) {
+              flowEdges.push({ source: sourceQName, target: targetQName });
+            }
+          } else {
+            // Intermediate node (CTE, alias, temp table) — continue traversal
+            queue.push(next);
+          }
+        }
+      }
+    }
+  }
+
+  // Use global lineage for cross-statement flows.
+  // This is essential for scripts like B10_INFO_CID.HQL where data flows through
+  // temporary tables across statements:
+  //   stmt1: CREATE TEMP TABLE a AS (SELECT ... FROM his_db.xxx)
+  //   stmt7: INSERT OVERWRITE TABLE sum_db.xxx SELECT ... FROM target_tmp_1
+  // Without global lineage, the per-statement BFS cannot connect physical source
+  // tables (in stmt1-6) to the physical target table (in stmt7) since they are
+  // separated by temporary table intermediaries in different statements.
+  //
+  // In "current file" mode, we filter global nodes to only those that belong to
+  // the filtered statements (via statementRefs).
+  if (result.globalLineage?.nodes) {
+    // In current-file mode, build a set of statement indices we care about
+    const relevantStatementIndices = filterSourceName
+      ? new Set(statements.map(s => s.statementIndex))
+      : null; // null = all statements (global mode)
+
+    // Helper: check if a global node is relevant (belongs to filtered statements)
+    const isRelevantGlobalNode = (node: { statementRefs?: Array<{ statementIndex: number }> }) => {
+      if (!relevantStatementIndices) return true; // global mode — all are relevant
+      return node.statementRefs?.some(ref => relevantStatementIndices.has(ref.statementIndex)) ?? false;
+    };
+
+    // Helper: build qualified name from global node's canonicalName
+    // Global nodes use `label` for display but `canonicalName` for structure.
+    // We need to match against tableMap which uses qualified names like "his_db.med_cover_extend_hour".
+    const getGlobalNodeQName = (node: { label: string; canonicalName?: { catalog?: string; schema?: string; name: string } }): string => {
+      const cn = node.canonicalName;
+      if (cn) {
+        const parts = [cn.catalog, cn.schema, cn.name].filter(Boolean);
+        if (parts.length > 1) return parts.join('.');
+      }
+      return node.label;
+    };
+
+    for (const node of result.globalLineage.nodes) {
+      if (!isRelevantGlobalNode(node)) continue;
+      const cn = node.canonicalName;
+      const qName = getGlobalNodeQName(node);
+      // Physical tables: have resolutionSource, or have a schema in canonicalName
+      // CTE/column nodes and temporary tables are excluded
+      const isPhysical = node.type !== 'cte' && node.type !== 'column' &&
+        !temporaryTableNames.has(qName) &&
+        !temporaryTableNames.has(node.label) &&
+        !temporaryTableNames.has(cn?.name || '') &&
+        (node.resolutionSource || cn?.schema);
+      if (isPhysical) {
+        if (!tableMap.has(qName)) {
+          tableMap.set(qName, {
+            catalog: cn?.catalog,
+            schema: cn?.schema,
+            name: cn?.name || node.label,
+          });
+        }
+      }
+    }
+
+    // Build adjacency for global lineage BFS (to traverse through temp tables)
+    const globalNodeById = new Map<string, typeof result.globalLineage.nodes[0]>();
+    for (const node of result.globalLineage.nodes) {
+      globalNodeById.set(node.id, node);
+    }
+    const globalAdj = new Map<string, string[]>();
+    for (const edge of result.globalLineage.edges || []) {
+      if (!globalAdj.has(edge.from)) globalAdj.set(edge.from, []);
+      globalAdj.get(edge.from)!.push(edge.to);
+    }
+
+    // Identify physical global nodes by matching their qName against tableMap
+    const physicalGlobalNodeIds = new Set<string>();
+    const globalNodeQNames = new Map<string, string>(); // nodeId -> qName
+    for (const node of result.globalLineage.nodes) {
+      const qName = getGlobalNodeQName(node);
+      globalNodeQNames.set(node.id, qName);
+      if (tableMap.has(qName)) {
+        physicalGlobalNodeIds.add(node.id);
+      }
+    }
+
+    // BFS through global lineage to find indirect flows (physical → temp → ... → physical)
+    // This also handles direct edges (distance-1 BFS)
+    for (const srcNode of result.globalLineage.nodes) {
+      if (!physicalGlobalNodeIds.has(srcNode.id)) continue;
+      const srcQName = globalNodeQNames.get(srcNode.id)!;
+      const visited = new Set<string>();
+      const queue = [srcNode.id];
+      visited.add(srcNode.id);
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const next of globalAdj.get(current) || []) {
+          if (visited.has(next)) continue;
+          visited.add(next);
+          if (physicalGlobalNodeIds.has(next)) {
+            const targetQName = globalNodeQNames.get(next)!;
+            if (srcQName !== targetQName) {
+              flowEdges.push({ source: srcQName, target: targetQName });
+            }
+          } else {
+            // Intermediate node (temp table, CTE) — continue traversal
+            queue.push(next);
+          }
+        }
+      }
+    }
+  }
+
+  // Build SchemaTable[] with FK refs representing data flow
+  // First, deduplicate tableMap: the same physical table may have been registered under
+  // different keys (e.g. "med_cover_vec_hour" from one statement and "his_db.med_cover_vec_hour"
+  // from another). We merge them by preferring the longer (more qualified) key.
+  const canonicalKeyMap = new Map<string, string>(); // short/unqualified → longest key
+  for (const qName of tableMap.keys()) {
+    const info = tableMap.get(qName)!;
+    // Build canonical identity: schema.name (or just name if no schema)
+    const identity = info.schema ? `${info.schema}.${info.name}` : info.name;
+    const existing = canonicalKeyMap.get(identity);
+    if (!existing || qName.length > existing.length) {
+      canonicalKeyMap.set(identity, qName);
+    }
+  }
+  // Build set of keys to keep (the longest/most-qualified form of each table)
+  const keysToKeep = new Set(canonicalKeyMap.values());
+  // Build a mapping from any key to the canonical key (for edge remapping)
+  const keyToCanonical = new Map<string, string>();
+  for (const qName of tableMap.keys()) {
+    const info = tableMap.get(qName)!;
+    const identity = info.schema ? `${info.schema}.${info.name}` : info.name;
+    keyToCanonical.set(qName, canonicalKeyMap.get(identity)!);
+  }
+
+  // Deduplicate edges using canonical keys
+  const edgeSet = new Set(flowEdges.map(e => {
+    const src = keyToCanonical.get(e.source) || e.source;
+    const tgt = keyToCanonical.get(e.target) || e.target;
+    return `${src}→${tgt}`;
+  }));
+  const edgesByTarget = new Map<string, string[]>();
+  for (const key of edgeSet) {
+    const [source, target] = key.split('→');
+    if (!edgesByTarget.has(target)) edgesByTarget.set(target, []);
+    edgesByTarget.get(target)!.push(source);
+  }
+
+  const tables: SchemaTable[] = [];
+  for (const [qName, info] of tableMap) {
+    if (!keysToKeep.has(qName)) continue; // skip duplicate shorter-named entries
+    // Build columns as FK refs to represent incoming data flow
+    const sources = edgesByTarget.get(qName) || [];
+    const columns = sources.map(sourceName => ({
+      name: `← ${sourceName}`,
+      dataType: undefined as string | undefined,
+      isPrimaryKey: false,
+      foreignKey: { table: sourceName, column: 'flow' },
+    }));
+
+    tables.push({
+      catalog: info.catalog,
+      schema: info.schema,
+      name: info.name,
+      columns,
+    });
+  }
+
+  return tables;
+}
+
+// ============================================================================
+// Schema List View (for "current file" mode)
+// ============================================================================
+
+interface SchemaListViewProps {
+  schema: SchemaTable[];
+}
+
+function SchemaListView({ schema }: SchemaListViewProps) {
+  const { t } = useTranslation();
+  const [expandedTargets, setExpandedTargets] = useState<Set<string>>(() => new Set());
+
+  const toggleTarget = useCallback((tableName: string) => {
+    setExpandedTargets((prev) => {
+      const next = new Set(prev);
+      if (next.has(tableName)) {
+        next.delete(tableName);
+      } else {
+        next.add(tableName);
+      }
+      return next;
+    });
+  }, []);
+
+  // Separate tables into target tables and source tables, mark data flow status
+  const { targetTables, sourceTables } = useMemo(() => {
+    const targets: { fullName: string; table: SchemaTable; sources: string[] }[] = [];
+    const referencedSourceNames = new Set<string>();
+
+    for (const table of schema) {
+      const fullName = [table.catalog, table.schema, table.name].filter(Boolean).join('.');
+      const incomingSources = (table.columns || [])
+        .filter((col) => col.name.startsWith('← '))
+        .map((col) => col.name.replace('← ', ''));
+
+      if (incomingSources.length > 0) {
+        targets.push({ fullName, table, sources: incomingSources });
+        for (const src of incomingSources) {
+          referencedSourceNames.add(src);
+        }
+      }
+    }
+
+    // Source tables: all non-target tables, with data flow indicator
+    const sources: { fullName: string; table: SchemaTable; hasDataFlow: boolean }[] = [];
+    for (const table of schema) {
+      const fullName = [table.catalog, table.schema, table.name].filter(Boolean).join('.');
+      const isTarget = targets.some((t) => t.fullName === fullName);
+      if (!isTarget) {
+        sources.push({ fullName, table, hasDataFlow: referencedSourceNames.has(fullName) });
+      }
+    }
+
+    return { targetTables: targets, sourceTables: sources };
+  }, [schema]);
+
+  if (schema.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground">
+        <p>{t('schemaView.noSchemaData')}</p>
+      </div>
+    );
+  }
+
+  const renderSchemaPrefix = (table: SchemaTable) => {
+    const prefix = [table.catalog, table.schema].filter(Boolean).join('.');
+    if (!prefix) return null;
+    return (
+      <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
+        {prefix}
+      </span>
+    );
+  };
+
+  return (
+    <div className="h-full overflow-auto">
+      {/* Target tables section */}
+      {targetTables.length > 0 && (
+        <div>
+          <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-muted/30 border-b">
+            {t('schemaView.targetTable')}
+          </div>
+          <div className="divide-y divide-border">
+            {targetTables.map(({ fullName, table, sources }) => {
+              const isExpanded = expandedTargets.has(fullName);
+              return (
+                <div key={fullName}>
+                  <button
+                    onClick={() => toggleTarget(fullName)}
+                    className="flex items-center gap-2 w-full px-4 py-2.5 text-left hover:bg-muted/50 transition-colors"
+                  >
+                    <span className="text-muted-foreground shrink-0">
+                      {isExpanded ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                    </span>
+                    <Database className="h-4 w-4 text-orange-500 shrink-0" />
+                    <span className="font-semibold text-sm truncate">{table.name}</span>
+                    {renderSchemaPrefix(table)}
+                    <span className="ml-auto text-xs text-muted-foreground shrink-0">
+                      {t('schemaView.sourceCount', { count: sources.length })}
+                    </span>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="pb-2 pl-14 pr-4">
+                      <div className="text-xs text-muted-foreground mb-1.5 font-medium">
+                        {t('schemaView.dataFlowSources')}
+                      </div>
+                      <div className="space-y-1">
+                        {sources.map((srcName, idx) => (
+                          <div
+                            key={`${srcName}-${idx}`}
+                            className="flex items-center gap-2 text-sm text-foreground/80"
+                          >
+                            <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                            <span className="truncate">{srcName}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Source tables section */}
+      {sourceTables.length > 0 && (
+        <div>
+          <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-muted/30 border-b">
+            {t('schemaView.sourceTable')}
+            <span className="ml-1.5 font-normal normal-case">({sourceTables.length})</span>
+          </div>
+          <div className="divide-y divide-border">
+            {sourceTables.map(({ fullName, table, hasDataFlow }) => (
+              <div key={fullName} className="flex items-center gap-2 px-4 py-2.5">
+                <span className="inline-block w-4 shrink-0" />
+                <Table2 className="h-4 w-4 text-primary shrink-0" />
+                <span className="font-medium text-sm truncate">{table.name}</span>
+                {renderSchemaPrefix(table)}
+                <span className="ml-auto shrink-0">
+                  {hasDataFlow ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500" />
+                      {t('schemaView.hasDataFlow')}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
+                      {t('schemaView.noDataFlow')}
+                    </span>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -132,7 +600,20 @@ export function AnalysisView({
     setLineageFocusNodeId(undefined);
   }, []);
 
-  const schema = useMemo(() => {
+  // Schema scope: 'current' = current file only, 'global' = all files
+  const [schemaScope, setSchemaScope] = useState<'current' | 'global'>('current');
+
+  // Get active file path for filtering
+  const activeFilePath = currentProject?.files.find(
+    (f) => f.id === currentProject.activeFileId
+  )?.path;
+
+  const currentFileSchema = useMemo(() => {
+    if (!result || !activeFilePath) return [];
+    return extractSchemaFromResult(result, activeFilePath);
+  }, [result, activeFilePath]);
+
+  const globalSchema = useMemo(() => {
     if (!result) return [];
     return extractSchemaFromResult(result);
   }, [result]);
@@ -486,11 +967,52 @@ export function AnalysisView({
             className="h-full mt-0 p-0 absolute inset-0 data-[state=inactive]:hidden"
           >
             {mountedTabs.has('schema') && (
-              <SchemaView
-                schema={schema}
-                selectedTableName={schemaState.selectedTableName}
-                onClearSelection={schemaState.clearSelection}
-              />
+              <div className="flex flex-col h-full">
+                {/* Schema scope toggle */}
+                <div className="flex items-center gap-1 px-3 py-1.5 border-b bg-muted/5 shrink-0">
+                  <div className="inline-flex items-center rounded-md bg-muted p-0.5 text-xs">
+                    <button
+                      onClick={() => setSchemaScope('current')}
+                      className={cn(
+                        'px-2.5 py-1 rounded-sm transition-colors',
+                        schemaScope === 'current'
+                          ? 'bg-background text-foreground shadow-sm font-medium'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      {t('analysis.schemaCurrentFile')}
+                      {currentFileSchema.length > 0 && (
+                        <span className="ml-1 text-muted-foreground">({currentFileSchema.length})</span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setSchemaScope('global')}
+                      className={cn(
+                        'px-2.5 py-1 rounded-sm transition-colors',
+                        schemaScope === 'global'
+                          ? 'bg-background text-foreground shadow-sm font-medium'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      {t('analysis.schemaGlobal')}
+                      {globalSchema.length > 0 && (
+                        <span className="ml-1 text-muted-foreground">({globalSchema.length})</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  {schemaScope === 'current' ? (
+                    <SchemaListView schema={currentFileSchema} />
+                  ) : (
+                    <SchemaView
+                      schema={globalSchema}
+                      selectedTableName={schemaState.selectedTableName}
+                      onClearSelection={schemaState.clearSelection}
+                    />
+                  )}
+                </div>
+              </div>
             )}
           </TabsContent>
 
@@ -516,10 +1038,12 @@ export function AnalysisView({
         <SchemaEditor
           open={schemaEditorOpen}
           onOpenChange={setSchemaEditorOpen}
-          schemaSQL={isBackendMode ? schemaMetadataToSQL(backendSchema) : currentProject.schemaSQL}
+          schemaSQL={isBackendMode
+            ? schemaMetadataToSQL(backendSchema)
+            : resolvedSchemaToSQL(result?.resolvedSchema)}
           dialect={currentProject.dialect}
           onSave={handleSaveSchema}
-          isReadOnly={isBackendMode}
+          isReadOnly
         />
       )}
     </div>

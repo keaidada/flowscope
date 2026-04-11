@@ -1,4 +1,4 @@
-import { Play, Loader2, ChevronDown, Braces, Code, FileCode } from 'lucide-react';
+import { Play, Loader2, ChevronDown, Braces, Code, FileCode, WrapText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
@@ -42,6 +42,8 @@ interface EditorToolbarProps {
   onDialectChange?: (dialect: Dialect) => void;
   templateMode?: TemplateMode;
   onTemplateModeChange?: (mode: TemplateMode) => void;
+  lineWrapping?: boolean;
+  onLineWrappingChange?: (wrap: boolean) => void;
 }
 
 export function EditorToolbar({
@@ -61,6 +63,8 @@ export function EditorToolbar({
   onDialectChange,
   templateMode,
   onTemplateModeChange,
+  lineWrapping = true,
+  onLineWrappingChange,
 }: EditorToolbarProps) {
   const { t } = useTranslation();
 
@@ -156,6 +160,25 @@ export function EditorToolbar({
               ))}
             </SelectContent>
           </Select>
+        )}
+        {onLineWrappingChange && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`h-7 w-7 ${lineWrapping ? 'bg-muted' : ''}`}
+                  onClick={() => onLineWrappingChange(!lineWrapping)}
+                >
+                  <WrapText className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{lineWrapping ? t('editor.nowrap') : t('editor.wrap')}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
         <div className="flex items-center rounded-full overflow-hidden shadow-xs">
           <Button

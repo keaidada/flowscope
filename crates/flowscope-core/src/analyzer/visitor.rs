@@ -614,8 +614,10 @@ impl<'a, 'b> Visitor for LineageVisitor<'a, 'b> {
                 let Statement::Insert(insert) = insert_stmt else {
                     return;
                 };
-                let target_name = insert.table.to_string();
-                self.add_source_table(&target_name);
+                // Delegate to analyze_insert which properly creates the target
+                // table node and analyzes the source query (e.g. the SELECT
+                // that references CTEs defined in the outer WITH clause).
+                self.analyzer.analyze_insert(self.ctx, insert);
             }
             SetExpr::Table(tbl) => {
                 let name = tbl

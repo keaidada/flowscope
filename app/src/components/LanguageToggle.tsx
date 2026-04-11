@@ -16,14 +16,14 @@ const languageOptions = [
 ];
 
 export function LanguageToggle() {
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+        <Button variant="ghost" size="sm" className="h-8 gap-2 px-2 w-full justify-start">
           <Languages className="h-4 w-4" />
-          <span className="sr-only">Switch language</span>
+          <span className="text-sm">{t('app.language')}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

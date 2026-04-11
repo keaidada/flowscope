@@ -61,6 +61,8 @@ export function EditorArea({
 
   // SQL view mode toggle: 'template' shows original templated SQL, 'resolved' shows compiled SQL
   const [sqlViewMode, setSqlViewMode] = useState<SqlViewMode>('template');
+  // Line wrapping toggle
+  const [lineWrapping, setLineWrapping] = useState(true);
 
   // Reset view mode to 'template' when active file changes
   useEffect(() => {
@@ -223,8 +225,12 @@ export function EditorArea({
     );
   }
 
-  const allFileCount = currentProject.files.filter((f) => f.name.endsWith('.sql')).length;
-  const selectedCount = currentProject.selectedFileIds?.length || 0;
+  const allFileCount = currentProject.files.filter((f) => {
+    const lower = f.name.toLowerCase();
+    return lower.endsWith('.sql') || lower.endsWith('.hql');
+  }).length;
+  const fileIdSet = new Set(currentProject.files.map((f) => f.id));
+  const selectedCount = (currentProject.selectedFileIds || []).filter((id) => fileIdSet.has(id)).length;
 
   return (
     <div className={cn('flex flex-col h-full bg-background', className)}>
@@ -245,6 +251,8 @@ export function EditorArea({
         onDialectChange={(d) => setProjectDialect(currentProject.id, d)}
         templateMode={currentProject.templateMode}
         onTemplateModeChange={(m) => setTemplateMode(currentProject.id, m)}
+        lineWrapping={lineWrapping}
+        onLineWrappingChange={setLineWrapping}
       />
 
       <div
@@ -260,6 +268,7 @@ export function EditorArea({
             editable={sqlViewMode === 'template' && !isReadOnly}
             isDark={isDark}
             highlightedSpan={sqlViewMode === 'template' ? highlightedSpan : null}
+            lineWrapping={lineWrapping}
           />
         </ErrorBoundary>
         {isReadOnly && (

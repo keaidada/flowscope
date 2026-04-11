@@ -62,6 +62,7 @@ export function SqlView({
   value,
   isDark,
   highlightedSpan: highlightedSpanProp,
+  lineWrapping = true,
 }: SqlViewProps): JSX.Element {
   const { state, actions } = useLineage();
   const isControlled = value !== undefined;
@@ -106,10 +107,10 @@ export function SqlView({
       sql(),
       highlightField,
       baseTheme,
-      EditorView.lineWrapping,
+      ...(lineWrapping ? [EditorView.lineWrapping] : []),
       EditorView.editable.of(editable),
     ],
-    [editable]
+    [editable, lineWrapping]
   );
 
   const theme = useMemo(() => (isDark ? oneDark : 'light'), [isDark]);

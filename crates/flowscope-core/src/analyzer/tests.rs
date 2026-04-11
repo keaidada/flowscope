@@ -981,3 +981,121 @@ fn test_type_mismatch_has_statement_index() {
         "type mismatch warning should reference the second statement"
     );
 }
+
+#[test]
+fn test_hive_with_cte_insert_overwrite() {
+    // Hive-style WITH ... INSERT OVERWRITE should correctly recognize CTEs
+    // and create lineage from source tables through CTEs to the target table.
+    let sql = r#"
+        WITH u1 AS (
+            SELECT uid AS cpid FROM his_db.ctv_user WHERE imp_date='2021-01-01'
+        ),
+        u2 AS (
+            SELECT uid AS cpid FROM his_db.ctv_operate_info WHERE imp_date='2021-01-01'
+        )
+        INSERT OVERWRITE TABLE sum_db.b10_info_cpid PARTITION(data_dt='2021-01-01')
+        SELECT u1.cpid FROM u1 LEFT JOIN u2 ON u1.cpid = u2.cpid
+    "#;
+    let mut request = make_request(sql);
+    request.dialect = Dialect::Hive;
+    let result = analyze(&request);
+
+    assert_eq!(result.statements.len(), 1);
+
+    let stmt = &result.statements[0];
+
+    // Collect node labels for inspection
+    let node_labels: Vec<String> = stmt.nodes.iter().map(|n| n.label.to_string()).collect();
+
+    // The target table should be present
+    assert!(
+        node_labels.contains(&"b10_info_cpid".to_string()),
+        "target table 'b10_info_cpid' should be in nodes, got: {:?}",
+        node_labels
+    );
+
+    // CTE definitions should be present
+    assert!(
+        node_labels.contains(&"u1".to_string()),
+        "CTE 'u1' should be in nodes, got: {:?}",
+        node_labels
+    );
+    assert!(
+        node_labels.contains(&"u2".to_string()),
+        "CTE 'u2' should be in nodes, got: {:?}",
+        node_labels
+    );
+
+    // Source tables (inside CTEs) should be present
+    assert!(
+        node_labels.contains(&"ctv_user".to_string()),
+        "source table 'ctv_user' should be in nodes, got: {:?}",
+        node_labels
+    );
+    assert!(
+        node_labels.contains(&"ctv_operate_info".to_string()),
+        "source table 'ctv_operate_info' should be in nodes, got: {:?}",
+        node_labels
+    );
+}
+
+#[test]
+fn test_hive_insert_overwrite_with_template_vars() {
+    // B10_INFO_ACT.HQL style: INSERT OVERWRITE with ${} template variables
+    let sql = r#"
+INSERT OVERWRITE TABLE sum_db.B10_Info_Act PARTITION(data_dt='${DATA_DT}')
+SELECT  FROM_UNIXTIME(UNIX_TIMESTAMP(),'yyyy-MM-dd HH:mm:ss') statt_tm
+       ,t1.act_id
+       ,t1.act_nm
+       ,t1.act_start_tm
+       ,t3.source1_nm
+  FROM 
+      (SELECT  activity_id act_id
+              ,activity_name act_nm
+              ,activity_begin_time act_start_tm
+         FROM his_db.Ams_Base_Activity
+        WHERE data_dt = '${DATA_DT_ISO}'
+          AND valid_flag = 'Y'
+       ) t1
+LEFT JOIN
+      (SELECT  activity_id
+              ,channel_id
+         FROM his_db.Ams_Base_Activity_Channel
+        WHERE data_dt = '${DATA_DT_ISO}'
+          AND valid_flag = 'Y'
+       ) t2
+ON t1.act_id = t2.activity_id
+LEFT JOIN
+      (SELECT  id
+              ,channel1 source1_nm
+         FROM his_db.Ams_Base_Channel
+        WHERE data_dt = '${DATA_DT_ISO}'
+          AND valid_flag = 'Y'
+       ) t3
+ON t2.channel_id = t3.id
+    "#;
+    let mut request = make_request(sql);
+    request.dialect = Dialect::Hive;
+    let result = analyze(&request);
+
+    assert_eq!(result.statements.len(), 1, "should parse as 1 statement");
+
+    let stmt = &result.statements[0];
+    let node_labels: Vec<String> = stmt.nodes.iter().map(|n| n.label.to_string()).collect();
+
+    // Target table should be present
+    assert!(
+        node_labels.iter().any(|l| l.to_lowercase() == "b10_info_act"),
+        "target table 'B10_Info_Act' should be in nodes, got: {:?}",
+        node_labels
+    );
+
+    // Source tables should be present
+    for expected in ["ams_base_activity", "ams_base_activity_channel", "ams_base_channel"] {
+        assert!(
+            node_labels.iter().any(|l| l.to_lowercase() == expected),
+            "source table '{}' should be in nodes, got: {:?}",
+            expected, node_labels
+        );
+    }
+}

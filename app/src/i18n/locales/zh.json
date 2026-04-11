@@ -28,7 +28,9 @@
     "systemError": "系统错误：{{error}}",
     "viewOnGithub": "在 GitHub 上查看",
     "shareProject": "分享项目",
-    "toggleTheme": "切换主题"
+    "toggleTheme": "切换主题",
+    "language": "语言",
+    "theme": "主题"
   },
   "theme": {
     "light": "浅色",
@@ -56,6 +58,8 @@
     "viewingTemplate": "正在查看模板 SQL。点击查看解析后的 SQL。",
     "viewingResolved": "正在查看解析后的 SQL。点击查看模板 SQL。",
     "runConfig": "运行配置",
+    "wrap": "自动换行",
+    "nowrap": "不换行",
     "runActiveOnly": "仅运行当前文件",
     "runAllFiles": "运行所有文件 ({{count}})",
     "runSelected": "运行已选文件 ({{count}})",
@@ -160,6 +164,8 @@
     "hierarchy": "层级",
     "matrix": "矩阵",
     "schema": "Schema",
+    "schemaCurrentFile": "当前文件",
+    "schemaGlobal": "全局",
     "issues": "问题",
     "issuesCount": "问题 ({{count}})",
     "editSchema": "编辑 Schema",
@@ -183,7 +189,21 @@
     "viewTitle": "查看 Schema",
     "editDesc": "使用 CREATE TABLE 语句定义数据库 Schema。此 Schema 将用于增强血缘分析，但不会出现在图中。",
     "viewDesc": "此 Schema 从服务端加载（数据库自省）。在 Serve 模式下无法编辑。",
-    "saveSchema": "保存 Schema"
+    "saveSchema": "保存 Schema",
+    "saved": "Schema 已保存",
+    "import": "导入文件",
+    "importFolder": "导入文件夹",
+    "imported": "已导入 {{name}}",
+    "importError": "导入文件失败",
+    "noSupportedFiles": "未找到支持的文件类型（.sql/.hql/.ddl/.txt）",
+    "export": "导出 Schema",
+    "clear": "清空全部",
+    "selectFile": "选择文件以编辑",
+    "emptyHint": "上传 Schema SQL 文件或文件夹，用于增强血缘分析",
+    "wrap": "开启换行",
+    "nowrap": "关闭换行",
+    "deduped": "新增 {{added}} 个，更新 {{updated}} 个已有文件",
+    "duplicateFile": "该路径下已存在同名文件"
   },
   "shortcuts": {
     "title": "快捷键",
@@ -325,7 +345,23 @@
   "activityBar": {
     "files": "资源管理器",
     "search": "搜索",
-    "lineage": "血缘"
+    "lineage": "血缘",
+    "schema": "Schema"
+  },
+  "sidebar": {
+    "addFolder": "添加文件夹",
+    "replaceFolder": "替换为文件夹",
+    "newFolder": "新建文件夹",
+    "folderName": "文件夹名称",
+    "uploading": "正在读取文件...",
+    "uploadDone": "上传完成",
+    "uploadProgress": "正在读取 {{loaded}} / {{total}} 个文件",
+    "uploadResult": "已导入 {{imported}} 个，跳过 {{skipped}} 个",
+    "selectedCount": "已选 {{count}} 个",
+    "deleteSelected": "删除选中文件",
+    "confirmDelete": "确认？",
+    "selectAll": "全选",
+    "deselectAll": "取消全选"
   },
   "tableFilter": {
     "filterByTables": "按表筛选",
@@ -419,7 +455,18 @@
   "schemaView": {
     "primaryKey": "主键",
     "foreignKey": "外键 → {{table}}.{{column}}",
-    "noSchemaData": "没有可显示的 Schema 数据"
+    "noSchemaData": "没有可显示的 Schema 数据",
+    "tableName": "表",
+    "dataFlowSources": "数据流来源",
+    "noSources": "无上游数据流",
+    "sourceCount_one": "{{count}} 个来源",
+    "sourceCount_other": "{{count}} 个来源",
+    "physicalTable": "物理表",
+    "view": "视图",
+    "targetTable": "目标表（写入）",
+    "sourceTable": "源表（读取）",
+    "hasDataFlow": "有数据流",
+    "noDataFlow": "无数据流"
   },
   "columnPanel": {
     "noData": "暂无数据",

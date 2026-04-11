@@ -26,9 +26,9 @@ export function ThemeToggle() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+        <Button variant="ghost" size="sm" className="h-8 gap-2 px-2 w-full justify-start">
           <CurrentIcon className="h-4 w-4" />
-          <span className="sr-only">{t('app.toggleTheme')}</span>
+          <span className="text-sm">{t('app.theme')}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

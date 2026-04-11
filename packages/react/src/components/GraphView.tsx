@@ -992,7 +992,7 @@ export function GraphView({
         fitView={!initialViewport}
         minZoom={0.1}
         maxZoom={2}
-        zoomOnPinch={false}
+        zoomOnPinch={true}
         zoomOnScroll={false}
         panOnScroll={true}
         panOnDrag={true}

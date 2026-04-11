@@ -358,10 +358,10 @@ export function split_statements_json(request_json) {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
-        __wbg___wbindgen_throw_be289d5034ed271b: function(arg0, arg1) {
+        __wbg___wbindgen_throw_81fc77679af83bc6: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
-        __wbg_error_7534b8e9a36f1ab4: function(arg0, arg1) {
+        __wbg_error_a6fa202b58aa1cd3: function(arg0, arg1) {
             let deferred0_0;
             let deferred0_1;
             try {
@@ -372,23 +372,23 @@ function __wbg_get_imports() {
                 wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
             }
         },
-        __wbg_getTime_1e3cd1391c5c3995: function(arg0) {
+        __wbg_getTime_f6ac312467f7cf09: function(arg0) {
             const ret = arg0.getTime();
             return ret;
         },
-        __wbg_new_0_73afc35eb544e539: function() {
+        __wbg_new_0_bfa2ef4bc447daa2: function() {
             const ret = new Date();
             return ret;
         },
-        __wbg_new_8a6f238a6ece86ea: function() {
+        __wbg_new_227d7c05414eb861: function() {
             const ret = new Error();
             return ret;
         },
-        __wbg_now_a3af9a2f4bbaa4d1: function() {
+        __wbg_now_88621c9c9a4f3ffc: function() {
             const ret = Date.now();
             return ret;
         },
-        __wbg_stack_0ed75d68575b0f3c: function(arg0, arg1) {
+        __wbg_stack_3b0d974bbf31e44f: function(arg0, arg1) {
             const ret = arg1.stack;
             const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len1 = WASM_VECTOR_LEN;

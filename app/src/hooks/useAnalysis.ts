@@ -101,12 +101,15 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     []
   );
 
+  const isSqlFile = useCallback((name: string) => {
+    const lower = name.toLowerCase();
+    return lower.endsWith('.sql') || lower.endsWith('.hql');
+  }, []);
+
   const buildAnalysisContext = useCallback(
     (
       project: Project | null,
       activeFileContent?: string,
-      // Use path (not just basename) for consistency with custom/all modes.
-      // This ensures sourceName matches across all run modes.
       activeFilePath?: string
     ): AnalysisContext | null => {
       if (!project) return null;
@@ -121,16 +124,12 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
       } else if (runMode === 'custom') {
         const selectedIds = project.selectedFileIds || [];
         const selectedFiles = project.files.filter(
-          (f) => selectedIds.includes(f.id) && f.name.endsWith('.sql')
+          (f) => selectedIds.includes(f.id) && isSqlFile(f.name)
         );
-        // Use path instead of name to avoid collisions when files in different
-        // directories have the same basename (e.g., "dir1/query.sql" and "dir2/query.sql")
         filesToAnalyze = selectedFiles.map((f) => ({ name: f.path, content: f.content }));
         contextDescription = `Analyzing selected: ${filesToAnalyze.length} files`;
       } else {
-        const sqlFiles = project.files.filter((f) => f.name.endsWith('.sql'));
-        // Use path instead of name to avoid collisions when files in different
-        // directories have the same basename (e.g., "dir1/query.sql" and "dir2/query.sql")
+        const sqlFiles = project.files.filter((f) => isSqlFile(f.name));
         filesToAnalyze = sqlFiles.map((f) => ({ name: f.path, content: f.content }));
         contextDescription = `Analyzing project: ${sqlFiles.length} files`;
       }
@@ -141,7 +140,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         files: filesToAnalyze,
       };
     },
-    []
+    [isSqlFile]
   );
 
   useEffect(() => {
@@ -153,7 +152,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     // Use file.path as name to match how buildAnalysisContext keys files.
     // This ensures the worker cache uses consistent keys (paths) across sync and analysis.
     const sqlFiles = currentProject.files
-      .filter((file) => file.name.endsWith('.sql'))
+      .filter((file) => isSqlFile(file.name))
       .map((f) => ({ name: f.path, content: f.content }));
 
     if (ANALYSIS_DEBUG)

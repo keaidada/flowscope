@@ -206,3 +206,56 @@ export function schemaMetadataToSQL(schema: SchemaMetadata | null): string {
 
   return lines.join('\n');
 }
+
+/**
+ * Convert ResolvedSchemaMetadata (from analysis result) to DDL SQL.
+ * Only includes tables that were imported (user-provided schema) and match
+ * physical tables referenced in the current analysis — excludes implied
+ * tables (inferred from DDL in the SQL) and temporary tables.
+ */
+export function resolvedSchemaToSQL(resolvedSchema: { tables: Array<{
+  catalog?: string;
+  schema?: string;
+  name: string;
+  columns: Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }>;
+  origin: string;
+  temporary?: boolean;
+}> } | null | undefined): string {
+  if (!resolvedSchema || !resolvedSchema.tables || resolvedSchema.tables.length === 0) {
+    return '-- No resolved schema available';
+  }
+
+  // Only show imported (user-provided) non-temporary tables
+  const matchedTables = resolvedSchema.tables.filter(t => !t.temporary && t.origin === 'imported');
+
+  if (matchedTables.length === 0) {
+    return '-- No imported schema tables matched in current analysis\n-- Import schema DDL files via the Schema sidebar (left panel)';
+  }
+
+  const lines: string[] = [
+    `-- Matched Schema (${matchedTables.length} imported tables used in current analysis)`,
+    '',
+  ];
+
+  for (const table of matchedTables) {
+    const qualifiedName = [table.catalog, table.schema, table.name].filter(Boolean).join('.');
+
+    lines.push(`CREATE TABLE ${qualifiedName} (`);
+
+    if (table.columns && table.columns.length > 0) {
+      const columnLines = table.columns.map((col, index) => {
+        const parts = [`  ${col.name}`];
+        if (col.dataType) parts.push(col.dataType);
+        if (col.isPrimaryKey) parts.push('PRIMARY KEY');
+        const isLast = index === table.columns.length - 1;
+        return parts.join(' ') + (isLast ? '' : ',');
+      });
+      lines.push(...columnLines);
+    }
+
+    lines.push(');');
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}

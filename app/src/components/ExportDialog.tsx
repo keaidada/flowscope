@@ -25,7 +25,6 @@ import {
   DropdownMenuLabel,
 } from './ui/dropdown-menu';
 import { Button } from './ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import {
   Dialog,
   DialogClose,
@@ -49,7 +48,6 @@ import {
   validateSchemaName,
 } from '@pondpilot/flowscope-core';
 import { useIsDarkMode } from '@pondpilot/flowscope-react';
-import { getShortcutDisplay } from '@/lib/shortcuts';
 import {
   base64UrlEncode,
   formatBytes,
@@ -321,60 +319,47 @@ export function ExportDialog({
 
   return (
     <>
-      <TooltipProvider>
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
-                  <Download className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="flex items-center gap-2">
-                Export lineage data
-                <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded border font-mono">
-                  {getShortcutDisplay('export')}
-                </kbd>
-              </p>
-            </TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuLabel>Data Formats</DropdownMenuLabel>
-            <DropdownMenuItem onClick={handleDownloadXlsx}>
-              <FileSpreadsheet className="size-4 mr-2" />
-              Excel (.xlsx)
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleDownloadJson}>
-              <FileJson className="size-4 mr-2" />
-              JSON
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleDownloadCsv}>
-              <FileDown className="size-4 mr-2" />
-              CSV Archive (.zip)
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleOpenDuckDbDialog}>
-              <Database className="size-4 mr-2" />
-              DuckDB SQL
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>Visual Formats</DropdownMenuLabel>
-            <DropdownMenuItem onClick={handleDownloadPng}>
-              <Image className="size-4 mr-2" />
-              PNG Image
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleDownloadMermaid}>
-              <FileCode className="size-4 mr-2" />
-              Mermaid (.md)
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleDownloadHtml}>
-              <FileText className="size-4 mr-2" />
-              HTML Report
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </TooltipProvider>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-8 gap-2 px-2 w-full justify-start">
+            <Download className="h-4 w-4" />
+            <span className="text-sm">{t('export.exportLineage')}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuLabel>Data Formats</DropdownMenuLabel>
+          <DropdownMenuItem onClick={handleDownloadXlsx}>
+            <FileSpreadsheet className="size-4 mr-2" />
+            Excel (.xlsx)
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleDownloadJson}>
+            <FileJson className="size-4 mr-2" />
+            JSON
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleDownloadCsv}>
+            <FileDown className="size-4 mr-2" />
+            CSV Archive (.zip)
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleOpenDuckDbDialog}>
+            <Database className="size-4 mr-2" />
+            DuckDB SQL
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>Visual Formats</DropdownMenuLabel>
+          <DropdownMenuItem onClick={handleDownloadPng}>
+            <Image className="size-4 mr-2" />
+            PNG Image
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleDownloadMermaid}>
+            <FileCode className="size-4 mr-2" />
+            Mermaid (.md)
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleDownloadHtml}>
+            <FileText className="size-4 mr-2" />
+            HTML Report
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <Dialog open={duckDbDialogOpen} onOpenChange={setDuckDbDialogOpen}>
         <DialogContent className="sm:max-w-md">

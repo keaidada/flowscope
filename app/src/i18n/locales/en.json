@@ -28,7 +28,9 @@
     "systemError": "System Error: {{error}}",
     "viewOnGithub": "View on GitHub",
     "shareProject": "Share project",
-    "toggleTheme": "Toggle theme"
+    "toggleTheme": "Toggle theme",
+    "language": "Language",
+    "theme": "Theme"
   },
   "theme": {
     "light": "Light",
@@ -56,6 +58,8 @@
     "viewingTemplate": "Viewing template SQL. Click to see resolved.",
     "viewingResolved": "Viewing resolved SQL. Click to see template.",
     "runConfig": "Run Configuration",
+    "wrap": "Word Wrap",
+    "nowrap": "No Wrap",
     "runActiveOnly": "Run Active File Only",
     "runAllFiles": "Run All Files ({{count}})",
     "runSelected": "Run Selected ({{count}})",
@@ -160,6 +164,8 @@
     "hierarchy": "Hierarchy",
     "matrix": "Matrix",
     "schema": "Schema",
+    "schemaCurrentFile": "Current File",
+    "schemaGlobal": "Global",
     "issues": "Issues",
     "issuesCount": "Issues ({{count}})",
     "editSchema": "Edit schema",
@@ -183,7 +189,21 @@
     "viewTitle": "View Schema",
     "editDesc": "Define your database schema using CREATE TABLE statements. This schema will be used to augment the lineage analysis without appearing in the graph.",
     "viewDesc": "This schema was loaded from the server (database introspection). It cannot be edited in serve mode.",
-    "saveSchema": "Save Schema"
+    "saveSchema": "Save Schema",
+    "saved": "Schema saved",
+    "import": "Import files",
+    "importFolder": "Import folder",
+    "imported": "Imported {{name}}",
+    "importError": "Failed to import file",
+    "noSupportedFiles": "No supported file types found (.sql/.hql/.ddl/.txt)",
+    "export": "Export Schema",
+    "clear": "Clear all",
+    "selectFile": "Select a file to edit",
+    "emptyHint": "Upload Schema SQL files or folders to enhance lineage analysis",
+    "wrap": "Enable word wrap",
+    "nowrap": "Disable word wrap",
+    "deduped": "Added {{added}}, updated {{updated}} existing file(s)",
+    "duplicateFile": "File already exists at this path"
   },
   "shortcuts": {
     "title": "Keyboard Shortcuts",
@@ -325,7 +345,23 @@
   "activityBar": {
     "files": "Explorer",
     "search": "Search",
-    "lineage": "Lineage"
+    "lineage": "Lineage",
+    "schema": "Schema"
+  },
+  "sidebar": {
+    "addFolder": "Add folder",
+    "replaceFolder": "Replace with folder",
+    "newFolder": "New folder",
+    "folderName": "Folder name",
+    "uploading": "Reading files...",
+    "uploadDone": "Upload complete",
+    "uploadProgress": "Reading {{loaded}} / {{total}} files",
+    "uploadResult": "Imported {{imported}}, skipped {{skipped}}",
+    "selectedCount": "{{count}} selected",
+    "deleteSelected": "Delete selected files",
+    "confirmDelete": "Confirm?",
+    "selectAll": "Select all",
+    "deselectAll": "Deselect all"
   },
   "tableFilter": {
     "filterByTables": "Filter by Tables",
@@ -419,7 +455,18 @@
   "schemaView": {
     "primaryKey": "Primary Key",
     "foreignKey": "Foreign Key → {{table}}.{{column}}",
-    "noSchemaData": "No schema data to display"
+    "noSchemaData": "No schema data to display",
+    "tableName": "Table",
+    "dataFlowSources": "Data Flow Sources",
+    "noSources": "No incoming data flow",
+    "sourceCount_one": "{{count}} source",
+    "sourceCount_other": "{{count}} sources",
+    "physicalTable": "Physical Table",
+    "view": "View",
+    "targetTable": "Target Table (Write)",
+    "sourceTable": "Source Tables (Read)",
+    "hasDataFlow": "Data Flow",
+    "noDataFlow": "No Flow"
   },
   "columnPanel": {
     "noData": "No data available",

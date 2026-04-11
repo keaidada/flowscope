@@ -312,11 +312,24 @@ export const HierarchyView = forwardRef<HierarchyViewRef, HierarchyViewProps>(
 
     const { sinks, unusedSources } = useMemo(() => {
       const tableNodes = nodes.filter((n) => ['table', 'view', 'cte'].includes(n.type));
+      const tableNodeIds = new Set(tableNodes.map((n) => n.id));
+
+      // Build a set of non-table node IDs that are owned by each table/cte
+      // (ownership edges: table → column). This allows us to trace indirect
+      // connections through column-level edges.
+      const ownerOf = new Map<string, string>(); // column_id → owner_table_id
+      edges.forEach((e) => {
+        if (e.type === 'ownership' && tableNodeIds.has(e.from)) {
+          ownerOf.set(e.to, e.from);
+        }
+      });
 
       const hasDownstream = new Set<string>();
       const hasUpstream = new Set<string>();
 
+      // Direct table/cte-to-table/cte edges
       edges.forEach((e) => {
+        if (e.type === 'ownership') return;
         const fromNode = getNode(e.from);
         const toNode = getNode(e.to);
         if (
@@ -327,6 +340,33 @@ export const HierarchyView = forwardRef<HierarchyViewRef, HierarchyViewProps>(
         ) {
           hasDownstream.add(e.from);
           hasUpstream.add(e.to);
+        }
+      });
+
+      // Indirect edges: trace through column-level edges to find table-to-table connections.
+      // Pattern: table_A → col_on_A → col_on_B → (ownership) → table_B
+      // This is essential for INSERT statements where data flows:
+      //   source_table → CTE → target_column → (ownership) → target_table
+      edges.forEach((e) => {
+        if (e.type === 'ownership') return;
+        // Check if source is a table/cte and target is a column owned by another table/cte
+        const fromNode = getNode(e.from);
+        const toOwner = ownerOf.get(e.to);
+        if (fromNode && ['table', 'view', 'cte'].includes(fromNode.type) && toOwner && toOwner !== e.from) {
+          hasDownstream.add(e.from);
+          hasUpstream.add(toOwner);
+        }
+        // Check if source is a column owned by a table/cte and target is another table/cte
+        const fromOwner = ownerOf.get(e.from);
+        const toNode = getNode(e.to);
+        if (fromOwner && toNode && ['table', 'view', 'cte'].includes(toNode.type) && fromOwner !== e.to) {
+          hasDownstream.add(fromOwner);
+          hasUpstream.add(e.to);
+        }
+        // Both are columns owned by different tables
+        if (fromOwner && toOwner && fromOwner !== toOwner) {
+          hasDownstream.add(fromOwner);
+          hasUpstream.add(toOwner);
         }
       });
 
@@ -343,6 +383,41 @@ export const HierarchyView = forwardRef<HierarchyViewRef, HierarchyViewProps>(
       };
     }, [getNode, nodes, edges]);
 
+    // Pre-compute indirect upstream table relationships for buildUpstreamTree.
+    // Maps table/cte ID → set of upstream table/cte IDs (via column-level edges).
+    const indirectUpstream = useMemo(() => {
+      const tableNodeIds = new Set(nodes.filter((n) => ['table', 'view', 'cte'].includes(n.type)).map((n) => n.id));
+      const ownerOf = new Map<string, string>();
+      edges.forEach((e) => {
+        if (e.type === 'ownership' && tableNodeIds.has(e.from)) {
+          ownerOf.set(e.to, e.from);
+        }
+      });
+
+      const upstream = new Map<string, Set<string>>();
+      edges.forEach((e) => {
+        if (e.type === 'ownership') return;
+        // column_on_A → column_on_B: owner(A) is upstream of owner(B)
+        const fromOwner = ownerOf.get(e.from);
+        const toOwner = ownerOf.get(e.to);
+        if (fromOwner && toOwner && fromOwner !== toOwner) {
+          if (!upstream.has(toOwner)) upstream.set(toOwner, new Set());
+          upstream.get(toOwner)!.add(fromOwner);
+        }
+        // table/cte → column_on_B: table/cte is upstream of owner(B)
+        if (tableNodeIds.has(e.from) && toOwner && toOwner !== e.from) {
+          if (!upstream.has(toOwner)) upstream.set(toOwner, new Set());
+          upstream.get(toOwner)!.add(e.from);
+        }
+        // column_on_A → table/cte: owner(A) is upstream of table/cte
+        if (fromOwner && tableNodeIds.has(e.to) && fromOwner !== e.to) {
+          if (!upstream.has(e.to)) upstream.set(e.to, new Set());
+          upstream.get(e.to)!.add(fromOwner);
+        }
+      });
+      return upstream;
+    }, [nodes, edges]);
+
     const buildUpstreamTree = (
       nodeId: string,
       visited: Set<string> = new Set(),
@@ -357,14 +432,26 @@ export const HierarchyView = forwardRef<HierarchyViewRef, HierarchyViewProps>(
       }
       visited.add(nodeId);
 
-      const upstreamEdges = edges.filter((e) => {
-        if (e.to !== nodeId) return false;
+      // Direct upstream: table/cte edges
+      const directUpstreamIds = new Set<string>();
+      edges.forEach((e) => {
+        if (e.to !== nodeId) return;
         const fromNode = getNode(e.from);
-        return fromNode && ['table', 'view', 'cte'].includes(fromNode.type);
+        if (fromNode && ['table', 'view', 'cte'].includes(fromNode.type)) {
+          directUpstreamIds.add(e.from);
+        }
       });
 
-      const upstream = upstreamEdges
-        .map((edge) => buildUpstreamTree(edge.from, new Set(visited), filterLower))
+      // Indirect upstream: via column-level edges
+      const indirectIds = indirectUpstream.get(nodeId);
+      if (indirectIds) {
+        for (const id of indirectIds) {
+          directUpstreamIds.add(id);
+        }
+      }
+
+      const upstream = Array.from(directUpstreamIds)
+        .map((id) => buildUpstreamTree(id, new Set(visited), filterLower))
         .filter((n): n is LineageNode => n !== null)
         .sort((a, b) => a.label.localeCompare(b.label));
 
@@ -934,6 +1021,15 @@ function NodeTooltipContent({ details }: { details: NodeDetails | null }) {
 
 function DetailsPanel({ details }: { details: NodeDetails }) {
   const { onNavigateToEditor } = useHierarchyActions();
+  const [expandedUpstream, setExpandedUpstream] = useState(false);
+  const [expandedDownstream, setExpandedDownstream] = useState(false);
+
+  // Reset expanded state when selected node changes
+  useEffect(() => {
+    setExpandedUpstream(false);
+    setExpandedDownstream(false);
+  }, [details.id]);
+
   return (
     <div className="p-3 text-xs space-y-3">
       {/* Header with navigation buttons */}
@@ -1000,19 +1096,23 @@ function DetailsPanel({ details }: { details: NodeDetails }) {
             From ({details.upstreamMappings.length})
           </div>
           <div className="space-y-0.5 font-mono text-[11px]">
-            {details.upstreamMappings.slice(0, 10).map((m, i) => (
-              <div key={i} className="flex items-center gap-1 text-muted-foreground">
-                <span className="truncate max-w-[120px]">
+            {details.upstreamMappings.slice(0, expandedUpstream ? undefined : 10).map((m, i) => (
+              <div key={i} className="flex items-start gap-1 text-muted-foreground">
+                <span className="text-muted-foreground/50 shrink-0 w-5 text-right">{i + 1}.</span>
+                <span className="break-all">
                   {m.fromTable}.{m.fromCol}
                 </span>
-                <ArrowRight className="w-3 h-3 shrink-0" />
-                <span>{m.toCol}</span>
+                <ArrowRight className="w-3 h-3 shrink-0 mt-0.5" />
+                <span className="break-all">{m.toCol}</span>
               </div>
             ))}
-            {details.upstreamMappings.length > 10 && (
-              <div className="text-muted-foreground/70">
+            {!expandedUpstream && details.upstreamMappings.length > 10 && (
+              <button
+                onClick={() => setExpandedUpstream(true)}
+                className="text-primary hover:underline cursor-pointer"
+              >
                 +{details.upstreamMappings.length - 10} more
-              </div>
+              </button>
             )}
           </div>
         </div>
@@ -1026,19 +1126,23 @@ function DetailsPanel({ details }: { details: NodeDetails }) {
             To ({details.downstreamMappings.length})
           </div>
           <div className="space-y-0.5 font-mono text-[11px]">
-            {details.downstreamMappings.slice(0, 10).map((m, i) => (
-              <div key={i} className="flex items-center gap-1 text-muted-foreground">
-                <span>{m.fromCol}</span>
-                <ArrowRight className="w-3 h-3 shrink-0" />
-                <span className="truncate max-w-[120px]">
+            {details.downstreamMappings.slice(0, expandedDownstream ? undefined : 10).map((m, i) => (
+              <div key={i} className="flex items-start gap-1 text-muted-foreground">
+                <span className="text-muted-foreground/50 shrink-0 w-5 text-right">{i + 1}.</span>
+                <span className="break-all">{m.fromCol}</span>
+                <ArrowRight className="w-3 h-3 shrink-0 mt-0.5" />
+                <span className="break-all">
                   {m.toTable}.{m.toCol}
                 </span>
               </div>
             ))}
-            {details.downstreamMappings.length > 10 && (
-              <div className="text-muted-foreground/70">
+            {!expandedDownstream && details.downstreamMappings.length > 10 && (
+              <button
+                onClick={() => setExpandedDownstream(true)}
+                className="text-primary hover:underline cursor-pointer"
+              >
                 +{details.downstreamMappings.length - 10} more
-              </div>
+              </button>
             )}
           </div>
         </div>
