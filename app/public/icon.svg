@@ -1,0 +1,11 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Simple duck silhouette - clean at all sizes -->
+  <!-- Head -->
+  <circle cx="82" cy="38" r="28" fill="#A78BFA"/>
+  <!-- Body -->
+  <ellipse cx="58" cy="82" rx="42" ry="28" fill="#A78BFA"/>
+  <!-- Beak -->
+  <ellipse cx="112" cy="46" rx="14" ry="8" fill="#F4A462"/>
+  <!-- Eye -->
+  <circle cx="90" cy="34" r="5" fill="#1B255A"/>
+</svg>
