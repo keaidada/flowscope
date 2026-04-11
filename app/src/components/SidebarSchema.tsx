@@ -524,6 +524,7 @@ export function SidebarSchema() {
   const [newFolderName, setNewFolderName] = useState('');
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
+  const [search, setSearch] = useState('');
   // Track the currently focused folder path (set by clicking a folder or selecting a file inside one)
   const [activeFolderPath, setActiveFolderPath] = useState<string>('');
   const folderNameInputRef = useRef<HTMLInputElement>(null);
@@ -544,8 +545,15 @@ export function SidebarSchema() {
   // Active file content for editor
   const activeFile = useMemo(() => schemaFiles.find(f => f.id === activeFileId), [schemaFiles, activeFileId]);
 
-  // Build tree
-  const tree = useMemo(() => buildTree(schemaFiles), [schemaFiles]);
+  // Build tree (filtered by search)
+  const filteredFiles = useMemo(() => {
+    if (!search.trim()) return schemaFiles;
+    const q = search.toLowerCase();
+    return schemaFiles.filter(f =>
+      f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q)
+    );
+  }, [schemaFiles, search]);
+  const tree = useMemo(() => buildTree(filteredFiles), [filteredFiles]);
   const sortedRootChildren = useMemo(() => sortNodes(Array.from(tree.children.values())), [tree]);
 
   const handleToggleFolder = useCallback((path: string) => {
@@ -566,6 +574,22 @@ export function SidebarSchema() {
       }
     }
   }, [sortedRootChildren]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-expand all folders when searching
+  useEffect(() => {
+    if (search.trim()) {
+      const allPaths = new Set<string>();
+      for (const f of filteredFiles) {
+        const parts = f.path.split('/');
+        for (let i = 1; i < parts.length; i++) {
+          allPaths.add(parts.slice(0, i).join('/'));
+        }
+      }
+      if (allPaths.size > 0) {
+        setExpandedFolders(prev => new Set([...prev, ...allPaths]));
+      }
+    }
+  }, [search, filteredFiles]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Resize handler for tree/editor split
   const handleResizeStart = useCallback(
@@ -1050,6 +1074,31 @@ export function SidebarSchema() {
           </div>
         </TooltipProvider>
       </div>
+
+      {/* Search */}
+      {schemaFiles.length > 0 && (
+        <div className="px-2 py-1.5 border-b shrink-0">
+          <div className="relative">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('fileSelector.searchFiles')}
+              className="h-7 text-xs pl-7"
+            />
+            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            </span>
+            {search && (
+              <button
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
+                onClick={() => setSearch('')}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* New folder input */}
       {isCreatingFolder && (
