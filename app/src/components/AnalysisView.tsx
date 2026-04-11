@@ -25,6 +25,7 @@ import { isValidTab, useNavigation } from '@/lib/navigation-context';
 import { useViewStateStore, getNamespaceFilterStateWithDefaults } from '@/lib/view-state-store';
 import { useProject } from '@/lib/project-store';
 import { schemaMetadataToSQL, resolvedSchemaToSQL } from '@/lib/schema-parser';
+import { loadSchemaFiles } from '@/lib/schema-storage';
 import { HierarchyView, type HierarchyViewRef } from './HierarchyView';
 import { StatsPopover } from './StatsPopover';
 import { NamespaceFilterBar } from './NamespaceFilterBar';
@@ -627,10 +628,99 @@ export function AnalysisView({
   const { currentProject, updateSchemaSQL, activeProjectId, isBackendMode, backendSchema } =
     useProject();
   const [schemaEditorOpen, setSchemaEditorOpen] = useState(false);
+  const [matchedDDL, setMatchedDDL] = useState<string>('');
   const { activeTab, setActiveTab, navigationTarget, clearNavigationTarget } = useNavigation();
   const [lineageFocusNodeId, setLineageFocusNodeId] = useState<string | undefined>(undefined);
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
   const [mountedTabs, setMountedTabs] = useState<Set<string>>(() => new Set([activeTab]));
+
+  // When Schema editor opens, extract matched DDL from schema files for physical tables in analysis
+  useEffect(() => {
+    if (!schemaEditorOpen || isBackendMode || !activeProjectId || !result) {
+      return;
+    }
+
+    // Collect physical table names from analysis result
+    const tableNames = new Set<string>();
+    for (const stmt of result.statements) {
+      for (const node of stmt.nodes) {
+        if (node.type === 'table' || node.type === 'view') {
+          const qName = node.qualifiedName || node.label;
+          tableNames.add(qName.toLowerCase());
+          // Also add short name for matching
+          const parts = qName.split('.');
+          if (parts.length > 1) {
+            tableNames.add(parts[parts.length - 1].toLowerCase());
+          }
+        }
+      }
+    }
+
+    if (tableNames.size === 0) {
+      setMatchedDDL(resolvedSchemaToSQL(result?.resolvedSchema));
+      return;
+    }
+
+    // Load schema files from IndexedDB and extract matching CREATE TABLE blocks
+    loadSchemaFiles(activeProjectId).then(files => {
+      if (files.length === 0) {
+        setMatchedDDL(resolvedSchemaToSQL(result?.resolvedSchema));
+        return;
+      }
+
+      const matchedBlocks: string[] = [];
+      const allContent = files.map(f => f.content).join('\n\n');
+
+      // Split by CREATE TABLE statements — regex to find each CREATE TABLE ... ; block
+      // Matches: CREATE [EXTERNAL] TABLE [IF NOT EXISTS] `name`(...); including Hive DDL
+      const createTableRegex = /CREATE\s+(?:EXTERNAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?([^\s(`"]+)[`"]?\s*\(/gi;
+      let match;
+
+      while ((match = createTableRegex.exec(allContent)) !== null) {
+        const tableName = match[1].replace(/`/g, '').toLowerCase();
+        const shortName = tableName.split('.').pop() || tableName;
+
+        // Check if this table is referenced in the analysis
+        if (tableNames.has(tableName) || tableNames.has(shortName)) {
+          // Extract the full CREATE TABLE block: from "CREATE" to the next ";" or next "CREATE"
+          const blockStart = match.index;
+          // Find the end: look for the matching semicolon (handling nested parens)
+          let depth = 0;
+          let blockEnd = blockStart;
+          let foundOpenParen = false;
+          for (let i = blockStart; i < allContent.length; i++) {
+            const ch = allContent[i];
+            if (ch === '(') { depth++; foundOpenParen = true; }
+            else if (ch === ')') { depth--; }
+            else if (ch === ';' && foundOpenParen && depth <= 0) {
+              blockEnd = i + 1;
+              break;
+            }
+            // Also stop at next CREATE TABLE if no semicolon found
+            if (i > blockStart + 10 && foundOpenParen && depth <= 0 && allContent.substring(i, i + 6).toUpperCase() === 'CREATE') {
+              blockEnd = i;
+              break;
+            }
+            blockEnd = i + 1;
+          }
+
+          const block = allContent.substring(blockStart, blockEnd).trim();
+          if (block.length > 0) {
+            matchedBlocks.push(block);
+          }
+        }
+      }
+
+      if (matchedBlocks.length > 0) {
+        setMatchedDDL(
+          `-- 匹配到 ${matchedBlocks.length} 个物理表的 DDL 定义\n\n` +
+          matchedBlocks.join('\n\n')
+        );
+      } else {
+        setMatchedDDL(resolvedSchemaToSQL(result?.resolvedSchema));
+      }
+    });
+  }, [schemaEditorOpen, isBackendMode, activeProjectId, result]);
 
   // Persisted state hooks for each view
   const matrixState = usePersistedMatrixState(activeProjectId);
@@ -1114,7 +1204,7 @@ export function AnalysisView({
           onOpenChange={setSchemaEditorOpen}
           schemaSQL={isBackendMode
             ? schemaMetadataToSQL(backendSchema)
-            : resolvedSchemaToSQL(result?.resolvedSchema)}
+            : matchedDDL}
           dialect={currentProject.dialect}
           onSave={handleSaveSchema}
           isReadOnly
