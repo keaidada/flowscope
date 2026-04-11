@@ -1000,7 +1000,7 @@ export function SidebarSchema() {
                 {/* New file */}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setIsCreatingFile(true); setIsCreatingFolder(false); }}>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setActiveFolderPath(''); setIsCreatingFile(true); setIsCreatingFolder(false); }}>
                       <Plus className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
@@ -1027,7 +1027,7 @@ export function SidebarSchema() {
                 {/* New folder */}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setIsCreatingFolder(true); setIsCreatingFile(false); }}>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setActiveFolderPath(''); setIsCreatingFolder(true); setIsCreatingFile(false); }}>
                       <FolderPlus className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
