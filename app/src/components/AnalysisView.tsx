@@ -329,23 +329,45 @@ function extractSchemaFromResult(result: AnalyzeResult, filterSourceName?: strin
     edgesByTarget.get(target)!.push(source);
   }
 
+  // Build a lookup from resolvedSchema for DDL column info.
+  // Maps qualified table name (e.g. "his_db.ai_chk_idtfy") → column definitions
+  const resolvedColumnsMap = new Map<string, Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }>>();
+  if (result.resolvedSchema?.tables) {
+    for (const rst of result.resolvedSchema.tables) {
+      // Build all possible name forms for matching
+      const names: string[] = [rst.name];
+      if (rst.schema) names.push(`${rst.schema}.${rst.name}`);
+      if (rst.catalog && rst.schema) names.push(`${rst.catalog}.${rst.schema}.${rst.name}`);
+      for (const n of names) {
+        resolvedColumnsMap.set(n.toLowerCase(), rst.columns.map(c => ({
+          name: c.name,
+          dataType: c.dataType,
+          isPrimaryKey: c.isPrimaryKey,
+        })));
+      }
+    }
+  }
+
   const tables: SchemaTable[] = [];
   for (const [qName, info] of tableMap) {
     if (!keysToKeep.has(qName)) continue; // skip duplicate shorter-named entries
     // Build columns as FK refs to represent incoming data flow
     const sources = edgesByTarget.get(qName) || [];
-    const columns = sources.map(sourceName => ({
+    const flowColumns = sources.map(sourceName => ({
       name: `← ${sourceName}`,
       dataType: undefined as string | undefined,
       isPrimaryKey: false,
       foreignKey: { table: sourceName, column: 'flow' },
     }));
 
+    // Look up DDL columns from resolvedSchema
+    const ddlColumns = resolvedColumnsMap.get(qName.toLowerCase()) || [];
+
     tables.push({
       catalog: info.catalog,
       schema: info.schema,
       name: info.name,
-      columns,
+      columns: [...flowColumns, ...ddlColumns],
     });
   }
 
@@ -362,10 +384,10 @@ interface SchemaListViewProps {
 
 function SchemaListView({ schema }: SchemaListViewProps) {
   const { t } = useTranslation();
-  const [expandedTargets, setExpandedTargets] = useState<Set<string>>(() => new Set());
+  const [expandedTables, setExpandedTables] = useState<Set<string>>(() => new Set());
 
-  const toggleTarget = useCallback((tableName: string) => {
-    setExpandedTargets((prev) => {
+  const toggleTable = useCallback((tableName: string) => {
+    setExpandedTables((prev) => {
       const next = new Set(prev);
       if (next.has(tableName)) {
         next.delete(tableName);
@@ -378,7 +400,7 @@ function SchemaListView({ schema }: SchemaListViewProps) {
 
   // Separate tables into target tables and source tables, mark data flow status
   const { targetTables, sourceTables } = useMemo(() => {
-    const targets: { fullName: string; table: SchemaTable; sources: string[] }[] = [];
+    const targets: { fullName: string; table: SchemaTable; sources: string[]; ddlColumns: Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }> }[] = [];
     const referencedSourceNames = new Set<string>();
 
     for (const table of schema) {
@@ -386,9 +408,11 @@ function SchemaListView({ schema }: SchemaListViewProps) {
       const incomingSources = (table.columns || [])
         .filter((col) => col.name.startsWith('← '))
         .map((col) => col.name.replace('← ', ''));
+      const ddlColumns = (table.columns || [])
+        .filter((col) => !col.name.startsWith('← '));
 
       if (incomingSources.length > 0) {
-        targets.push({ fullName, table, sources: incomingSources });
+        targets.push({ fullName, table, sources: incomingSources, ddlColumns });
         for (const src of incomingSources) {
           referencedSourceNames.add(src);
         }
@@ -396,12 +420,13 @@ function SchemaListView({ schema }: SchemaListViewProps) {
     }
 
     // Source tables: all non-target tables, with data flow indicator
-    const sources: { fullName: string; table: SchemaTable; hasDataFlow: boolean }[] = [];
+    const sources: { fullName: string; table: SchemaTable; hasDataFlow: boolean; ddlColumns: Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }> }[] = [];
     for (const table of schema) {
       const fullName = [table.catalog, table.schema, table.name].filter(Boolean).join('.');
       const isTarget = targets.some((t) => t.fullName === fullName);
       if (!isTarget) {
-        sources.push({ fullName, table, hasDataFlow: referencedSourceNames.has(fullName) });
+        const ddlColumns = (table.columns || []).filter((col) => !col.name.startsWith('← '));
+        sources.push({ fullName, table, hasDataFlow: referencedSourceNames.has(fullName), ddlColumns });
       }
     }
 
@@ -435,12 +460,12 @@ function SchemaListView({ schema }: SchemaListViewProps) {
             {t('schemaView.targetTable')}
           </div>
           <div className="divide-y divide-border">
-            {targetTables.map(({ fullName, table, sources }) => {
-              const isExpanded = expandedTargets.has(fullName);
+            {targetTables.map(({ fullName, table, sources, ddlColumns }) => {
+              const isExpanded = expandedTables.has(fullName);
               return (
                 <div key={fullName}>
                   <button
-                    onClick={() => toggleTarget(fullName)}
+                    onClick={() => toggleTable(fullName)}
                     className="flex items-center gap-2 w-full px-4 py-2.5 text-left hover:bg-muted/50 transition-colors"
                   >
                     <span className="text-muted-foreground shrink-0">
@@ -474,6 +499,23 @@ function SchemaListView({ schema }: SchemaListViewProps) {
                           </div>
                         ))}
                       </div>
+                      {ddlColumns.length > 0 && (
+                        <div className="mt-3">
+                          <div className="text-xs text-muted-foreground mb-1.5 font-medium">
+                            {t('hierarchyView.columnsLabel', { count: ddlColumns.length })}
+                          </div>
+                          <div className="space-y-0.5">
+                            {ddlColumns.map((col, idx) => (
+                              <div key={`${col.name}-${idx}`} className="flex items-center gap-2 text-xs text-foreground/70">
+                                <span className="w-1.5 h-1.5 rounded-full bg-primary/50 shrink-0" />
+                                <span className="truncate font-mono">{col.name}</span>
+                                {col.dataType && <span className="text-muted-foreground shrink-0">{col.dataType}</span>}
+                                {col.isPrimaryKey && <span className="text-amber-500 text-[10px] shrink-0">PK</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -491,27 +533,59 @@ function SchemaListView({ schema }: SchemaListViewProps) {
             <span className="ml-1.5 font-normal normal-case">({sourceTables.length})</span>
           </div>
           <div className="divide-y divide-border">
-            {sourceTables.map(({ fullName, table, hasDataFlow }) => (
-              <div key={fullName} className="flex items-center gap-2 px-4 py-2.5">
-                <span className="inline-block w-4 shrink-0" />
-                <Table2 className="h-4 w-4 text-primary shrink-0" />
-                <span className="font-medium text-sm truncate">{table.name}</span>
-                {renderSchemaPrefix(table)}
-                <span className="ml-auto shrink-0">
-                  {hasDataFlow ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500" />
-                      {t('schemaView.hasDataFlow')}
+            {sourceTables.map(({ fullName, table, hasDataFlow, ddlColumns }) => {
+              const isExpanded = expandedTables.has(fullName);
+              const hasColumns = ddlColumns.length > 0;
+              return (
+                <div key={fullName}>
+                  <div
+                    className={cn("flex items-center gap-2 px-4 py-2.5", hasColumns && "cursor-pointer hover:bg-muted/50")}
+                    onClick={hasColumns ? () => toggleTable(fullName) : undefined}
+                  >
+                    {hasColumns ? (
+                      <span className="text-muted-foreground shrink-0">
+                        {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      </span>
+                    ) : (
+                      <span className="inline-block w-4 shrink-0" />
+                    )}
+                    <Table2 className="h-4 w-4 text-primary shrink-0" />
+                    <span className="font-medium text-sm truncate">{table.name}</span>
+                    {renderSchemaPrefix(table)}
+                    <span className="ml-auto shrink-0">
+                      {hasDataFlow ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500" />
+                          {t('schemaView.hasDataFlow')}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
+                          {t('schemaView.noDataFlow')}
+                        </span>
+                      )}
                     </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
-                      {t('schemaView.noDataFlow')}
-                    </span>
+                  </div>
+                  {isExpanded && ddlColumns.length > 0 && (
+                    <div className="pb-2 pl-14 pr-4">
+                      <div className="text-xs text-muted-foreground mb-1.5 font-medium">
+                        {t('hierarchyView.columnsLabel', { count: ddlColumns.length })}
+                      </div>
+                      <div className="space-y-0.5">
+                        {ddlColumns.map((col, idx) => (
+                          <div key={`${col.name}-${idx}`} className="flex items-center gap-2 text-xs text-foreground/70">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary/50 shrink-0" />
+                            <span className="truncate font-mono">{col.name}</span>
+                            {col.dataType && <span className="text-muted-foreground shrink-0">{col.dataType}</span>}
+                            {col.isPrimaryKey && <span className="text-amber-500 text-[10px] shrink-0">PK</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
-                </span>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
