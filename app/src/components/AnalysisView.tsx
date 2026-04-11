@@ -709,7 +709,7 @@ export function AnalysisView({
             blockEnd = i + 1;
           }
 
-          const block = allContent.substring(blockStart, blockEnd).trim();
+          const block = allContent.substring(blockStart, blockEnd).trim().replace(/;+$/, '');
           if (block.length > 0) {
             matchedBlocks.push(block);
           }
@@ -719,7 +719,7 @@ export function AnalysisView({
       if (matchedBlocks.length > 0) {
         setMatchedDDL(
           `-- 匹配到 ${matchedBlocks.length} 个物理表的 DDL 定义\n\n` +
-          matchedBlocks.join('\n\n')
+          matchedBlocks.join(';\n\n') + ';'
         );
       } else {
         setMatchedDDL(resolvedSchemaToSQL(result?.resolvedSchema));
