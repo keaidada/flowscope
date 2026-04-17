@@ -161,12 +161,9 @@ export function buildTableLevelLineage(result: AnalyzeResult): AnalyzeResult {
     }
   }
 
-  // 2. 从 globalLineage 中补充
-  const physicalGlobalIds = new Set<string>();
-  const globalNodeQNames = new Map<string, string>();
+  // 2. 从 globalLineage 中补充物理表（不做 BFS，只补充 tableMap）
   for (const node of result.globalLineage?.nodes ?? []) {
     const qName = getGlobalNodeQName(node);
-    globalNodeQNames.set(node.id, qName);
 
     const isPhysical =
       node.type !== 'cte' &&
@@ -176,7 +173,6 @@ export function buildTableLevelLineage(result: AnalyzeResult): AnalyzeResult {
       (node.resolutionSource || node.canonicalName?.schema);
 
     if (isPhysical) {
-      physicalGlobalIds.add(node.id);
       if (!tableMap.has(qName)) {
         const cn = node.canonicalName;
         tableMap.set(qName, {
@@ -225,37 +221,6 @@ export function buildTableLevelLineage(result: AnalyzeResult): AnalyzeResult {
             const targetQName = targetNode.qualifiedName || targetNode.label;
             if (srcQName !== targetQName) {
               flowEdgesWithSource.push({ source: srcQName, target: targetQName, sourceName: stmtSource });
-            }
-          } else {
-            queue.push(next);
-          }
-        }
-      }
-    }
-  }
-
-  // 2b. 从 globalLineage BFS（跨语句穿透临时表）
-  if (result.globalLineage?.edges) {
-    const globalAdj = new Map<string, string[]>();
-    for (const edge of result.globalLineage.edges) {
-      if (!globalAdj.has(edge.from)) globalAdj.set(edge.from, []);
-      globalAdj.get(edge.from)!.push(edge.to);
-    }
-
-    for (const srcId of physicalGlobalIds) {
-      const srcQName = globalNodeQNames.get(srcId)!;
-      const visited = new Set<string>();
-      const queue = [srcId];
-      visited.add(srcId);
-      while (queue.length > 0) {
-        const current = queue.shift()!;
-        for (const next of globalAdj.get(current) || []) {
-          if (visited.has(next)) continue;
-          visited.add(next);
-          if (physicalGlobalIds.has(next)) {
-            const targetQName = globalNodeQNames.get(next)!;
-            if (srcQName !== targetQName) {
-              flowEdgesWithSource.push({ source: srcQName, target: targetQName, sourceName: 'global' });
             }
           } else {
             queue.push(next);

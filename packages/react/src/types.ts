@@ -62,6 +62,12 @@ export interface TableFilter {
   selectedTableLabels: Set<string>;
   /** Direction of lineage to show: upstream, downstream, or both */
   direction: TableFilterDirection;
+  /** Max upstream depth (undefined = unlimited) */
+  upstreamDepth?: number;
+  /** Max downstream depth (undefined = unlimited) */
+  downstreamDepth?: number;
+  /** The node ID that initiated the depth filter (for highlighting) */
+  focusNodeId?: string;
 }
 
 /**

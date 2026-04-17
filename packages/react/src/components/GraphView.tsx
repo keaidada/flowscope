@@ -66,6 +66,40 @@ const ELK_NODE_LIMIT = 2000;
 const NODE_OVERLAP_THRESHOLD = 0.5;
 
 /**
+ * MiniMap wrapper that supports click-to-navigate.
+ * Must be inside ReactFlow to use useReactFlow.
+ */
+function ClickableMiniMap({ show }: { show: boolean }): JSX.Element | null {
+  const { setCenter, getZoom } = useReactFlow();
+
+  const handleClick = useCallback(
+    (_event: React.MouseEvent, position: { x: number; y: number }) => {
+      setCenter(position.x, position.y, { zoom: getZoom(), duration: 300 });
+    },
+    [setCenter, getZoom]
+  );
+
+  if (!show) return null;
+
+  return (
+    <MiniMap
+      pannable
+      zoomable
+      onClick={handleClick}
+      nodeColor={(node) => {
+        if (isTableNodeData(node.data)) {
+          return getMinimapNodeColor(node.data.nodeType || 'table');
+        }
+        if (node.id.startsWith('script:')) {
+          return getMinimapNodeColor('script');
+        }
+        return getMinimapNodeColor('table');
+      }}
+    />
+  );
+}
+
+/**
  * Helper component to handle node focusing.
  * Must be rendered inside ReactFlow to access useReactFlow hook.
  */
@@ -1060,20 +1094,7 @@ export function GraphView({
         <Panel position="bottom-left" className="!m-3">
           <LayoutProgressIndicator />
         </Panel>
-        {showMiniMap && (
-          <MiniMap
-            nodeColor={(node) => {
-              if (isTableNodeData(node.data)) {
-                return getMinimapNodeColor(node.data.nodeType || 'table');
-              }
-              // For script nodes, check node type from id prefix
-              if (node.id.startsWith('script:')) {
-                return getMinimapNodeColor('script');
-              }
-              return getMinimapNodeColor('table');
-            }}
-          />
-        )}
+        <ClickableMiniMap show={showMiniMap} />
       </ReactFlow>
     </div>
   );

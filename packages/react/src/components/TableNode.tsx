@@ -4,8 +4,11 @@ import {
   type JSX,
   type CSSProperties,
   useCallback,
+  useRef,
+  useEffect,
   type ReactElement,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { List } from 'react-window';
@@ -249,6 +252,155 @@ function getNodeHeaderLabel(nodeData: TableNodeData, isVirtualOutput: boolean): 
   return nodeData.nodeType;
 }
 
+/** 层级筛选浮层 — 通过 Portal 渲染到 body，避免节点遮挡 */
+function DepthFilterPortal({
+  open,
+  anchorRef,
+  palette,
+  colors,
+  onFilter,
+  onClear,
+  onClose,
+  activeUpDepth,
+  activeDownDepth,
+}: {
+  open: boolean;
+  anchorRef: React.RefObject<HTMLElement | null>;
+  palette: { bg: string; border: string; text: string; textSecondary: string };
+  colors: { accent: string };
+  onFilter: (e: React.MouseEvent, up?: number, down?: number) => void;
+  onClear: () => void;
+  onClose: () => void;
+  activeUpDepth?: number;
+  activeDownDepth?: number;
+}) {
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [hoverItem, setHoverItem] = useState<'upstream' | 'downstream' | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open || !anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    setPos({ top: rect.bottom + 4, left: rect.left - 40 });
+    setHoverItem(null);
+  }, [open, anchorRef]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (anchorRef.current?.contains(e.target as Node)) return;
+      if (menuRef.current?.contains(e.target as Node)) return;
+      onClose();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open, anchorRef, onClose]);
+
+  if (!open) return null;
+
+  const menuStyle: CSSProperties = {
+    position: 'fixed', zIndex: 9999,
+    backgroundColor: palette.bg, border: `1px solid ${palette.border}`,
+    borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+    padding: '4px 0', minWidth: 100,
+  };
+
+  const itemStyle: CSSProperties = {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+    padding: '5px 10px', color: palette.text, fontSize: 12,
+  };
+
+  const subItemStyle: CSSProperties = {
+    display: 'block', width: '100%', textAlign: 'center',
+    background: 'none', border: 'none', cursor: 'pointer',
+    padding: '4px 12px', color: palette.text, fontSize: 11, borderRadius: 3,
+  };
+
+  const levels = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+  return createPortal(
+    <div ref={menuRef} style={{ position: 'fixed', top: 0, left: 0, zIndex: 9999 }}
+      onClick={(e) => e.stopPropagation()}
+      onMouseLeave={() => onClose()}>
+      {/* 一级菜单 */}
+      <div style={{ ...menuStyle, top: pos.top, left: pos.left }}>
+        <button style={itemStyle}
+          onMouseEnter={(e) => { setHoverItem('upstream'); e.currentTarget.style.backgroundColor = `${colors.accent}10`; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+        >
+          <span>↑ 上游{activeUpDepth !== undefined && activeUpDepth > 0 ? ` (${activeUpDepth})` : activeUpDepth === undefined ? ' (全部)' : ''}</span>
+          <span style={{ fontSize: 10, opacity: 0.5 }}>▶</span>
+        </button>
+        <button style={itemStyle}
+          onMouseEnter={(e) => { setHoverItem('downstream'); e.currentTarget.style.backgroundColor = `${colors.accent}10`; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+        >
+          <span>↓ 下游{activeDownDepth !== undefined && activeDownDepth > 0 ? ` (${activeDownDepth})` : activeDownDepth === undefined ? ' (全部)' : ''}</span>
+          <span style={{ fontSize: 10, opacity: 0.5 }}>▶</span>
+        </button>
+        <div style={{ height: 1, backgroundColor: palette.border, margin: '3px 0' }} />
+        <button style={{ ...itemStyle, color: '#ef4444' }}
+          onMouseEnter={(e) => { setHoverItem(null); e.currentTarget.style.backgroundColor = '#ef444410'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+          onClick={(e) => { e.stopPropagation(); onClear(); }}
+        >清除筛选</button>
+      </div>
+
+      {/* 二级菜单 — 右侧展开 */}
+      {hoverItem && (
+        <div style={{
+          ...menuStyle,
+          top: pos.top + (hoverItem === 'downstream' ? 30 : 0),
+          left: pos.left + 104,
+          display: 'grid',
+          gridTemplateColumns: 'repeat(5, 1fr)',
+          gap: 2,
+          padding: 6,
+          minWidth: 180,
+        }}
+          onMouseEnter={() => setHoverItem(hoverItem)}
+          onMouseLeave={() => setHoverItem(null)}
+        >
+          {levels.map((d) => {
+            const isActive = hoverItem === 'upstream'
+              ? activeUpDepth === d
+              : activeDownDepth === d;
+            return (
+              <button key={d} style={{
+                ...subItemStyle,
+                backgroundColor: isActive ? `${colors.accent}30` : 'transparent',
+                color: isActive ? colors.accent : palette.text,
+                fontWeight: isActive ? 700 : 400,
+                borderRadius: 4,
+              }}
+                onClick={(e) => hoverItem === 'upstream'
+                  ? onFilter(e, d, undefined)
+                  : onFilter(e, undefined, d)
+                }
+                onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = `${colors.accent}20`; }}
+                onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent'; }}
+              >{d}</button>
+            );
+          })}
+          <button style={{
+            ...subItemStyle, gridColumn: '1 / -1', fontWeight: 600, color: colors.accent,
+            backgroundColor: (hoverItem === 'upstream' ? activeUpDepth === undefined : activeDownDepth === undefined) ? `${colors.accent}30` : 'transparent',
+          }}
+            onClick={(e) => hoverItem === 'upstream'
+              ? onFilter(e, undefined, undefined)
+              : onFilter(e, undefined, undefined)
+            }
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${colors.accent}20`; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+          >全部</button>
+        </div>
+      )}
+    </div>,
+    document.body
+  );
+}
+
 function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
   const { toggleNodeCollapse, toggleTableExpansion, selectNode } = useLineageActions();
   const isExpanded = useLineageStore((state) => state.expandedTableIds.has(id));
@@ -271,6 +423,56 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
     [data]
   );
 
+  // 层级筛选浮层
+  const [depthMenuOpen, setDepthMenuOpen] = useState(false);
+  const depthMenuRef = useRef<HTMLButtonElement>(null);
+  const { setTableFilter, clearTableFilter } = useLineageActions();
+  const currentTableFilter = useLineageStore((s) => s.tableFilter);
+
+  const handleDepthFilter = useCallback(
+    (e: React.MouseEvent, upDepth?: number, downDepth?: number) => {
+      e.stopPropagation();
+      if (!isTableNodeData(data)) return;
+      const label = data.label;
+      const isSameTable = currentTableFilter.focusNodeId === id;
+
+      const prevUp = isSameTable ? currentTableFilter.upstreamDepth : undefined;
+      const prevDown = isSameTable ? currentTableFilter.downstreamDepth : undefined;
+      const newUp = upDepth !== undefined ? upDepth : prevUp;
+      const newDown = downDepth !== undefined ? downDepth : prevDown;
+
+      // 再次点击同一方向同一深度 → 取消该方向
+      if (isSameTable && upDepth !== undefined && currentTableFilter.upstreamDepth === upDepth) {
+        if (prevDown && prevDown > 0) {
+          setTableFilter({ selectedTableLabels: new Set([label]), direction: 'both', upstreamDepth: 0, downstreamDepth: prevDown, focusNodeId: id });
+        } else {
+          clearTableFilter();
+        }
+        setDepthMenuOpen(false);
+        return;
+      }
+      if (isSameTable && downDepth !== undefined && currentTableFilter.downstreamDepth === downDepth) {
+        if (prevUp && prevUp > 0) {
+          setTableFilter({ selectedTableLabels: new Set([label]), direction: 'both', upstreamDepth: prevUp, downstreamDepth: 0, focusNodeId: id });
+        } else {
+          clearTableFilter();
+        }
+        setDepthMenuOpen(false);
+        return;
+      }
+
+      setTableFilter({
+        selectedTableLabels: new Set([label]),
+        direction: 'both',
+        upstreamDepth: newUp,
+        downstreamDepth: newDown,
+        focusNodeId: id,
+      });
+      setDepthMenuOpen(false);
+    },
+    [id, data, setTableFilter, clearTableFilter, currentTableFilter]
+  );
+
   if (!isTableNodeData(data)) {
     console.error('Invalid node data type for TableNode', data);
     return <div>Invalid node data</div>;
@@ -284,6 +486,7 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
   const isBaseTable = !!nodeData.isBaseTable;
   const isSelected = selected || nodeData.isSelected;
   const isHighlighted = nodeData.isHighlighted;
+  const isFilterTarget = currentTableFilter.focusNodeId === id;
   const isCollapsed = nodeData.isCollapsed;
   // isExpanded is now derived directly from the store selector above
   const hiddenColumnCount = nodeData.hiddenColumnCount || 0;
@@ -318,19 +521,21 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
       style={{
         minWidth: 180,
         borderRadius: 8,
-        borderTop: `1px solid ${isSelected ? colors.interactive.selection : palette.border}`,
-        borderRight: `1px solid ${isSelected ? colors.interactive.selection : palette.border}`,
-        borderBottom: `1px solid ${isSelected ? colors.interactive.selection : palette.border}`,
+        borderTop: `${isFilterTarget ? '2px' : '1px'} solid ${isFilterTarget ? '#f59e0b' : isSelected ? colors.interactive.selection : palette.border}`,
+        borderRight: `${isFilterTarget ? '2px' : '1px'} solid ${isFilterTarget ? '#f59e0b' : isSelected ? colors.interactive.selection : palette.border}`,
+        borderBottom: `${isFilterTarget ? '2px' : '1px'} solid ${isFilterTarget ? '#f59e0b' : isSelected ? colors.interactive.selection : palette.border}`,
         borderLeft: schemaColor
-          ? `3px solid ${schemaColor}`
-          : `1px solid ${isSelected ? colors.interactive.selection : palette.border}`,
-        boxShadow: isSelected
-          ? `0 0 0 2px ${colors.interactive.selectionRing}`
-          : isRecursive
-            ? `0 0 0 2px ${colors.recursive}20`
-            : '0 1px 3px rgba(0,0,0,0.1)',
+          ? `3px solid ${isFilterTarget ? '#f59e0b' : schemaColor}`
+          : `${isFilterTarget ? '2px' : '1px'} solid ${isFilterTarget ? '#f59e0b' : isSelected ? colors.interactive.selection : palette.border}`,
+        boxShadow: isFilterTarget
+          ? '0 0 0 3px rgba(245, 158, 11, 0.4), 0 0 12px rgba(245, 158, 11, 0.2)'
+          : isSelected
+            ? `0 0 0 2px ${colors.interactive.selectionRing}`
+            : isRecursive
+              ? `0 0 0 2px ${colors.recursive}20`
+              : '0 1px 3px rgba(0,0,0,0.1)',
         overflow: 'hidden',
-        backgroundColor: isHighlighted ? colors.interactive.related : palette.bg,
+        backgroundColor: isFilterTarget ? '#fef3c720' : isHighlighted ? colors.interactive.related : palette.bg,
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       }}
     >
@@ -523,6 +728,54 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
                   </svg>
                 )}
               </button>
+            )}
+            {/* 层级筛选按钮 */}
+            {!isVirtualOutput && (
+              <div style={{ position: 'relative' }}>
+                <button
+                  ref={depthMenuRef}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDepthMenuOpen(!depthMenuOpen);
+                  }}
+                  style={{
+                    background: currentTableFilter.focusNodeId === id
+                      ? `${colors.accent}25`
+                      : 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    color: currentTableFilter.focusNodeId === id
+                      ? colors.accent
+                      : palette.textSecondary,
+                    opacity: currentTableFilter.focusNodeId === id
+                      ? 1
+                      : 0.4,
+                    borderRadius: 3,
+                    transition: 'opacity 0.15s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.4'; }}
+                  title="筛选上下游层级"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>
+                  </svg>
+                </button>
+                <DepthFilterPortal
+                  open={depthMenuOpen}
+                  anchorRef={depthMenuRef}
+                  palette={palette}
+                  colors={colors}
+                  onFilter={handleDepthFilter}
+                  onClear={() => { clearTableFilter(); setDepthMenuOpen(false); }}
+                  onClose={() => setDepthMenuOpen(false)}
+                  activeUpDepth={currentTableFilter.focusNodeId === id ? currentTableFilter.upstreamDepth : undefined}
+                  activeDownDepth={currentTableFilter.focusNodeId === id ? currentTableFilter.downstreamDepth : undefined}
+                />
+              </div>
             )}
           </div>
         </div>

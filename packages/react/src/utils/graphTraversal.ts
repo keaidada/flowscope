@@ -62,6 +62,87 @@ function traverseDirection(
 }
 
 /**
+ * Traverse the graph in a single direction with depth limit.
+ * Nodes are counted as depth steps; edges are transparent.
+ */
+function traverseDirectionWithDepth(
+  startId: string,
+  edgeMap: Map<string, FlowEdge>,
+  adjacencyMap: Map<string, string[]>,
+  getNextId: (edge: FlowEdge) => string,
+  maxDepth: number
+): Set<string> {
+  const visited = new Set<string>([startId]);
+  // depth 表示到达当前节点经过了多少跳（startNode = 0）
+  const depthMap = new Map<string, number>([[startId, 0]]);
+  const queue = [startId];
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    const currentDepth = depthMap.get(currentId) ?? 0;
+
+    if (edgeMap.has(currentId)) {
+      // 当前是 edge → 跳到下一个 node，depth 继承自发出这条 edge 的 node
+      const edge = edgeMap.get(currentId)!;
+      const nextId = getNextId(edge);
+      if (!visited.has(nextId)) {
+        visited.add(nextId);
+        depthMap.set(nextId, currentDepth);
+        queue.push(nextId);
+      }
+    } else {
+      // 当前是 node → 展开相邻 edges
+      // 下一个 node 的深度 = currentDepth + 1
+      if (currentDepth >= maxDepth) continue;
+      const adjacentEdges = adjacencyMap.get(currentId) || [];
+      for (const edgeId of adjacentEdges) {
+        if (!visited.has(edgeId)) {
+          visited.add(edgeId);
+          depthMap.set(edgeId, currentDepth + 1);
+          queue.push(edgeId);
+        }
+      }
+    }
+  }
+
+  return visited;
+}
+
+/**
+ * Find connected elements with separate upstream/downstream depth limits.
+ * Depth 0 = only the start node. undefined = unlimited.
+ */
+export function findConnectedElementsWithDepth(
+  startId: string,
+  index: GraphIndex,
+  upstreamDepth: number | undefined,
+  downstreamDepth: number | undefined
+): Set<string> {
+  const { downstreamMap, upstreamMap, edgeMap } = index;
+  const visited = new Set<string>([startId]);
+
+  if (downstreamDepth !== undefined && downstreamDepth > 0) {
+    const downstream = traverseDirectionWithDepth(
+      startId, edgeMap, downstreamMap,
+      (edge) => edge.targetHandle || edge.target,
+      downstreamDepth
+    );
+    for (const id of downstream) visited.add(id);
+  }
+
+  if (upstreamDepth !== undefined && upstreamDepth > 0) {
+    const upstream = traverseDirectionWithDepth(
+      startId, edgeMap, upstreamMap,
+      (edge) => edge.sourceHandle || edge.source,
+      upstreamDepth
+    );
+    for (const id of upstream) visited.add(id);
+  }
+
+  return visited;
+}
+
+/**
  * Build a graph index from edges for efficient traversal.
  * Call this once when the graph changes, then pass to traversal functions.
  */
@@ -665,13 +746,26 @@ export function applyTableFilter(
   const allStartIds = new Set([...matchingNodeIds, ...matchingColumnIds]);
 
   // Use pre-built index if provided, otherwise build on-the-fly
-  const tableFilterConnected = graphIndex
-    ? findConnectedElementsMultipleDirectionalIndexed(
-        allStartIds,
-        graphIndex,
-        tableFilter.direction
-      )
-    : findConnectedElementsMultipleDirectional(allStartIds, graph.edges, tableFilter.direction);
+  const idx = graphIndex || buildGraphIndex(graph.edges);
+  const hasDepthLimit = tableFilter.upstreamDepth !== undefined || tableFilter.downstreamDepth !== undefined;
+
+  const tableFilterConnected = new Set<string>();
+
+  if (hasDepthLimit) {
+    // Depth-limited traversal
+    const upDepth = tableFilter.direction === 'downstream' ? 0 : tableFilter.upstreamDepth;
+    const downDepth = tableFilter.direction === 'upstream' ? 0 : tableFilter.downstreamDepth;
+    for (const startId of allStartIds) {
+      const connected = findConnectedElementsWithDepth(startId, idx, upDepth, downDepth);
+      for (const id of connected) tableFilterConnected.add(id);
+    }
+  } else {
+    // Unlimited traversal (original behavior)
+    const connected = graphIndex
+      ? findConnectedElementsMultipleDirectionalIndexed(allStartIds, graphIndex, tableFilter.direction)
+      : findConnectedElementsMultipleDirectional(allStartIds, graph.edges, tableFilter.direction);
+    for (const id of connected) tableFilterConnected.add(id);
+  }
 
   // Also include the original table node IDs (they may not be in traversal results
   // if they have no edges, but we still want to show them)

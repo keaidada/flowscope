@@ -80,21 +80,26 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   const [editorOpen, setEditorOpen] = useState(true);
   const [globalLineageOpen, setGlobalLineageOpen] = useState(false);
   const previousResultRef = useRef(result);
+  const previousLayoutRef = useRef(layoutAlgorithm);
 
   // 打开全局血缘：从 SQLite 加载所有文件结果并合并
   const handleGlobalLineageToggle = useCallback(async () => {
     if (globalLineageOpen) {
-      // 关闭：恢复之前的单文件 result
+      // 关闭：恢复之前的单文件 result 和布局
       setGlobalLineageOpen(false);
       setLineageResult(previousResultRef.current);
+      setLayoutAlgorithm(previousLayoutRef.current);
       return;
     }
 
     if (!activeProjectId) return;
 
-    // 保存当前 result 以便恢复
+    // 保存当前 result 和布局以便恢复
     previousResultRef.current = result;
+    previousLayoutRef.current = layoutAlgorithm;
     setGlobalLineageOpen(true);
+    // 全局血缘默认使用 ELK（最小化交叉）布局
+    setLayoutAlgorithm('elk');
 
     try {
       const fileResults = await readAllFileResults(activeProjectId);
@@ -160,9 +165,18 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
     if (file) {
       setGlobalLineageOpen(false);
       setLineageResult(previousResultRef.current);
+      setLayoutAlgorithm(previousLayoutRef.current);
       selectFile(file.id);
     }
-  }, [lineageState.navigationRequest, globalLineageOpen, currentProject, selectFile, setLineageResult]);
+  }, [lineageState.navigationRequest, globalLineageOpen, currentProject, selectFile, setLineageResult, setLayoutAlgorithm]);
+
+  // 全局血缘打开期间，切换视图时强制保持 ELK 布局
+  useEffect(() => {
+    if (globalLineageOpen) {
+      setLayoutAlgorithm('elk');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalLineageOpen, viewMode]);
 
   // 导出 SQLite 数据库文件
   const handleExportLineage = useCallback(async () => {
@@ -303,8 +317,8 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       // 如果在全局血缘视图中，关闭它回到操作界面
       if (globalLineageOpen) {
         setGlobalLineageOpen(false);
-        // 恢复之前的单文件 result（会被 useAnalysis 的 SQLite 恢复 effect 覆盖）
         setLineageResult(previousResultRef.current);
+        setLayoutAlgorithm(previousLayoutRef.current);
       }
       // Expand the editor panel if collapsed
       if (editorPanelRef.current?.isCollapsed()) {
