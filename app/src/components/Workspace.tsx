@@ -1,8 +1,9 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { Share2, Github, Settings } from 'lucide-react';
+import { Share2, Github, Settings, Network, Trash2, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useLineageActions, useLineageState } from '@pondpilot/flowscope-react';
+import { GraphErrorBoundary, GraphView } from '@pondpilot/flowscope-react';
 import { Button } from './ui/button';
 import {
   DropdownMenu,
@@ -38,6 +39,8 @@ import type { GlobalShortcut } from '@/hooks';
 import { useThemeStore, type Theme } from '@/lib/theme-store';
 import { useViewStateStore } from '@/lib/view-state-store';
 import { useBackend } from '@/lib/backend-context';
+import { readAllFileResults, clearProjectLineage, exportSqliteDb } from '@/lib/analysis-cache';
+import { mergeAnalyzeResults, buildTableLevelLineage } from '@/lib/merge-results';
 
 interface WorkspaceProps {
   backendReady: boolean;
@@ -65,6 +68,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
     setAllNodesCollapsed,
     toggleShowScriptTables,
     setLayoutAlgorithm,
+    setResult: setLineageResult,
   } = lineageActions;
   const lineageState = useLineageState();
   const { result, viewMode, layoutAlgorithm } = lineageState;
@@ -74,6 +78,109 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [sidebarView, setSidebarView] = useState<SidebarView>('files');
   const [editorOpen, setEditorOpen] = useState(true);
+  const [globalLineageOpen, setGlobalLineageOpen] = useState(false);
+  const previousResultRef = useRef(result);
+
+  // 打开全局血缘：从 SQLite 加载所有文件结果并合并
+  const handleGlobalLineageToggle = useCallback(async () => {
+    if (globalLineageOpen) {
+      // 关闭：恢复之前的单文件 result
+      setGlobalLineageOpen(false);
+      setLineageResult(previousResultRef.current);
+      return;
+    }
+
+    if (!activeProjectId) return;
+
+    // 保存当前 result 以便恢复
+    previousResultRef.current = result;
+    setGlobalLineageOpen(true);
+
+    try {
+      const fileResults = await readAllFileResults(activeProjectId);
+      if (fileResults.length === 0) {
+        toast.info(t('analysis.emptyState.runAnalysis'));
+        return;
+      }
+      const merged = mergeAnalyzeResults(fileResults.map((r) => r.result));
+      if (!merged) {
+        toast.info(t('analysis.emptyState.runAnalysis'));
+        return;
+      }
+      // 提取表级血缘（只保留源表→目标表），与 schema 视图一致
+      const tableLevelResult = buildTableLevelLineage(merged);
+      setLineageResult(tableLevelResult);
+    } catch (error) {
+      console.error('[Workspace] Failed to load global lineage:', error);
+      toast.error('Failed to load global lineage');
+    }
+  }, [globalLineageOpen, activeProjectId, result, setLineageResult, t]);
+
+  // 清理当前项目的全局血缘数据
+  const handleClearGlobalLineage = useCallback(async () => {
+    if (!activeProjectId) return;
+    if (!window.confirm('确定要清理当前项目的所有血缘缓存数据吗？清理后需要重新运行分析。')) return;
+    await clearProjectLineage(activeProjectId);
+    if (globalLineageOpen) {
+      setLineageResult(null);
+    }
+    toast.success(t('app.globalLineage') + ' - 已清理');
+  }, [activeProjectId, globalLineageOpen, setLineageResult, t]);
+
+  // 全局血缘中点击节点时，监听 navigationRequest 关闭全局血缘并跳转文件
+  const lastNavRequestRef = useRef(lineageState.navigationRequest);
+  useEffect(() => {
+    // 记录打开全局血缘时的 navigationRequest，忽略旧值
+    if (!globalLineageOpen) {
+      lastNavRequestRef.current = lineageState.navigationRequest;
+      return;
+    }
+
+    const request = lineageState.navigationRequest;
+    // 只响应新的请求（和上次不同的引用）
+    if (!request?.sourceName || request === lastNavRequestRef.current) return;
+    lastNavRequestRef.current = request;
+
+    const project = currentProject;
+    if (!project?.files) return;
+
+    const normalizeForComparison = (path: string) => path.replace(/\\/g, '/').toLowerCase();
+    const normalizedSource = normalizeForComparison(request.sourceName);
+
+    const file = project.files.find(
+      (f) =>
+        f.name === request.sourceName ||
+        f.path === request.sourceName ||
+        normalizeForComparison(f.name) === normalizedSource ||
+        normalizeForComparison(f.path) === normalizedSource ||
+        normalizeForComparison(f.name).endsWith(normalizedSource) ||
+        normalizeForComparison(f.path).endsWith(normalizedSource)
+    );
+
+    if (file) {
+      setGlobalLineageOpen(false);
+      setLineageResult(previousResultRef.current);
+      selectFile(file.id);
+    }
+  }, [lineageState.navigationRequest, globalLineageOpen, currentProject, selectFile, setLineageResult]);
+
+  // 导出 SQLite 数据库文件
+  const handleExportLineage = useCallback(async () => {
+    try {
+      const data = await exportSqliteDb();
+      const blob = new Blob([new Uint8Array(data)], { type: 'application/x-sqlite3' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `flowscope-${currentProject?.name ?? 'export'}.db`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('SQLite 数据库已导出');
+    } catch (error) {
+      console.error('[Workspace] Failed to export SQLite:', error);
+      toast.error('导出失败');
+    }
+  }, [currentProject?.name]);
 
   // Theme cycling for keyboard shortcut
   const { theme, setTheme } = useThemeStore();
@@ -193,6 +300,12 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       }
 
       selectFile(file.id);
+      // 如果在全局血缘视图中，关闭它回到操作界面
+      if (globalLineageOpen) {
+        setGlobalLineageOpen(false);
+        // 恢复之前的单文件 result（会被 useAnalysis 的 SQLite 恢复 effect 覆盖）
+        setLineageResult(previousResultRef.current);
+      }
       // Expand the editor panel if collapsed
       if (editorPanelRef.current?.isCollapsed()) {
         editorPanelRef.current.expand();
@@ -202,7 +315,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
         highlightSpan(span);
       }
     },
-    [selectFile, highlightSpan]
+    [selectFile, highlightSpan, globalLineageOpen, setLineageResult]
   );
 
   const toggleEditorPanel = useCallback(() => {
@@ -382,6 +495,39 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
           {/* Project Selector */}
           <ProjectSelector open={projectSelectorOpen} onOpenChange={setProjectSelectorOpen} />
+
+          {/* Global Lineage Toggle */}
+          <Button
+            variant={globalLineageOpen ? 'secondary' : 'ghost'}
+            size="sm"
+            className="h-7 gap-1.5 text-xs"
+            onClick={handleGlobalLineageToggle}
+          >
+            <Network className="h-3.5 w-3.5" />
+            {t('app.globalLineage')}
+          </Button>
+          {globalLineageOpen && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 text-xs"
+              onClick={handleExportLineage}
+              title="导出血缘数据"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {globalLineageOpen && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 text-xs text-destructive hover:text-destructive"
+              onClick={handleClearGlobalLineage}
+              title="清理全局血缘缓存"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
 
         {/* Header Actions */}
@@ -494,81 +640,107 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       <NavigationProvider projectId={activeProjectId} onNavigateToEditor={handleNavigateToEditor}>
         <FocusRegistryProvider>
           <div className="flex-1 overflow-hidden flex">
-            {/* Activity Bar (narrow icon strip) */}
-            <ActivityBar
-              activeView={sidebarView}
-              onViewChange={setSidebarView}
-              hideSchema={isBackendMode}
-            />
-
-            {/* Main area with optional resizable sidebar */}
-            <div ref={sidebarLayoutRef} className="flex-1 min-w-0">
-              <ResizablePanelGroup direction="horizontal" className="h-full">
-                {/* Sidebar (collapsible & resizable) */}
-                {sidebarView && (
-                  <>
-                    <ResizablePanel
-                      ref={sidebarPanelRef}
-                      defaultSize={sidebarDefaultSize}
-                      minSize={10}
-                      maxSize={50}
-                      className="overflow-hidden flex flex-col"
-                    >
-                      {sidebarView === 'files' && (
-                        <SidebarFileTree onContentWidthChange={handleSidebarContentWidthChange} />
-                      )}
-                      {sidebarView === 'search' && (
-                        <SidebarSearch
-                          onOpenSchemaFile={() => {
-                            setSidebarView('schema');
-                          }}
-                          onHighlightSpan={highlightSpan}
-                        />
-                      )}
-                      {sidebarView === 'schema' && (
-                        <SidebarSchema onContentWidthChange={handleSidebarContentWidthChange} />
-                      )}
-                    </ResizablePanel>
-                    <ResizableHandle />
-                  </>
+            {globalLineageOpen ? (
+              /* Global Lineage — full-screen GraphView, no sidebar or editor */
+              <div className="flex-1 min-w-0">
+                {result ? (
+                  <GraphErrorBoundary>
+                    <GraphView className="h-full w-full" />
+                  </GraphErrorBoundary>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
+                    <Network className="h-10 w-10 opacity-30" />
+                    <p className="text-sm">{t('app.globalLineage')}</p>
+                    <p className="text-xs opacity-60">
+                      {t('analysis.emptyState.runAnalysis')}
+                    </p>
+                  </div>
                 )}
+              </div>
+            ) : (
+              /* Normal layout — sidebar + analysis + editor */
+              <>
+                {/* Activity Bar (narrow icon strip) */}
+                <ActivityBar
+                  activeView={sidebarView}
+                  onViewChange={setSidebarView}
+                  hideSchema={isBackendMode}
+                />
 
-                {/* Main panels area */}
-                <ResizablePanel
-                  defaultSize={sidebarView ? 100 - sidebarDefaultSize : 100}
-                  minSize={40}
-                >
-                  <ResizablePanelGroup direction="horizontal">
-                    {/* Analysis Panel (Lineage) - always visible */}
-                    <ResizablePanel
-                      defaultSize={editorOpen ? 55 : 100}
-                      minSize={30}
-                      data-testid="analysis-panel"
-                    >
-                      <AnalysisView
-                        graphContainerRef={graphContainerRef}
-                        isAnalyzing={analysis.isAnalyzing}
-                      />
-                    </ResizablePanel>
-
-                    {/* Editor Panel - toggleable */}
-                    {editorOpen && (
+                {/* Main area with optional resizable sidebar */}
+                <div ref={sidebarLayoutRef} className="flex-1 min-w-0">
+                  <ResizablePanelGroup direction="horizontal" className="h-full">
+                    {/* Sidebar (collapsible & resizable) */}
+                    {sidebarView && (
                       <>
-                        <ResizableHandle withHandle />
                         <ResizablePanel
-                          ref={editorPanelRef}
-                          defaultSize={45}
-                          minSize={25}
-                          data-testid="editor-panel"
+                          ref={sidebarPanelRef}
+                          defaultSize={sidebarDefaultSize}
+                          minSize={10}
+                          maxSize={50}
+                          className="overflow-hidden flex flex-col"
                         >
-                          <EditorArea backendReady={backendReady} analysis={analysis} />
+                          {sidebarView === 'files' && (
+                            <SidebarFileTree
+                              onContentWidthChange={handleSidebarContentWidthChange}
+                            />
+                          )}
+                          {sidebarView === 'search' && (
+                            <SidebarSearch
+                              onOpenSchemaFile={() => {
+                                setSidebarView('schema');
+                              }}
+                              onHighlightSpan={highlightSpan}
+                            />
+                          )}
+                          {sidebarView === 'schema' && (
+                            <SidebarSchema
+                              onContentWidthChange={handleSidebarContentWidthChange}
+                            />
+                          )}
                         </ResizablePanel>
+                        <ResizableHandle />
                       </>
                     )}
+
+                    {/* Main panels area */}
+                    <ResizablePanel
+                      defaultSize={sidebarView ? 100 - sidebarDefaultSize : 100}
+                      minSize={40}
+                    >
+                      <ResizablePanelGroup direction="horizontal">
+                        {/* Analysis Panel (Lineage) - always visible */}
+                        <ResizablePanel
+                          defaultSize={editorOpen ? 55 : 100}
+                          minSize={30}
+                          data-testid="analysis-panel"
+                        >
+                          <AnalysisView
+                            graphContainerRef={graphContainerRef}
+                            isAnalyzing={analysis.isAnalyzing}
+                          />
+                        </ResizablePanel>
+
+                        {/* Editor Panel - toggleable */}
+                        {editorOpen && (
+                          <>
+                            <ResizableHandle withHandle />
+                            <ResizablePanel
+                              ref={editorPanelRef}
+                              defaultSize={45}
+                              minSize={25}
+                              data-testid="editor-panel"
+                            >
+                              <EditorArea backendReady={backendReady} analysis={analysis} />
+                            </ResizablePanel>
+                          </>
+                        )}
+                      </ResizablePanelGroup>
+                    </ResizablePanel>
                   </ResizablePanelGroup>
-                </ResizablePanel>
-              </ResizablePanelGroup>
-            </div>
+                </div>
+              </>
+            )}
           </div>
         </FocusRegistryProvider>
       </NavigationProvider>

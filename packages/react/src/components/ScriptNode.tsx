@@ -1,7 +1,7 @@
-import { memo, type JSX } from 'react';
+import { memo, useCallback, useState, type JSX } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
-import { FileCode } from 'lucide-react';
+import { FileCode, Copy, Check } from 'lucide-react';
 import type { ScriptNodeData } from '../types';
 import {
   GraphTooltip,
@@ -24,6 +24,15 @@ function ScriptNodeComponent({ data, selected }: NodeProps): JSX.Element {
   const scriptColors = colors.nodes.script;
   const nodeData = data as ScriptNodeData;
   const { label, tablesRead, tablesWritten, statementCount, isSelected, isHighlighted } = nodeData;
+
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(label).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [label]);
 
   // Determine selection state from either prop or data
   const active = selected || isSelected;
@@ -60,12 +69,25 @@ function ScriptNodeComponent({ data, selected }: NodeProps): JSX.Element {
                 >
                   {t('scriptNode.script')}
                 </div>
-                <div
-                  className="truncate text-sm font-semibold"
-                  style={{ color: scriptColors.text }}
-                  title={label}
-                >
-                  {label}
+                <div className="flex items-center gap-1">
+                  <div
+                    className="truncate text-sm font-semibold"
+                    style={{ color: scriptColors.text }}
+                    title={label}
+                  >
+                    {label}
+                  </div>
+                  <button
+                    onClick={handleCopy}
+                    className="shrink-0 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                    title="复制脚本名"
+                  >
+                    {copied ? (
+                      <Check className="h-3 w-3" style={{ color: colors.status.success }} />
+                    ) : (
+                      <Copy className="h-3 w-3" style={{ color: scriptColors.textSecondary }} />
+                    )}
+                  </button>
                 </div>
               </div>
             </div>

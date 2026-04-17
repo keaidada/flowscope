@@ -10,7 +10,7 @@ import { FILE_LIMITS, ANALYSIS_SQL_PREVIEW_LIMITS } from '@/lib/constants';
 import { AnalysisErrorCode, isAnalysisError } from '@/types';
 import type { AnalysisState, AnalysisContext, FileValidationResult } from '@/types';
 import { loadSchemaFiles } from '@/lib/schema-storage';
-import { hasPendingContent, loadPendingContent } from '@/lib/lazy-file-loader';
+import { writeFileResult, writeLineageData, readFileResult, writeTableFlows, writeSchemaData, writeHierarchyData } from '@/lib/analysis-cache';
 
 // Maximum retry attempts for file sync errors to prevent infinite loops
 const MAX_FILE_SYNC_RETRIES = 1;
@@ -173,29 +173,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
   const hydrateAnalysisFiles = useCallback(
     async (files: PreparedAnalysisFile[]): Promise<Array<{ name: string; content: string }>> => {
-      const pendingUpdates: Array<{ fileId: string; content: string }> = [];
-
-      const hydratedFiles = await Promise.all(
-        files.map(async (file) => {
-          if (!file.id || file.content.length > 0 || !hasPendingContent(file.id)) {
-            return { name: file.name, content: file.content };
-          }
-
-          const loadedContent = await loadPendingContent(file.id);
-          if (loadedContent === null) {
-            return { name: file.name, content: file.content };
-          }
-
-          pendingUpdates.push({ fileId: file.id, content: loadedContent });
-          return { name: file.name, content: loadedContent };
-        })
-      );
-
-      if (pendingUpdates.length > 0) {
-        updateFiles(pendingUpdates);
-      }
-
-      return hydratedFiles;
+      return files.map((file) => ({ name: file.name, content: file.content }));
     },
     [updateFiles]
   );
@@ -376,6 +354,42 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     adapter,
   ]);
 
+  // 从 SQLite project_file_results 恢复已分析文件的结果。
+  // 当文件切换且内存/IndexedDB 缓存都 miss 时，尝试从持久化的单文件结果恢复。
+  useEffect(() => {
+    if (!activeProjectId || !currentProject?.activeFileId) return;
+
+    // 如果内存中已有结果，不需要从 SQLite 恢复
+    const cachedResult = getResult(activeProjectId, hideCTEs);
+    if (cachedResult) return;
+
+    const activeFile = currentProject.files.find((f) => f.id === currentProject.activeFileId);
+    if (!activeFile) return;
+
+    let cancelled = false;
+
+    readFileResult(activeProjectId, activeFile.path).then((result) => {
+      if (cancelled || !result) return;
+      // 再次检查内存缓存（可能在异步期间已恢复）
+      if (getResult(activeProjectId, hideCTEs)) return;
+
+      console.log(`[useAnalysis] SQLite file cache HIT: ${activeFile.path}`);
+      startTransition(() => {
+        setLineageResult(result);
+      });
+      storeResult(activeProjectId, result, hideCTEs);
+
+      // 同步 SQL 预览
+      if (activeFile.content) {
+        setLineageSql(activeFile.content);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId, currentProject?.activeFileId, hideCTEs, getResult, storeResult]);
+
   const runAnalysis = useCallback(
     async (
       activeFileContent?: string,
@@ -543,6 +557,23 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           });
           if (activeProjectId) {
             storeResult(activeProjectId, analysisResponse.result, hideCTEs);
+            // 持久化每个文件的分析结果到 SQLite（用于全局血缘）
+            const cacheKey = analysisResponse.cacheKey ?? '';
+            for (const file of context.files) {
+              writeFileResult(activeProjectId, file.name, cacheKey, analysisResponse.result).catch(
+                () => {}
+              );
+              // 写入结构化表 + 源表→目标表
+              writeLineageData(activeProjectId, file.name, analysisResponse.result, file.content).catch(
+                () => {}
+              );
+              writeTableFlows(activeProjectId, file.name, analysisResponse.result).catch(
+                () => {}
+              );
+            }
+            // 写入 schema 和层级（项目级，只需一次）
+            writeSchemaData(activeProjectId, analysisResponse.result).catch(() => {});
+            writeHierarchyData(activeProjectId, analysisResponse.result).catch(() => {});
           }
         }
 
