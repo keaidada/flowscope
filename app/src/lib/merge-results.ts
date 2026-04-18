@@ -102,7 +102,40 @@ export function mergeAnalyzeResults(results: AnalyzeResult[]): AnalyzeResult | n
  * - 过滤 CTE、临时表、子查询别名
  * - 通过 BFS 穿透中间节点建立实体表之间的直接关系
  */
-export function buildTableLevelLineage(result: AnalyzeResult): AnalyzeResult {
+/**
+ * 从 SQL 文件内容中提取表的中文注释。
+ * 支持格式：--# 程序名称:     XXX.HQL:中文名称
+ *          --# 目标表名:     schema.table_name
+ */
+export function extractTableComments(
+  fileContents: Map<string, string>
+): Map<string, string> {
+  const comments = new Map<string, string>();
+  for (const [, content] of fileContents) {
+    // 提取程序中文名
+    const nameMatch = content.match(/--#\s*程序名称:\s*\S+[.:：](.+)/);
+    const chineseName = nameMatch?.[1]?.trim();
+    if (!chineseName) continue;
+
+    // 提取目标表名
+    const tableMatch = content.match(/--#\s*目标表名:\s*(\S+)/);
+    if (tableMatch) {
+      const tableName = tableMatch[1].trim().toLowerCase();
+      comments.set(tableName, chineseName);
+      // 也存短名（不带 schema）
+      const parts = tableName.split('.');
+      if (parts.length > 1) {
+        comments.set(parts[parts.length - 1], chineseName);
+      }
+    }
+  }
+  return comments;
+}
+
+export function buildTableLevelLineage(
+  result: AnalyzeResult,
+  tableComments?: Map<string, string>
+): AnalyzeResult {
   // 构建临时表名集合
   const temporaryTableNames = new Set<string>();
   if (result.resolvedSchema?.tables) {
@@ -263,7 +296,11 @@ export function buildTableLevelLineage(result: AnalyzeResult): AnalyzeResult {
       type: 'table',
       label: info.name,
       qualifiedName: qName,
-      metadata: info.sourceName ? { sourceName: info.sourceName } : undefined,
+      metadata: {
+        ...(info.sourceName ? { sourceName: info.sourceName } : {}),
+        ...(tableComments?.get(qName.toLowerCase()) ? { comment: tableComments.get(qName.toLowerCase()) } : {}),
+        ...(tableComments?.get(info.name.toLowerCase()) ? { comment: tableComments.get(info.name.toLowerCase()) } : {}),
+      },
     });
   }
 

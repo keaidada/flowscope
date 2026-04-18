@@ -114,26 +114,46 @@ export async function writeFileResult(
 }
 
 /**
- * 读取项目下所有已缓存的文件分析结果（大 JSON）。
+ * 读取项目下所有已缓存的文件分析结果。
+ * SQL 层面按 content_hash 去重读取 JSON，避免重复 parse 大对象。
  */
 export async function readAllFileResults(
   projectId: string
 ): Promise<{ filePath: string; result: AnalyzeResult }[]> {
   try {
     const db = await getDb();
-    const stmt = db.prepare(
-      'SELECT file_path, result_json FROM project_file_results WHERE project_id = ?'
+
+    // 1. 先读去重的 JSON（按 content_hash 只读一次）
+    const hashStmt = db.prepare(
+      'SELECT content_hash, result_json FROM project_file_results WHERE project_id = ? GROUP BY content_hash'
     );
-    stmt.bind([projectId]);
-    const results: { filePath: string; result: AnalyzeResult }[] = [];
-    while (stmt.step()) {
-      const row = stmt.get();
-      results.push({
-        filePath: String(row[0]),
-        result: JSON.parse(String(row[1])) as AnalyzeResult,
-      });
+    hashStmt.bind([projectId]);
+    const parsedCache = new Map<string, AnalyzeResult>();
+    while (hashStmt.step()) {
+      const row = hashStmt.get();
+      const hash = String(row[0]);
+      parsedCache.set(hash, JSON.parse(String(row[1])) as AnalyzeResult);
     }
-    stmt.free();
+    hashStmt.free();
+
+    if (parsedCache.size === 0) return [];
+
+    // 2. 读所有文件的路径和 hash（不读 result_json，已缓存）
+    const fileStmt = db.prepare(
+      'SELECT file_path, content_hash FROM project_file_results WHERE project_id = ?'
+    );
+    fileStmt.bind([projectId]);
+    const results: { filePath: string; result: AnalyzeResult }[] = [];
+    while (fileStmt.step()) {
+      const row = fileStmt.get();
+      const filePath = String(row[0]);
+      const hash = String(row[1]);
+      const result = parsedCache.get(hash);
+      if (result) {
+        results.push({ filePath, result });
+      }
+    }
+    fileStmt.free();
     return results;
   } catch (error) {
     console.error('[analysis-cache] Failed to read file results:', error);

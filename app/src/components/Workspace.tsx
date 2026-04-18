@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useLineageActions, useLineageState } from '@pondpilot/flowscope-react';
 import { GraphErrorBoundary, GraphView } from '@pondpilot/flowscope-react';
+import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import { Button } from './ui/button';
 import {
   DropdownMenu,
@@ -40,7 +41,7 @@ import { useThemeStore, type Theme } from '@/lib/theme-store';
 import { useViewStateStore } from '@/lib/view-state-store';
 import { useBackend } from '@/lib/backend-context';
 import { readAllFileResults, clearProjectLineage, exportSqliteDb } from '@/lib/analysis-cache';
-import { mergeAnalyzeResults, buildTableLevelLineage } from '@/lib/merge-results';
+import { mergeAnalyzeResults, buildTableLevelLineage, extractTableComments } from '@/lib/merge-results';
 
 interface WorkspaceProps {
   backendReady: boolean;
@@ -81,6 +82,8 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   const [globalLineageOpen, setGlobalLineageOpen] = useState(false);
   const previousResultRef = useRef(result);
   const previousLayoutRef = useRef(layoutAlgorithm);
+  // 缓存全局血缘加载的各文件分析结果，跳转时直接使用
+  const globalFileResultsRef = useRef<Map<string, AnalyzeResult>>(new Map());
 
   // 打开全局血缘：从 SQLite 加载所有文件结果并合并
   const handleGlobalLineageToggle = useCallback(async () => {
@@ -102,18 +105,45 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
     setLayoutAlgorithm('elk');
 
     try {
+      const startTime = performance.now();
       const fileResults = await readAllFileResults(activeProjectId);
       if (fileResults.length === 0) {
         toast.info(t('analysis.emptyState.runAnalysis'));
         return;
       }
-      const merged = mergeAnalyzeResults(fileResults.map((r) => r.result));
+      console.log(`[GlobalLineage] Loaded ${fileResults.length} files in ${(performance.now() - startTime).toFixed(0)}ms`);
+
+      // 缓存各文件结果，供跳转时直接使用
+      const resultMap = new Map<string, AnalyzeResult>();
+      for (const fr of fileResults) {
+        resultMap.set(fr.filePath, fr.result);
+      }
+      globalFileResultsRef.current = resultMap;
+
+      // 去重：如果所有文件指向同一个 result 对象（runMode=all），只需处理一次
+      const uniqueResults = [...new Set(fileResults.map((r) => r.result))];
+      console.log(`[GlobalLineage] ${uniqueResults.length} unique results from ${fileResults.length} files`);
+
+      const mergeStart = performance.now();
+      const merged = uniqueResults.length === 1
+        ? uniqueResults[0]
+        : mergeAnalyzeResults(fileResults.map((r) => r.result));
       if (!merged) {
         toast.info(t('analysis.emptyState.runAnalysis'));
         return;
       }
+      // 从文件内容提取中文注释
+      const fileContents = new Map<string, string>();
+      if (currentProject?.files) {
+        for (const f of currentProject.files) {
+          if (f.content) fileContents.set(f.path || f.name, f.content);
+        }
+      }
+      const tableComments = extractTableComments(fileContents);
+
       // 提取表级血缘（只保留源表→目标表），与 schema 视图一致
-      const tableLevelResult = buildTableLevelLineage(merged);
+      const tableLevelResult = buildTableLevelLineage(merged, tableComments);
+      console.log(`[GlobalLineage] Merge + build in ${(performance.now() - mergeStart).toFixed(0)}ms, tables=${tableLevelResult.statements.reduce((s, st) => s + st.nodes.length, 0)}`);
       setLineageResult(tableLevelResult);
     } catch (error) {
       console.error('[Workspace] Failed to load global lineage:', error);
@@ -164,8 +194,23 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
     if (file) {
       setGlobalLineageOpen(false);
-      setLineageResult(previousResultRef.current);
       setLayoutAlgorithm(previousLayoutRef.current);
+      // 从缓存中取 result，过滤出只属于该文件的 statements
+      const cachedResult = globalFileResultsRef.current.get(file.path)
+        || globalFileResultsRef.current.get(file.name);
+      if (cachedResult) {
+        const fileStatements = cachedResult.statements.filter(
+          (s) => s.sourceName === file.name || s.sourceName === file.path || !s.sourceName
+        );
+        if (fileStatements.length > 0 && fileStatements.length < cachedResult.statements.length) {
+          // 有多个文件的 statements 混在一起，只取当前文件的
+          setLineageResult({ ...cachedResult, statements: fileStatements });
+        } else {
+          setLineageResult(cachedResult);
+        }
+      } else {
+        setLineageResult(null);
+      }
       selectFile(file.id);
     }
   }, [lineageState.navigationRequest, globalLineageOpen, currentProject, selectFile, setLineageResult, setLayoutAlgorithm]);
@@ -317,8 +362,21 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       // 如果在全局血缘视图中，关闭它回到操作界面
       if (globalLineageOpen) {
         setGlobalLineageOpen(false);
-        setLineageResult(previousResultRef.current);
         setLayoutAlgorithm(previousLayoutRef.current);
+        const cachedResult = globalFileResultsRef.current.get(file.path)
+          || globalFileResultsRef.current.get(file.name);
+        if (cachedResult) {
+          const fileStatements = cachedResult.statements.filter(
+            (s) => s.sourceName === file.name || s.sourceName === file.path || !s.sourceName
+          );
+          if (fileStatements.length > 0 && fileStatements.length < cachedResult.statements.length) {
+            setLineageResult({ ...cachedResult, statements: fileStatements });
+          } else {
+            setLineageResult(cachedResult);
+          }
+        } else {
+          setLineageResult(null);
+        }
       }
       // Expand the editor panel if collapsed
       if (editorPanelRef.current?.isCollapsed()) {
@@ -659,7 +717,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
               <div className="flex-1 min-w-0">
                 {result ? (
                   <GraphErrorBoundary>
-                    <GraphView className="h-full w-full" />
+                    <GraphView className="h-full w-full" graphContainerRef={graphContainerRef} />
                   </GraphErrorBoundary>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">

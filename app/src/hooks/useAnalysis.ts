@@ -355,11 +355,11 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
   ]);
 
   // 从 SQLite project_file_results 恢复已分析文件的结果。
-  // 当文件切换且内存/IndexedDB 缓存都 miss 时，尝试从持久化的单文件结果恢复。
+  // 当文件切换时，尝试从持久化的单文件结果恢复。
   useEffect(() => {
     if (!activeProjectId || !currentProject?.activeFileId) return;
 
-    // 如果内存中已有结果，不需要从 SQLite 恢复
+    // 如果内存中已有结果且 lineageStore 有值，不重复读取
     const cachedResult = getResult(activeProjectId, hideCTEs);
     if (cachedResult) return;
 
@@ -370,8 +370,6 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
     readFileResult(activeProjectId, activeFile.path).then((result) => {
       if (cancelled || !result) return;
-      // 再次检查内存缓存（可能在异步期间已恢复）
-      if (getResult(activeProjectId, hideCTEs)) return;
 
       console.log(`[useAnalysis] SQLite file cache HIT: ${activeFile.path}`);
       startTransition(() => {

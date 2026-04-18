@@ -360,6 +360,7 @@ function buildTableNodeData(
     qualifiedName,
     schema: canonical?.schema,
     database: canonical?.catalog,
+    comment: node.metadata?.comment as string | undefined,
   };
 }
 

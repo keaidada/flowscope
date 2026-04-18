@@ -1,5 +1,5 @@
 import { useCallback, useState, type JSX } from 'react';
-import { toPng } from 'html-to-image';
+import { toPng, toSvg } from 'html-to-image';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { gzipSync, strToU8 } from 'fflate';
@@ -151,6 +151,9 @@ export function ExportDialog({
   const [schemaError, setSchemaError] = useState<string | undefined>();
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | undefined>();
+  const [imageExportOpen, setImageExportOpen] = useState(false);
+  const [imageExportStatus, setImageExportStatus] = useState<'idle' | 'exporting' | 'done' | 'error'>('idle');
+  const [imageExportMessage, setImageExportMessage] = useState('');
 
   const handleDownloadXlsx = useCallback(async () => {
     if (!result) return;
@@ -201,18 +204,61 @@ export function ExportDialog({
       return;
     }
 
+    setImageExportOpen(true);
+    setImageExportStatus('exporting');
+    setImageExportMessage('正在生成高清 PNG 图片...');
+
+    // 等待弹窗渲染后再开始生成（toPng 会阻塞主线程）
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
     try {
       const backgroundColor = isDarkMode ? '#1e293b' : '#ffffff';
-      const dataUrl = await toPng(graphRef.current, { backgroundColor });
+      const dataUrl = await toPng(graphRef.current, {
+        backgroundColor,
+        pixelRatio: 3,
+      });
       const { filename } = await buildExportFilename(projectName, 'png');
       const link = document.createElement('a');
       link.download = filename;
       link.href = dataUrl;
       link.click();
-      toast.success('PNG export downloaded');
+      setImageExportStatus('done');
+      setImageExportMessage('PNG 导出完成！');
     } catch (err) {
       console.error('Failed to export image:', err);
-      toast.error('Failed to export PNG');
+      setImageExportStatus('error');
+      setImageExportMessage('PNG 导出失败，请重试');
+    }
+  }, [graphRef, projectName, isDarkMode]);
+
+  const handleDownloadSvg = useCallback(async () => {
+    if (!graphRef?.current) {
+      toast.error('Graph not available for export');
+      return;
+    }
+
+    setImageExportOpen(true);
+    setImageExportStatus('exporting');
+    setImageExportMessage('正在生成 SVG 矢量图...');
+
+    // 等待弹窗渲染后再开始生成
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    try {
+      const backgroundColor = isDarkMode ? '#1e293b' : '#ffffff';
+      const dataUrl = await toSvg(graphRef.current, { backgroundColor });
+      const { filename } = await buildExportFilename(projectName, 'mermaid');
+      const svgFilename = filename.replace(/\.\w+$/, '.svg');
+      const link = document.createElement('a');
+      link.download = svgFilename;
+      link.href = dataUrl;
+      link.click();
+      setImageExportStatus('done');
+      setImageExportMessage('SVG 导出完成！');
+    } catch (err) {
+      console.error('Failed to export SVG:', err);
+      setImageExportStatus('error');
+      setImageExportMessage('SVG 导出失败，请重试');
     }
   }, [graphRef, projectName, isDarkMode]);
 
@@ -348,7 +394,11 @@ export function ExportDialog({
           <DropdownMenuLabel>Visual Formats</DropdownMenuLabel>
           <DropdownMenuItem onClick={handleDownloadPng}>
             <Image className="size-4 mr-2" />
-            PNG Image
+            PNG Image (3x)
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleDownloadSvg}>
+            <Image className="size-4 mr-2" />
+            SVG (矢量图)
           </DropdownMenuItem>
           <DropdownMenuItem onClick={handleDownloadMermaid}>
             <FileCode className="size-4 mr-2" />
@@ -411,6 +461,49 @@ export function ExportDialog({
               PondPilot
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 图片导出进度弹窗 */}
+      <Dialog open={imageExportOpen} onOpenChange={(open) => {
+        if (!open && imageExportStatus !== 'exporting') {
+          setImageExportOpen(false);
+          setImageExportStatus('idle');
+        }
+      }}>
+        <DialogContent className="sm:max-w-[360px]">
+          <DialogTitle className="text-center">
+            {imageExportStatus === 'exporting' ? '导出中' : imageExportStatus === 'done' ? '导出完成' : '导出失败'}
+          </DialogTitle>
+          <DialogDescription className="text-center">
+            <div className="flex flex-col items-center gap-4 py-4">
+              {imageExportStatus === 'exporting' && (
+                <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+              )}
+              {imageExportStatus === 'done' && (
+                <div className="h-8 w-8 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-green-600 dark:text-green-400">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </div>
+              )}
+              {imageExportStatus === 'error' && (
+                <div className="h-8 w-8 rounded-full bg-red-100 dark:bg-red-900 flex items-center justify-center">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-red-600 dark:text-red-400">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </div>
+              )}
+              <p className="text-sm">{imageExportMessage}</p>
+            </div>
+          </DialogDescription>
+          {imageExportStatus !== 'exporting' && (
+            <DialogFooter className="justify-center">
+              <Button variant="outline" onClick={() => { setImageExportOpen(false); setImageExportStatus('idle'); }}>
+                关闭
+              </Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
     </>

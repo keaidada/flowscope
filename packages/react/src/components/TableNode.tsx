@@ -672,7 +672,11 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
                 textOverflow: 'ellipsis',
                 flex: 1,
               }}
-              title={nodeData.qualifiedName || nodeData.label}
+              title={
+                (nodeData as Record<string, unknown>).comment
+                  ? `${nodeData.qualifiedName || nodeData.label}\n${(nodeData as Record<string, unknown>).comment}`
+                  : (nodeData.qualifiedName || nodeData.label)
+              }
             >
               {sanitizeIdentifier(nodeData.label)}
             </div>
