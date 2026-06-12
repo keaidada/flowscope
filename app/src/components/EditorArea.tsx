@@ -12,7 +12,6 @@ import { EditorToolbar } from './EditorToolbar';
 import type { SqlViewMode } from './EditorToolbar';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_FILE_NAMES } from '@/lib/constants';
-import { hasPendingContent, loadPendingContent } from '@/lib/lazy-file-loader';
 import type { RunMode } from '@/lib/project-store';
 
 interface EditorAnalysisState {
@@ -105,17 +104,6 @@ export function EditorArea({ backendReady, className, analysis }: EditorAreaProp
       createFile(DEFAULT_FILE_NAMES.SCRATCHPAD);
     }
   }, [currentProject, createFile, isReadOnly]);
-
-  // Lazy-load file content for files uploaded without reading content
-  useEffect(() => {
-    if (activeFile && hasPendingContent(activeFile.id) && !activeFile.content) {
-      loadPendingContent(activeFile.id).then((content) => {
-        if (content !== null) {
-          updateFile(activeFile.id, content);
-        }
-      });
-    }
-  }, [activeFile, updateFile]);
 
   // Focus the editor when active file changes (e.g., new file created)
   useEffect(() => {

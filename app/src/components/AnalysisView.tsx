@@ -13,13 +13,23 @@ import {
   ChevronDown,
   ChevronRight,
   Database,
+  Download,
+  Image,
   Loader2,
   Settings,
   Table2,
 } from 'lucide-react';
+import { toPng, toSvg } from 'html-to-image';
+import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { useGlobalShortcuts } from '@/hooks';
 import type { GlobalShortcut } from '@/hooks';
@@ -707,6 +717,82 @@ export function AnalysisView({
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
   const [mountedTabs, setMountedTabs] = useState<Set<string>>(() => new Set([activeTab]));
 
+  const buildGraphExportFilename = useCallback(
+    (extension: 'png' | 'svg') => {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const baseName = (currentProject?.name || 'flowscope')
+        .trim()
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase();
+      return `${baseName || 'flowscope'}-lineage-${timestamp}.${extension}`;
+    },
+    [currentProject?.name]
+  );
+
+  const getGraphExportBackground = useCallback(() => {
+    const target = graphContainerRef.current;
+    if (!target) {
+      return document.documentElement.classList.contains('dark') ? '#020817' : '#ffffff';
+    }
+    const color = window.getComputedStyle(target).backgroundColor;
+    if (color && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') {
+      return color;
+    }
+    return document.documentElement.classList.contains('dark') ? '#020817' : '#ffffff';
+  }, [graphContainerRef]);
+
+  const handleDownloadLineageImage = useCallback(
+    async (format: 'png' | 'svg') => {
+      const graphElement = graphContainerRef.current;
+      if (!graphElement) {
+        toast.error(t('export.graphNotAvailable'));
+        return;
+      }
+
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      const width = Math.max(1, Math.round(graphElement.clientWidth));
+      const height = Math.max(1, Math.round(graphElement.clientHeight));
+      const backgroundColor = getGraphExportBackground();
+
+      try {
+        const filename = buildGraphExportFilename(format);
+        const link = document.createElement('a');
+
+        if (format === 'png') {
+          const dataUrl = await toPng(graphElement, {
+            backgroundColor,
+            width,
+            height,
+            pixelRatio: Math.max(4, Math.ceil(window.devicePixelRatio || 1)),
+            cacheBust: true,
+          });
+          link.download = filename;
+          link.href = dataUrl;
+          link.click();
+          toast.success(t('export.pngDownloaded'));
+          return;
+        }
+
+        const dataUrl = await toSvg(graphElement, {
+          backgroundColor,
+          width,
+          height,
+          cacheBust: true,
+        });
+        link.download = filename;
+        link.href = dataUrl;
+        link.click();
+        toast.success(t('export.svgDownloaded'));
+      } catch (error) {
+        console.error(`[AnalysisView] Failed to export ${format}:`, error);
+        toast.error(format === 'png' ? t('export.failedPng') : t('export.failedSvg'));
+      }
+    },
+    [buildGraphExportFilename, getGraphExportBackground, graphContainerRef, t]
+  );
+
   // When Schema editor opens, extract matched DDL from schema files for physical tables in analysis
   useEffect(() => {
     if (!schemaEditorOpen || isBackendMode || !activeProjectId || !result) {
@@ -1118,6 +1204,26 @@ export function AnalysisView({
 
           {/* Stats Popover and Actions */}
           <div className="flex items-center gap-2">
+            {activeTab === 'lineage' && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+                    <Download className="h-3 w-3" />
+                    {t('export.downloadCurrentView')}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => void handleDownloadLineageImage('png')}>
+                    <Image className="mr-2 h-4 w-4" />
+                    {t('export.highResPng')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void handleDownloadLineageImage('svg')}>
+                    <Image className="mr-2 h-4 w-4" />
+                    {t('export.svgImage')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             <StatsPopover
               tableCount={summary.tableCount}
               columnCount={summary.columnCount}
@@ -1164,6 +1270,7 @@ export function AnalysisView({
 
         <div className="flex-1 overflow-hidden relative">
           {/* forceMount keeps components mounted when switching tabs to preserve state */}
+
           <TabsContent
             value="lineage"
             forceMount

@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { Share2, Github, Settings, Network, Trash2, Download } from 'lucide-react';
+import { Share2, Github, Settings, Network, Trash2, Download, Rows3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useLineageActions, useLineageState } from '@pondpilot/flowscope-react';
@@ -32,6 +32,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { LanguageToggle } from './LanguageToggle';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { CommandPalette } from './CommandPalette';
+import { GlobalLineageListView } from './GlobalLineageListView';
 import { useProject } from '@/lib/project-store';
 import { NavigationProvider } from '@/lib/navigation-context';
 import { FocusRegistryProvider } from '@/lib/focus-registry';
@@ -80,6 +81,8 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   const [sidebarView, setSidebarView] = useState<SidebarView>('files');
   const [editorOpen, setEditorOpen] = useState(true);
   const [globalLineageOpen, setGlobalLineageOpen] = useState(false);
+  const [globalLineageView, setGlobalLineageView] = useState<'graph' | 'list'>('graph');
+  const [globalFocusNodeId, setGlobalFocusNodeId] = useState<string | undefined>(undefined);
   const previousResultRef = useRef(result);
   const previousLayoutRef = useRef(layoutAlgorithm);
   // 缓存全局血缘加载的各文件分析结果，跳转时直接使用
@@ -90,6 +93,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
     if (globalLineageOpen) {
       // 关闭：恢复之前的单文件 result 和布局
       setGlobalLineageOpen(false);
+      setGlobalFocusNodeId(undefined);
       setLineageResult(previousResultRef.current);
       setLayoutAlgorithm(previousLayoutRef.current);
       return;
@@ -194,6 +198,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
     if (file) {
       setGlobalLineageOpen(false);
+      setGlobalFocusNodeId(undefined);
       setLayoutAlgorithm(previousLayoutRef.current);
       // 从缓存中取 result，过滤出只属于该文件的 statements
       const cachedResult = globalFileResultsRef.current.get(file.path)
@@ -362,6 +367,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       // 如果在全局血缘视图中，关闭它回到操作界面
       if (globalLineageOpen) {
         setGlobalLineageOpen(false);
+        setGlobalFocusNodeId(undefined);
         setLayoutAlgorithm(previousLayoutRef.current);
         const cachedResult = globalFileResultsRef.current.get(file.path)
           || globalFileResultsRef.current.get(file.name);
@@ -713,12 +719,60 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
         <FocusRegistryProvider>
           <div className="flex-1 overflow-hidden flex">
             {globalLineageOpen ? (
-              /* Global Lineage — full-screen GraphView, no sidebar or editor */
-              <div className="flex-1 min-w-0">
+              /* Global Lineage — full-screen graph/list view, no sidebar or editor */
+              <div className="flex min-w-0 flex-1 flex-col">
+                <div className="flex items-center justify-between border-b border-border bg-muted/10 px-4 py-2">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant={globalLineageView === 'graph' ? 'secondary' : 'ghost'}
+                      size="sm"
+                      className="h-8 gap-1.5 text-xs"
+                      onClick={() => setGlobalLineageView('graph')}
+                    >
+                      <Network className="h-3.5 w-3.5" />
+                      {t('globalLineageList.graphView')}
+                    </Button>
+                    <Button
+                      variant={globalLineageView === 'list' ? 'secondary' : 'ghost'}
+                      size="sm"
+                      className="h-8 gap-1.5 text-xs"
+                      onClick={() => setGlobalLineageView('list')}
+                    >
+                      <Rows3 className="h-3.5 w-3.5" />
+                      {t('globalLineageList.listView')}
+                    </Button>
+                  </div>
+                  {result && (
+                    <div className="text-xs text-muted-foreground">
+                      {t('globalLineageList.summary', {
+                        tables: result.summary.tableCount,
+                        flows: result.globalLineage?.edges?.length ?? 0,
+                      })}
+                    </div>
+                  )}
+                </div>
                 {result ? (
-                  <GraphErrorBoundary>
-                    <GraphView className="h-full w-full" graphContainerRef={graphContainerRef} />
-                  </GraphErrorBoundary>
+                  <div className="min-h-0 flex-1">
+                    {globalLineageView === 'graph' ? (
+                      <GraphErrorBoundary>
+                        <GraphView
+                          className="h-full w-full"
+                          graphContainerRef={graphContainerRef}
+                          focusNodeId={globalFocusNodeId}
+                          onFocusApplied={() => setGlobalFocusNodeId(undefined)}
+                        />
+                      </GraphErrorBoundary>
+                    ) : (
+                      <GlobalLineageListView
+                        result={result}
+                        onOpenGraphForNode={(nodeId) => {
+                          lineageActions.selectNode(nodeId);
+                          setGlobalFocusNodeId(nodeId);
+                          setGlobalLineageView('graph');
+                        }}
+                      />
+                    )}
+                  </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
                     <Network className="h-10 w-10 opacity-30" />

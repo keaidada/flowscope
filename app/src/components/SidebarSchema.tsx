@@ -31,11 +31,6 @@ import { schemaMetadataToSQL } from '@/lib/schema-parser';
 import { cn } from '@/lib/utils';
 import { saveSchemaFiles, loadSchemaFiles } from '@/lib/schema-storage';
 import { onSchemaFileSelect } from '@/lib/schema-events';
-import {
-  registerPendingFiles,
-  hasPendingContent,
-  loadPendingContent,
-} from '@/lib/lazy-file-loader';
 // Schema files accept a broader set of extensions than the main SQL file tree
 const SCHEMA_ACCEPTED_EXTENSIONS = ['.sql', '.hql', '.ddl', '.txt'] as const;
 
@@ -741,19 +736,6 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
     [schemaFiles, activeFileId]
   );
 
-  // Lazy-load file content for files uploaded without reading content
-  useEffect(() => {
-    if (activeFile && !activeFile.content && hasPendingContent(activeFile.id)) {
-      loadPendingContent(activeFile.id).then((content) => {
-        if (content !== null) {
-          setSchemaFiles((prev) =>
-            prev.map((f) => (f.id === activeFile.id ? { ...f, content } : f))
-          );
-        }
-      });
-    }
-  }, [activeFile, setSchemaFiles]);
-
   // Build tree (filtered by search)
   const filteredFiles = useMemo(() => {
     if (!search.trim()) return schemaFiles;
@@ -1109,31 +1091,12 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
         return;
       }
 
-      // Phase 2: Create file entries WITHOUT reading content (lazy load on open)
-      const newFiles: SchemaFile[] = new Array(importTotal);
-      const pendingEntries: Array<{ id: string; file: File }> = new Array(importTotal);
-
-      for (let i = 0; i < supportedFiles.length; i++) {
-        const file = supportedFiles[i];
+      // Phase 2: Create entries with empty content — instant UI display
+      const newFiles: SchemaFile[] = supportedFiles.map((file) => {
         const relativePath =
           (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-        const id = crypto.randomUUID();
-        newFiles[i] = {
-          id,
-          name: file.name,
-          path: relativePath,
-          content: '', // Content loaded lazily when file is opened
-        };
-        pendingEntries[i] = { id, file };
-
-        if ((i + 1) % 200 === 0 || i === supportedFiles.length - 1) {
-          setUploadProgress({ total: importTotal, loaded: i + 1, skipped, done: false });
-          await new Promise((r) => setTimeout(r, 0));
-        }
-      }
-
-      // Register File references for lazy content loading
-      registerPendingFiles(pendingEntries);
+        return { id: crypto.randomUUID(), name: file.name, path: relativePath, content: '' };
+      });
 
       // Compute expand paths
       const expandPaths = new Set<string>();
@@ -1144,24 +1107,40 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
         }
       }
 
-      // Phase 3: Apply results (deduplicate by path)
-      setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false });
-      await new Promise((r) => requestAnimationFrame(r));
-
+      // Show files in tree immediately (empty content)
       setSchemaFiles((prev) => {
         const existingPaths = new Map(prev.map((f) => [f.path, f]));
         for (const nf of newFiles) {
-          if (existingPaths.has(nf.path)) {
-            existingPaths.get(nf.path)!.content = nf.content;
-          } else {
-            existingPaths.set(nf.path, nf);
-          }
+          existingPaths.set(nf.path, nf);
         }
         return Array.from(existingPaths.values());
       });
       setExpandedFolders((prev) => new Set([...prev, ...expandPaths]));
       if (!activeFileId && newFiles.length > 0) {
         setActiveFileId(newFiles[0].id);
+      }
+
+      // Phase 3: Read content in background batches
+      const BATCH = 100;
+      for (let i = 0; i < supportedFiles.length; i += BATCH) {
+        const batchFiles = supportedFiles.slice(i, i + BATCH);
+        const batchEntries = newFiles.slice(i, i + BATCH);
+
+        const contents = await Promise.all(batchFiles.map((f) => f.text()));
+
+        // Update content in-place and refresh state
+        for (let j = 0; j < batchEntries.length; j++) {
+          batchEntries[j].content = contents[j];
+        }
+        // Trigger React re-render with updated content
+        setSchemaFiles((prev) => [...prev]);
+
+        setUploadProgress({
+          total: importTotal,
+          loaded: Math.min(i + BATCH, importTotal),
+          skipped,
+          done: false,
+        });
       }
 
       setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: true });

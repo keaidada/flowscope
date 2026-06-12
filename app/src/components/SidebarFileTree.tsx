@@ -23,7 +23,6 @@ import {
   FILE_EXTENSIONS,
   DEFAULT_FILE_NAMES,
 } from '@/lib/constants';
-import { registerPendingFiles } from '@/lib/lazy-file-loader';
 
 interface SidebarFileTreeProps {
   onContentWidthChange?: (widthPx: number) => void;
@@ -39,6 +38,7 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
     selectFile,
     importFiles,
     addFilesDirectly,
+    updateFiles,
     toggleFileSelection,
     setFileSelection,
     renameFile,
@@ -99,11 +99,10 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
       if (!e.target.files || e.target.files.length === 0) return;
 
       const allFiles = Array.from(e.target.files);
-      const total = allFiles.length;
 
-      setUploadProgress({ total, loaded: 0, skipped: 0, done: false });
+      setUploadProgress({ total: allFiles.length, loaded: 0, skipped: 0, done: false });
 
-      // Phase 1: Filter supported files (use Set for O(1) lookup)
+      // Phase 1: Filter supported files
       const acceptedSet = new Set(ACCEPTED_FILE_TYPES_ARRAY.map((ext) => ext.toLowerCase()));
       const supportedFiles: File[] = [];
       let skipped = 0;
@@ -120,10 +119,6 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
       const importTotal = supportedFiles.length;
       setUploadProgress({ total: importTotal, loaded: 0, skipped, done: false });
 
-      // Phase 2: Create file entries WITHOUT reading content (lazy load on open)
-      const projectFiles: ProjectFile[] = new Array(importTotal);
-      const pendingEntries: Array<{ id: string; file: File }> = new Array(importTotal);
-
       const getFileLanguage = (fileName: string): ProjectFile['language'] => {
         if (fileName.endsWith(FILE_EXTENSIONS.JSON)) return 'json';
         if (
@@ -134,35 +129,59 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
         return 'text';
       };
 
-      for (let i = 0; i < supportedFiles.length; i++) {
-        const file = supportedFiles[i];
+      // Phase 2: Create file entries with empty content — instant UI display
+      const projectFiles: ProjectFile[] = supportedFiles.map((file) => {
         const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-        const id = crypto.randomUUID();
-        projectFiles[i] = {
-          id,
+        return {
+          id: crypto.randomUUID(),
           name: file.name,
           path: relativePath || file.name,
-          content: '', // Content loaded lazily when file is opened
+          content: '',
           language: getFileLanguage(file.name),
         };
-        pendingEntries[i] = { id, file };
+      });
 
-        // Update progress every 200 files
-        if ((i + 1) % 200 === 0 || i === supportedFiles.length - 1) {
-          setUploadProgress({ total: importTotal, loaded: i + 1, skipped, done: false });
-          await new Promise((r) => setTimeout(r, 0));
-        }
-      }
-
-      // Register File references for lazy content loading
-      registerPendingFiles(pendingEntries);
-
-      // Phase 3: Add files in one shot
-      setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false });
-      await new Promise((r) => requestAnimationFrame(r));
-
+      // Show files in tree immediately (empty content)
       if (projectFiles.length > 0) {
         addFilesDirectly(projectFiles);
+      }
+
+      // Phase 3: Read content in background, update React state + SQLite progressively
+      let loaded = 0;
+      const BATCH = 100;
+      for (let i = 0; i < supportedFiles.length; i += BATCH) {
+        const batchFiles = supportedFiles.slice(i, i + BATCH);
+        const batchPFs = projectFiles.slice(i, i + BATCH);
+
+        // Read content for this batch in parallel
+        const contents = await Promise.all(batchFiles.map((f) => f.text()));
+
+        // Update in-memory ProjectFile objects
+        const updates: Array<{ fileId: string; content: string }> = [];
+        for (let j = 0; j < batchPFs.length; j++) {
+          batchPFs[j].content = contents[j];
+          updates.push({ fileId: batchPFs[j].id, content: contents[j] });
+        }
+
+        // Batch-update React state
+        updateFiles(updates);
+
+        loaded += batchFiles.length;
+        setUploadProgress({ total: importTotal, loaded, skipped, done: false });
+      }
+
+      // Phase 4: Ensure SQLite persistence is complete before showing "done"
+      const { saveProjectFiles } = await import('@/lib/file-storage');
+      if (currentProject) {
+        // Merge with existing files in project
+        const allProjectFiles = [
+          ...(currentProject.files.filter((f) => !projectFiles.some((pf) => pf.id === f.id))),
+          ...projectFiles,
+        ];
+        await saveProjectFiles(currentProject.id, allProjectFiles);
+        // Force immediate IndexedDB flush
+        const { persistNow } = await import('@/lib/duckdb');
+        await persistNow();
       }
 
       setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: true });
@@ -170,7 +189,7 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
 
       if (folderInputRef.current) folderInputRef.current.value = '';
     },
-    [addFilesDirectly]
+    [addFilesDirectly, updateFiles, currentProject]
   );
 
   const handleSelectFile = (fileId: string) => {

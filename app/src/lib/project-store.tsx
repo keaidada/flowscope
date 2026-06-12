@@ -194,16 +194,10 @@ interface ProjectContextType {
 
 const ProjectContext = createContext<ProjectContextType | null>(null);
 
-/** Lightweight project settings stored in localStorage (no file data) */
-interface ProjectSettings {
-  id: string;
-  name: string;
-  dialect: Dialect;
-  templateMode: TemplateMode;
-  schemaSQL: string;
-  runMode: RunMode;
-}
-
+/**
+ * Sync initialiser — returns default projects.
+ * Real projects are loaded from DuckDB asynchronously after mount.
+ */
 const loadProjectsFromStorage = (): Project[] => {
   try {
     const saved = localStorage.getItem(STORAGE_KEYS.PROJECTS);
@@ -213,11 +207,11 @@ const loadProjectsFromStorage = (): Project[] => {
         id: p.id || crypto.randomUUID(),
         name: p.name || 'Untitled',
         dialect: p.dialect || 'generic',
-        runMode: 'current' as RunMode, // Default to current file — user can switch to 'all' manually
+        runMode: 'current' as RunMode,
         selectedFileIds: [],
         schemaSQL: p.schemaSQL || '',
         templateMode: parseTemplateMode(p.templateMode),
-        files: [], // Files are loaded from IndexedDB asynchronously
+        files: [], // Files are loaded from DuckDB asynchronously
         activeFileId: null,
       }));
     }
@@ -229,11 +223,11 @@ const loadProjectsFromStorage = (): Project[] => {
 
 /**
  * Persist project settings to localStorage (lightweight, sync).
- * File contents are saved to IndexedDB separately (async, no size limit).
+ * File contents are saved to DuckDB separately (async).
  */
 const saveProjectSettingsToStorage = (projects: Project[]) => {
   try {
-    const settings: ProjectSettings[] = projects.map((p) => ({
+    const settings = projects.map((p) => ({
       id: p.id,
       name: p.name,
       dialect: p.dialect,
@@ -256,8 +250,8 @@ const debouncedSaveFiles = (projectId: string, files: ProjectFile[]) => {
   fileSaveTimers.set(
     projectId,
     setTimeout(() => {
-      saveProjectFiles(projectId, files);
       fileSaveTimers.delete(projectId);
+      saveProjectFiles(projectId, files);
     }, 500)
   );
 };
@@ -434,7 +428,6 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         if (timer) {
           clearTimeout(timer);
           fileSaveTimers.delete(project.id);
-          // Fire-and-forget — can't await in beforeunload, but the write is initiated
           saveProjectFiles(project.id, project.files);
         }
       }
@@ -443,7 +436,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [projects]);
 
-  // Load files from IndexedDB on mount (non-blocking)
+  // Load files from DuckDB on mount (non-blocking)
   useEffect(() => {
     let cancelled = false;
     const loadFiles = async () => {
@@ -828,7 +821,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           setActiveFileIdOverride(remainingFiles[0]?.id || null);
         }
 
-        // Immediately persist to IndexedDB (skip debounce to avoid data loss on HMR/reload)
+        // Immediately persist to storage (skip debounce to avoid data loss on HMR/reload)
         saveProjectFiles(activeProjectId, remainingFiles);
 
         return prev.map((p) => {
@@ -860,7 +853,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           setActiveFileIdOverride(remainingFiles[0]?.id || null);
         }
 
-        // Immediately persist to IndexedDB (skip debounce to avoid data loss on HMR/reload)
+        // Immediately persist to storage (skip debounce to avoid data loss on HMR/reload)
         saveProjectFiles(activeProjectId, remainingFiles);
 
         return prev.map((p) => {

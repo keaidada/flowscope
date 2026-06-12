@@ -20,6 +20,16 @@ import type { ProjectFile } from '@/lib/project-store';
 /** Max children to render at once in a folder before showing "load more" */
 const FOLDER_RENDER_LIMIT = 50;
 
+/** Format byte size to human-readable string (like `ls -h`) */
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'K', 'M', 'G'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, i);
+  // Show 1 decimal for values < 10, otherwise integer
+  return value < 10 && i > 0 ? `${value.toFixed(1)}${units[i]}` : `${Math.round(value)}${units[i]}`;
+}
+
 interface FileTreeProps {
   files: ProjectFile[];
   activeFileId: string | null;
@@ -548,6 +558,9 @@ function FileNode({ node, depth, props }: FileNodeProps) {
       <span className={cn('whitespace-nowrap text-sm', isActive && 'font-semibold italic')}>
         {file.name}
       </span>
+      <span className="text-[10px] text-muted-foreground/60 shrink-0 tabular-nums">
+        {formatFileSize(file.content.length)}
+      </span>
       {/* Hide rename/delete actions in read-only mode */}
       {!isReadOnly && (
         <>
@@ -624,6 +637,10 @@ export function FileTree(props: FileTreeProps) {
   const { files, searchQuery, onContentWidthChange } = props;
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const treeRef = useRef<HTMLDivElement>(null);
+  // Track if this is the initial mount to avoid collapsing on first render
+  const isInitialMount = useRef(true);
+  // Track previous search query to detect actual search changes
+  const prevSearchQuery = useRef(searchQuery);
 
   const tree = useMemo(() => buildFileTree(files), [files]);
 
@@ -633,9 +650,32 @@ export function FileTree(props: FileTreeProps) {
   }, [files]);
 
   // When searching, auto-expand all folders that contain matched files.
-  // When not searching, collapse all (default closed).
+  // Only collapse when search is cleared (not when files change due to lazy loading).
   useEffect(() => {
     if (!hasNestedStructure) return;
+
+    const searchChanged = prevSearchQuery.current !== searchQuery;
+    prevSearchQuery.current = searchQuery;
+
+    // Skip collapsing on initial mount to preserve user's folder state
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      // On initial mount with search, expand matching folders
+      if (searchQuery && searchQuery.trim()) {
+        const foldersToExpand = new Set<string>();
+        for (const file of files) {
+          const parts = file.path.split('/').filter(Boolean);
+          for (let i = 1; i < parts.length; i++) {
+            foldersToExpand.add(parts.slice(0, i).join('/'));
+          }
+        }
+        setExpandedFolders(foldersToExpand);
+      }
+      return;
+    }
+
+    // Only react to search query changes, not file content updates
+    if (!searchChanged) return;
 
     if (searchQuery && searchQuery.trim()) {
       // Expand all parent folders of matched files
@@ -648,7 +688,7 @@ export function FileTree(props: FileTreeProps) {
       }
       setExpandedFolders(foldersToExpand);
     } else {
-      // No search — collapse all
+      // Search cleared — collapse all folders
       setExpandedFolders(new Set());
     }
   }, [files, hasNestedStructure, searchQuery]);
