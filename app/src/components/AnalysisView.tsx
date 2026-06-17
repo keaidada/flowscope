@@ -290,12 +290,16 @@ function extractSchemaFromResult(
       const qName = getGlobalNodeQName(node);
       // Physical tables: have resolutionSource, or have a schema in canonicalName
       // CTE/column nodes and temporary tables are excluded
+      // Also exclude Spark/Hive cache temp tables (e.g. Temp_*, TEMP_*)
       const isPhysical =
         node.type !== 'cte' &&
         node.type !== 'column' &&
         !temporaryTableNames.has(qName) &&
         !temporaryTableNames.has(node.label) &&
         !temporaryTableNames.has(cn?.name || '') &&
+        !isSparkTempTable(qName) &&
+        !isSparkTempTable(node.label) &&
+        !isSparkTempTable(cn?.name || '') &&
         (node.resolutionSource || cn?.schema);
       if (isPhysical) {
         if (!tableMap.has(qName)) {

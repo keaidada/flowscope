@@ -737,6 +737,32 @@ SELECT * FROM t1;";
         assert!(!output.parser_fallback_used);
         assert_eq!(output.statements.len(), 1);
     }
+
+    #[test]
+    fn test_spark_sql_mixed_patterns_databricks() {
+        // Simulate the user's real Spark SQL: CACHE TABLE, UNCACHE TABLE, LEFT ANTI JOIN,
+        // temp table references, INSERT INTO physical table.
+        let sql = "\
+UNCACHE TABLE IF EXISTS Temp_All_Subs_Existed;
+CACHE TABLE Temp_All_Subs_Existed OPTIONS ('storageLevel' 'DISK_ONLY');
+SELECT a.subs_id, a.acc_nbr
+FROM Temp_All_Subs_Existed a
+LEFT ANTI JOIN smartfren_analytic_prd.dwh_cc.f_subs_order_movement b
+    ON b.subs_id = a.subs_id;
+INSERT INTO smartfren_analytic_prd.stg_cc.f_smartfren_active_master_l3_fu_traffic
+SELECT subs_id, acc_nbr FROM Temp_All_Subs_Existed;
+# this is a hash comment
+SELECT * FROM smartfren_analytic_prd.dwh_cc.f_usage_cdr;
+";
+
+        // Test with Databricks dialect (should work via sanitize)
+        let output = parse_sql_with_dialect_output(sql, Dialect::Databricks);
+        assert!(output.is_ok(), "Databricks parse failed: {:?}", output.err());
+
+        // Test with Generic dialect (should also work via sanitize)
+        let output = parse_sql_with_dialect_output(sql, Dialect::Generic);
+        assert!(output.is_ok(), "Generic parse failed: {:?}", output.err());
+    }
 }
 
 /// Sanitize Hive/Spark SQL: remove CACHE TABLE / UNCACHE TABLE statements,
