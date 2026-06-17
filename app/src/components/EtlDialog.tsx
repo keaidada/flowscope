@@ -38,23 +38,15 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
   const [summary, setSummary] = useState('');
   const [showRemoved, setShowRemoved] = useState(true);
   const [editingLineIdx, setEditingLineIdx] = useState<number | null>(null);
+  const [leftEditIdx, setLeftEditIdx] = useState<number | null>(null);
 
-  const leftScrollRef = useRef<HTMLTextAreaElement>(null);
+  const leftScrollRef = useRef<HTMLDivElement>(null);
   const leftGutterRef = useRef<HTMLDivElement>(null);
   const middleScrollRef = useRef<HTMLDivElement>(null);
   const rightScrollRef = useRef<HTMLDivElement>(null);
   const syncing = useRef(false);
 
-  /** Sync scroll between left textarea and its line-number gutter. */
-  const handleLeftScroll = useCallback(() => {
-    const textarea = leftScrollRef.current;
-    const gutter = leftGutterRef.current;
-    if (textarea && gutter) {
-      gutter.scrollTop = textarea.scrollTop;
-    }
-  }, []);
-
-  /** Synchronized scrolling between left textarea and right panel (proportional). */
+  // Both left and right panels use h-[15px] per line → direct scroll sync
   const handleScroll = useCallback((source: 'left' | 'right') => {
     if (syncing.current) return;
     syncing.current = true;
@@ -68,17 +60,13 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
     }
 
     if (source === 'left') {
-      const ratio = leftEl.scrollTop / Math.max(leftEl.scrollHeight - leftEl.clientHeight, 1);
-      rightEl.scrollTop = ratio * Math.max(rightEl.scrollHeight - rightEl.clientHeight, 1);
-      if (middleEl) middleEl.scrollTop = ratio * Math.max(middleEl.scrollHeight - middleEl.clientHeight, 1);
-      // Sync left gutter (direct scrollTop, not proportional)
-      const gutter = leftGutterRef.current;
-      if (gutter) gutter.scrollTop = leftEl.scrollTop;
-    } else {
-      const ratio = rightEl.scrollTop / Math.max(rightEl.scrollHeight - rightEl.clientHeight, 1);
-      leftEl.scrollTop = ratio * Math.max(leftEl.scrollHeight - leftEl.clientHeight, 1);
-      if (middleEl) middleEl.scrollTop = ratio * Math.max(middleEl.scrollHeight - middleEl.clientHeight, 1);
+      rightEl.scrollTop = leftEl.scrollTop;
       if (leftGutterRef.current) leftGutterRef.current.scrollTop = leftEl.scrollTop;
+      if (middleEl) middleEl.scrollTop = leftEl.scrollTop;
+    } else {
+      leftEl.scrollTop = rightEl.scrollTop;
+      if (leftGutterRef.current) leftGutterRef.current.scrollTop = rightEl.scrollTop;
+      if (middleEl) middleEl.scrollTop = rightEl.scrollTop;
     }
 
     requestAnimationFrame(() => {
@@ -99,6 +87,8 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
       setMergedLines([]);
       setSummary('');
       setShowRemoved(true);
+      setEditingLineIdx(null);
+      setLeftEditIdx(null);
       setCopied(false);
     }
   }, [open, initialContent]);
@@ -307,7 +297,7 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
 
         {/* Two-column editor area */}
         <div className="flex-1 min-h-0 flex overflow-hidden">
-          {/* Left: Original input with line numbers */}
+          {/* Left: Original input — line-by-line rendering matching right panel height */}
           <div className="flex-1 min-w-0 flex flex-col border-r">
             <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/10 shrink-0">
               <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -318,36 +308,53 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
                 variant="ghost"
                 size="sm"
                 className="h-5 px-1.5 text-[10px]"
-                onClick={() => { setInput(''); setMergedLines([]); }}
+                onClick={() => { setInput(''); setMergedLines([]); setLeftEditIdx(null); }}
                 disabled={!input}
               >
                 <X className="h-2.5 w-2.5 mr-0.5" />清空
               </Button>
             </div>
             <div className="flex-1 min-h-0 flex overflow-hidden">
-              {/* Line number gutter — on the left side of textarea */}
+              {/* Left content area — each line h-[15px] matches right panel exactly */}
+              <div
+                ref={leftScrollRef}
+                className="flex-1 min-w-0 overflow-auto bg-background"
+                onScroll={() => handleScroll('left')}
+              >
+                {input.split('\n').map((line, idx) => (
+                  <div key={idx} className="flex items-start h-[15px]">
+                    {leftEditIdx === idx ? (
+                      <input
+                        type="text"
+                        value={line}
+                        onChange={(e) => setInput((prev) => { const ls = prev.split('\n'); ls[idx] = e.target.value; return ls.join('\n'); })}
+                        onBlur={() => setLeftEditIdx(null)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setLeftEditIdx(null); }}
+                        autoFocus
+                        className={cn('flex-1 min-w-0 border-0 outline-none bg-transparent h-[15px] px-1', fSizeMono, 'font-mono', 'focus:bg-blue-500/5')}
+                        spellCheck={false}
+                      />
+                    ) : (
+                      <span
+                        className={cn('flex-1 whitespace-pre pr-2 overflow-hidden cursor-text px-1', fSizeMono, 'font-mono')}
+                        onClick={() => setLeftEditIdx(idx)}
+                        title="点击编辑"
+                      >
+                        {line}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {/* Line number gutter */}
               <div
                 ref={leftGutterRef}
-                className="w-7 shrink-0 overflow-hidden bg-muted/5 border-r border-border/40 select-none"
+                className="w-7 shrink-0 overflow-hidden bg-muted/5 border-l border-border/40 select-none"
               >
-                <div className="font-mono text-[9px] leading-[15px] text-muted-foreground text-right pr-1 py-2">
-                  {input.split('\n').map((_, i) => (
-                    <div key={i} className="h-[15px]">{i + 1}</div>
-                  ))}
-                </div>
+                {input.split('\n').map((_, i) => (
+                  <div key={i} className="font-mono text-[9px] leading-[15px] h-[15px] text-muted-foreground text-right pr-1">{i + 1}</div>
+                ))}
               </div>
-              <textarea
-                ref={leftScrollRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onScroll={() => { handleLeftScroll(); handleScroll('left'); }}
-                className={cn(
-                  'flex-1 min-w-0 resize-none bg-background p-2 font-mono outline-none border-0 focus:ring-0',
-                  fSizeMono
-                )}
-                placeholder="粘贴原始 SQL 或 PySpark 脚本..."
-                spellCheck={false}
-              />
             </div>
           </div>
 
