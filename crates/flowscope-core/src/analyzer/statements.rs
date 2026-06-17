@@ -20,7 +20,7 @@ use crate::types::{
 use sqlparser::ast::{
     self, AlterTableOperation, Assignment, CopyIntoSnowflakeKind, CopySource, CopyTarget, Expr,
     FromTable, MergeAction, MergeClause, MergeInsertKind, ObjectName, RenameTableNameKind,
-    Statement, TableFactor, TableWithJoins, UpdateTableFromKind,
+    SetExpr, Statement, TableFactor, TableWithJoins, UpdateTableFromKind,
 };
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -55,22 +55,30 @@ impl<'a> Analyzer<'a> {
 
         let statement_type = match statement {
             Statement::Query(query) => {
-                // In dbt mode, a bare SELECT represents a model that should be registered
-                // with the model name derived from the source file path.
-                let model_name = if self.is_dbt_mode() {
-                    source_name.as_ref().map(|path| extract_model_name(path))
-                } else {
-                    None
-                };
+                // When the query body is an INSERT (e.g. `WITH ... INSERT INTO t SELECT ...`),
+                // the target table is created by analyze_insert. To avoid a redundant Output node,
+                // skip ensure_output_node_with_model here. The CrossStatementTracker still gets
+                // the produced table from analyze_insert's record_produced call.
+                let is_insert_body = matches!(*query.body, SetExpr::Insert(_));
 
-                // Normalize the model name to match how table references are normalized
-                // (e.g., Snowflake normalizes to uppercase)
-                let normalized_model_name = model_name.map(|n| self.normalize_table_name(n));
-                ctx.ensure_output_node_with_model(normalized_model_name.as_deref());
+                if !is_insert_body {
+                    // In dbt mode, a bare SELECT represents a model that should be registered
+                    // with the model name derived from the source file path.
+                    let model_name = if self.is_dbt_mode() {
+                        source_name.as_ref().map(|path| extract_model_name(path))
+                    } else {
+                        None
+                    };
 
-                // Register the model as a produced table for cross-statement linking
-                if let Some(ref name) = normalized_model_name {
-                    self.tracker.record_produced(name, index);
+                    // Normalize the model name to match how table references are normalized
+                    // (e.g., Snowflake normalizes to uppercase)
+                    let normalized_model_name = model_name.map(|n| self.normalize_table_name(n));
+                    ctx.ensure_output_node_with_model(normalized_model_name.as_deref());
+
+                    // Register the model as a produced table for cross-statement linking
+                    if let Some(ref name) = normalized_model_name {
+                        self.tracker.record_produced(name, index);
+                    }
                 }
 
                 self.analyze_query(&mut ctx, query, None);
@@ -437,9 +445,11 @@ impl<'a> Analyzer<'a> {
         self.tracker
             .record_produced(&canonical, ctx.statement_index);
 
-        // Analyze source - check the body of the insert
-        if let Some(ref source_body) = insert.source {
-            self.analyze_query_body(ctx, &source_body.body, Some(&target_id));
+        // Analyze source - visit the full Query to handle CTEs defined inside the INSERT source.
+        // When the SQL is written as `INSERT INTO t WITH cte AS (...) SELECT ...`,
+        // the WITH clause is nested inside the source Query (not at statement level).
+        if let Some(ref source_query) = insert.source {
+            self.analyze_query(ctx, source_query, Some(&target_id));
         }
     }
 

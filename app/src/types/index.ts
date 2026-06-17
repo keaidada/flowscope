@@ -59,6 +59,18 @@ export interface AnalysisState {
   isAnalyzing: boolean;
   error: string | null;
   lastAnalyzedAt: number | null;
+  resultStatus?: {
+    origin: 'cache' | 'fresh';
+    source: 'memory' | 'indexeddb' | 'sqlite' | 'fresh';
+    restoredAt: number | null;
+    persistedAt: number | null;
+  } | null;
+  loadingContext?: {
+    fileName: string | null;
+    runMode: 'current' | 'all' | 'custom';
+    fileCount: number;
+    stage: 'preparing' | 'loadingSchema' | 'buildingLineage' | 'persisting' | 'rendering';
+  } | null;
 }
 
 export interface KeyboardShortcutHandler {

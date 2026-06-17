@@ -20,6 +20,95 @@ use crate::templater::{template_sql, TemplateMode};
 /// on malformed SQL input.
 const MAX_MERGE_ITERATIONS: usize = 10_000;
 
+/// Wraps template variables (`{var}` and `${var}`) in single quotes when they
+/// appear as bare tokens (not already inside quotes), so the SQL parser treats
+/// them as string literals.
+///
+/// This is a standalone version usable without the `templating` feature flag.
+///
+/// # Examples
+///
+/// - `WHERE dt = ${DATA_DT}` → `WHERE dt = '${DATA_DT}'`
+/// - `WHERE dt = {date_id}` → `WHERE dt = '{date_id}'`
+/// - `WHERE dt = '${DATA_DT}'` → unchanged
+/// - `{1, 2, 3}` → unchanged (non-identifier content)
+fn quote_shell_vars(sql: &str) -> String {
+    let mut result = String::with_capacity(sql.len() + 32);
+    let mut remaining = sql;
+
+    while let Some(special_pos) = remaining.find(['{', '$']) {
+        result.push_str(&remaining[..special_pos]);
+
+        let rest = &remaining[special_pos..];
+
+        if let Some(after_open) = rest.strip_prefix("${") {
+            // ${var} pattern
+            if let Some(close_pos) = after_open.find('}') {
+                let var_end = 2 + close_pos + 1;
+
+                let already_quoted = special_pos > 0
+                    && remaining.as_bytes().get(special_pos.wrapping_sub(1)) == Some(&b'\'')
+                    && rest.as_bytes().get(var_end) == Some(&b'\'');
+
+                let var_text = &rest[..var_end];
+                if already_quoted {
+                    result.push_str(var_text);
+                } else {
+                    result.push('\'');
+                    result.push_str(var_text);
+                    result.push('\'');
+                }
+                remaining = &rest[var_end..];
+            } else {
+                result.push_str(rest);
+                return result;
+            }
+        } else if let Some(after_open) = rest.strip_prefix('{') {
+            // {var} pattern
+            if let Some(close_pos) = after_open.find('}') {
+                let content = &after_open[..close_pos];
+                let is_template_var = content
+                    .starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                    && content
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_');
+
+                let var_end = 1 + close_pos + 1;
+
+                if !is_template_var {
+                    result.push_str(&rest[..var_end]);
+                    remaining = &rest[var_end..];
+                    continue;
+                }
+
+                let already_quoted = special_pos > 0
+                    && remaining.as_bytes().get(special_pos.wrapping_sub(1)) == Some(&b'\'')
+                    && rest.as_bytes().get(var_end) == Some(&b'\'');
+
+                let var_text = &rest[..var_end];
+                if already_quoted {
+                    result.push_str(var_text);
+                } else {
+                    result.push('\'');
+                    result.push_str(var_text);
+                    result.push('\'');
+                }
+                remaining = &rest[var_end..];
+            } else {
+                result.push_str(rest);
+                return result;
+            }
+        } else {
+            // Lone '$' not followed by '{' — copy as-is
+            result.push('$');
+            remaining = &rest[1..];
+        }
+    }
+
+    result.push_str(remaining);
+    result
+}
+
 /// Creates an issue for a template rendering error.
 #[cfg(feature = "templating")]
 fn template_error_issue(
@@ -42,18 +131,23 @@ fn template_error_issue(
 /// Returns the (possibly transformed) SQL and whether templating was applied.
 /// The boolean is true when templating was run in non-raw mode, regardless of
 /// whether the rendered result differs from the original SQL.
+///
+/// Shell-style template variables (`{var}` and `${var}`) are always wrapped in
+/// single quotes so the SQL parser treats them as string literals.
 #[cfg(feature = "templating")]
 fn apply_template<'a>(
     sql: &'a str,
     config: Option<&crate::templater::TemplateConfig>,
 ) -> Result<(Cow<'a, str>, bool), crate::templater::TemplateError> {
+    // Always preprocess shell-style template vars: {var} → '{var}', ${var} → '${var}'
+    let sql = quote_shell_vars(sql);
     match config {
         Some(cfg) if cfg.mode != TemplateMode::Raw => {
-            let rendered = template_sql(sql, cfg)?;
+            let rendered = template_sql(&sql, cfg)?;
             // Templating was applied
             Ok((Cow::Owned(rendered), true))
         }
-        _ => Ok((Cow::Borrowed(sql), false)),
+        _ => Ok((Cow::Owned(sql), false)),
     }
 }
 
@@ -202,7 +296,7 @@ pub(crate) fn collect_statements<'a>(
             };
             #[cfg(not(feature = "templating"))]
             let (source_sql, templating_applied): (Cow<'_, str>, bool) =
-                (Cow::Borrowed(file.content.as_str()), false);
+                (Cow::Owned(quote_shell_vars(&file.content)), false);
 
             let ctx = ParseContext {
                 source_sql,
@@ -234,7 +328,7 @@ pub(crate) fn collect_statements<'a>(
         };
         #[cfg(not(feature = "templating"))]
         let (source_sql, templating_applied): (Cow<'_, str>, bool) =
-            (Cow::Borrowed(request.sql.as_str()), false);
+            (Cow::Owned(quote_shell_vars(request.sql.as_str())), false);
 
         let ctx = ParseContext {
             source_sql,
@@ -1269,8 +1363,58 @@ mod tests {
     }
 
     #[test]
+    fn quote_shell_vars_wraps_bare_curly() {
+        assert_eq!(
+            quote_shell_vars("WHERE date_id BETWEEN {date_id} AND {max_dt}"),
+            "WHERE date_id BETWEEN '{date_id}' AND '{max_dt}'"
+        );
+    }
+
+    #[test]
+    fn quote_shell_vars_preserves_quoted_curly() {
+        assert_eq!(
+            quote_shell_vars("WHERE date_id = '{date_id}'"),
+            "WHERE date_id = '{date_id}'"
+        );
+    }
+
+    #[test]
+    fn quote_shell_vars_wraps_dollar_brace() {
+        assert_eq!(
+            quote_shell_vars("WHERE dt = ${DATA_DT}"),
+            "WHERE dt = '${DATA_DT}'"
+        );
+    }
+
+    #[test]
+    fn quote_shell_vars_handles_line_with_select_and_where() {
+        let input = "WHERE date_id BETWEEN {date_id}\n         AND (SELECT max(date_id) FROM src)\n         AND length(ELEMENT_AT(SPLIT(cgi, '-'), 4)) <= 3";
+        let expected = "WHERE date_id BETWEEN '{date_id}'\n         AND (SELECT max(date_id) FROM src)\n         AND length(ELEMENT_AT(SPLIT(cgi, '-'), 4)) <= 3";
+        assert_eq!(quote_shell_vars(input), expected);
+    }
+
+    #[test]
+    fn quote_shell_vars_skips_non_identifier_braces() {
+        assert_eq!(quote_shell_vars("{1, 2, 3}"), "{1, 2, 3}");
+        assert_eq!(quote_shell_vars("x = {-5}"), "x = {-5}");
+    }
+
+    #[test]
+    fn end_to_end_bare_curly_parses() {
+        let sql = "SELECT date_id, cgi AS cgi, trim(tower_id) AS tower_id FROM smartfren_analytic_prd.ods_cc.prd_xldim_acl_tb_f_d_bts_ref_hist WHERE date_id BETWEEN {date_id} AND (SELECT max(date_id) FROM smartfren_analytic_prd.ods_cc.prd_xldim_acl_tb_f_d_bts_ref_hist) AND length(ELEMENT_AT(SPLIT(cgi, '-'), 4)) <= 3";
+        let mut request = base_request();
+        request.dialect = Dialect::Hive;
+        request.sql = sql.to_string();
+        let (statements, issues) = collect_statements(&request);
+        for issue in &issues {
+            eprintln!("ISSUE: {:?}", issue);
+        }
+        assert!(issues.is_empty(), "Expected no parse issues, got {:?}", issues);
+        assert!(!statements.is_empty(), "Should have at least one statement");
+    }
+
+    #[test]
     fn unicode_sql_parses_correctly() {
-        // End-to-end test: ensure Unicode SQL parses and produces correct ranges
         let mut request = base_request();
         request.sql = "SELECT '日本' AS country; SELECT 'émoji: 🚀' AS test;".to_string();
 

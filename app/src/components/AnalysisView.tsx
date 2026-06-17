@@ -12,6 +12,7 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronRight,
+  Copy,
   Database,
   Download,
   Image,
@@ -43,6 +44,7 @@ import { isValidTab, useNavigation } from '@/lib/navigation-context';
 import { useViewStateStore, getNamespaceFilterStateWithDefaults } from '@/lib/view-state-store';
 import { useProject } from '@/lib/project-store';
 import { schemaMetadataToSQL, resolvedSchemaToSQL } from '@/lib/schema-parser';
+import { buildScopedSchemaSQLForTableNames } from '@/lib/scoped-schema';
 import { loadSchemaFiles } from '@/lib/schema-storage';
 import { HierarchyView, type HierarchyViewRef } from './HierarchyView';
 import { StatsPopover } from './StatsPopover';
@@ -53,6 +55,19 @@ import { SchemaEditor } from './SchemaEditor';
 interface AnalysisViewProps {
   graphContainerRef?: React.RefObject<HTMLDivElement | null>;
   isAnalyzing?: boolean;
+  lastAnalyzedAt?: number | null;
+  resultStatus?: {
+    origin: 'cache' | 'fresh';
+    source: 'memory' | 'indexeddb' | 'sqlite' | 'fresh';
+    restoredAt: number | null;
+    persistedAt: number | null;
+  } | null;
+  loadingContext?: {
+    fileName: string | null;
+    runMode: 'current' | 'all' | 'custom';
+    fileCount: number;
+    stage: 'preparing' | 'loadingSchema' | 'buildingLineage' | 'persisting' | 'rendering';
+  } | null;
 }
 
 /**
@@ -511,13 +526,63 @@ function SchemaListView({ schema }: SchemaListViewProps) {
     );
   };
 
+  const copyTableNames = async (
+    tableNames: string[],
+    successMessage: string,
+    failedMessage: string,
+    logLabel: string
+  ) => {
+    const text = tableNames.join('\n');
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(successMessage);
+    } catch (error) {
+      console.error(`[SchemaListView] Failed to copy ${logLabel}:`, error);
+      toast.error(failedMessage);
+    }
+  };
+
+  const handleCopyTargetTables = async () => {
+    await copyTableNames(
+      targetTables.map(({ fullName }) => fullName),
+      t('schemaView.copyTargetTablesSuccess', { count: targetTables.length }),
+      t('schemaView.copyTargetTablesFailed'),
+      'target tables'
+    );
+  };
+
+  const handleCopySourceTables = async () => {
+    await copyTableNames(
+      sourceTables.map(({ fullName }) => fullName),
+      t('schemaView.copySourceTablesSuccess', { count: sourceTables.length }),
+      t('schemaView.copySourceTablesFailed'),
+      'source tables'
+    );
+  };
+
   return (
     <div className="h-full overflow-auto">
       {/* Target tables section */}
       {targetTables.length > 0 && (
         <div>
-          <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-muted/30 border-b">
-            {t('schemaView.targetTable')}
+          <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-4 py-2">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t('schemaView.targetTable')}
+              <span className="ml-1.5 font-normal normal-case">({targetTables.length})</span>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleCopyTargetTables}
+              className="h-7 gap-1.5 px-2 text-[11px] font-medium normal-case tracking-normal text-foreground"
+              title={t('schemaView.copyTargetTables')}
+            >
+              <Copy className="h-3.5 w-3.5 shrink-0" />
+              <span>{t('schemaView.copyTargetTables')}</span>
+            </Button>
           </div>
           <div className="divide-y divide-border">
             {targetTables.map(({ fullName, table, sources, ddlColumns }) => {
@@ -597,9 +662,22 @@ function SchemaListView({ schema }: SchemaListViewProps) {
       {/* Source tables section */}
       {sourceTables.length > 0 && (
         <div>
-          <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-muted/30 border-b">
-            {t('schemaView.sourceTable')}
-            <span className="ml-1.5 font-normal normal-case">({sourceTables.length})</span>
+          <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-4 py-2">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t('schemaView.sourceTable')}
+              <span className="ml-1.5 font-normal normal-case">({sourceTables.length})</span>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleCopySourceTables}
+              className="h-7 gap-1.5 px-2 text-[11px] font-medium normal-case tracking-normal text-foreground"
+              title={t('schemaView.copySourceTables')}
+            >
+              <Copy className="h-3.5 w-3.5 shrink-0" />
+              <span>{t('schemaView.copySourceTables')}</span>
+            </Button>
           </div>
           <div className="divide-y divide-border">
             {sourceTables.map(({ fullName, table, hasDataFlow, ddlColumns }) => {
@@ -682,6 +760,9 @@ function SchemaListView({ schema }: SchemaListViewProps) {
 export function AnalysisView({
   graphContainerRef: externalGraphRef,
   isAnalyzing = false,
+  lastAnalyzedAt = null,
+  resultStatus = null,
+  loadingContext = null,
 }: AnalysisViewProps) {
   const { t } = useTranslation();
   const { state, actions } = useLineage();
@@ -716,6 +797,64 @@ export function AnalysisView({
   const [lineageFocusNodeId, setLineageFocusNodeId] = useState<string | undefined>(undefined);
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
   const [mountedTabs, setMountedTabs] = useState<Set<string>>(() => new Set([activeTab]));
+  const loadingStageLabel = useMemo(() => {
+    switch (loadingContext?.stage) {
+      case 'preparing':
+        return t('analysis.loadingStagePreparing');
+      case 'loadingSchema':
+        return t('analysis.loadingStageSchema');
+      case 'buildingLineage':
+        return t('analysis.loadingStageLineage');
+      case 'persisting':
+        return t('analysis.loadingStagePersisting');
+      case 'rendering':
+        return t('analysis.loadingStageRendering');
+      default:
+        return t('analysis.analyzingDesc');
+    }
+  }, [loadingContext?.stage, t]);
+  const runModeLabel = useMemo(() => {
+    switch (loadingContext?.runMode) {
+      case 'all':
+        return t('analysis.loadingRunModeAll');
+      case 'custom':
+        return t('analysis.loadingRunModeCustom');
+      default:
+        return t('analysis.loadingRunModeCurrent');
+    }
+  }, [loadingContext?.runMode, t]);
+  const loadingTargetSummary = useMemo(() => {
+    const primary = loadingContext?.fileName;
+    const total = loadingContext?.fileCount ?? 0;
+    if (!primary) {
+      return t('analysis.loadingCurrentFilePending');
+    }
+    if (total <= 1) {
+      return primary;
+    }
+    return t('analysis.loadingTargetSummary', {
+      primary,
+      rest: Math.max(0, total - 1),
+    });
+  }, [loadingContext?.fileCount, loadingContext?.fileName, t]);
+  const statusSourceLabel = useMemo(() => {
+    if (!resultStatus) return null;
+    if (resultStatus.origin === 'fresh') {
+      return t('analysis.statusSourceFresh');
+    }
+    switch (resultStatus.source) {
+      case 'indexeddb':
+        return t('analysis.statusSourceIndexedDb');
+      case 'sqlite':
+        return t('analysis.statusSourceSqlite');
+      default:
+        return t('analysis.statusSourceMemory');
+    }
+  }, [resultStatus, t]);
+  const formatStatusTime = useCallback((timestamp: number | null) => {
+    if (!timestamp) return t('analysis.statusTimeUnavailable');
+    return new Date(timestamp).toLocaleString();
+  }, [t]);
 
   const buildGraphExportFilename = useCallback(
     (extension: 'png' | 'svg') => {
@@ -831,63 +970,11 @@ export function AnalysisView({
         return;
       }
 
-      const matchedBlocks: string[] = [];
-      const allContent = files.map((f) => f.content).join('\n\n');
+      const scopedSchema = buildScopedSchemaSQLForTableNames(files, Array.from(tableNames));
 
-      // Split by CREATE TABLE statements — regex to find each CREATE TABLE ... ; block
-      // Matches: CREATE [EXTERNAL] TABLE [IF NOT EXISTS] `name`(...); including Hive DDL
-      const createTableRegex =
-        /CREATE\s+(?:EXTERNAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?([^\s(`"]+)[`"]?\s*\(/gi;
-      let match;
-
-      while ((match = createTableRegex.exec(allContent)) !== null) {
-        const tableName = match[1].replace(/`/g, '').toLowerCase();
-        const shortName = tableName.split('.').pop() || tableName;
-
-        // Check if this table is referenced in the analysis
-        if (tableNames.has(tableName) || tableNames.has(shortName)) {
-          // Extract the full CREATE TABLE block: from "CREATE" to the next ";" or next "CREATE"
-          const blockStart = match.index;
-          // Find the end: look for the matching semicolon (handling nested parens)
-          let depth = 0;
-          let blockEnd = blockStart;
-          let foundOpenParen = false;
-          for (let i = blockStart; i < allContent.length; i++) {
-            const ch = allContent[i];
-            if (ch === '(') {
-              depth++;
-              foundOpenParen = true;
-            } else if (ch === ')') {
-              depth--;
-            } else if (ch === ';' && foundOpenParen && depth <= 0) {
-              blockEnd = i + 1;
-              break;
-            }
-            // Also stop at next CREATE TABLE if no semicolon found
-            if (
-              i > blockStart + 10 &&
-              foundOpenParen &&
-              depth <= 0 &&
-              allContent.substring(i, i + 6).toUpperCase() === 'CREATE'
-            ) {
-              blockEnd = i;
-              break;
-            }
-            blockEnd = i + 1;
-          }
-
-          const block = allContent.substring(blockStart, blockEnd).trim().replace(/;+$/, '');
-          if (block.length > 0) {
-            matchedBlocks.push(block);
-          }
-        }
-      }
-
-      if (matchedBlocks.length > 0) {
+      if (scopedSchema.schemaSQL) {
         setMatchedDDL(
-          `-- 匹配到 ${matchedBlocks.length} 个物理表的 DDL 定义\n\n` +
-            matchedBlocks.join(';\n\n') +
-            ';'
+          `-- 匹配到 ${scopedSchema.matchedBlockCount} 个物理表的 DDL 定义\n\n${scopedSchema.schemaSQL}`
         );
       } else {
         setMatchedDDL(resolvedSchemaToSQL(result?.resolvedSchema));
@@ -1024,7 +1111,42 @@ export function AnalysisView({
     handleTabChangeRef.current = handleTabChange;
   }, [handleTabChange]);
 
-  const summary = result?.summary;
+  const summary = useMemo(() => {
+    if (!result) return null;
+    if (result.summary) return result.summary;
+
+    const tableIds = new Set<string>();
+    const columnIds = new Set<string>();
+    let joinCount = 0;
+
+    for (const stmt of result.statements) {
+      joinCount += stmt.joinCount ?? 0;
+      for (const node of stmt.nodes) {
+        if (node.type === 'table' || node.type === 'view') {
+          tableIds.add(node.id);
+        } else if (node.type === 'column') {
+          columnIds.add(node.id);
+        }
+      }
+    }
+
+    const issueCount = { errors: 0, warnings: 0, infos: 0 };
+    for (const issue of result.issues ?? []) {
+      if (issue.severity === 'error') issueCount.errors += 1;
+      else if (issue.severity === 'warning') issueCount.warnings += 1;
+      else issueCount.infos += 1;
+    }
+
+    return {
+      statementCount: result.statements.length,
+      tableCount: tableIds.size || result.globalLineage?.nodes?.length || 0,
+      columnCount: columnIds.size,
+      joinCount,
+      complexityScore: 0,
+      issueCount,
+      hasErrors: issueCount.errors > 0,
+    };
+  }, [result]);
   const hasIssues = summary
     ? summary.issueCount.errors > 0 || summary.issueCount.warnings > 0
     : false;
@@ -1155,23 +1277,23 @@ export function AnalysisView({
     }
   }, [hasIssues, activeTab]);
 
-  if (!result || !summary) {
+  if (!result) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5">
         <div className="p-6 text-center">
           {isAnalyzing ? (
             <>
               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-3 opacity-70" />
-              <h3 className="font-semibold mb-2">Analyzing SQL</h3>
+              <h3 className="font-semibold mb-2">{t('analysis.analyzingSql')}</h3>
               <p className="text-sm max-w-xs mx-auto">
-                Building lineage, schema, and issue details for the current analysis run.
+                {t('analysis.analyzingDesc')}
               </p>
             </>
           ) : (
             <>
-              <h3 className="font-semibold mb-2">No Analysis Results</h3>
+              <h3 className="font-semibold mb-2">{t('analysis.noResults')}</h3>
               <p className="text-sm max-w-xs mx-auto">
-                Run analysis on your SQL script to see lineage and schema details here.
+                {t('analysis.noResultsDesc')}
               </p>
             </>
           )}
@@ -1179,6 +1301,8 @@ export function AnalysisView({
       </div>
     );
   }
+
+  const resolvedSummary = summary!;
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -1196,7 +1320,7 @@ export function AnalysisView({
             {hasIssues && (
               <TabsTrigger value="issues" className="text-warning-light dark:text-warning-dark">
                 {t('analysis.issuesCount', {
-                  count: summary.issueCount.errors + summary.issueCount.warnings,
+                  count: resolvedSummary.issueCount.errors + resolvedSummary.issueCount.warnings,
                 })}
               </TabsTrigger>
             )}
@@ -1225,10 +1349,10 @@ export function AnalysisView({
               </DropdownMenu>
             )}
             <StatsPopover
-              tableCount={summary.tableCount}
-              columnCount={summary.columnCount}
-              joinCount={summary.joinCount}
-              complexityScore={summary.complexityScore}
+              tableCount={resolvedSummary.tableCount}
+              columnCount={resolvedSummary.columnCount}
+              joinCount={resolvedSummary.joinCount}
+              complexityScore={resolvedSummary.complexityScore}
             />
             {/* Hide Schema editor button in serve mode - schema comes from CLI */}
             {!isBackendMode && (
@@ -1259,6 +1383,36 @@ export function AnalysisView({
           </div>
         </div>
 
+        {resultStatus && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-muted/5 px-4 py-2 text-xs text-muted-foreground">
+            <div className="rounded-full border bg-background px-2.5 py-1 font-medium text-foreground">
+              {resultStatus.origin === 'cache'
+                ? t('analysis.statusBadgeRestored')
+                : t('analysis.statusBadgeFresh')}
+            </div>
+            <div className="rounded-full border border-dashed px-2.5 py-1">
+              {t('analysis.statusSourceLabel', { source: statusSourceLabel })}
+            </div>
+            <div className="rounded-full border px-2.5 py-1">
+              {resultStatus.persistedAt
+                ? t('analysis.statusPersistedAt', {
+                    time: formatStatusTime(resultStatus.persistedAt),
+                  })
+                : t('analysis.statusPersistedReady')}
+            </div>
+            <div className="rounded-full border px-2.5 py-1">
+              {t('analysis.statusRestoredAt', {
+                time: formatStatusTime(resultStatus.restoredAt),
+              })}
+            </div>
+            <div className="rounded-full border px-2.5 py-1">
+              {t('analysis.statusLastAnalyzedAt', {
+                time: formatStatusTime(lastAnalyzedAt),
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Namespace filter bar - only shown when schemas/databases are available */}
         {activeProjectId && (availableSchemas.length > 0 || availableDatabases.length > 0) && (
           <NamespaceFilterBar
@@ -1269,6 +1423,69 @@ export function AnalysisView({
         )}
 
         <div className="flex-1 overflow-hidden relative">
+          {isAnalyzing && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/88 backdrop-blur-sm">
+              <div className="mx-6 flex w-full max-w-lg flex-col items-center rounded-2xl border border-border/60 bg-background/95 px-8 py-10 text-center shadow-lg">
+                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-primary/8 text-primary">
+                  <Loader2 className="h-7 w-7 animate-spin" />
+                </div>
+                <h3 className="text-lg font-semibold text-foreground">
+                  {t('analysis.analyzingSql')}
+                </h3>
+                <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+                  {loadingStageLabel}
+                </p>
+                <div className="mt-5 grid w-full gap-3 text-left sm:grid-cols-3">
+                  <div className="rounded-xl border bg-muted/35 px-4 py-3">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {t('analysis.loadingCurrentFile')}
+                    </div>
+                    <div className="mt-1 truncate text-sm font-medium text-foreground">
+                      {loadingContext?.fileName || t('analysis.loadingCurrentFilePending')}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/35 px-4 py-3">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {t('analysis.loadingTargetSummaryLabel')}
+                    </div>
+                    <div className="mt-1 line-clamp-2 text-sm font-medium text-foreground">
+                      {loadingTargetSummary}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/35 px-4 py-3">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {t('analysis.loadingRunMode')}
+                    </div>
+                    <div className="mt-1 text-sm font-medium text-foreground">{runModeLabel}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/35 px-4 py-3">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {t('analysis.loadingFileCount')}
+                    </div>
+                    <div className="mt-1 text-sm font-medium text-foreground">
+                      {t('analysis.loadingFileCountValue', {
+                        count: loadingContext?.fileCount ?? 0,
+                      })}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-6 grid w-full gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl border bg-muted/35 px-3 py-3">
+                    <div className="h-1.5 w-16 animate-pulse rounded-full bg-primary/30" />
+                    <div className="mt-3 h-3 w-20 animate-pulse rounded bg-muted-foreground/20" />
+                  </div>
+                  <div className="rounded-xl border bg-muted/35 px-3 py-3">
+                    <div className="h-1.5 w-12 animate-pulse rounded-full bg-primary/30" />
+                    <div className="mt-3 h-3 w-24 animate-pulse rounded bg-muted-foreground/20" />
+                  </div>
+                  <div className="rounded-xl border bg-muted/35 px-3 py-3">
+                    <div className="h-1.5 w-14 animate-pulse rounded-full bg-primary/30" />
+                    <div className="mt-3 h-3 w-16 animate-pulse rounded bg-muted-foreground/20" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {/* forceMount keeps components mounted when switching tabs to preserve state */}
 
           <TabsContent

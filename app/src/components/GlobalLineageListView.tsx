@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AnalyzeResult, Edge, Node } from '@pondpilot/flowscope-core';
 import { useLineageActions } from '@pondpilot/flowscope-react';
 import {
@@ -6,11 +6,12 @@ import {
   ArrowUpDown,
   ArrowUpToLine,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   FileCode2,
-  Flame,
   FolderTree,
-  Layers3,
   GitBranch,
   Network,
   Search,
@@ -33,7 +34,7 @@ type GlobalLineageStatus = 'source' | 'bridge' | 'sink' | 'isolated';
 type GlobalLineageSortKey = 'impact' | 'upstream' | 'downstream' | 'files' | 'name';
 type GlobalLineageQuickView = 'all' | 'hotspots' | 'bridge' | 'source' | 'sink' | 'isolated';
 type GlobalLineageInventoryMode = 'table' | 'grouped';
-const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
+const PAGE_SIZE_OPTIONS = [50, 100, 200, 500] as const;
 
 interface GlobalLineageListViewProps {
   result: AnalyzeResult | null;
@@ -77,13 +78,6 @@ interface GlobalLineageData {
   entries: TableEntry[];
   entryMap: Map<string, TableEntry>;
   stats: GlobalLineageStats;
-}
-
-interface FileGroupEntry {
-  file: string;
-  tableCount: number;
-  maxImpactScore: number;
-  topTableName: string;
 }
 
 interface InventoryFileGroup {
@@ -223,31 +217,6 @@ function MiniLineageBar({
           {t('globalLineageList.downstreamMini', { count: downstreamCount })}
         </span>
       </div>
-    </div>
-  );
-}
-
-function OverviewCard({
-  label,
-  value,
-  hint,
-  icon,
-}: {
-  label: string;
-  value: React.ReactNode;
-  hint?: string;
-  icon?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-border bg-background px-3 py-3 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-xs text-muted-foreground">{label}</div>
-          <div className="mt-1.5 text-xl font-semibold text-foreground">{value}</div>
-        </div>
-        {icon ? <div className="text-muted-foreground">{icon}</div> : null}
-      </div>
-      {hint ? <div className="mt-1.5 text-[11px] text-muted-foreground">{hint}</div> : null}
     </div>
   );
 }
@@ -433,16 +402,15 @@ export function GlobalLineageListView({
   const [activeStatuses, setActiveStatuses] = useState<Set<GlobalLineageStatus>>(() => new Set());
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<GlobalLineageSortKey>('impact');
+  const [pageAnnouncement, setPageAnnouncement] = useState('');
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
   const [quickView, setQuickView] = useState<GlobalLineageQuickView>('all');
   const [selectedFileGroup, setSelectedFileGroup] = useState<string | null>(null);
   const [inventoryMode, setInventoryMode] = useState<GlobalLineageInventoryMode>('table');
   const [expandedInventoryGroups, setExpandedInventoryGroups] = useState<Set<string>>(() => new Set());
   const [selectionContext, setSelectionContext] = useState<SelectionContext | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
-  const [analyticsCollapsed, setAnalyticsCollapsed] = useState(false);
-  const [inventoryCollapsed, setInventoryCollapsed] = useState(false);
-  const [insightsCollapsed, setInsightsCollapsed] = useState(false);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
 
   const graphData = useMemo<GlobalLineageData>(() => {
     if (!result) {
@@ -490,6 +458,47 @@ export function GlobalLineageListView({
           edgeFiles.set(key, new Set());
         }
         edgeFiles.get(key)!.add(sourceName);
+      }
+    }
+
+    // 关系图是基于 result.globalLineage 渲染的。某些表（特别是表级血缘
+    // 合并后只出现在 globalLineage.nodes/edges 中而不在 statements.nodes 的表）
+    // 必须从 globalLineage 同步回列表，否则会漏掉几十/几百张表。
+    const globalNodes = result.globalLineage?.nodes ?? [];
+    const globalNodeById = new Map<string, (typeof globalNodes)[number]>();
+    const buildQNameFromGlobal = (gNode: (typeof globalNodes)[number]): string => {
+      const cn = gNode.canonicalName;
+      if (cn) {
+        const parts = [cn.catalog, cn.schema, cn.name].filter(Boolean);
+        if (parts.length > 1) return parts.join('.');
+      }
+      return gNode.label || gNode.id;
+    };
+    for (const gNode of globalNodes) {
+      globalNodeById.set(gNode.id, gNode);
+      if (!nodeInfoById.has(gNode.id)) {
+        // 把 globalLineage 节点反向构造为最小可用的 Node，使列表与关系图同源
+        const inferredQName = buildQNameFromGlobal(gNode);
+        const fallback: Node = {
+          id: gNode.id,
+          label: gNode.label || inferredQName,
+          qualifiedName: inferredQName,
+          kind: gNode.type || 'table',
+          statementRefs: gNode.statementRefs,
+          metadata: gNode.metadata,
+        } as unknown as Node;
+        nodeInfoById.set(gNode.id, fallback);
+      }
+    }
+    for (const gNode of globalNodes) {
+      const existing = nodeInfoById.get(gNode.id);
+      if (existing && existing.qualifiedName === existing.id) {
+        const inferredQName = buildQNameFromGlobal(gNode);
+        nodeInfoById.set(gNode.id, {
+          ...existing,
+          label: gNode.label || existing.label,
+          qualifiedName: inferredQName,
+        });
       }
     }
 
@@ -634,66 +643,12 @@ export function GlobalLineageListView({
     () => sortEntries(fileScopedEntries, sortKey),
     [fileScopedEntries, sortKey]
   );
-  const hotspotEntries = useMemo(
-    () => sortEntries(graphData.entries, 'impact').slice(0, 5),
-    [graphData.entries]
-  );
-  const topImpactEntry = hotspotEntries[0] ?? null;
-  const topUpstreamEntry = useMemo(
-    () => sortEntries(graphData.entries, 'upstream')[0] ?? null,
-    [graphData.entries]
-  );
-  const topDownstreamEntry = useMemo(
-    () => sortEntries(graphData.entries, 'downstream')[0] ?? null,
-    [graphData.entries]
-  );
-  const fileGroups = useMemo<FileGroupEntry[]>(() => {
-    const grouped = new Map<string, FileGroupEntry>();
-
-    for (const entry of graphData.entries) {
-      if (!entry.primaryFile) continue;
-      const current = grouped.get(entry.primaryFile);
-      if (!current) {
-        grouped.set(entry.primaryFile, {
-          file: entry.primaryFile,
-          tableCount: 1,
-          maxImpactScore: entry.impactScore,
-          topTableName: entry.qualifiedName,
-        });
-        continue;
-      }
-
-      current.tableCount += 1;
-      if (entry.impactScore > current.maxImpactScore) {
-        current.maxImpactScore = entry.impactScore;
-        current.topTableName = entry.qualifiedName;
-      }
-    }
-
-    return Array.from(grouped.values()).sort((a, b) => {
-      return (
-        b.tableCount - a.tableCount ||
-        b.maxImpactScore - a.maxImpactScore ||
-        a.file.localeCompare(b.file)
-      );
-    });
-  }, [graphData.entries]);
   const activeFilterCount =
     activeStatuses.size +
     (searchTerm.trim() ? 1 : 0) +
     (quickView !== 'all' ? 1 : 0) +
     (selectedFileGroup ? 1 : 0);
   const selectedEntry = selectedNodeId ? graphData.entryMap.get(selectedNodeId) ?? null : null;
-  const selectedFileEntries = useMemo(
-    () =>
-      selectedFileGroup
-        ? sortEntries(
-            graphData.entries.filter((entry) => entry.primaryFile === selectedFileGroup),
-            'impact'
-          )
-        : [],
-    [graphData.entries, selectedFileGroup]
-  );
   const totalFilteredEntries = sortedEntries.length;
   const totalPages = Math.max(1, Math.ceil(totalFilteredEntries / pageSize));
   const paginatedEntries = useMemo(() => {
@@ -839,6 +794,66 @@ export function GlobalLineageListView({
     setCurrentPage((previous) => Math.min(totalPages, previous + 1));
   }, [totalPages]);
 
+  const handleFirstPage = useCallback(() => {
+    setCurrentPage(1);
+  }, []);
+
+  const handleLastPage = useCallback(() => {
+    setCurrentPage(totalPages);
+  }, [totalPages]);
+
+  const handlePreviousStep = useCallback(
+    (step: number) => {
+      setCurrentPage((previous) => Math.max(1, previous - step));
+    },
+    []
+  );
+
+  const handleNextStep = useCallback(
+    (step: number) => {
+      setCurrentPage((previous) => Math.min(totalPages, previous + step));
+    },
+    [totalPages]
+  );
+
+  // 翻页后轻量播报，方便屏幕阅读器与键盘用户感知
+  useEffect(() => {
+    if (totalFilteredEntries === 0 || totalPages === 0) return;
+    const start = (currentPage - 1) * pageSize + 1;
+    const end = Math.min(currentPage * pageSize, totalFilteredEntries);
+    setPageAnnouncement(
+      t('globalLineageList.paginationAnnouncement', {
+        page: currentPage,
+        totalPages,
+        start,
+        end,
+        total: totalFilteredEntries,
+      })
+    );
+  }, [currentPage, pageSize, totalPages, totalFilteredEntries, t]);
+
+  // 翻页后把表格滚动位置归零，避免上下页内容错位
+  useEffect(() => {
+    if (tableScrollRef.current) {
+      tableScrollRef.current.scrollTop = 0;
+    }
+  }, [currentPage, pageSize]);
+
+  const handleJumpToPage = useCallback((target: number) => {
+    setCurrentPage(Math.min(totalPages, Math.max(1, target)));
+  }, [totalPages]);
+
+  const handleJumpToPageInput = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== 'Enter') return;
+      const raw = (event.target as HTMLInputElement).value.trim();
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed)) return;
+      handleJumpToPage(Math.floor(parsed));
+    },
+    [handleJumpToPage]
+  );
+
   const handleReturnToSource = useCallback(() => {
     if (!selectionContext) return;
     if (selectionContext.file) {
@@ -846,8 +861,55 @@ export function GlobalLineageListView({
       setSelectedFileGroup(selectionContext.file);
       setExpandedInventoryGroups((previous) => new Set([...Array.from(previous), selectionContext.file!]));
     }
-    setSelectedNodeId(null);
   }, [selectionContext]);
+
+  // 全局键盘翻页：← / → 在表格区域内翻页，Shift + 翻页按 5 页跳
+  useEffect(() => {
+    if (!result) return undefined;
+    const listener = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName?.toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable) {
+          return;
+        }
+      }
+      if (event.key === 'ArrowLeft') {
+        if (event.metaKey || event.ctrlKey) handlePreviousStep(10);
+        else if (event.shiftKey) handlePreviousStep(5);
+        else handlePreviousPage();
+        event.preventDefault();
+      } else if (event.key === 'ArrowRight') {
+        if (event.metaKey || event.ctrlKey) handleNextStep(10);
+        else if (event.shiftKey) handleNextStep(5);
+        else handleNextPage();
+        event.preventDefault();
+      } else if (event.key === 'Home') {
+        handleFirstPage();
+        event.preventDefault();
+      } else if (event.key === 'End') {
+        handleLastPage();
+        event.preventDefault();
+      } else if (event.key === 'PageUp') {
+        handlePreviousPage();
+        event.preventDefault();
+      } else if (event.key === 'PageDown') {
+        handleNextPage();
+        event.preventDefault();
+      }
+    };
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, [
+    result,
+    handlePreviousPage,
+    handleNextPage,
+    handlePreviousStep,
+    handleNextStep,
+    handleFirstPage,
+    handleLastPage,
+  ]);
 
   const handleSelectRelatedTable = useCallback(
     (nodeId: string) => {
@@ -867,130 +929,9 @@ export function GlobalLineageListView({
     );
   }
 
-  const hasVisibleInventory = !inventoryCollapsed;
-  const hasVisibleInsights = !insightsCollapsed;
-  const lowerGridClassName =
-    hasVisibleInventory && hasVisibleInsights
-      ? 'xl:grid-cols-[minmax(0,3.7fr)_minmax(240px,0.95fr)]'
-      : 'grid-cols-1';
-
   return (
-    <div className="flex min-h-[125vh] flex-col overflow-y-auto bg-background">
-      <div
-        className={cn(
-          'border-b border-border bg-muted/10 px-4 transition-all',
-          analyticsCollapsed ? 'py-2' : 'flex min-h-[24vh] items-end py-4 xl:py-5'
-        )}
-      >
-        <div className="flex w-full flex-col gap-3">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
-            <div className="space-y-1">
-              <div className="text-sm font-semibold text-foreground">
-                {t('globalLineageList.analyticsTitle')}
-              </div>
-              {!analyticsCollapsed ? (
-                <p className="max-w-4xl text-xs text-muted-foreground">
-                  {t('globalLineageList.analyticsDescription')}
-                </p>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span className="rounded-full border border-border bg-background px-3 py-1.5">
-                {t('globalLineageList.visibleResults', {
-                  visible: sortedEntries.length,
-                  total: graphData.stats.totalTables,
-                })}
-              </span>
-              {activeFilterCount > 0 ? (
-                <span className="rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-primary">
-                  {t('globalLineageList.activeFilters', { count: activeFilterCount })}
-                </span>
-              ) : null}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setAnalyticsCollapsed((value) => !value)}
-                className="h-7 gap-1 text-xs"
-              >
-                {analyticsCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                {analyticsCollapsed
-                  ? t('globalLineageList.expandPanel')
-                  : t('globalLineageList.collapsePanel')}
-              </Button>
-            </div>
-          </div>
-          {!analyticsCollapsed ? (
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              <OverviewCard
-                label={t('globalLineageList.totalTables')}
-                value={graphData.stats.totalTables}
-                hint={
-                  topImpactEntry
-                    ? t('globalLineageList.topImpactHint', {
-                        name: topImpactEntry.qualifiedName,
-                        score: topImpactEntry.impactScore,
-                      })
-                    : t('globalLineageList.totalFlowsHint', { count: graphData.stats.totalEdges })
-                }
-                icon={<Layers3 className="h-4 w-4" />}
-              />
-              <OverviewCard
-                label={t('globalLineageList.bridgeTables')}
-                value={graphData.stats.bridgeTables}
-                hint={t('globalLineageList.bridgeTablesHint')}
-                icon={<Sparkles className="h-4 w-4" />}
-              />
-              <OverviewCard
-                label={t('globalLineageList.sourceTables')}
-                value={graphData.stats.sourceTables}
-                hint={t('globalLineageList.sourceTablesHint')}
-                icon={<ArrowUpToLine className="h-4 w-4" />}
-              />
-              <OverviewCard
-                label={t('globalLineageList.targetTables')}
-                value={graphData.stats.sinkTables}
-                hint={t('globalLineageList.targetTablesHint')}
-                icon={<ArrowDownToLine className="h-4 w-4" />}
-              />
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="min-h-screen px-4 py-4">
-        {(inventoryCollapsed || insightsCollapsed) && (
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            {inventoryCollapsed ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setInventoryCollapsed(false)}
-                className="h-8 gap-1.5 text-xs"
-              >
-                <ChevronRight className="h-3.5 w-3.5" />
-                {t('globalLineageList.restorePanel', {
-                  name: t('globalLineageList.inventoryTitle'),
-                })}
-              </Button>
-            ) : null}
-            {insightsCollapsed ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setInsightsCollapsed(false)}
-                className="h-8 gap-1.5 text-xs"
-              >
-                <ChevronRight className="h-3.5 w-3.5" />
-                {t('globalLineageList.restorePanel', {
-                  name: t('globalLineageList.insightsTitle'),
-                })}
-              </Button>
-            ) : null}
-          </div>
-        )}
-        <div className={cn('grid items-start gap-3', lowerGridClassName)}>
-          {!inventoryCollapsed ? (
-          <section className="flex min-h-screen min-h-0 flex-col rounded-2xl border border-border bg-background">
+    <div className="flex min-h-full flex-col overflow-y-auto bg-background px-4 py-4">
+      <section className="flex min-h-screen min-h-0 flex-col rounded-2xl border border-border bg-background">
             <div className="border-b border-border px-3 py-3">
               <div className="flex flex-col gap-2">
                 <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
@@ -1003,56 +944,95 @@ export function GlobalLineageListView({
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="rounded-full border border-border bg-muted/20 px-3 py-1.5">
+                    <span className="rounded-md border border-border bg-muted/20 px-3 py-1.5 font-medium text-foreground">
                       {t('globalLineageList.visibleResults', {
                         visible: totalFilteredEntries,
                         total: graphData.stats.totalTables,
                       })}
                     </span>
-                    <span className="rounded-full border border-border bg-muted/20 px-3 py-1.5">
+                    <span className="rounded-md border border-border bg-muted/20 px-3 py-1.5">
                       {t('globalLineageList.totalFlowsHint', { count: graphData.stats.totalEdges })}
                     </span>
-                    <span className="rounded-full border border-border bg-muted/20 px-3 py-1.5">
-                      {t('globalLineageList.pageSummary', {
-                        page: currentPage,
-                        totalPages,
-                        count: paginatedEntries.length,
-                      })}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1 rounded-md border border-border bg-muted/20 px-2 py-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleFirstPage}
+                        disabled={currentPage === 1}
+                        aria-label={t('globalLineageList.firstPage')}
+                        title={t('globalLineageList.firstPage')}
+                        className="h-7 min-w-7 px-1.5 text-xs text-foreground"
+                      >
+                        <ChevronsLeft className="h-4 w-4 shrink-0" strokeWidth={2.25} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handlePreviousPage}
+                        disabled={currentPage === 1}
+                        aria-label={t('globalLineageList.previousPage')}
+                        title={t('globalLineageList.previousPage')}
+                        className="h-7 gap-1 px-2 text-xs text-foreground"
+                      >
+                        <ChevronLeft className="h-4 w-4 shrink-0" strokeWidth={2.25} />
+                        <span>{t('globalLineageList.previousPage')}</span>
+                      </Button>
+                      <span className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground">
+                        {t('globalLineageList.pageSummary', {
+                          page: currentPage,
+                          totalPages,
+                          count: paginatedEntries.length,
+                        })}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleNextPage}
+                        disabled={currentPage === totalPages}
+                        aria-label={t('globalLineageList.nextPage')}
+                        title={t('globalLineageList.nextPage')}
+                        className="h-7 gap-1 px-2 text-xs text-foreground"
+                      >
+                        <span>{t('globalLineageList.nextPage')}</span>
+                        <ChevronRight className="h-4 w-4 shrink-0" strokeWidth={2.25} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleLastPage}
+                        disabled={currentPage === totalPages}
+                        aria-label={t('globalLineageList.lastPage')}
+                        title={t('globalLineageList.lastPage')}
+                        className="h-7 min-w-7 px-1.5 text-xs text-foreground"
+                      >
+                        <ChevronsRight className="h-4 w-4 shrink-0" strokeWidth={2.25} />
+                      </Button>
+                    </div>
                     {selectedFileGroup ? (
-                      <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300">
+                      <span className="rounded-md border border-sky-200 bg-sky-50 px-3 py-1.5 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300">
                         {t('globalLineageList.fileScopeActive', { file: selectedFileGroup })}
                       </span>
                     ) : null}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setInventoryCollapsed(true)}
-                      className="h-7 gap-1 text-xs"
-                    >
-                      <ChevronDown className="h-3.5 w-3.5" />
-                      {t('globalLineageList.collapsePanel')}
-                    </Button>
                   </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative min-w-[260px] flex-1">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <div className="relative min-w-[220px] flex-1">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                     <input
                       value={searchTerm}
                       onChange={(event) => setSearchTerm(event.target.value)}
                       placeholder={t('globalLineageList.searchPlaceholder')}
-                      className="h-9 w-full rounded-full border border-border bg-background pl-10 pr-4 text-sm outline-hidden transition-colors focus:border-primary/40"
+                      className="h-7 w-full rounded-md border border-border bg-background pl-8 pr-3 text-xs outline-hidden transition-colors focus:border-primary/40"
                     />
                   </div>
-                  <div className="flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5">
-                    <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+                  <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
+                    <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">{t('globalLineageList.sortBy')}</span>
                     <select
                       value={sortKey}
                       onChange={(event) => setSortKey(event.target.value as GlobalLineageSortKey)}
-                      className="bg-transparent text-sm text-foreground outline-hidden"
+                      className="bg-transparent text-xs text-foreground outline-hidden"
                     >
                       <option value="impact">{t('globalLineageList.sortImpact')}</option>
                       <option value="upstream">{t('globalLineageList.sortUpstream')}</option>
@@ -1062,7 +1042,12 @@ export function GlobalLineageListView({
                     </select>
                   </div>
                   {activeFilterCount > 0 ? (
-                    <Button variant="outline" size="sm" onClick={handleResetFilters}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleResetFilters}
+                      className="h-7 text-xs"
+                    >
                       {t('globalLineageList.resetFilters')}
                     </Button>
                   ) : null}
@@ -1072,129 +1057,112 @@ export function GlobalLineageListView({
                   <span className="text-xs text-muted-foreground">
                     {t('globalLineageList.inventoryMode')}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setInventoryMode('table')}
-                    className={cn(
-                      'inline-flex items-center rounded-full border px-3 py-1.5 text-xs transition-colors',
-                      inventoryMode === 'table'
-                        ? 'border-primary/30 bg-primary/10 text-primary'
-                        : 'border-border bg-background text-muted-foreground hover:text-foreground'
-                    )}
-                  >
-                    {t('globalLineageList.inventoryModeTable')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInventoryMode('grouped')}
-                    className={cn(
-                      'inline-flex items-center rounded-full border px-3 py-1.5 text-xs transition-colors',
-                      inventoryMode === 'grouped'
-                        ? 'border-primary/30 bg-primary/10 text-primary'
-                        : 'border-border bg-background text-muted-foreground hover:text-foreground'
-                    )}
-                  >
-                    {t('globalLineageList.inventoryModeGrouped')}
-                  </button>
+                  <div className="inline-flex items-center gap-1 rounded-md border border-border bg-background p-0.5">
+                    {(['table', 'grouped'] as GlobalLineageInventoryMode[]).map((mode) => {
+                      const isActive = inventoryMode === mode;
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setInventoryMode(mode)}
+                          className={cn(
+                            'rounded px-2.5 py-1 text-xs transition-colors',
+                            isActive
+                              ? 'bg-primary/10 text-primary'
+                              : 'text-muted-foreground hover:text-foreground'
+                          )}
+                        >
+                          {t(
+                            mode === 'table'
+                              ? 'globalLineageList.inventoryModeTable'
+                              : 'globalLineageList.inventoryModeGrouped'
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                   {inventoryMode === 'grouped' ? (
                     <>
-                      <Button variant="outline" size="sm" onClick={handleExpandAllInventoryGroups}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleExpandAllInventoryGroups}
+                        className="h-7 text-xs"
+                      >
                         {t('globalLineageList.expandAllGroups')}
                       </Button>
-                      <Button variant="outline" size="sm" onClick={handleCollapseAllInventoryGroups}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCollapseAllInventoryGroups}
+                        className="h-7 text-xs"
+                      >
                         {t('globalLineageList.collapseAllGroups')}
                       </Button>
                     </>
                   ) : null}
-                </div>
-
-                {selectedFileGroup ? (
-                  <div className="rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2.5 text-sm dark:border-sky-900/60 dark:bg-sky-950/30">
-                    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="min-w-0">
-                        <div className="truncate font-medium text-foreground">
-                          {selectedFileGroup}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {t('globalLineageList.fileScopeSummary', {
-                            count: selectedFileEntries.length,
-                          })}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleOpenFile(selectedFileGroup)}
+                  <span className="mx-1 hidden h-4 w-px bg-border sm:inline-block" />
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(
+                      [
+                        'all',
+                        'hotspots',
+                        'bridge',
+                        'source',
+                        'sink',
+                        'isolated',
+                      ] as GlobalLineageQuickView[]
+                    ).map((view) => {
+                      const isActive = quickView === view;
+                      return (
+                        <button
+                          key={view}
+                          type="button"
+                          onClick={() => setQuickView(view)}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs transition-colors',
+                            isActive
+                              ? 'border-primary/30 bg-primary/10 text-primary'
+                              : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                          )}
                         >
-                          {t('globalLineageList.openFile')}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setSelectedFileGroup(null)}
-                        >
-                          {t('globalLineageList.clearFileScope')}
-                        </Button>
-                      </div>
-                    </div>
+                          <span>
+                            {t(
+                              `globalLineageList.quickView${view.charAt(0).toUpperCase()}${view.slice(1)}`
+                            )}
+                          </span>
+                          <span className="rounded bg-background/80 px-1 text-[10px] tabular-nums">
+                            {quickViewCounts[view]}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
-                ) : null}
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {(
-                    [
-                      'all',
-                      'hotspots',
-                      'bridge',
-                      'source',
-                      'sink',
-                      'isolated',
-                    ] as GlobalLineageQuickView[]
-                  ).map((view) => {
-                    const isActive = quickView === view;
-                    return (
-                      <button
-                        key={view}
-                        type="button"
-                        onClick={() => setQuickView(view)}
-                        className={cn(
-                          'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors',
-                          isActive
-                            ? 'border-primary/30 bg-primary/10 text-primary'
-                            : 'border-border bg-background text-muted-foreground hover:text-foreground'
-                        )}
-                      >
-                        <span>{t(`globalLineageList.quickView${view.charAt(0).toUpperCase()}${view.slice(1)}`)}</span>
-                        <span className="rounded-full bg-background/80 px-1.5 py-0.5 text-[10px]">
-                          {quickViewCounts[view]}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {(Object.keys(STATUS_META) as GlobalLineageStatus[]).map((status) => {
-                    const meta = STATUS_META[status];
-                    const isActive = activeStatuses.has(status);
-                    return (
-                      <button
-                        key={status}
-                        type="button"
-                        onClick={() => toggleStatus(status)}
-                        className={cn(
-                          'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors',
-                          isActive
-                            ? meta.badgeClassName
-                            : 'border-border bg-background text-muted-foreground hover:text-foreground'
-                        )}
-                      >
-                        <span className={cn('inline-block h-2.5 w-2.5 rounded-full', meta.dotClassName)} />
-                        <span>{t(meta.labelKey)}</span>
-                      </button>
-                    );
-                  })}
+                  <span className="mx-1 hidden h-4 w-px bg-border sm:inline-block" />
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(Object.keys(STATUS_META) as GlobalLineageStatus[]).map((status) => {
+                      const meta = STATUS_META[status];
+                      const isActive = activeStatuses.has(status);
+                      return (
+                        <button
+                          key={status}
+                          type="button"
+                          onClick={() => toggleStatus(status)}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs transition-colors',
+                            isActive
+                              ? meta.badgeClassName
+                              : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                          )}
+                        >
+                          <span
+                            className={cn('inline-block h-2 w-2 rounded-full', meta.dotClassName)}
+                          />
+                          <span>{t(meta.labelKey)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1370,23 +1338,35 @@ export function GlobalLineageListView({
                   })}
                 </div>
               ) : (
-                <div className="max-h-[calc(100vh-320px)] overflow-auto">
-                  <table className="min-w-full border-collapse text-sm">
-                    <thead className="sticky top-0 z-10 bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+                <div
+                  ref={tableScrollRef}
+                  className="max-h-[calc(100vh-260px)] overflow-auto"
+                >
+                  <table className="min-w-full table-fixed border-collapse text-sm">
+                    <colgroup>
+                      <col className="w-[5%]" />
+                      <col className="w-[33%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[16%]" />
+                      <col className="w-[26%]" />
+                    </colgroup>
+                    <thead className="sticky top-0 z-10 bg-muted/50 text-[11px] uppercase tracking-wide text-muted-foreground">
                       <tr>
-                        <th className="px-4 py-3 text-left font-medium">
+                        <th className="px-3 py-2 text-right font-medium tabular-nums">#</th>
+                        <th className="px-3 py-2 text-left font-medium">
                           {t('globalLineageList.tableColumn')}
                         </th>
-                        <th className="px-4 py-3 text-left font-medium">
+                        <th className="px-3 py-2 text-left font-medium">
                           {t('globalLineageList.statusColumn')}
                         </th>
-                        <th className="px-4 py-3 text-right font-medium">
+                        <th className="px-3 py-2 text-right font-medium">
                           {t('globalLineageList.impactColumn')}
                         </th>
-                        <th className="px-4 py-3 text-left font-medium">
+                        <th className="px-3 py-2 text-left font-medium">
                           {t('globalLineageList.relationsColumn')}
                         </th>
-                        <th className="px-4 py-3 text-left font-medium">
+                        <th className="px-3 py-2 text-left font-medium">
                           {t('globalLineageList.primaryFileColumn')}
                         </th>
                       </tr>
@@ -1397,7 +1377,7 @@ export function GlobalLineageListView({
                         return (
                           <tr
                             key={entry.nodeId}
-                            className="cursor-pointer border-t border-border transition-colors hover:bg-muted/30"
+                            className="cursor-pointer border-t border-border align-middle transition-colors hover:bg-muted/30"
                             onClick={() =>
                               openEntry(entry.nodeId, {
                                 kind: 'inventory',
@@ -1406,66 +1386,85 @@ export function GlobalLineageListView({
                               })
                             }
                           >
-                            <td className="px-4 py-3">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={cn(
-                                      'inline-block h-2.5 w-2.5 shrink-0 rounded-full',
-                                      STATUS_META[entry.status].dotClassName
-                                    )}
-                                  />
-                                  <span className="truncate font-medium text-foreground">
-                                    {entry.qualifiedName}
+                            <td className="px-3 py-1.5 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+                              {absoluteIndex + 1}
+                            </td>
+                            <td className="px-3 py-1.5">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span
+                                  className={cn(
+                                    'inline-block h-2 w-2 shrink-0 rounded-full',
+                                    STATUS_META[entry.status].dotClassName
+                                  )}
+                                />
+                                <span className="truncate text-sm font-medium text-foreground">
+                                  {entry.qualifiedName}
+                                </span>
+                                {absoluteIndex < 3 ? (
+                                  <span className="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                                    Top {absoluteIndex + 1}
                                   </span>
-                                  {absoluteIndex < 3 ? (
-                                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-                                      Top {absoluteIndex + 1}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                {entry.comment && (
-                                  <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
-                                    {entry.comment}
-                                  </p>
-                                )}
+                                ) : null}
+                                {entry.comment ? (
+                                  <span className="truncate text-xs text-muted-foreground">
+                                    · {entry.comment}
+                                  </span>
+                                ) : null}
                               </div>
                             </td>
-                            <td className="px-4 py-3">
+                            <td className="px-3 py-1.5">
                               <span
                                 className={cn(
-                                  'inline-flex rounded-full border px-2 py-0.5 text-xs',
+                                  'inline-flex rounded border px-1.5 py-0.5 text-[11px] leading-tight',
                                   STATUS_META[entry.status].badgeClassName
                                 )}
                               >
                                 {t(STATUS_META[entry.status].labelKey)}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-right">
-                              <div className="font-mono text-base font-semibold text-foreground">
+                            <td className="px-3 py-1.5 text-right">
+                              <span className="font-mono text-sm font-semibold tabular-nums text-foreground">
                                 {entry.impactScore}
-                              </div>
-                              <div className="text-[11px] text-muted-foreground">
-                                {t('globalLineageList.totalRelations')}: {entry.relationCount}
+                              </span>
+                              <span className="ml-1 text-[11px] text-muted-foreground tabular-nums">
+                                ·{entry.relationCount}
+                              </span>
+                            </td>
+                            <td className="px-3 py-1.5">
+                              <div className="flex items-center gap-2">
+                                <div className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
+                                  <div
+                                    className="h-full bg-sky-500"
+                                    style={{
+                                      width: `${Math.max(
+                                        2,
+                                        Math.min(
+                                          100,
+                                          (entry.upstream.length /
+                                            Math.max(
+                                              1,
+                                              entry.upstream.length + entry.downstream.length
+                                            )) *
+                                            100
+                                        )
+                                      )}%`,
+                                    }}
+                                  />
+                                </div>
+                                <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                                  ↑{entry.upstream.length} · ↓{entry.downstream.length}
+                                </span>
                               </div>
                             </td>
-                            <td className="px-4 py-3">
-                              <div className="min-w-[180px] max-w-[240px]">
-                                <MiniLineageBar
-                                  upstreamCount={entry.upstream.length}
-                                  downstreamCount={entry.downstream.length}
-                                />
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
+                            <td className="px-3 py-1.5">
                               {entry.primaryFile ? (
-                                <div className="max-w-[320px]">
-                                  <div className="truncate text-sm text-foreground">{entry.primaryFile}</div>
-                                  <div className="mt-1 text-[11px] text-muted-foreground">
-                                    {t('globalLineageList.fileCountHint', {
-                                      count: entry.relatedFiles.length,
-                                    })}
-                                  </div>
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <span className="truncate text-xs text-foreground">
+                                    {entry.primaryFile}
+                                  </span>
+                                  <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                                    ·{entry.relatedFiles.length}
+                                  </span>
                                 </div>
                               ) : (
                                 <span className="text-xs text-muted-foreground">
@@ -1483,10 +1482,13 @@ export function GlobalLineageListView({
             </div>
 
             {totalFilteredEntries > 0 ? (
-              <div className="border-t border-border px-3 py-2.5">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="sticky bottom-0 z-20 shrink-0 border-t border-border bg-background/95 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span>
+                    <span aria-live="polite" className="sr-only">
+                      {pageAnnouncement}
+                    </span>
+                    <span aria-hidden="true">
                       {t('globalLineageList.paginationRange', {
                         start: (currentPage - 1) * pageSize + 1,
                         end: Math.min(currentPage * pageSize, totalFilteredEntries),
@@ -1494,10 +1496,139 @@ export function GlobalLineageListView({
                       })}
                     </span>
                     <span className="hidden h-1 w-1 rounded-full bg-muted-foreground/50 lg:inline-block" />
-                    <span>{t('globalLineageList.paginationPages', { page: currentPage, total: totalPages })}</span>
+                    <span aria-hidden="true">
+                      {t('globalLineageList.paginationPages', { page: currentPage, total: totalPages })}
+                    </span>
+                    <span className="hidden h-1 w-1 rounded-full bg-muted-foreground/50 lg:inline-block" />
+                    <span
+                      aria-hidden="true"
+                      className="hidden rounded border border-border bg-muted/30 px-2 py-0.5 font-mono text-[10px] tracking-tight text-muted-foreground md:inline-block"
+                    >
+                      {t('globalLineageList.paginationShortcutHint')}
+                    </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex items-center gap-2 rounded-full border border-border bg-background px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleFirstPage}
+                        disabled={currentPage === 1}
+                        aria-label={t('globalLineageList.firstPage')}
+                        className="h-8 min-w-8 gap-1 border-border bg-background px-2 text-foreground shadow-sm"
+                        title={t('globalLineageList.firstPage')}
+                      >
+                        <ChevronsLeft className="h-4 w-4 shrink-0" strokeWidth={2.25} />
+                        <span className="text-xs font-medium">{t('globalLineageList.firstPage')}</span>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handlePreviousPage}
+                        disabled={currentPage === 1}
+                        aria-label={t('globalLineageList.previousPage')}
+                        className="h-8 min-w-8 gap-1 border-border bg-background px-2 text-foreground shadow-sm"
+                        title={t('globalLineageList.previousPage')}
+                      >
+                        <ChevronLeft className="h-4 w-4 shrink-0" strokeWidth={2.25} />
+                        <span className="text-xs font-medium">{t('globalLineageList.previousPage')}</span>
+                      </Button>
+                      {(() => {
+                        const windowSize = 5;
+                        const half = Math.floor(windowSize / 2);
+                        let start = Math.max(1, currentPage - half);
+                        const end = Math.min(totalPages, start + windowSize - 1);
+                        start = Math.max(1, end - windowSize + 1);
+                        const pages: number[] = [];
+                        for (let p = start; p <= end; p++) pages.push(p);
+                        return (
+                          <>
+                            {start > 1 ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleJumpToPage(1)}
+                                  className="h-7 min-w-7 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                  1
+                                </button>
+                                {start > 2 ? (
+                                  <span className="px-1 text-xs text-muted-foreground">…</span>
+                                ) : null}
+                              </>
+                            ) : null}
+                            {pages.map((p) => {
+                              const isActive = p === currentPage;
+                              return (
+                                <button
+                                  key={p}
+                                  type="button"
+                                  onClick={() => handleJumpToPage(p)}
+                                  className={cn(
+                                    'h-7 min-w-7 rounded-md border px-2 text-xs tabular-nums transition-colors',
+                                    isActive
+                                      ? 'border-primary/40 bg-primary/10 font-semibold text-primary'
+                                      : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                                  )}
+                                >
+                                  {p}
+                                </button>
+                              );
+                            })}
+                            {end < totalPages ? (
+                              <>
+                                {end < totalPages - 1 ? (
+                                  <span className="px-1 text-xs text-muted-foreground">…</span>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  onClick={() => handleJumpToPage(totalPages)}
+                                  className="h-7 min-w-7 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                  {totalPages}
+                                </button>
+                              </>
+                            ) : null}
+                          </>
+                        );
+                      })()}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleNextPage}
+                        disabled={currentPage === totalPages}
+                        aria-label={t('globalLineageList.nextPage')}
+                        className="h-8 min-w-8 gap-1 border-border bg-background px-2 text-foreground shadow-sm"
+                        title={t('globalLineageList.nextPage')}
+                      >
+                        <ChevronRight className="h-4 w-4 shrink-0" strokeWidth={2.25} />
+                        <span className="text-xs font-medium">{t('globalLineageList.nextPage')}</span>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleLastPage}
+                        disabled={currentPage === totalPages}
+                        aria-label={t('globalLineageList.lastPage')}
+                        className="h-8 min-w-8 gap-1 border-border bg-background px-2 text-foreground shadow-sm"
+                        title={t('globalLineageList.lastPage')}
+                      >
+                        <ChevronsRight className="h-4 w-4 shrink-0" strokeWidth={2.25} />
+                        <span className="text-xs font-medium">{t('globalLineageList.lastPage')}</span>
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
+                      <span className="text-xs text-muted-foreground">{t('globalLineageList.jumpToPage')}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={totalPages}
+                        defaultValue={currentPage}
+                        onKeyDown={handleJumpToPageInput}
+                        className="h-6 w-12 rounded border border-border bg-background px-1.5 text-xs text-foreground outline-hidden tabular-nums"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
                       <span className="text-xs text-muted-foreground">
                         {t('globalLineageList.pageSize')}
                       </span>
@@ -1506,7 +1637,7 @@ export function GlobalLineageListView({
                         onChange={(event) =>
                           setPageSize(Number(event.target.value) as (typeof PAGE_SIZE_OPTIONS)[number])
                         }
-                        className="bg-transparent text-sm text-foreground outline-hidden"
+                        className="bg-transparent text-xs text-foreground outline-hidden"
                       >
                         {PAGE_SIZE_OPTIONS.map((size) => (
                           <option key={size} value={size}>
@@ -1515,258 +1646,11 @@ export function GlobalLineageListView({
                         ))}
                       </select>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handlePreviousPage}
-                      disabled={currentPage === 1}
-                    >
-                      {t('globalLineageList.previousPage')}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleNextPage}
-                      disabled={currentPage === totalPages}
-                    >
-                      {t('globalLineageList.nextPage')}
-                    </Button>
                   </div>
                 </div>
               </div>
             ) : null}
-          </section>
-          ) : null}
-
-          {!insightsCollapsed ? (
-          <aside className="rounded-2xl border border-border bg-background p-3 shadow-sm xl:sticky xl:top-3">
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="space-y-1">
-                  <div className="text-base font-semibold text-foreground">
-                    {t('globalLineageList.insightsTitle')}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {t('globalLineageList.insightsDescription')}
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setInsightsCollapsed(true)}
-                  className="h-7 gap-1 text-xs"
-                >
-                  <ChevronDown className="h-3.5 w-3.5" />
-                  {t('globalLineageList.collapsePanel')}
-                </Button>
-              </div>
-
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                <div className="rounded-xl border border-border bg-muted/20 px-3 py-2.5">
-                  <div className="text-[11px] uppercase tracking-[0.03em] text-muted-foreground">
-                    {t('globalLineageList.fanInLeader')}
-                  </div>
-                  <div className="mt-1 truncate text-sm font-medium text-foreground">
-                    {topUpstreamEntry?.qualifiedName ?? '-'}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {topUpstreamEntry
-                      ? t('globalLineageList.upstreamCountHint', {
-                          count: topUpstreamEntry.upstream.length,
-                        })
-                      : '-'}
-                  </div>
-                </div>
-                <div className="rounded-xl border border-border bg-muted/20 px-3 py-2.5">
-                  <div className="text-[11px] uppercase tracking-[0.03em] text-muted-foreground">
-                    {t('globalLineageList.fanOutLeader')}
-                  </div>
-                  <div className="mt-1 truncate text-sm font-medium text-foreground">
-                    {topDownstreamEntry?.qualifiedName ?? '-'}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {topDownstreamEntry
-                      ? t('globalLineageList.downstreamCountHint', {
-                          count: topDownstreamEntry.downstream.length,
-                        })
-                      : '-'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-border bg-background px-3 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <Flame className="h-4 w-4 text-amber-500" />
-                    <span>{t('globalLineageList.hotspotsTitle')}</span>
-                  </div>
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-                    Top {hotspotEntries.length}
-                  </span>
-                </div>
-
-                <div className="mt-3 space-y-2">
-                  {hotspotEntries.map((entry, index) => (
-                    <button
-                      key={`hotspot-${entry.nodeId}`}
-                      type="button"
-                      onClick={() =>
-                        openEntry(entry.nodeId, {
-                          kind: 'hotspot',
-                          label: t('globalLineageList.hotspotsTitle'),
-                          file: entry.primaryFile,
-                        })
-                      }
-                      className="flex w-full items-start gap-3 rounded-xl border border-border bg-muted/20 px-3 py-2.5 text-left transition-colors hover:border-primary/20 hover:bg-primary/5"
-                    >
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-background text-xs font-semibold text-foreground">
-                        {index + 1}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-foreground">
-                          {entry.qualifiedName}
-                        </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                          <span>{t('globalLineageList.impactScore')}: {entry.impactScore}</span>
-                          <span>{t('globalLineageList.totalRelations')}: {entry.relationCount}</span>
-                        </div>
-                        <div className="mt-2">
-                          <MiniLineageBar
-                            upstreamCount={entry.upstream.length}
-                            downstreamCount={entry.downstream.length}
-                          />
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-border bg-background px-3 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <FolderTree className="h-4 w-4 text-sky-500" />
-                    <span>{t('globalLineageList.fileGroupsTitle')}</span>
-                  </div>
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-                    Top {Math.min(fileGroups.length, 6)}
-                  </span>
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {t('globalLineageList.fileGroupsDescription')}
-                </p>
-
-                <div className="mt-3 space-y-2">
-                  {fileGroups.slice(0, 6).map((group) => (
-                    <div
-                      key={group.file}
-                      className="rounded-xl border border-border bg-muted/20 px-3 py-3"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setSelectedFileGroup((current) =>
-                              current === group.file ? null : group.file
-                            )
-                          }
-                          className="flex min-w-0 flex-1 items-start gap-2 text-left"
-                        >
-                          {selectedFileGroup === group.file ? (
-                            <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                          ) : (
-                            <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium text-foreground">
-                              {group.file}
-                            </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                              <span>
-                                {t('globalLineageList.tablesInFile', { count: group.tableCount })}
-                              </span>
-                              <span>
-                                {t('globalLineageList.impactScore')}: {group.maxImpactScore}
-                              </span>
-                            </div>
-                            <div className="mt-1 text-[11px] text-muted-foreground">
-                              {t('globalLineageList.topTableInFile', {
-                                name: group.topTableName,
-                              })}
-                            </div>
-                          </div>
-                        </button>
-                        <div className="flex shrink-0 items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setSearchTerm(group.file)}
-                          >
-                            {t('globalLineageList.filterTables')}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleOpenFile(group.file)}
-                          >
-                            {t('globalLineageList.openFile')}
-                          </Button>
-                        </div>
-                      </div>
-                      {selectedFileGroup === group.file ? (
-                        <div className="mt-3 space-y-2 border-t border-border pt-3">
-                          {selectedFileEntries.slice(0, 8).map((entry) => (
-                            <button
-                              key={`${group.file}-${entry.nodeId}`}
-                              type="button"
-                              onClick={() =>
-                                openEntry(entry.nodeId, {
-                                  kind: 'file-lens',
-                                  label: group.file,
-                                  file: group.file,
-                                })
-                              }
-                              className="flex w-full items-start gap-2 rounded-lg border border-border bg-background px-3 py-2 text-left transition-colors hover:border-primary/20 hover:bg-primary/5"
-                            >
-                              <span
-                                className={cn(
-                                  'mt-1 inline-block h-2.5 w-2.5 shrink-0 rounded-full',
-                                  STATUS_META[entry.status].dotClassName
-                                )}
-                              />
-                              <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm font-medium text-foreground">
-                                  {entry.qualifiedName}
-                                </div>
-                                <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                                  <span>
-                                    {t('globalLineageList.impactScore')}: {entry.impactScore}
-                                  </span>
-                                  <span>
-                                    {t('globalLineageList.totalRelations')}: {entry.relationCount}
-                                  </span>
-                                </div>
-                              </div>
-                            </button>
-                          ))}
-                          {selectedFileEntries.length > 8 ? (
-                            <div className="text-xs text-muted-foreground">
-                              {t('globalLineageList.moreTablesInFile', {
-                                count: selectedFileEntries.length - 8,
-                              })}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </aside>
-          ) : null}
-        </div>
-      </div>
+      </section>
 
       <Sheet open={selectedEntry !== null} onOpenChange={(open) => !open && setSelectedNodeId(null)}>
         <SheetContent

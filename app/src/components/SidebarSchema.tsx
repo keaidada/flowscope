@@ -14,7 +14,7 @@ import {
   FileCode,
   X,
   WrapText,
-  GripHorizontal,
+  GripVertical,
   Plus,
   Pencil,
   Loader2,
@@ -703,7 +703,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
     done: boolean;
   } | null>(null);
   const [lineWrapping, setLineWrapping] = useState(true);
-  const [treePanelHeight, setTreePanelHeight] = useState(200);
+  const [treePanelWidth, setTreePanelWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
   const [isCreatingFile, setIsCreatingFile] = useState(false);
   const [newFileName, setNewFileName] = useState('');
@@ -782,17 +782,17 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
     return () => cancelAnimationFrame(raf);
   }, [expandedFolders, filteredFiles, onContentWidthChange, search]);
 
-  // Resize handler for tree/editor split
+  // Resize handler for tree/detail split
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       setIsResizing(true);
-      const startY = e.clientY;
-      const startHeight = treePanelHeight;
+      const startX = e.clientX;
+      const startWidth = treePanelWidth;
 
       const handleMouseMove = (e: MouseEvent) => {
-        const deltaY = e.clientY - startY;
-        setTreePanelHeight(Math.max(60, Math.min(600, startHeight + deltaY)));
+        const deltaX = e.clientX - startX;
+        setTreePanelWidth(Math.max(220, Math.min(520, startWidth + deltaX)));
       };
 
       const handleMouseUp = () => {
@@ -804,7 +804,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
     },
-    [treePanelHeight]
+    [treePanelWidth]
   );
 
   // Select all / deselect all
@@ -1507,120 +1507,125 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
         </div>
       )}
 
-      {/* File tree - fills all space when no file selected, resizable when editor shown */}
-      <div
-        className={cn('overflow-auto shrink-0', !activeFile && 'flex-1')}
-        style={activeFile ? { height: treePanelHeight } : undefined}
-      >
-        {schemaFiles.length === 0 ? (
-          <div className="px-3 py-4 text-xs text-muted-foreground text-center">
-            {isBackendMode ? t('schemaEditor.viewDesc') : t('schemaEditor.emptyHint')}
-          </div>
-        ) : (
-          <div ref={treeContentRef} className="py-1 min-w-max">
-            {sortedRootChildren.map((child) =>
-              child.file ? (
-                <SchemaFileNode
-                  key={child.file.id}
-                  node={child}
-                  depth={0}
-                  activeFileId={activeFileId}
-                  onSelect={handleSelectFile}
-                  onDelete={handleDeleteFile}
-                  onRenameFile={handleRenameFile}
-                  onSelectFolder={setActiveFolderPath}
-                  selectedFileIds={selectedFileIds}
-                  onToggleSelection={handleToggleSelection}
-                />
-              ) : (
-                <SchemaFolderNode
-                  key={child.path}
-                  node={child}
-                  depth={0}
-                  activeFileId={activeFileId}
-                  activeFolderPath={activeFolderPath}
-                  onSelect={handleSelectFile}
-                  onDelete={handleDeleteFile}
-                  expandedFolders={expandedFolders}
-                  onToggleFolder={handleToggleFolder}
-                  onSelectFolder={setActiveFolderPath}
-                  onDoubleClickFolder={handleDoubleClickCreateFile}
-                  onCreateFolderInFolder={handleCreateFolderInFolder}
-                  onRenameFolder={handleRenameFolder}
-                  onRenameFile={handleRenameFile}
-                  selectedFileIds={selectedFileIds}
-                  onToggleSelection={handleToggleSelection}
-                />
-              )
-            )}
-          </div>
-        )}
-      </div>
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        {/* File tree - fills all space when no file selected, fixed left pane when preview shown */}
+        <div
+          className={cn(
+            'overflow-auto shrink-0 min-h-0 border-r bg-background',
+            !activeFile && 'flex-1 border-r-0'
+          )}
+          style={activeFile ? { width: treePanelWidth } : undefined}
+        >
+          {schemaFiles.length === 0 ? (
+            <div className="px-3 py-4 text-xs text-muted-foreground text-center">
+              {isBackendMode ? t('schemaEditor.viewDesc') : t('schemaEditor.emptyHint')}
+            </div>
+          ) : (
+            <div ref={treeContentRef} className="py-1 min-w-max">
+              {sortedRootChildren.map((child) =>
+                child.file ? (
+                  <SchemaFileNode
+                    key={child.file.id}
+                    node={child}
+                    depth={0}
+                    activeFileId={activeFileId}
+                    onSelect={handleSelectFile}
+                    onDelete={handleDeleteFile}
+                    onRenameFile={handleRenameFile}
+                    onSelectFolder={setActiveFolderPath}
+                    selectedFileIds={selectedFileIds}
+                    onToggleSelection={handleToggleSelection}
+                  />
+                ) : (
+                  <SchemaFolderNode
+                    key={child.path}
+                    node={child}
+                    depth={0}
+                    activeFileId={activeFileId}
+                    activeFolderPath={activeFolderPath}
+                    onSelect={handleSelectFile}
+                    onDelete={handleDeleteFile}
+                    expandedFolders={expandedFolders}
+                    onToggleFolder={handleToggleFolder}
+                    onSelectFolder={setActiveFolderPath}
+                    onDoubleClickFolder={handleDoubleClickCreateFile}
+                    onCreateFolderInFolder={handleCreateFolderInFolder}
+                    onRenameFolder={handleRenameFolder}
+                    onRenameFile={handleRenameFile}
+                    selectedFileIds={selectedFileIds}
+                    onToggleSelection={handleToggleSelection}
+                  />
+                )
+              )}
+            </div>
+          )}
+        </div>
 
-      {/* Resize handle + SQL Editor — only shown when a file is selected */}
-      {activeFile && (
-        <>
-          <div
-            className={cn(
-              'h-2 border-y bg-muted/30 cursor-ns-resize flex items-center justify-center shrink-0',
-              'hover:bg-muted/50 transition-colors',
-              isResizing && 'bg-muted/50'
-            )}
-            onMouseDown={handleResizeStart}
-          >
-            <GripHorizontal className="w-4 h-4 text-muted-foreground/50" />
-          </div>
+        {/* Resize handle + SQL preview — only shown when a file is selected */}
+        {activeFile && (
+          <>
+            <div
+              className={cn(
+                'w-2 border-x bg-muted/30 cursor-ew-resize flex items-center justify-center shrink-0',
+                'hover:bg-muted/50 transition-colors',
+                isResizing && 'bg-muted/50'
+              )}
+              onMouseDown={handleResizeStart}
+            >
+              <GripVertical className="w-4 h-4 text-muted-foreground/50" />
+            </div>
 
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <div className="flex flex-col h-full">
-              <div className="flex items-center justify-between px-3 py-1 border-b shrink-0 bg-muted/10">
-                <span className="text-[11px] text-muted-foreground truncate flex-1">
-                  {activeFile.path}
-                </span>
-                <TooltipProvider delayDuration={300}>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          className={cn(
-                            'p-0.5 rounded transition-colors',
-                            lineWrapping
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground'
-                          )}
-                          onClick={() => setLineWrapping((prev) => !prev)}
-                        >
-                          <WrapText className="size-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        <p>{lineWrapping ? t('schemaEditor.nowrap') : t('schemaEditor.wrap')}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                    <button
-                      className="p-0.5 rounded hover:bg-muted text-muted-foreground"
-                      onClick={() => setActiveFileId(null)}
-                    >
-                      <X className="size-3" />
-                    </button>
+            <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
+              <div className="flex flex-col h-full">
+                <div className="flex items-center justify-between px-3 py-2 border-b h-[44px] shrink-0 bg-muted/30 overflow-hidden gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1 text-sm text-muted-foreground">
+                    <FileCode className="h-4 w-4 shrink-0" />
+                    <span className="truncate font-medium text-foreground">{activeFile.path}</span>
                   </div>
-                </TooltipProvider>
-              </div>
-              <div className="flex-1 min-h-0">
-                <SqlView
-                  value={activeFile.content}
-                  onChange={isBackendMode ? undefined : handleEditorChange}
-                  className="h-full [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto"
-                  editable={!isBackendMode}
-                  isDark={isDark}
-                  lineWrapping={lineWrapping}
-                  highlightedSpan={schemaHighlightSpan}
-                />
+                  <TooltipProvider delayDuration={300}>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-7 w-7 ${lineWrapping ? 'bg-muted' : ''}`}
+                            onClick={() => setLineWrapping((prev) => !prev)}
+                          >
+                            <WrapText className="h-3.5 w-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">
+                          <p>{lineWrapping ? t('schemaEditor.nowrap') : t('schemaEditor.wrap')}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => setActiveFileId(null)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </TooltipProvider>
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <SqlView
+                    value={activeFile.content}
+                    onChange={isBackendMode ? undefined : handleEditorChange}
+                    className="h-full text-sm"
+                    editable={!isBackendMode}
+                    isDark={isDark}
+                    lineWrapping={lineWrapping}
+                    highlightedSpan={schemaHighlightSpan}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        </>
-      )}
+          </>
+        )}
+      </div>
 
       {/* Upload progress overlay */}
       {uploadProgress && (

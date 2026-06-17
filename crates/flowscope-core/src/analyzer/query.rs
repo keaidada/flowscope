@@ -15,7 +15,7 @@ use crate::types::{
     ResolutionSource, SchemaOrigin,
 };
 use serde_json::json;
-use sqlparser::ast::{self, Query, SetExpr};
+use sqlparser::ast::{self, Query};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -57,16 +57,6 @@ impl<'a> Analyzer<'a> {
     ) {
         let mut visitor = LineageVisitor::new(self, ctx, target_node.map(|s| s.to_string()));
         visitor.visit_query(query);
-    }
-
-    pub(super) fn analyze_query_body(
-        &mut self,
-        ctx: &mut StatementContext,
-        body: &SetExpr,
-        target_node: Option<&str>,
-    ) {
-        let mut visitor = LineageVisitor::new(self, ctx, target_node.map(|s| s.to_string()));
-        visitor.visit_set_expr(body);
     }
 
     // --- Shared Methods used by SelectAnalyzer, ExpressionAnalyzer, and Statements ---

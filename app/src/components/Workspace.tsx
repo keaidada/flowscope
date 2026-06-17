@@ -33,6 +33,7 @@ import { LanguageToggle } from './LanguageToggle';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { CommandPalette } from './CommandPalette';
 import { GlobalLineageListView } from './GlobalLineageListView';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './ui/sheet';
 import { useProject } from '@/lib/project-store';
 import { NavigationProvider } from '@/lib/navigation-context';
 import { FocusRegistryProvider } from '@/lib/focus-registry';
@@ -80,6 +81,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [sidebarView, setSidebarView] = useState<SidebarView>('files');
   const [editorOpen, setEditorOpen] = useState(true);
+  const [lineageWorkspaceOpen, setLineageWorkspaceOpen] = useState(false);
   const [globalLineageOpen, setGlobalLineageOpen] = useState(false);
   const [globalLineageView, setGlobalLineageView] = useState<'graph' | 'list'>('graph');
   const [globalFocusNodeId, setGlobalFocusNodeId] = useState<string | undefined>(undefined);
@@ -784,7 +786,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                 )}
               </div>
             ) : (
-              /* Normal layout — sidebar + analysis + editor */
+             /* Normal layout — sidebar + editor, lineage opens in a sheet */
               <>
                 {/* Activity Bar (narrow icon strip) */}
                 <ActivityBar
@@ -797,7 +799,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                 <div ref={sidebarLayoutRef} className="flex-1 min-w-0">
                   <ResizablePanelGroup direction="horizontal" className="h-full">
                     {/* Sidebar (collapsible & resizable) */}
-                    {sidebarView && (
+                    {sidebarView && sidebarView !== 'schema' && (
                       <>
                         <ResizablePanel
                           ref={sidebarPanelRef}
@@ -819,11 +821,6 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                               onHighlightSpan={highlightSpan}
                             />
                           )}
-                          {sidebarView === 'schema' && (
-                            <SidebarSchema
-                              onContentWidthChange={handleSidebarContentWidthChange}
-                            />
-                          )}
                         </ResizablePanel>
                         <ResizableHandle />
                       </>
@@ -831,40 +828,46 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
                     {/* Main panels area */}
                     <ResizablePanel
-                      defaultSize={sidebarView ? 100 - sidebarDefaultSize : 100}
+                      defaultSize={sidebarView && sidebarView !== 'schema' ? 100 - sidebarDefaultSize : 100}
                       minSize={40}
                     >
-                      <ResizablePanelGroup direction="horizontal">
-                        {/* Analysis Panel (Lineage) - always visible */}
-                        <ResizablePanel
-                          defaultSize={editorOpen ? 55 : 100}
-                          minSize={30}
-                          data-testid="analysis-panel"
-                        >
-                          <AnalysisView
-                            graphContainerRef={graphContainerRef}
-                            isAnalyzing={analysis.isAnalyzing}
-                          />
-                        </ResizablePanel>
-
-                        {/* Editor Panel - toggleable */}
-                        {editorOpen && (
-                          <>
-                            <ResizableHandle withHandle />
-                            <ResizablePanel
-                              ref={editorPanelRef}
-                              defaultSize={45}
-                              minSize={25}
-                              data-testid="editor-panel"
-                            >
-                              <EditorArea backendReady={backendReady} analysis={analysis} />
-                            </ResizablePanel>
-                          </>
-                        )}
-                      </ResizablePanelGroup>
+                      {sidebarView === 'schema' ? (
+                        <SidebarSchema />
+                      ) : (
+                        editorOpen && (
+                        <EditorArea
+                          backendReady={backendReady}
+                          analysis={analysis}
+                          onRequestOpenLineage={() => setLineageWorkspaceOpen(true)}
+                        />
+                        )
+                      )}
                     </ResizablePanel>
                   </ResizablePanelGroup>
                 </div>
+
+                <Sheet open={lineageWorkspaceOpen} onOpenChange={setLineageWorkspaceOpen}>
+                  <SheetContent
+                    side="right"
+                    className="w-[78vw] min-w-[960px] max-w-none p-0 sm:max-w-none"
+                  >
+                    <div className="flex h-full min-h-0 flex-col">
+                      <SheetHeader className="border-b px-5 py-4">
+                        <SheetTitle>{t('app.globalLineage')}</SheetTitle>
+                        <SheetDescription>{t('analysis.emptyState.runAnalysis')}</SheetDescription>
+                      </SheetHeader>
+                      <div className="min-h-0 flex-1">
+                        <AnalysisView
+                          graphContainerRef={graphContainerRef}
+                          isAnalyzing={analysis.isAnalyzing}
+                          lastAnalyzedAt={analysis.lastAnalyzedAt}
+                          resultStatus={analysis.resultStatus}
+                          loadingContext={analysis.loadingContext}
+                        />
+                      </div>
+                    </div>
+                  </SheetContent>
+                </Sheet>
               </>
             )}
           </div>

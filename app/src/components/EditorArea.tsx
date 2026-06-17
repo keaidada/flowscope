@@ -10,9 +10,11 @@ import { useDebounce, useFileNavigation, useGlobalShortcuts } from '@/hooks';
 import type { GlobalShortcut } from '@/hooks';
 import { EditorToolbar } from './EditorToolbar';
 import type { SqlViewMode } from './EditorToolbar';
+import { EtlDialog } from './EtlDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_FILE_NAMES } from '@/lib/constants';
 import type { RunMode } from '@/lib/project-store';
+import { useNavigation } from '@/lib/navigation-context';
 
 interface EditorAnalysisState {
   isAnalyzing: boolean;
@@ -41,9 +43,15 @@ interface EditorAreaProps {
   backendReady: boolean;
   className?: string;
   analysis: EditorAnalysisState;
+  onRequestOpenLineage?: () => void;
 }
 
-export function EditorArea({ backendReady, className, analysis }: EditorAreaProps) {
+export function EditorArea({
+  backendReady,
+  className,
+  analysis,
+  onRequestOpenLineage,
+}: EditorAreaProps) {
   const { t } = useTranslation();
   const {
     currentProject,
@@ -57,6 +65,7 @@ export function EditorArea({ backendReady, className, analysis }: EditorAreaProp
 
   const theme = useThemeStore((state) => state.theme);
   const isDark = resolveTheme(theme) === 'dark';
+  const { setActiveTab } = useNavigation();
 
   const activeFile = currentProject?.files.find((f) => f.id === currentProject.activeFileId);
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -71,6 +80,10 @@ export function EditorArea({ backendReady, className, analysis }: EditorAreaProp
   const [sqlViewMode, setSqlViewMode] = useState<SqlViewMode>('template');
   // Line wrapping toggle
   const [lineWrapping, setLineWrapping] = useState(true);
+
+  // ETL dialog state
+  const [etlOpen, setEtlOpen] = useState(false);
+  const [initialEtlContent, setInitialEtlContent] = useState('');
 
   // Reset view mode to 'template' when active file changes
   useEffect(() => {
@@ -189,15 +202,50 @@ export function EditorArea({ backendReady, className, analysis }: EditorAreaProp
 
   const handleAnalyze = useCallback(() => {
     if (activeFile) {
-      runAnalysis(activeFile.content, activeFile.path);
+      onRequestOpenLineage?.();
+      setActiveTab('lineage');
+      void runAnalysis(activeFile.content, activeFile.path)
+        .catch((err) => {
+          console.error('Manual analysis failed:', err);
+          setError(err instanceof Error ? err.message : 'Failed to run analysis');
+        });
     }
-  }, [activeFile, runAnalysis]);
+  }, [activeFile, onRequestOpenLineage, runAnalysis, setActiveTab, setError]);
 
   const handleAnalyzeActiveOnly = useCallback(() => {
     if (activeFile) {
-      runAnalysis(activeFile.content, activeFile.path, { runModeOverride: 'current' });
+      onRequestOpenLineage?.();
+      setActiveTab('lineage');
+      void runAnalysis(activeFile.content, activeFile.path, { runModeOverride: 'current' })
+        .catch((err) => {
+          console.error('Active-file analysis failed:', err);
+          setError(err instanceof Error ? err.message : 'Failed to run analysis');
+        });
     }
-  }, [activeFile, runAnalysis]);
+  }, [activeFile, onRequestOpenLineage, runAnalysis, setActiveTab, setError]);
+
+  const handleOpenLineage = useCallback(() => {
+    onRequestOpenLineage?.();
+    if (result) {
+      setActiveTab('lineage');
+      return;
+    }
+    handleAnalyze();
+  }, [onRequestOpenLineage, result, setActiveTab, handleAnalyze]);
+
+  const handleOpenEtl = useCallback(() => {
+    setInitialEtlContent(activeFile?.content || '');
+    setEtlOpen(true);
+  }, [activeFile?.content]);
+
+  const handleApplyEtlResult = useCallback(
+    (content: string) => {
+      if (!activeFile) return;
+      updateFile(activeFile.id, content);
+      setEtlOpen(false);
+    },
+    [activeFile, updateFile]
+  );
 
   // Keyboard shortcuts for running analysis
   const analysisShortcuts = useMemo<GlobalShortcut[]>(
@@ -257,6 +305,9 @@ export function EditorArea({ backendReady, className, analysis }: EditorAreaProp
         onTemplateModeChange={(m) => setTemplateMode(currentProject.id, m)}
         lineWrapping={lineWrapping}
         onLineWrappingChange={setLineWrapping}
+        onOpenLineage={handleOpenLineage}
+        hasLineageResult={!!result}
+        onOpenEtl={handleOpenEtl}
       />
 
       <div
@@ -281,6 +332,13 @@ export function EditorArea({ backendReady, className, analysis }: EditorAreaProp
           </div>
         )}
       </div>
+
+      <EtlDialog
+        open={etlOpen}
+        onOpenChange={setEtlOpen}
+        initialContent={initialEtlContent}
+        onApplyResult={handleApplyEtlResult}
+      />
     </div>
   );
 }

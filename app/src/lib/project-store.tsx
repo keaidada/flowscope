@@ -27,6 +27,7 @@ import { saveProjectFiles, loadProjectFiles, deleteProjectFiles } from './file-s
 const uuidv4 = () => crypto.randomUUID();
 
 const MAX_PROJECT_NAME_LENGTH = 50;
+const VALID_RUN_MODES: readonly RunMode[] = ['current', 'all', 'custom'];
 
 /**
  * Validates and sanitizes a project name.
@@ -207,12 +208,17 @@ const loadProjectsFromStorage = (): Project[] => {
         id: p.id || crypto.randomUUID(),
         name: p.name || 'Untitled',
         dialect: p.dialect || 'generic',
-        runMode: 'current' as RunMode,
-        selectedFileIds: [],
+        runMode:
+          typeof p.runMode === 'string' && VALID_RUN_MODES.includes(p.runMode as RunMode)
+            ? (p.runMode as RunMode)
+            : ('current' as RunMode),
+        selectedFileIds: Array.isArray(p.selectedFileIds)
+          ? p.selectedFileIds.filter((id): id is string => typeof id === 'string')
+          : [],
         schemaSQL: p.schemaSQL || '',
         templateMode: parseTemplateMode(p.templateMode),
         files: [], // Files are loaded from DuckDB asynchronously
-        activeFileId: null,
+        activeFileId: typeof p.activeFileId === 'string' ? p.activeFileId : null,
       }));
     }
   } catch (error) {
@@ -234,6 +240,8 @@ const saveProjectSettingsToStorage = (projects: Project[]) => {
       templateMode: p.templateMode,
       schemaSQL: p.schemaSQL,
       runMode: p.runMode,
+      selectedFileIds: p.selectedFileIds,
+      activeFileId: p.activeFileId,
     }));
     localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(settings));
   } catch (error) {
@@ -475,10 +483,20 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             prev.map((p) => {
               const loaded = projectsWithFiles.find((u) => u.id === p.id);
               if (!loaded) return p;
+              const validActiveFileId =
+                p.activeFileId && loaded.files.some((file) => file.id === p.activeFileId)
+                  ? p.activeFileId
+                  : loaded.files[0]?.id || null;
+              const validSelectedFileIds = (p.selectedFileIds || []).filter((fileId) =>
+                loaded.files.some((file) => file.id === fileId)
+              );
               return {
                 ...p,
                 files: loaded.files,
-                activeFileId: loaded.files[0]?.id || null,
+                activeFileId: validActiveFileId,
+                selectedFileIds: validSelectedFileIds,
+                runMode:
+                  p.runMode === 'custom' && validSelectedFileIds.length === 0 ? 'current' : p.runMode,
               };
             })
           );
@@ -937,8 +955,15 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setActiveFileIdOverride(fileId);
+      if (!activeProjectId) return;
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId || p.activeFileId === fileId) return p;
+          return { ...p, activeFileId: fileId };
+        })
+      );
     },
-    [isBackendMode]
+    [activeProjectId, isBackendMode]
   );
 
   const updateSchemaSQL = useCallback((projectId: string, schemaSQL: string) => {

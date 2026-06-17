@@ -1106,3 +1106,45 @@ ON t2.channel_id = t3.id
         );
     }
 }
+
+#[test]
+fn test_insert_overwrite_with_cte_both_orders_produce_same_lineage() {
+    // Variant 1: WITH ... INSERT OVERWRITE TABLE
+    let sql_a = "WITH cgi_data AS (SELECT cgi, tower_id FROM ods_cc.prd_xldim_acl_tb_f_d_bts_ref_hist WHERE date_id = 1)\nINSERT OVERWRITE TABLE rinjani.dim_btsweb_mapping\nSELECT cgi, tower_id FROM cgi_data;";
+
+    // Variant 2: INSERT OVERWRITE TABLE ... WITH
+    let sql_b = "INSERT OVERWRITE TABLE rinjani.dim_btsweb_mapping\nWITH cgi_data AS (SELECT cgi, tower_id FROM ods_cc.prd_xldim_acl_tb_f_d_bts_ref_hist WHERE date_id = 1)\nSELECT cgi, tower_id FROM cgi_data;";
+
+    let mut req_a = make_request(sql_a);
+    req_a.dialect = Dialect::Hive;
+    let result_a = analyze(&req_a);
+
+    let mut req_b = make_request(sql_b);
+    req_b.dialect = Dialect::Hive;
+    let result_b = analyze(&req_b);
+
+    let nodes_a: Vec<String> = result_a.statements[0]
+        .nodes
+        .iter()
+        .map(|n| format!("{} ({:?})", n.label, n.node_type))
+        .collect();
+    let nodes_b: Vec<String> = result_b.statements[0]
+        .nodes
+        .iter()
+        .map(|n| format!("{} ({:?})", n.label, n.node_type))
+        .collect();
+
+    eprintln!("WITH-first:  {:?}", nodes_a);
+    eprintln!("INSERT-first: {:?}", nodes_b);
+
+    // Both should have the same set of node labels (order-independent)
+    let mut labels_a: Vec<&str> = nodes_a.iter().map(|s| s.as_str()).collect();
+    let mut labels_b: Vec<&str> = nodes_b.iter().map(|s| s.as_str()).collect();
+    labels_a.sort();
+    labels_b.sort();
+
+    assert_eq!(
+        labels_a, labels_b,
+        "Both syntax orders should produce the same lineage nodes"
+    );
+}

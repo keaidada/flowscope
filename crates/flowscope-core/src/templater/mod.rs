@@ -116,6 +116,91 @@ pub fn template_sql(sql: &str, config: &TemplateConfig) -> Result<String, Templa
     }
 }
 
+/// Wraps template variables (`${var}` or `{var}`) in single quotes when they
+/// appear as bare tokens (not already inside quotes), so the SQL parser treats
+/// them as string literals.
+///
+/// # Examples
+///
+/// - `WHERE dt = ${DATA_DT}` → `WHERE dt = '${DATA_DT}'`
+/// - `WHERE dt = {date_id}` → `WHERE dt = '{date_id}'`
+/// - `WHERE dt = '${DATA_DT}'` → unchanged
+/// - `PARTITION(dt='${DT}')` → unchanged
+pub fn quote_shell_template_vars(sql: &str) -> String {
+    let mut result = String::with_capacity(sql.len() + 32);
+    let mut remaining = sql;
+
+    while let Some(special_pos) = remaining.find(['{', '$']) {
+        result.push_str(&remaining[..special_pos]);
+
+        let rest = &remaining[special_pos..];
+
+        if let Some(after_open) = rest.strip_prefix("${") {
+            if let Some(close_pos) = after_open.find('}') {
+                let var_end = 2 + close_pos + 1;
+
+                let already_quoted = special_pos > 0
+                    && remaining.as_bytes().get(special_pos.wrapping_sub(1)) == Some(&b'\'')
+                    && rest.as_bytes().get(var_end) == Some(&b'\'');
+
+                let var_text = &rest[..var_end];
+                if already_quoted {
+                    result.push_str(var_text);
+                } else {
+                    result.push('\'');
+                    result.push_str(var_text);
+                    result.push('\'');
+                }
+                remaining = &rest[var_end..];
+            } else {
+                result.push_str(rest);
+                return result;
+            }
+        } else if let Some(after_open) = rest.strip_prefix('{') {
+            if let Some(close_pos) = after_open.find('}') {
+                let content = &after_open[..close_pos];
+                let is_template_var = content
+                    .starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                    && content
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_');
+
+                let var_end = 1 + close_pos + 1;
+
+                if !is_template_var {
+                    result.push_str(&rest[..var_end]);
+                    remaining = &rest[var_end..];
+                    continue;
+                }
+
+                let already_quoted = special_pos > 0
+                    && remaining.as_bytes().get(special_pos.wrapping_sub(1)) == Some(&b'\'')
+                    && rest.as_bytes().get(var_end) == Some(&b'\'');
+
+                let var_text = &rest[..var_end];
+                if already_quoted {
+                    result.push_str(var_text);
+                } else {
+                    result.push('\'');
+                    result.push_str(var_text);
+                    result.push('\'');
+                }
+                remaining = &rest[var_end..];
+            } else {
+                result.push_str(rest);
+                return result;
+            }
+        } else {
+            // Lone '$' not followed by '{' — copy as-is
+            result.push('$');
+            remaining = &rest[1..];
+        }
+    }
+
+    result.push_str(remaining);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +208,118 @@ mod tests {
     #[test]
     fn raw_mode_passes_through() {
         let sql = "SELECT * FROM {{ not_a_template }}";
+        let config = TemplateConfig::default();
+
+        let result = template_sql(sql, &config).unwrap();
+        // `{{ }}` is not `${ }`, so pass-through unchanged
+        assert_eq!(result, sql);
+    }
+
+    #[test]
+    fn quote_shell_var_wraps_bare_variable() {
+        assert_eq!(
+            quote_shell_template_vars("WHERE dt = ${DATA_DT}"),
+            "WHERE dt = '${DATA_DT}'"
+        );
+    }
+
+    #[test]
+    fn quote_bare_curly_var_wraps() {
+        assert_eq!(
+            quote_shell_template_vars("WHERE dt = {date_id}"),
+            "WHERE dt = '{date_id}'"
+        );
+    }
+
+    #[test]
+    fn quote_bare_curly_var_already_quoted_preserved() {
+        assert_eq!(
+            quote_shell_template_vars("WHERE dt = '{date_id}'"),
+            "WHERE dt = '{date_id}'"
+        );
+    }
+
+    #[test]
+    fn quote_bare_curly_mixed_with_dollar() {
+        assert_eq!(
+            quote_shell_template_vars("WHERE dt = ${DATA_DT} AND id = {user_id}"),
+            "WHERE dt = '${DATA_DT}' AND id = '{user_id}'"
+        );
+    }
+
+    #[test]
+    fn bare_curly_skips_non_identifier_content() {
+        // JSON-like `{"key": 1}` should NOT be wrapped
+        assert_eq!(
+            quote_shell_template_vars("SELECT * FROM t WHERE col = {1, 2, 3}"),
+            "SELECT * FROM t WHERE col = {1, 2, 3}"
+        );
+        // struct literal should NOT be wrapped
+        assert_eq!(
+            quote_shell_template_vars("SELECT ROW(1, 'a') AS {\"id\", \"name\"}"),
+            "SELECT ROW(1, 'a') AS {\"id\", \"name\"}"
+        );
+    }
+
+    #[test]
+    fn quote_shell_var_preserves_already_quoted() {
+        assert_eq!(
+            quote_shell_template_vars("WHERE dt = '${DATA_DT}'"),
+            "WHERE dt = '${DATA_DT}'"
+        );
+    }
+
+    #[test]
+    fn quote_shell_var_multiple_variables() {
+        assert_eq!(
+            quote_shell_template_vars("BETWEEN ${start} AND ${end}"),
+            "BETWEEN '${start}' AND '${end}'"
+        );
+    }
+
+    #[test]
+    fn quote_shell_var_mixed_quoted_and_bare() {
+        assert_eq!(
+            quote_shell_template_vars("WHERE dt = '${DATA_DT}' AND id = ${ID}"),
+            "WHERE dt = '${DATA_DT}' AND id = '${ID}'"
+        );
+    }
+
+    #[test]
+    fn quote_shell_var_in_partition_clause() {
+        assert_eq!(
+            quote_shell_template_vars("PARTITION(data_dt='${DATA_DT}')"),
+            "PARTITION(data_dt='${DATA_DT}')"
+        );
+    }
+
+    #[test]
+    fn quote_shell_var_in_insert_target() {
+        assert_eq!(
+            quote_shell_template_vars("INSERT OVERWRITE TABLE ${target_db}.dim_table"),
+            "INSERT OVERWRITE TABLE '${target_db}'.dim_table"
+        );
+    }
+
+    #[test]
+    fn quote_shell_var_no_variables() {
+        assert_eq!(
+            quote_shell_template_vars("SELECT * FROM users WHERE id = 1"),
+            "SELECT * FROM users WHERE id = 1"
+        );
+    }
+
+    #[test]
+    fn quote_shell_var_real_world_spark_sql() {
+        let input = "INSERT OVERWRITE TABLE rinjani.dim_btsweb_mapping\nWITH cgi AS (\n  SELECT * FROM ods_cc.src_table\n  WHERE date_id BETWEEN ${date_id}\n        AND (SELECT max(date_id) FROM ods_cc.src_table)\n)\nSELECT * FROM cgi;";
+        let expected = "INSERT OVERWRITE TABLE rinjani.dim_btsweb_mapping\nWITH cgi AS (\n  SELECT * FROM ods_cc.src_table\n  WHERE date_id BETWEEN '${date_id}'\n        AND (SELECT max(date_id) FROM ods_cc.src_table)\n)\nSELECT * FROM cgi;";
+        assert_eq!(quote_shell_template_vars(input), expected);
+    }
+
+    #[test]
+    fn raw_mode_does_not_wrap_shell_vars() {
+        // quote_shell_template_vars is called by apply_template in input.rs, not template_sql
+        let sql = "WHERE dt = ${DATA_DT}";
         let config = TemplateConfig::default();
 
         let result = template_sql(sql, &config).unwrap();

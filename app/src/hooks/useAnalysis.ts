@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, startTransition } from 'react';
 import { useLineageStore } from '@pondpilot/flowscope-react';
+import { toast } from 'sonner';
 import { analyzeWithWorker, getCachedAnalysis, syncAnalysisFiles } from '@/lib/analysis-worker';
 import type { BackendAdapter, AnalysisPayload } from '@/lib/backend-adapter';
 import { useProject } from '@/lib/project-store';
@@ -7,10 +8,12 @@ import type { Project } from '@/lib/project-store';
 import { useAnalysisStore } from '@/lib/analysis-store';
 import { useViewStateStore, getIssuesStateWithDefaults } from '@/lib/view-state-store';
 import { FILE_LIMITS, ANALYSIS_SQL_PREVIEW_LIMITS } from '@/lib/constants';
+import { buildScopedSchemaSQL } from '@/lib/scoped-schema';
 import { AnalysisErrorCode, isAnalysisError } from '@/types';
 import type { AnalysisState, AnalysisContext, FileValidationResult } from '@/types';
 import { loadSchemaFiles } from '@/lib/schema-storage';
 import { writeFileResult, writeLineageData, readFileResult, writeTableFlows, writeSchemaData, writeHierarchyData } from '@/lib/analysis-cache';
+import i18n from '@/i18n';
 
 // Maximum retry attempts for file sync errors to prevent infinite loops
 const MAX_FILE_SYNC_RETRIES = 1;
@@ -48,7 +51,7 @@ interface PreparedAnalysisFile {
  */
 export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions) {
   const adapter = options?.adapter;
-  const { currentProject, activeProjectId, updateSchemaSQL, updateFiles } = useProject();
+  const { currentProject, activeProjectId, updateFiles } = useProject();
   const hideCTEs = useLineageStore((state) => state.hideCTEs);
   const setLineageResult = useLineageStore((state) => state.setResult);
   const setLineageSql = useLineageStore((state) => state.setSql);
@@ -61,9 +64,12 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     isAnalyzing: false,
     error: null,
     lastAnalyzedAt: null,
+    resultStatus: null,
+    loadingContext: null,
   });
   const analysisRequestRef = useRef(0);
   const currentProjectRef = useRef<Project | null>(currentProject);
+  const lastRestoreToastKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     currentProjectRef.current = currentProject;
@@ -76,6 +82,27 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
   const setError = useCallback((error: string | null) => {
     setState((prev) => ({ ...prev, error }));
   }, []);
+
+  const setLoadingContext = useCallback((loadingContext: AnalysisState['loadingContext']) => {
+    setState((prev) => ({ ...prev, loadingContext }));
+  }, []);
+
+  const mergeResultStatus = useCallback(
+    (partial: NonNullable<AnalysisState['resultStatus']> | null) => {
+      setState((prev) => ({
+        ...prev,
+        resultStatus: partial
+          ? {
+              origin: partial.origin,
+              source: partial.source,
+              restoredAt: partial.restoredAt,
+              persistedAt: partial.persistedAt ?? prev.resultStatus?.persistedAt ?? null,
+            }
+          : null,
+      }));
+    },
+    []
+  );
 
   const validateFiles = useCallback(
     (files: Array<{ name: string; content: string }>): FileValidationResult => {
@@ -204,6 +231,38 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     [resolveAnalysisContext, hydrateAnalysisFiles]
   );
 
+  const resolveScopedSchemaSQL = useCallback(
+    async (
+      project: Project,
+      analysisFiles: Array<{ name: string; content: string }>
+    ): Promise<string> => {
+      if (!activeProjectId) {
+        return project.schemaSQL ?? '';
+      }
+
+      try {
+        const schemaFiles = await loadSchemaFiles(activeProjectId);
+        if (schemaFiles.length === 0) {
+          return project.schemaSQL ?? '';
+        }
+
+        const scopedSchema = buildScopedSchemaSQL(schemaFiles, analysisFiles);
+        if (ANALYSIS_DEBUG) {
+          console.log(
+            `[useAnalysis] Scoped schema matched ${scopedSchema.matchedBlockCount} blocks for ${scopedSchema.referencedTables.length} referenced tables`
+          );
+        }
+        return scopedSchema.schemaSQL;
+      } catch (error) {
+        if (ANALYSIS_DEBUG) {
+          console.warn('[useAnalysis] Failed to resolve scoped schema SQL:', error);
+        }
+        return project.schemaSQL ?? '';
+      }
+    },
+    [activeProjectId]
+  );
+
   // Restore cached analysis result from memory when project or hideCTEs changes.
   // Cache validation is built into getResult - it returns null if the cached
   // result was computed with a different hideCTEs setting.
@@ -216,6 +275,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
     if (!activeProjectId) {
       setLineageResult(null);
+      mergeResultStatus(null);
       return;
     }
 
@@ -229,11 +289,19 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     startTransition(() => {
       setLineageResult(cachedResult);
     });
+    if (cachedResult) {
+      mergeResultStatus({
+        origin: 'cache',
+        source: 'memory',
+        restoredAt: Date.now(),
+        persistedAt: null,
+      });
+    }
 
     if (cachedResult || !backendReady) {
       return;
     }
-  }, [activeProjectId, hideCTEs, getResult, backendReady]);
+  }, [activeProjectId, hideCTEs, getResult, backendReady, mergeResultStatus]);
 
   // Check worker's IndexedDB cache for persisted analysis results.
   // This runs after the memory cache effect and may update the result
@@ -271,13 +339,18 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         return;
       }
 
+      const schemaSQL = await resolveScopedSchemaSQL(project, context.files);
+      if (cancelled) {
+        return;
+      }
+
       if (ANALYSIS_DEBUG)
         console.log(`[useAnalysis] Checking IndexedDB cache for ${context.files.length} files`);
 
       const cachePayload: AnalysisPayload = {
         files: context.files,
         dialect: project.dialect,
-        schemaSQL: project.schemaSQL ?? '',
+        schemaSQL,
         hideCTEs,
         enableColumnLineage: true,
         enableLinting,
@@ -292,7 +365,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             return getCachedAnalysis({
               fileNames: context.files.map((file) => file.name),
               dialect: project.dialect,
-              schemaSQL: project.schemaSQL ?? '',
+              schemaSQL,
               hideCTEs,
               enableColumnLineage: true,
               enableLinting,
@@ -321,6 +394,20 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         setLineageResult(cached.result);
       });
       storeResult(activeProjectId, cached.result, hideCTEs);
+      mergeResultStatus({
+        origin: 'cache',
+        source: 'indexeddb',
+        restoredAt: Date.now(),
+        persistedAt: null,
+      });
+      const restoreToastKey = `indexeddb:${activeProjectId}:${project.activeFileId ?? 'unknown'}`;
+      if (lastRestoreToastKeyRef.current !== restoreToastKey) {
+        toast.success(i18n.t('analysis.restoredPersistentResult'), {
+          description: activeFile?.path ?? context.files[0]?.name ?? undefined,
+          duration: 2200,
+        });
+        lastRestoreToastKeyRef.current = restoreToastKey;
+      }
       setMetrics(activeProjectId, {
         lastDurationMs: durationMs,
         lastCacheHit: true,
@@ -351,7 +438,9 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     setMetrics,
     backendReady,
     buildAnalysisContext,
+    resolveScopedSchemaSQL,
     adapter,
+    mergeResultStatus,
   ]);
 
   // 从 SQLite project_file_results 恢复已分析文件的结果。
@@ -359,34 +448,63 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
   useEffect(() => {
     if (!activeProjectId || !currentProject?.activeFileId) return;
 
-    // 如果内存中已有结果且 lineageStore 有值，不重复读取
-    const cachedResult = getResult(activeProjectId, hideCTEs);
-    if (cachedResult) return;
-
     const activeFile = currentProject.files.find((f) => f.id === currentProject.activeFileId);
     if (!activeFile) return;
+    const isCurrentFileMode = currentProject.runMode === 'current';
 
     let cancelled = false;
 
     readFileResult(activeProjectId, activeFile.path).then((result) => {
-      if (cancelled || !result) return;
+      if (cancelled) return;
+      if (!result) {
+        if (isCurrentFileMode) {
+          startTransition(() => {
+            setLineageResult(null);
+          });
+          mergeResultStatus(null);
+        }
+        return;
+      }
 
       console.log(`[useAnalysis] SQLite file cache HIT: ${activeFile.path}`);
       startTransition(() => {
         setLineageResult(result);
       });
       storeResult(activeProjectId, result, hideCTEs);
+      mergeResultStatus({
+        origin: 'cache',
+        source: 'sqlite',
+        restoredAt: Date.now(),
+        persistedAt: null,
+      });
 
       // 同步 SQL 预览
       if (activeFile.content) {
         setLineageSql(activeFile.content);
+      }
+
+      const restoreToastKey = `sqlite:${activeProjectId}:${activeFile.path}`;
+      if (lastRestoreToastKeyRef.current !== restoreToastKey) {
+        toast.success(i18n.t('analysis.restoredPersistentResult'), {
+          description: activeFile.path,
+          duration: 2200,
+        });
+        lastRestoreToastKeyRef.current = restoreToastKey;
       }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [activeProjectId, currentProject?.activeFileId, hideCTEs, getResult, storeResult]);
+  }, [
+    activeProjectId,
+    currentProject?.activeFileId,
+    currentProject?.files,
+    currentProject?.runMode,
+    hideCTEs,
+    storeResult,
+    mergeResultStatus,
+  ]);
 
   const runAnalysis = useCallback(
     async (
@@ -399,9 +517,20 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
       const requestId = analysisRequestRef.current + 1;
       analysisRequestRef.current = requestId;
+      const runMode = options?.runModeOverride ?? project.runMode;
+      const requestedFileName =
+        activeFilePath ??
+        project.files.find((file) => file.id === project.activeFileId)?.path ??
+        null;
 
       setAnalyzing(true);
       setError(null);
+      setLoadingContext({
+        fileName: requestedFileName,
+        runMode,
+        fileCount: 0,
+        stage: 'preparing',
+      });
 
       const analysisStart = performance.now();
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -411,7 +540,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           project,
           activeFileContent,
           activeFilePath,
-          options?.runModeOverride
+          runMode
         );
 
         if (!context) {
@@ -430,6 +559,13 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           }
           return;
         }
+
+        setLoadingContext({
+          fileName: context.files[0]?.name ?? requestedFileName,
+          runMode,
+          fileCount: context.fileCount,
+          stage: 'loadingSchema',
+        });
 
         const validation = validateFiles(context.files);
         if (!validation.valid) {
@@ -456,20 +592,14 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           setLineageSql(activeFileContent);
         }
 
-        // Resolve schemaSQL: use project store value, or load from IndexedDB if empty
-        let schemaSQL = project.schemaSQL ?? '';
-        if (!schemaSQL.trim() && activeProjectId) {
-          try {
-            const schemaFiles = await loadSchemaFiles(activeProjectId);
-            if (schemaFiles.length > 0) {
-              schemaSQL = schemaFiles.map((f) => `-- File: ${f.path}\n${f.content}`).join('\n\n');
-              // Also sync back to project store so subsequent analyses don't need to re-load
-              updateSchemaSQL(activeProjectId, schemaSQL);
-            }
-          } catch {
-            // Non-critical: schema loading failure shouldn't block analysis
-          }
-        }
+        const schemaSQL = await resolveScopedSchemaSQL(project, context.files);
+
+        setLoadingContext({
+          fileName: context.files[0]?.name ?? requestedFileName,
+          runMode,
+          fileCount: context.fileCount,
+          stage: 'buildingLineage',
+        });
 
         const adapterPayload: AnalysisPayload = {
           files: context.files,
@@ -548,6 +678,12 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         const durationMs = performance.now() - analysisStart;
 
         if (!analysisResponse.skipped && analysisResponse.result) {
+          setLoadingContext({
+            fileName: context.files[0]?.name ?? requestedFileName,
+            runMode,
+            fileCount: context.fileCount,
+            stage: 'persisting',
+          });
           // Use startTransition to make the result update low-priority,
           // allowing UI interactions and worker callbacks to proceed without blocking
           startTransition(() => {
@@ -573,7 +709,34 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             writeSchemaData(activeProjectId, analysisResponse.result).catch(() => {});
             writeHierarchyData(activeProjectId, analysisResponse.result).catch(() => {});
           }
+
+          toast.success(i18n.t('analysis.persistedCurrentResult'), {
+            description:
+              context.fileCount > 1
+                ? i18n.t('analysis.persistedCurrentResultDesc', {
+                    primary:
+                      context.files[0]?.name ??
+                      requestedFileName ??
+                      i18n.t('analysis.loadingCurrentFilePending'),
+                    rest: Math.max(0, context.fileCount - 1),
+                  })
+                : context.files[0]?.name ?? requestedFileName ?? undefined,
+            duration: 2200,
+          });
+          mergeResultStatus({
+            origin: 'fresh',
+            source: 'fresh',
+            restoredAt: null,
+            persistedAt: Date.now(),
+          });
         }
+
+        setLoadingContext({
+          fileName: context.files[0]?.name ?? requestedFileName,
+          runMode,
+          fileCount: context.fileCount,
+          stage: 'rendering',
+        });
 
         if (activeProjectId) {
           setMetrics(activeProjectId, {
@@ -594,6 +757,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
       } finally {
         if (analysisRequestRef.current === requestId) {
           setAnalyzing(false);
+          setLoadingContext(null);
         }
       }
     },
@@ -611,7 +775,9 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
       hideCTEs,
       enableLinting,
       adapter,
-      updateSchemaSQL,
+      setLoadingContext,
+      mergeResultStatus,
+      resolveScopedSchemaSQL,
     ]
   );
 

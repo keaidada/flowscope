@@ -1,4 +1,4 @@
-import { Play, Loader2, ChevronDown, Braces, Code, FileCode, WrapText } from 'lucide-react';
+import { Play, Loader2, ChevronDown, Braces, Code, FileCode, Network, WrapText, Wand2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
@@ -44,6 +44,9 @@ interface EditorToolbarProps {
   onTemplateModeChange?: (mode: TemplateMode) => void;
   lineWrapping?: boolean;
   onLineWrappingChange?: (wrap: boolean) => void;
+  onOpenLineage?: () => void;
+  hasLineageResult?: boolean;
+  onOpenEtl?: () => void;
 }
 
 export function EditorToolbar({
@@ -65,6 +68,9 @@ export function EditorToolbar({
   onTemplateModeChange,
   lineWrapping = true,
   onLineWrappingChange,
+  onOpenLineage,
+  hasLineageResult = false,
+  onOpenEtl,
 }: EditorToolbarProps) {
   const { t } = useTranslation();
 
@@ -179,6 +185,37 @@ export function EditorToolbar({
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+        )}
+        {onOpenEtl && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={onOpenEtl}
+                >
+                  <Wand2 className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>ETL 工具</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {onOpenLineage && (
+          <Button
+            onClick={onOpenLineage}
+            disabled={!backendReady || isAnalyzing}
+            size="sm"
+            variant="outline"
+            className="h-[34px] gap-1.5 rounded-full px-3 text-xs font-medium"
+          >
+            <Network className="h-3.5 w-3.5" />
+            <span>{hasLineageResult ? t('editor.openLineage') : t('editor.runAndShowLineage')}</span>
+          </Button>
         )}
         <div className="flex items-center rounded-full overflow-hidden shadow-xs">
           <Button
