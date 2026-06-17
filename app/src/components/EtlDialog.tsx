@@ -40,9 +40,19 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
   const [editingLineIdx, setEditingLineIdx] = useState<number | null>(null);
 
   const leftScrollRef = useRef<HTMLTextAreaElement>(null);
+  const leftGutterRef = useRef<HTMLDivElement>(null);
   const middleScrollRef = useRef<HTMLDivElement>(null);
   const rightScrollRef = useRef<HTMLDivElement>(null);
   const syncing = useRef(false);
+
+  /** Sync scroll between left textarea and its line-number gutter. */
+  const handleLeftScroll = useCallback(() => {
+    const textarea = leftScrollRef.current;
+    const gutter = leftGutterRef.current;
+    if (textarea && gutter) {
+      gutter.scrollTop = textarea.scrollTop;
+    }
+  }, []);
 
   /** Synchronized scrolling between left textarea and right panel (proportional). */
   const handleScroll = useCallback((source: 'left' | 'right') => {
@@ -61,10 +71,14 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
       const ratio = leftEl.scrollTop / Math.max(leftEl.scrollHeight - leftEl.clientHeight, 1);
       rightEl.scrollTop = ratio * Math.max(rightEl.scrollHeight - rightEl.clientHeight, 1);
       if (middleEl) middleEl.scrollTop = ratio * Math.max(middleEl.scrollHeight - middleEl.clientHeight, 1);
+      // Sync left gutter (direct scrollTop, not proportional)
+      const gutter = leftGutterRef.current;
+      if (gutter) gutter.scrollTop = leftEl.scrollTop;
     } else {
       const ratio = rightEl.scrollTop / Math.max(rightEl.scrollHeight - rightEl.clientHeight, 1);
       leftEl.scrollTop = ratio * Math.max(leftEl.scrollHeight - leftEl.clientHeight, 1);
       if (middleEl) middleEl.scrollTop = ratio * Math.max(middleEl.scrollHeight - middleEl.clientHeight, 1);
+      if (leftGutterRef.current) leftGutterRef.current.scrollTop = leftEl.scrollTop;
     }
 
     requestAnimationFrame(() => {
@@ -293,7 +307,7 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
 
         {/* Two-column editor area */}
         <div className="flex-1 min-h-0 flex overflow-hidden">
-          {/* Left: Original input (always shows raw content) */}
+          {/* Left: Original input with line numbers */}
           <div className="flex-1 min-w-0 flex flex-col border-r">
             <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/10 shrink-0">
               <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -310,18 +324,31 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
                 <X className="h-2.5 w-2.5 mr-0.5" />清空
               </Button>
             </div>
-            <textarea
-              ref={leftScrollRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onScroll={() => handleScroll('left')}
-              className={cn(
-                'flex-1 min-h-0 w-full resize-none bg-background p-2 font-mono outline-none border-0 focus:ring-0',
-                fSizeMono
-              )}
-              placeholder="粘贴原始 SQL 或 PySpark 脚本..."
-              spellCheck={false}
-            />
+            <div className="flex-1 min-h-0 flex overflow-hidden">
+              {/* Line number gutter */}
+              <div
+                ref={leftGutterRef}
+                className="w-7 shrink-0 overflow-hidden bg-muted/5 border-r select-none"
+              >
+                <div className="font-mono text-[9px] leading-[15px] text-muted-foreground text-right pr-1 py-2">
+                  {input.split('\n').map((_, i) => (
+                    <div key={i} className="h-[15px]">{i + 1}</div>
+                  ))}
+                </div>
+              </div>
+              <textarea
+                ref={leftScrollRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onScroll={() => { handleLeftScroll(); handleScroll('left'); }}
+                className={cn(
+                  'flex-1 min-w-0 resize-none bg-background p-2 font-mono outline-none border-0 focus:ring-0',
+                  fSizeMono
+                )}
+                placeholder="粘贴原始 SQL 或 PySpark 脚本..."
+                spellCheck={false}
+              />
+            </div>
           </div>
 
           {/* Middle: action arrows (keep / delete) */}
