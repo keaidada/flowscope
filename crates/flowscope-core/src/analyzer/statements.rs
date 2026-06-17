@@ -15,7 +15,8 @@ use super::visitor::{LineageVisitor, Visitor};
 use super::Analyzer;
 use crate::error::ParseError;
 use crate::types::{
-    issue_codes, Edge, EdgeType, Issue, JoinType, Node, NodeType, Span, StatementLineage,
+    issue_codes, Edge, EdgeType, Issue, JoinType, Node, NodeType, ResolutionSource, Span,
+    StatementLineage,
 };
 use sqlparser::ast::{
     self, AlterTableOperation, Assignment, CopyIntoSnowflakeKind, CopySource, CopyTarget, Expr,
@@ -437,7 +438,7 @@ impl<'a> Analyzer<'a> {
             expression: None,
             span: None,
             metadata: None,
-            resolution_source: None,
+            resolution_source: Some(ResolutionSource::Implied),
             filters: Vec::new(),
             aggregation: None,
         });

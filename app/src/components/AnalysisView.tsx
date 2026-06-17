@@ -111,6 +111,16 @@ function extractSchemaFromResult(
     }
   }
 
+  /** Check if a table name looks like a Spark/Hive cache/temp table (e.g. Temp_*, TEMP_*).
+   *  Handles both unqualified names ("temp_all_subs_existed") and schema-qualified
+   *  names ("default.temp_all_subs_existed", "catalog.schema.temp_all_subs_existed"). */
+  const isSparkTempTable = (name: string): boolean => {
+    return name.split('.').some((part) => {
+      const upper = part.toUpperCase();
+      return upper.startsWith('TEMP_') || upper.startsWith('TMP_');
+    });
+  };
+
   // Helper: check if a node is a real physical table (not a CTE, alias, subquery, or temp table).
   // Strategy (in order of reliability):
   //   1. Must be table or view type
@@ -131,6 +141,8 @@ function extractSchemaFromResult(
     // Exclude temporary tables — they are intermediate/staging, not real physical tables
     const qName = node.qualifiedName || node.label;
     if (temporaryTableNames.has(qName) || temporaryTableNames.has(node.label)) return false;
+    // Exclude Spark/Hive cache temp tables (e.g. Temp_*, TEMP_*)
+    if (isSparkTempTable(qName) || isSparkTempTable(node.label)) return false;
     // Physical tables always get a resolutionSource from the analyzer
     if (node.resolutionSource) return true;
     // Fallback: check for schema-qualified name

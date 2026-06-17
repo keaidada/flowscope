@@ -75,6 +75,19 @@ pub fn parse_sql_with_dialect_output(
                 }
             }
 
+            if matches!(dialect, Dialect::Hive) {
+                if let Some(sanitized_sql) = sanitize_hive_spark_sql(sql) {
+                    if let Ok(statements) =
+                        Parser::parse_sql(sqlparser_dialect.as_ref(), &sanitized_sql)
+                    {
+                        return Ok(ParseSqlOutput {
+                            statements,
+                            parser_fallback_used: true,
+                        });
+                    }
+                }
+            }
+
             // Parity fallback: Generic dialect frequently fails on Postgres-specific
             // operators (`?`, `->>`, `::`) commonly used in warehouse SQL.
             if matches!(dialect, Dialect::Generic) && looks_like_postgres_syntax(sql) {
@@ -666,5 +679,41 @@ mod tests {
         let output = parse_sql_with_dialect_output(sql, Dialect::Generic).expect("parse");
         assert!(!output.parser_fallback_used);
         assert_eq!(output.statements.len(), 1);
+    }
+}
+
+/// Sanitize Hive/Spark SQL: remove CACHE TABLE / UNCACHE TABLE statements and
+/// convert `#` comments to `--` comments so the parser can handle the input.
+fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
+    let mut changed = false;
+    let lines: Vec<&str> = sql.split('\n').collect();
+    let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
+
+    for line in &lines {
+        let trimmed = line.trim();
+
+        // Convert # comments to -- comments
+        if trimmed.starts_with('#') || trimmed.starts_with("---") {
+            out_lines.push(format!("-- {}", &trimmed[1..].trim()));
+            changed = true;
+            continue;
+        }
+
+        // Skip CACHE TABLE / UNCACHE TABLE statements
+        let upper = trimmed.to_uppercase();
+        if upper.starts_with("CACHE TABLE") || upper.starts_with("UNCACHE TABLE") {
+            // Comment out the line so it doesn't cause parse errors
+            out_lines.push(format!("-- spark: {}", line));
+            changed = true;
+            continue;
+        }
+
+        out_lines.push(line.to_string());
+    }
+
+    if changed {
+        Some(out_lines.join("\n"))
+    } else {
+        None
     }
 }
