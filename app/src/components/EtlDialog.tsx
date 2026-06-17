@@ -325,10 +325,10 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
               </Button>
             </div>
             <div className="flex-1 min-h-0 flex overflow-hidden">
-              {/* Line number gutter */}
+              {/* Line number gutter — on the left side of textarea */}
               <div
                 ref={leftGutterRef}
-                className="w-7 shrink-0 overflow-hidden bg-muted/5 border-r select-none"
+                className="w-7 shrink-0 overflow-hidden bg-muted/5 border-r border-border/40 select-none"
               >
                 <div className="font-mono text-[9px] leading-[15px] text-muted-foreground text-right pr-1 py-2">
                   {input.split('\n').map((_, i) => (
