@@ -75,7 +75,11 @@ pub fn parse_sql_with_dialect_output(
                 }
             }
 
-            if matches!(dialect, Dialect::Hive) {
+            // Hive/Spark sanitize: always try this fallback when the SQL contains
+            // Spark-specific patterns (CACHE TABLE, UNCACHE TABLE, LEFT ANTI JOIN etc.)
+            // regardless of the declared dialect, since users often leave dialect at
+            // 'generic' for Spark SQL files.
+            if matches!(dialect, Dialect::Hive) || looks_like_hive_spark_syntax(sql) {
                 if let Some(sanitized_sql) = sanitize_hive_spark_sql(sql) {
                     if let Ok(statements) =
                         Parser::parse_sql(sqlparser_dialect.as_ref(), &sanitized_sql)
@@ -102,6 +106,16 @@ pub fn parse_sql_with_dialect_output(
             Err(primary_err.into())
         }
     }
+}
+
+fn looks_like_hive_spark_syntax(sql: &str) -> bool {
+    let upper = sql.to_uppercase();
+    upper.contains("CACHE TABLE")
+        || upper.contains("UNCACHE TABLE")
+        || upper.contains("ANTI JOIN")
+        || upper.contains("SEMI JOIN")
+        || upper.contains("OPTIONS (") // Spark OPTIONS on CACHE TABLE / CREATE TABLE
+        || sql.contains('#') // Hive-style comments
 }
 
 fn looks_like_postgres_syntax(sql: &str) -> bool {
@@ -674,6 +688,49 @@ mod tests {
     }
 
     #[test]
+    fn test_hive_spark_sanitize_left_anti_join() {
+        // LEFT ANTI JOIN is not supported by sqlparser-rs; sanitize rewrites to LEFT JOIN
+        let sql = "SELECT a.id FROM t1 a LEFT ANTI JOIN t2 b ON a.id = b.id";
+        let output = parse_sql_with_dialect_output(sql, Dialect::Generic);
+        // Should parse (either directly or via fallback)
+        assert!(output.is_ok(), "Failed to parse LEFT ANTI JOIN SQL");
+    }
+
+    #[test]
+    fn test_hive_spark_sanitize_cache_table() {
+        let sql = "CACHE TABLE Temp_X OPTIONS ('storageLevel' 'DISK_ONLY');\nSELECT * FROM users;";
+        let output = parse_sql_with_dialect_output(sql, Dialect::Generic);
+        assert!(output.is_ok(), "Failed to parse CACHE TABLE SQL");
+    }
+
+    #[test]
+    fn test_hive_spark_sanitize_hash_comments() {
+        let sql = "# this is a comment\nSELECT 1;";
+        let output = parse_sql_with_dialect_output(sql, Dialect::Generic);
+        assert!(output.is_ok(), "Failed to parse # comment SQL");
+    }
+
+    #[test]
+    fn test_hive_spark_sanitize_uncache() {
+        let sql = "UNCACHE TABLE IF EXISTS Temp_X;\nSELECT 1;";
+        let output = parse_sql_with_dialect_output(sql, Dialect::Generic);
+        assert!(output.is_ok(), "Failed to parse UNCACHE TABLE SQL");
+    }
+
+    #[test]
+    fn test_hive_spark_sanitize_left_anti_join_combined() {
+        // Multiple Spark patterns in one SQL - must not fail
+        let sql = "\
+# comment block
+CACHE TABLE Temp_X OPTIONS ('storageLevel' 'DISK_ONLY');
+SELECT a.id FROM t1 a LEFT ANTI JOIN t2 b ON a.id = b.id;
+UNCACHE TABLE IF EXISTS Temp_X;
+SELECT * FROM t1;";
+        let output = parse_sql_with_dialect_output(sql, Dialect::Generic);
+        assert!(output.is_ok(), "Failed to parse combined Spark SQL: {:?}", output.err());
+    }
+
+    #[test]
     fn test_parse_output_without_fallback() {
         let sql = "SELECT 1";
         let output = parse_sql_with_dialect_output(sql, Dialect::Generic).expect("parse");
@@ -682,11 +739,27 @@ mod tests {
     }
 }
 
-/// Sanitize Hive/Spark SQL: remove CACHE TABLE / UNCACHE TABLE statements and
-/// convert `#` comments to `--` comments so the parser can handle the input.
+/// Sanitize Hive/Spark SQL: remove CACHE TABLE / UNCACHE TABLE statements,
+/// convert `#` comments to `--` comments, and rewrite LEFT ANTI/SEMI JOIN to
+/// LEFT JOIN so the parser can handle the input.
 fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
     let mut changed = false;
-    let lines: Vec<&str> = sql.split('\n').collect();
+
+    // Rewrite LEFT ANTI JOIN / LEFT SEMI JOIN / RIGHT ANTI JOIN / RIGHT SEMI JOIN
+    // to LEFT JOIN / RIGHT JOIN (schema-level analysis doesn't depend on join type).
+    let mut result = String::new();
+    for line in sql.split('\n') {
+        let rewritten = rewrite_spark_joins(line);
+        if rewritten.as_deref() != Some(line) {
+            changed = true;
+        }
+        result.push_str(rewritten.as_deref().unwrap_or(line));
+        result.push('\n');
+    }
+    // Remove trailing newline added in loop
+    result.pop();
+
+    let lines: Vec<&str> = result.split('\n').collect();
     let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
 
     for line in &lines {
@@ -716,4 +789,22 @@ fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Rewrite Spark-specific join types to standard SQL join types.
+/// LEFT ANTI JOIN → LEFT JOIN, LEFT SEMI JOIN → LEFT JOIN,
+/// RIGHT ANTI JOIN → RIGHT JOIN, RIGHT SEMI JOIN → RIGHT JOIN.
+fn rewrite_spark_joins(line: &str) -> Option<String> {
+    // Quick check to avoid regex overhead for most lines
+    let upper = line.to_uppercase();
+    if !upper.contains("ANTI JOIN") && !upper.contains("SEMI JOIN") {
+        return None;
+    }
+
+    use std::sync::LazyLock;
+    use regex::Regex;
+    static SPARK_JOIN_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)(LEFT|RIGHT)\s+(ANTI|SEMI)\s+(JOIN)").unwrap()
+    });
+    Some(SPARK_JOIN_RE.replace_all(line, "$1 JOIN").into_owned())
 }
