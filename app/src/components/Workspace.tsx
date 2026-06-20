@@ -1,9 +1,8 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { Share2, Github, Settings, Network, Trash2, Download, Rows3 } from 'lucide-react';
+import { Share2, Github, Settings, Network, Trash2, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useLineageActions, useLineageState } from '@pondpilot/flowscope-react';
-import { GraphErrorBoundary, GraphView } from '@pondpilot/flowscope-react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import { Button } from './ui/button';
 import {
@@ -32,7 +31,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { LanguageToggle } from './LanguageToggle';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { CommandPalette } from './CommandPalette';
-import { GlobalLineageListView } from './GlobalLineageListView';
+import { GlobalLineageView, type GlobalLineageMode } from './GlobalLineageView';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './ui/sheet';
 import { useProject } from '@/lib/project-store';
 import { NavigationProvider } from '@/lib/navigation-context';
@@ -83,7 +82,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   const [editorOpen, setEditorOpen] = useState(true);
   const [lineageWorkspaceOpen, setLineageWorkspaceOpen] = useState(false);
   const [globalLineageOpen, setGlobalLineageOpen] = useState(false);
-  const [globalLineageView, setGlobalLineageView] = useState<'graph' | 'list'>('graph');
+  const [globalLineageView, setGlobalLineageView] = useState<GlobalLineageMode>('graph');
   const [globalFocusNodeId, setGlobalFocusNodeId] = useState<string | undefined>(undefined);
   const previousResultRef = useRef(result);
   const previousLayoutRef = useRef(layoutAlgorithm);
@@ -721,60 +720,16 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
         <FocusRegistryProvider>
           <div className="flex-1 overflow-hidden flex">
             {globalLineageOpen ? (
-              /* Global Lineage — full-screen graph/list view, no sidebar or editor */
+              /* Global Lineage — full-screen graph/list/matrix view */
               <div className="flex min-w-0 flex-1 flex-col">
-                <div className="flex items-center justify-between border-b border-border bg-muted/10 px-4 py-2">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant={globalLineageView === 'graph' ? 'secondary' : 'ghost'}
-                      size="sm"
-                      className="h-8 gap-1.5 text-xs"
-                      onClick={() => setGlobalLineageView('graph')}
-                    >
-                      <Network className="h-3.5 w-3.5" />
-                      {t('globalLineageList.graphView')}
-                    </Button>
-                    <Button
-                      variant={globalLineageView === 'list' ? 'secondary' : 'ghost'}
-                      size="sm"
-                      className="h-8 gap-1.5 text-xs"
-                      onClick={() => setGlobalLineageView('list')}
-                    >
-                      <Rows3 className="h-3.5 w-3.5" />
-                      {t('globalLineageList.listView')}
-                    </Button>
-                  </div>
-                  {result && (
-                    <div className="text-xs text-muted-foreground">
-                      {t('globalLineageList.summary', {
-                        tables: result.summary.tableCount,
-                        flows: result.globalLineage?.edges?.length ?? 0,
-                      })}
-                    </div>
-                  )}
-                </div>
                 {result ? (
-                  <div className="min-h-0 flex-1">
-                    {globalLineageView === 'graph' ? (
-                      <GraphErrorBoundary>
-                        <GraphView
-                          className="h-full w-full"
-                          graphContainerRef={graphContainerRef}
-                          focusNodeId={globalFocusNodeId}
-                          onFocusApplied={() => setGlobalFocusNodeId(undefined)}
-                        />
-                      </GraphErrorBoundary>
-                    ) : (
-                      <GlobalLineageListView
-                        result={result}
-                        onOpenGraphForNode={(nodeId) => {
-                          lineageActions.selectNode(nodeId);
-                          setGlobalFocusNodeId(nodeId);
-                          setGlobalLineageView('graph');
-                        }}
-                      />
-                    )}
-                  </div>
+                  <GlobalLineageView
+                    result={result}
+                    mode={globalLineageView}
+                    onModeChange={setGlobalLineageView}
+                    focusNodeId={globalFocusNodeId}
+                    onFocusApplied={() => setGlobalFocusNodeId(undefined)}
+                  />
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
                     <Network className="h-10 w-10 opacity-30" />
