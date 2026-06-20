@@ -170,7 +170,35 @@ impl<'a> Analyzer<'a> {
             Statement::Analyze { .. } => "ANALYZE".to_string(),
             Statement::Call(_) => "CALL".to_string(),
             Statement::Use(_) => "USE".to_string(),
-            Statement::StartTransaction { .. }
+            Statement::StartTransaction { statements: inner_stmts, .. } => {
+                // BigQuery BEGIN...END block — recursively analyze inner statements
+                let mut combined_type = String::new();
+                let mut has_lineage = false;
+                for (offset, inner) in inner_stmts.iter().enumerate() {
+                    let inner_index = index + offset;
+                    match self.analyze_statement(
+                        inner_index,
+                        inner,
+                        source_name.clone(),
+                        source_range.clone(),
+                        resolved_sql.clone(),
+                    ) {
+                        Ok(lineage) => {
+                            if has_lineage {
+                                combined_type.push_str("; ");
+                            }
+                            combined_type.push_str(&lineage.statement_type);
+                            has_lineage = true;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+                if !has_lineage {
+                    "TRANSACTION".to_string()
+                } else {
+                    combined_type
+                }
+            }
             | Statement::Commit { .. }
             | Statement::Rollback { .. }
             | Statement::Savepoint { .. } => "TRANSACTION".to_string(),

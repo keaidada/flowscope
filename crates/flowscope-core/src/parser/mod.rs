@@ -22,10 +22,32 @@ pub fn parse_sql_with_dialect_output(
 ) -> Result<ParseSqlOutput, ParseError> {
     let sqlparser_dialect = dialect.to_sqlparser_dialect();
     match Parser::parse_sql(sqlparser_dialect.as_ref(), sql) {
-        Ok(statements) => Ok(ParseSqlOutput {
-            statements,
-            parser_fallback_used: false,
-        }),
+        Ok(statements) => {
+            // If parser returned 0 statements but SQL looks like a BigQuery procedure,
+            // try the sanitizer to extract actual DML/SELECT.
+            if statements.is_empty()
+                && ((matches!(dialect, Dialect::Bigquery)
+                    || matches!(dialect, Dialect::Generic))
+                    && looks_like_bigquery_procedure(sql))
+            {
+                if let Some(sanitized_sql) = sanitize_bigquery_raw_double_quoted_literals(sql)
+                {
+                    if let Ok(parsed) =
+                        Parser::parse_sql(sqlparser_dialect.as_ref(), &sanitized_sql)
+                    {
+                        return Ok(ParseSqlOutput {
+                            statements: parsed,
+                            parser_fallback_used: true,
+                        });
+                    }
+                }
+                // If sanitizer produced nothing useful, fall through to return empty
+            }
+            Ok(ParseSqlOutput {
+                statements,
+                parser_fallback_used: false,
+            })
+        }
         Err(primary_err) => {
             if let Some(sanitized_sql) = sanitize_escaped_identifiers_for_dialect(sql, dialect) {
                 if let Ok(statements) =
@@ -120,12 +142,25 @@ fn looks_like_hive_spark_syntax(sql: &str) -> bool {
 
 fn looks_like_bigquery_procedure(sql: &str) -> bool {
     let upper = sql.to_uppercase();
+    // Case 1: CREATE [OR REPLACE] PROCEDURE
     if let Some(pos) = upper.find("PROCEDURE") {
-        upper[..pos].trim_end().ends_with("CREATE")
+        if upper[..pos].trim_end().ends_with("CREATE")
             || upper[..pos].trim_end().ends_with("REPLACE")
-    } else {
-        false
+        {
+            return true;
+        }
     }
+    // Case 2: Standalone BEGIN...END block (procedure body without header)
+    let trimmed = sql.trim_start();
+    let upper_trimmed = trimmed.to_uppercase();
+    if upper_trimmed.starts_with("BEGIN")
+        && is_word_boundary(trimmed.as_bytes(), 0, 5)
+        && upper_trimmed.ends_with("END")
+        && upper_trimmed.contains("DECLARE")
+    {
+        return true;
+    }
+    false
 }
 
 fn looks_like_postgres_syntax(sql: &str) -> bool {
@@ -311,10 +346,30 @@ fn sanitize_ansi_national_literal_spacing(sql: &str) -> Option<String> {
 /// Sanitize BigQuery stored procedures: extract DML/SELECT from BEGIN...END body.
 fn sanitize_bigquery_procedure(sql: &str) -> Option<String> {
     let upper = sql.to_uppercase();
-    let proc_pos = upper.find("PROCEDURE")?;
-    let before_proc = upper[..proc_pos].trim_end();
-    if !before_proc.ends_with("CREATE") && !before_proc.ends_with("REPLACE") { return None; }
-    let begin_idx = upper[proc_pos..].find("BEGIN").map(|i| proc_pos + i)?;
+
+    // Case 1: CREATE [OR REPLACE] PROCEDURE ... BEGIN ... END;
+    if let Some(proc_pos) = upper.find("PROCEDURE") {
+        let before_proc = upper[..proc_pos].trim_end();
+        if before_proc.ends_with("CREATE") || before_proc.ends_with("REPLACE") {
+            if let Some(begin_idx) = upper[proc_pos..].find("BEGIN").map(|i| proc_pos + i) {
+                return extract_begin_end_body(sql, &upper, begin_idx);
+            }
+        }
+    }
+
+    // Case 2: Standalone BEGIN...END block (procedure body without header)
+    let trimmed_start = sql.trim_start();
+    let upper_trimmed = trimmed_start.to_uppercase();
+    if upper_trimmed.starts_with("BEGIN") && is_word_boundary(trimmed_start.as_bytes(), 0, 5) {
+        let offset = sql.len() - trimmed_start.len();
+        return extract_begin_end_body(sql, &upper, offset);
+    }
+
+    None
+}
+
+/// Extract DML/SELECT from a BEGIN...END body starting at begin_idx
+fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<String> {
 
     let bytes = sql.as_bytes();
     let mut depth = 0;
@@ -923,6 +978,81 @@ BEGIN
 END;";
         let output = parse_sql_with_dialect_output(sql, Dialect::Bigquery);
         assert!(output.is_ok(), "Nested BEGIN..END parse failed: {:?}", output.err());
+    }
+
+    #[test]
+    fn test_bigquery_standalone_begin_end_block() {
+        // Standalone BEGIN...END body without CREATE PROCEDURE header,
+        // e.g. docs/tmp/1.sql stored procedure
+        let sql = "\
+BEGIN
+  DECLARE v_START TIMESTAMP;
+  DECLARE v_FUNCTION_NAME STRING;
+  SET v_FUNCTION_NAME = 'rinjani.sp_dim_bts_master';
+  SET v_START = CURRENT_TIMESTAMP();
+
+  SELECT 'Start Deleting data for current periode:'|| CURRENT_TIMESTAMP();
+  INSERT INTO stg.proc_log(proc_date, func_name, seqno, description)
+  VALUES (CURRENT_TIMESTAMP(), v_FUNCTION_NAME, 0, 'param=20251025');
+
+  create or replace table rinjani.dim_btsweb_mapping
+  as
+  WITH cgi_data AS (
+    SELECT date_id, cgi cgi, trim(tower_id) tower_id
+    FROM ods_cc.prd_xldim_acl_tb_f_d_bts_ref_hist
+  )
+  SELECT cgi, tower_id FROM cgi_data;
+
+  drop table if exists rinjani.stg_bts_nwca;
+  create table rinjani.stg_bts_nwca as
+  SELECT upper(a.bts_code) bts_code, a.longitude, a.latitude
+  FROM dwh_cc.d_nwca_bts_lte_master a;
+
+  INSERT INTO rinjani.dim_bts_master
+  SELECT bts_code, bts_city FROM rinjani.stg_bts_nwca;
+END;
+";
+        let output = parse_sql_with_dialect_output(sql, Dialect::Bigquery);
+        let o = output.expect("Parse failed");
+        // May use fallback or native parse — either is acceptable as long as
+        // we get DML/SELECT statements extracted from the procedure body.
+        println!(
+            "BigQuery standalone: {} statements, fallback_used={}",
+            o.statements.len(),
+            o.parser_fallback_used
+        );
+        assert!(o.statements.len() > 0, "Should extract at least one DML/SELECT");
+        for (i, stmt) in o.statements.iter().enumerate() {
+            println!("  stmt[{}]: {:?}", i, stmt);
+        }
+    }
+
+    #[test]
+    fn test_bigquery_procedure_from_file() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/tmp/1.sql");
+        let sql = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(_) => { eprintln!("Cannot read file, skipping"); return; }
+        };
+        if sql.trim().is_empty() { eprintln!("File empty, skipping"); return; }
+
+        let output = parse_sql_with_dialect_output(&sql, Dialect::Bigquery);
+        match &output {
+            Ok(o) => println!(
+                "BigQuery parsed: {} statements, fallback_used={}",
+                o.statements.len(), o.parser_fallback_used
+            ),
+            Err(e) => println!("BigQuery dialect failed: {:?}", e),
+        }
+
+        let output = parse_sql_with_dialect_output(&sql, Dialect::Generic);
+        match &output {
+            Ok(o) => println!(
+                "Generic parsed: {} statements, fallback_used={}",
+                o.statements.len(), o.parser_fallback_used
+            ),
+            Err(e) => println!("Generic dialect failed: {:?}", e),
+        }
     }
 }
 
