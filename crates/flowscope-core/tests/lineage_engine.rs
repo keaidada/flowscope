@@ -3550,6 +3550,76 @@ fn bigquery_select_except_replace_combined() {
 }
 
 #[test]
+fn bigquery_standalone_begin_end_block_lineage() {
+    // Simulates docs/tmp/1.sql: standalone BEGIN...END (procedure body
+    // stored without CREATE PROCEDURE header)
+    let sql = r#"
+BEGIN
+  DECLARE v_START TIMESTAMP;
+  DECLARE v_FUNCTION_NAME STRING;
+  SET v_FUNCTION_NAME = 'rinjani.sp_dim_bts_master';
+  SET v_START = CURRENT_TIMESTAMP();
+  SELECT 'Start:'|| CURRENT_TIMESTAMP();
+  INSERT INTO stg.proc_log VALUES (CURRENT_TIMESTAMP(), v_FUNCTION_NAME, 0);
+  CREATE OR REPLACE TABLE rinjani.dim_btsweb_mapping AS
+  WITH cgi_data AS (
+    SELECT date_id, cgi cgi, trim(tower_id) tower_id
+    FROM ods_cc.prd_xldim_acl_tb_f_d_bts_ref_hist
+  )
+  SELECT cgi, tower_id FROM cgi_data;
+  DROP TABLE IF EXISTS rinjani.stg_bts_nwca;
+  CREATE TABLE rinjani.stg_bts_nwca AS
+  SELECT upper(a.bts_code) bts_code, a.longitude, a.latitude
+  FROM dwh_cc.d_nwca_bts_lte_master a;
+  INSERT INTO rinjani.dim_bts_master
+  SELECT bts_code, bts_city FROM rinjani.stg_bts_nwca;
+END;
+"#;
+
+    let result = run_analysis(sql, Dialect::Bigquery, None);
+
+    // Should have no warnings about "not fully supported"
+    let unsupported = result
+        .issues
+        .iter()
+        .filter(|i| i.message.contains("not fully supported for lineage analysis"))
+        .count();
+    assert_eq!(unsupported, 0, "Should have no unsupported warnings");
+
+    // Verify lineage edges exist (at least INSERT→target and SELECT→from)
+    assert!(
+        !result.statements.is_empty(),
+        "Should extract DML from BEGIN..END"
+    );
+
+    let tables = collect_table_names(&result);
+
+    // INSERT INTO stg.proc_log
+    assert!(tables.contains("stg.proc_log"), "Missing stg.proc_log, got: {tables:?}");
+
+    // CREATE TABLE ... AS SELECT FROM ods_cc.prd_xldim_acl_tb_f_d_bts_ref_hist
+    assert!(
+        tables.contains("ods_cc.prd_xldim_acl_tb_f_d_bts_ref_hist"),
+        "Missing source table in CTAS, got: {tables:?}"
+    );
+    assert!(tables.contains("rinjani.dim_btsweb_mapping"), "Missing CTAS target, got: {tables:?}");
+
+    // CREATE TABLE ... AS SELECT FROM dwh_cc.d_nwca_bts_lte_master
+    assert!(
+        tables.contains("dwh_cc.d_nwca_bts_lte_master"),
+        "Missing d_nwca_bts_lte_master, got: {tables:?}"
+    );
+    assert!(tables.contains("rinjani.stg_bts_nwca"), "Missing stg_bts_nwca, got: {tables:?}");
+
+    // INSERT INTO rinjani.dim_bts_master ... SELECT FROM rinjani.stg_bts_nwca
+    assert!(tables.contains("rinjani.dim_bts_master"), "Missing dim_bts_master, got: {tables:?}");
+
+    // DECLARE variables should not appear as tables
+    assert!(!tables.contains("v_START"), "DECLARE variable should not be a table");
+    assert!(!tables.contains("v_FUNCTION_NAME"), "DECLARE variable should not be a table");
+}
+
+#[test]
 fn postgres_distinct_on_clause() {
     let sql = r#"
         SELECT DISTINCT ON (user_id)

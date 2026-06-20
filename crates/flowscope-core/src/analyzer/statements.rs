@@ -162,6 +162,7 @@ impl<'a> Analyzer<'a> {
             Statement::AlterRole { .. } => "ALTER_ROLE".to_string(),
             Statement::Grant { .. } => "GRANT".to_string(),
             Statement::Revoke { .. } => "REVOKE".to_string(),
+            Statement::Declare { .. } => "DECLARE".to_string(),
             Statement::Set(_) => "SET".to_string(),
             Statement::ShowVariable { .. } | Statement::ShowVariables { .. } => "SHOW".to_string(),
             Statement::Truncate { .. } => "TRUNCATE".to_string(),
