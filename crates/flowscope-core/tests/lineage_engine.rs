@@ -3614,6 +3614,28 @@ END;
     // INSERT INTO rinjani.dim_bts_master ... SELECT FROM rinjani.stg_bts_nwca
     assert!(tables.contains("rinjani.dim_bts_master"), "Missing dim_bts_master, got: {tables:?}");
 
+    // Verify edges exist: each DML should produce lineage edges
+    // Print all issues for debugging
+    for issue in &result.issues {
+        eprintln!("ISSUE [{}] {}", issue.code, issue.message);
+    }
+
+    let total_edges: usize = result.statements.iter().map(|s| s.edges.len()).sum();
+    eprintln!("Statements: {}, Total edges: {}", result.statements.len(), total_edges);
+
+    // Verify edges exist: each DML should produce lineage edges
+    assert!(total_edges > 0, "Should produce lineage edges, got {total_edges} edges across {} statements", result.statements.len());
+
+    // Check that no real errors exist (PARSE_ERROR from best-effort mode is ok)
+    let errors: Vec<_> = result.issues.iter().filter(|i| i.severity == flowscope_core::Severity::Error).collect();
+    for e in &errors {
+        if e.code == "PARSE_ERROR" {
+            eprintln!("Benign parse error (expected for procedure bodies): {}", e.message);
+        } else {
+            panic!("Unexpected error: {:?} {}", e.code, e.message);
+        }
+    }
+
     // DECLARE variables should not appear as tables
     assert!(!tables.contains("v_START"), "DECLARE variable should not be a table");
     assert!(!tables.contains("v_FUNCTION_NAME"), "DECLARE variable should not be a table");
