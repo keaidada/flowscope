@@ -4,14 +4,12 @@ import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import {
   GraphErrorBoundary,
   GraphView,
-  MatrixView,
   useLineageActions,
 } from '@pondpilot/flowscope-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from './ui/button';
 import { GlobalLineageListView } from './GlobalLineageListView';
-import { usePersistedMatrixState } from '@/hooks/usePersistedMatrixState';
-import { useProject } from '@/lib/project-store';
+import { TaskLayerMatrix } from './TaskLayerMatrix';
 import { useGlobalLineageData } from '@/hooks/useGlobalLineageData';
 
 export type GlobalLineageMode = 'graph' | 'list' | 'matrix';
@@ -35,8 +33,6 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
 }) => {
   const { t } = useTranslation();
   const lineageActions = useLineageActions();
-  const { activeProjectId } = useProject();
-  const matrixState = usePersistedMatrixState(activeProjectId);
 
   // Shared data — computed once, consumed by list and potentially matrix
   useGlobalLineageData(result);
@@ -111,11 +107,7 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
           />
         )}
         {mode === 'matrix' && (
-          <MatrixView
-            className="h-full w-full"
-            controlledState={matrixState.controlledState}
-            onStateChange={matrixState.onStateChange}
-          />
+          <TaskLayerMatrix className="h-full w-full" />
         )}
       </div>
     </div>
