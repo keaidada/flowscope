@@ -7,8 +7,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from './ui/tooltip';
-import { buildPipelineTasks } from '@/data/mock-pipeline';
-import type { PipelineTask } from '@/types/pipeline-matrix';
+import type { PipelineTask, LayerDef } from '@/types/pipeline-matrix';
 
 // ============================================================================
 // 颜色映射
@@ -29,12 +28,23 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const LAYER_BG_COLORS: Record<string, string> = {
+  L5: 'rgba(249, 115, 22, 0.05)',
   L4: 'rgba(245, 158, 11, 0.06)',
   L3: 'rgba(34, 197, 94, 0.06)',
   L2: 'rgba(59, 130, 246, 0.06)',
   L1: 'rgba(139, 92, 246, 0.06)',
   L0: 'rgba(236, 72, 153, 0.06)',
 };
+
+function getLayerBg(key: string): string {
+  if (LAYER_BG_COLORS[key]) return LAYER_BG_COLORS[key];
+  // Hash-based fallback for unknown layer keys
+  const hues = [30, 90, 210, 270, 330, 350, 180, 45, 120, 300];
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = key.charCodeAt(i) + ((hash << 5) - hash);
+  const hue = hues[Math.abs(hash) % hues.length];
+  return `hsla(${hue}, 60%, 50%, 0.06)`;
+}
 
 // ============================================================================
 // 单个任务圆点
@@ -171,13 +181,17 @@ function Legend() {
 // ============================================================================
 // 主组件
 // ============================================================================
-export function TaskLayerMatrix({ className }: { className?: string }) {
-  const { tasks, layers, taskNames } = useMemo(() => buildPipelineTasks(), []);
+interface TaskLayerMatrixProps {
+  tasks: PipelineTask[];
+  taskNames: string[];
+  layers: LayerDef[];
+  className?: string;
+}
 
-  // 按层级分组：每个 (taskName, layer) 组合一个 cell
+export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLayerMatrixProps) {
+  // 按层级分组
   const rows = useMemo(() => {
     return layers.map((layer) => {
-      // 该层级下所有任务，按 taskName 排序 → 每任务一列
       const cells = taskNames
         .map((name) => tasks.filter((t) => t.taskName === name && t.layer === layer.key))
         .filter((group) => group.length > 0);
@@ -283,7 +297,7 @@ export function TaskLayerMatrix({ className }: { className?: string }) {
                 y={AXIS_H + y * CELL_H}
                 width={MAX_COLS * CELL_W}
                 height={CELL_H}
-                fill={LAYER_BG_COLORS[layer.key] || 'transparent'}
+                fill={getLayerBg(layer.key)}
               />
             ))}
 

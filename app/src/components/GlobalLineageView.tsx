@@ -1,4 +1,4 @@
-import { useCallback, type FC } from 'react';
+import { useCallback, useMemo, type FC } from 'react';
 import { Network, Rows3, LayoutGrid } from 'lucide-react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import {
@@ -11,6 +11,8 @@ import { Button } from './ui/button';
 import { GlobalLineageListView } from './GlobalLineageListView';
 import { TaskLayerMatrix } from './TaskLayerMatrix';
 import { useGlobalLineageData } from '@/hooks/useGlobalLineageData';
+import { usePipelineData } from '@/hooks/usePipelineData';
+import type { LayerDef } from '@/types/pipeline-matrix';
 
 export type GlobalLineageMode = 'graph' | 'list' | 'matrix';
 
@@ -34,8 +36,26 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
   const { t } = useTranslation();
   const lineageActions = useLineageActions();
 
-  // Shared data — computed once, consumed by list and potentially matrix
+  // Shared data — computed once, consumed by list and matrix
   useGlobalLineageData(result);
+  const { tasks: pipelineTasks, taskNames: pipelineTaskNames } = usePipelineData(result);
+
+  // Dynamic layers from actual data
+  const pipelineLayers = useMemo<LayerDef[]>(() => {
+    const seen = new Map<string, number>();
+    for (const t of pipelineTasks) {
+      const key = t.layer;
+      if (!seen.has(key)) seen.set(key, seen.size);
+    }
+    return [...seen.entries()]
+      .sort(([, a], [, b]) => b - a)
+      .map(([key]) => ({
+        key,
+        label: key,
+        type: 'logical' as const,
+        order: 0,
+      }));
+  }, [pipelineTasks]);
 
   // Navigate from list → graph (focus on a specific node)
   const handleOpenGraphForNode = useCallback(
@@ -107,7 +127,12 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
           />
         )}
         {mode === 'matrix' && (
-          <TaskLayerMatrix className="h-full w-full" />
+          <TaskLayerMatrix
+            className="h-full w-full"
+            tasks={pipelineTasks}
+            taskNames={pipelineTaskNames}
+            layers={pipelineLayers}
+          />
         )}
       </div>
     </div>
