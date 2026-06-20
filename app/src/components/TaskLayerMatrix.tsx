@@ -28,12 +28,12 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const LAYER_BG_COLORS: Record<string, string> = {
-  L5: 'rgba(249, 115, 22, 0.05)',
-  L4: 'rgba(245, 158, 11, 0.06)',
-  L3: 'rgba(34, 197, 94, 0.06)',
-  L2: 'rgba(59, 130, 246, 0.06)',
-  L1: 'rgba(139, 92, 246, 0.06)',
-  L0: 'rgba(236, 72, 153, 0.06)',
+  L1: 'rgba(236, 72, 153, 0.06)',
+  L2: 'rgba(139, 92, 246, 0.06)',
+  L3: 'rgba(59, 130, 246, 0.06)',
+  L4: 'rgba(34, 197, 94, 0.06)',
+  L5: 'rgba(245, 158, 11, 0.06)',
+  L6: 'rgba(249, 115, 22, 0.05)',
 };
 
 function getLayerBg(key: string): string {
@@ -287,7 +287,6 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
             width={svgW}
             height={svgH}
             className="block"
-            style={{ minWidth: svgW, minHeight: svgH }}
           >
             {/* 行背景 */}
             {layers.map((layer, y) => (
