@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { SqlView, useLineageState } from '@pondpilot/flowscope-react';
 import { cn } from '@/lib/utils';
 import { useProject } from '@/lib/project-store';
+import { saveProjectFiles } from '@/lib/file-storage';
 import { useThemeStore, resolveTheme } from '@/lib/theme-store';
 import { useDebounce, useFileNavigation, useGlobalShortcuts } from '@/hooks';
 import type { GlobalShortcut } from '@/hooks';
@@ -200,6 +201,18 @@ export function EditorArea({
     return activeFile?.content ?? '';
   }, [sqlViewMode, resolvedSql, activeFile?.content]);
 
+  const handleSave = useCallback(() => {
+    if (currentProject && currentProject.files.length > 0) {
+      saveProjectFiles(currentProject.id, currentProject.files)
+        .then(() => toast.success(t('editor.saved')))
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error('[EditorArea] Save failed:', msg);
+          toast.error(`${t('editor.saveFailed')}: ${msg}`);
+        });
+    }
+  }, [currentProject, t]);
+
   const handleAnalyze = useCallback(() => {
     if (activeFile) {
       onRequestOpenLineage?.();
@@ -261,8 +274,13 @@ export function EditorArea({
         shift: true,
         handler: handleAnalyzeActiveOnly,
       },
+      {
+        key: 's',
+        cmdOrCtrl: true,
+        handler: handleSave,
+      },
     ],
-    [handleAnalyze, handleAnalyzeActiveOnly]
+    [handleAnalyze, handleAnalyzeActiveOnly, handleSave]
   );
 
   useGlobalShortcuts(analysisShortcuts);
@@ -308,6 +326,7 @@ export function EditorArea({
         onOpenLineage={handleOpenLineage}
         hasLineageResult={!!result}
         onOpenEtl={handleOpenEtl}
+        onSave={handleSave}
       />
 
       <div

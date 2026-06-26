@@ -70,7 +70,9 @@
     "failedToRender": "Failed to render SQL editor",
     "tryReloading": "Try reloading the page",
     "analysisError": "Analysis Error",
-    "noFileSelected": "No file selected"
+    "noFileSelected": "No file selected",
+    "saved": "Saved",
+    "saveFailed": "Save failed"
   },
   "project": {
     "projects": "Projects",
@@ -165,6 +167,7 @@
   },
   "analysis": {
     "analyzingSql": "Analyzing SQL",
+    "tooManyNodesForGraph": "Lineage contains {{count}} nodes (exceeds graph render limit of {{limit}}). Switched to matrix view. Use list view for full details.",
     "analyzingDesc": "Building lineage, schema, and issue details for the current analysis run.",
     "loadingCurrentFile": "Current file",
     "loadingCurrentFilePending": "Preparing...",
@@ -499,6 +502,8 @@
     "newFolder": "New folder",
     "folderName": "Folder name",
     "uploading": "Reading files...",
+    "uploadReading": "Reading files...",
+    "uploadSaving": "Saving...",
     "uploadDone": "Upload complete",
     "uploadProgress": "Reading {{loaded}} / {{total}} files",
     "uploadResult": "Imported {{imported}}, skipped {{skipped}}",

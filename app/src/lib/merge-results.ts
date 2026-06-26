@@ -12,6 +12,13 @@ import type {
   StatementLineage,
 } from '@pondpilot/flowscope-core';
 
+/** Check if a name looks like a Hive/Spark temp table */
+function isSparkTempTable(name: string): boolean {
+  return name.split('.').some((part) =>
+    part.toUpperCase().startsWith('TEMP_')
+  );
+}
+
 /**
  * 合并多个 AnalyzeResult 为完整的全局视图（不做过滤）。
  */
@@ -158,6 +165,7 @@ export function buildTableLevelLineage(
     if (node.type !== 'table' && node.type !== 'view') return false;
     const qName = node.qualifiedName || node.label;
     if (temporaryTableNames.has(qName) || temporaryTableNames.has(node.label)) return false;
+    if (isSparkTempTable(qName) || isSparkTempTable(node.label)) return false;
     if (node.resolutionSource) return true;
     return qName.includes('.');
   };
@@ -203,6 +211,8 @@ export function buildTableLevelLineage(
       node.type !== 'column' &&
       !temporaryTableNames.has(qName) &&
       !temporaryTableNames.has(node.label) &&
+      !isSparkTempTable(qName) &&
+      !isSparkTempTable(node.label) &&
       (node.resolutionSource || node.canonicalName?.schema);
 
     if (isPhysical) {
@@ -263,11 +273,59 @@ export function buildTableLevelLineage(
     }
   }
 
+  // 2b. 从 globalLineage 的跨 statement BFS
+  if (result.globalLineage?.edges) {
+    const globalNodeById = new Map(
+      (result.globalLineage.nodes ?? []).map((n) => [n.id, n])
+    );
+
+    // Which global nodes are physical tables?
+    const globalPhysicalIds = new Set<string>();
+    for (const info of tableMap.values()) {
+      globalPhysicalIds.add(info.nodeId);
+    }
+
+    // Build adjacency from globalLineage edges
+    const globalAdj = new Map<string, string[]>();
+    for (const edge of result.globalLineage.edges) {
+      if (!globalAdj.has(edge.from)) globalAdj.set(edge.from, []);
+      globalAdj.get(edge.from)!.push(edge.to);
+    }
+
+    // BFS from each physical global node to find targets
+    for (const [qName, info] of tableMap) {
+      if (!globalPhysicalIds.has(info.nodeId)) continue;
+      const visited = new Set<string>();
+      const queue = [info.nodeId];
+      visited.add(info.nodeId);
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        for (const next of globalAdj.get(cur) || []) {
+          if (visited.has(next)) continue;
+          visited.add(next);
+          if (globalPhysicalIds.has(next)) {
+            const targetQName = getGlobalNodeQName(globalNodeById.get(next)!);
+            if (qName !== targetQName) {
+              // sourceName is the file path that produced the source table
+              flowEdgesWithSource.push({
+                source: qName,
+                target: targetQName,
+                sourceName: info.sourceName || 'unknown',
+              });
+            }
+          } else {
+            queue.push(next);
+          }
+        }
+      }
+    }
+  }
+
   // 去重：同一物理表可能有多种名字形式，取最长的作为 canonical
   const canonicalKeyMap = new Map<string, string>();
   for (const qName of tableMap.keys()) {
     const info = tableMap.get(qName)!;
-    const identity = info.schema ? `${info.schema}.${info.name}` : info.name;
+    const identity = [info.catalog, info.schema, info.name].filter(Boolean).join('.');
     const existing = canonicalKeyMap.get(identity);
     if (!existing || qName.length > existing.length) {
       canonicalKeyMap.set(identity, qName);
@@ -277,7 +335,7 @@ export function buildTableLevelLineage(
   const keyToCanonical = new Map<string, string>();
   for (const qName of tableMap.keys()) {
     const info = tableMap.get(qName)!;
-    const identity = info.schema ? `${info.schema}.${info.name}` : info.name;
+    const identity = [info.catalog, info.schema, info.name].filter(Boolean).join('.');
     keyToCanonical.set(qName, canonicalKeyMap.get(identity)!);
   }
 

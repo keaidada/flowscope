@@ -3550,6 +3550,115 @@ fn bigquery_select_except_replace_combined() {
 }
 
 #[test]
+fn bigquery_actual_file_1_sql_analysis() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/tmp/1.sql"
+    );
+    let sql = std::fs::read_to_string(path).expect("Cannot read docs/tmp/1.sql");
+    if sql.trim().is_empty() { return; }
+
+    let result = run_analysis(&sql, Dialect::Bigquery, None);
+
+    let total_edges: usize = result.statements.iter().map(|s| s.edges.len()).sum();
+    let total_nodes: usize = result.statements.iter().map(|s| s.nodes.len()).sum();
+
+    // Dump summary as a panic message so it's always visible
+    let mut dump = format!(
+        "REAL FILE: {} stmts, {} nodes, {} edges, {} issues\n",
+        result.statements.len(),
+        total_nodes,
+        total_edges,
+        result.issues.len()
+    );
+    for (i, s) in result.statements.iter().enumerate() {
+        let table_count = s.nodes.iter().filter(|n| n.node_type == NodeType::Table).count();
+        dump.push_str(&format!(
+            "  stmt[{}] type={} nodes={} tables={} edges={}\n",
+            i, s.statement_type, s.nodes.len(), table_count, s.edges.len()
+        ));
+        for e in &s.edges {
+            dump.push_str(&format!(
+                "    {} --[{:?}]--> {}\n",
+                e.from, e.edge_type, e.to
+            ));
+        }
+    }
+    for issue in &result.issues {
+        if issue.code == "PARSE_ERROR" { continue; }
+        dump.push_str(&format!("  [{}] {}\n", issue.code, issue.message));
+    }
+
+    // Verify: if INSERT...SELECT statements exist, they should produce source→target
+    // DataFlow edges (not just DELETE self-loops). The file may be a single procedure
+    // with all DML embedded in EXECUTE IMMEDIATE strings, which yields no INSERT.
+    let insert_stmts: Vec<_> = result.statements.iter()
+        .filter(|s| s.statement_type == "INSERT")
+        .collect();
+    if !insert_stmts.is_empty() {
+        for stmt in insert_stmts {
+            let dataflow_edges: Vec<_> = stmt.edges.iter()
+                .filter(|e| e.edge_type == EdgeType::DataFlow)
+                .collect();
+            assert!(!dataflow_edges.is_empty(),
+                "INSERT should have DataFlow edges (source→target)");
+        }
+    }
+    // When npw_cesa_rpt_activation is present, verify it is tracked
+    let all_table_names: std::collections::HashSet<String> = result.statements.iter()
+        .flat_map(|s| s.nodes.iter())
+        .filter(|n| n.node_type == NodeType::Table)
+        .map(|n| n.label.to_string())
+        .collect();
+    // Only assert npw if it appears in the file content
+    let sql_upper = sql.to_uppercase();
+    if sql_upper.contains("NPW_CESA_RPT_ACTIVATION") {
+        assert!(
+            all_table_names.iter().any(|n: &String| n.contains("npw_cesa_rpt_activation")),
+            "Expected npw_cesa_rpt_activation table",
+        );
+    }
+}
+
+#[test]
+fn bigquery_insert_select_source_tables() {
+    // Verify that BigQuery INSERT...SELECT correctly extracts source tables
+    let sql = r#"
+INSERT INTO `smartfren-analytic-prd`.bidigitalbusiness.ca_stg_subs1
+SELECT 
+    prd_id,
+    subs_id
+FROM `smartfren-analytic-prd.stg_cc.agg_rgu31_abcd_mis_s3_churn_new`
+WHERE prd_id = 20240101
+"#;
+
+    let result = run_analysis(sql, Dialect::Bigquery, None);
+    
+    let all_tables: Vec<_> = result.statements.iter()
+        .flat_map(|s| s.nodes.iter().filter(|n| n.node_type == NodeType::Table))
+        .map(|n| &n.qualified_name)
+        .collect();
+    
+    let all_dataflows: Vec<_> = result.statements.iter()
+        .flat_map(|s| s.edges.iter().filter(|e| e.edge_type == EdgeType::DataFlow))
+        .map(|e| (&e.from, &e.to))
+        .collect();
+
+    let dump = format!(
+        "Tables: {:?}\nDataflows: {:?}",
+        all_tables, all_dataflows
+    );
+    
+    // Should find at least the source table AND the target table
+    assert!(all_tables.len() >= 2, "Expected at least 2 tables (source + target), got {} tables. {}", all_tables.len(), dump);
+    
+    // Dataflow should go from source → target, not self-loop
+    for (from, to) in &all_dataflows {
+        assert!(from != to, "Self-loop detected! {}", dump);
+    }
+}
+
+#[test]
 fn bigquery_standalone_begin_end_block_lineage() {
     // Simulates docs/tmp/1.sql: standalone BEGIN...END (procedure body
     // stored without CREATE PROCEDURE header)

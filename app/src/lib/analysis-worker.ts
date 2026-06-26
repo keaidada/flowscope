@@ -34,6 +34,16 @@ function mapWorkerErrorCode(code: WorkerErrorCode | undefined): AnalysisErrorCod
 interface PendingRequest {
   resolve: (value: AnalysisWorkerResponse) => void;
   reject: (error: Error) => void;
+  onProgress?: (progress: BatchProgress) => void;
+}
+
+export interface BatchProgress {
+  batchProgress?: string | null;
+  batchFile?: string;
+  batchIndex?: number;
+  batchTotal?: number;
+  completedFiles?: number;
+  totalFiles?: number;
 }
 
 export interface AnalysisWorkerResult {
@@ -61,6 +71,22 @@ function getWorker(): Worker {
 
     workerInstance.onmessage = (event: MessageEvent<AnalysisWorkerResponse>) => {
       const response = event.data;
+
+      // Batch progress updates: forward to callback without resolving the pending request
+      if (response.type === 'batch-progress') {
+        for (const [, pending] of pendingRequests) {
+          pending.onProgress?.({
+            batchProgress: response.batchProgress,
+            batchFile: response.batchFile,
+            batchIndex: response.batchIndex,
+            batchTotal: response.batchTotal,
+            completedFiles: response.completedFiles,
+            totalFiles: response.totalFiles,
+          });
+        }
+        return;
+      }
+
       const pending = pendingRequests.get(response.requestId);
       if (!pending) {
         return;
@@ -93,7 +119,8 @@ function getWorker(): Worker {
 }
 
 function sendRequest(
-  message: Omit<AnalysisWorkerRequest, 'requestId'>
+  message: Omit<AnalysisWorkerRequest, 'requestId'>,
+  onProgress?: (progress: BatchProgress) => void
 ): Promise<AnalysisWorkerResponse> {
   if (!isWorkerSupported()) {
     return Promise.reject(new Error('Web Workers are not supported in this environment'));
@@ -103,7 +130,7 @@ function sendRequest(
   const worker = getWorker();
 
   return new Promise((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject });
+    pendingRequests.set(requestId, { resolve, reject, onProgress });
     worker.postMessage({ ...message, requestId });
   });
 }
@@ -167,6 +194,8 @@ export async function clearAnalysisWorkerCache(): Promise<void> {
 export interface AnalyzeWorkerOptions {
   cacheMaxBytes?: number;
   knownCacheKey?: string | null;
+  /** Called when the worker posts batch progress updates */
+  onProgress?: (progress: BatchProgress) => void;
 }
 
 export async function analyzeWithWorker(
@@ -178,7 +207,7 @@ export async function analyzeWithWorker(
     payload,
     cacheMaxBytes: options?.cacheMaxBytes,
     knownCacheKey: options?.knownCacheKey,
-  });
+  }, options?.onProgress);
 
   if (!response.cacheKey) {
     throw new Error('Worker returned an empty cache key');

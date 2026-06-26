@@ -45,6 +45,10 @@ const PAGE_SIZE_OPTIONS = [50, 100, 200, 500] as const;
 interface GlobalLineageListViewProps {
   result: AnalyzeResult | null;
   onOpenGraphForNode?: (nodeId: string) => void;
+  /** 轻量模式：大数据集时不预构建详情，改为按需加载 */
+  isLightweight?: boolean;
+  /** 按需加载单个条目的完整上下游详情 */
+  loadEntryDetail?: (entryId: string) => TableEntry | null;
 }
 
 interface InventoryFileGroup {
@@ -301,6 +305,8 @@ function RelationTableSection({
 export function GlobalLineageListView({
   result,
   onOpenGraphForNode,
+  isLightweight,
+  loadEntryDetail,
 }: GlobalLineageListViewProps) {
   const { t } = useTranslation();
   const { requestNavigation, selectNode } = useLineageActions();
@@ -317,11 +323,26 @@ export function GlobalLineageListView({
   const [selectionContext, setSelectionContext] = useState<SelectionContext | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
+  /** 轻量模式下按需加载的完整条目详情（用于抽屉展示） */
+  const [detailedEntry, setDetailedEntry] = useState<TableEntry | null>(null);
 
   const graphData = useGlobalLineageData(result);
 
   const filteredEntries = useMemo(() => {
     const lowered = searchTerm.trim().toLowerCase();
+    if (!lowered && activeStatuses.size === 0) return graphData.entries;
+
+    // Collect table IDs that belong to tasks matching the search term
+    let taskTableIds: Set<string> | null = null;
+    if (lowered) {
+      for (const [taskName, tableIds] of graphData.taskTables) {
+        if (taskName.toLowerCase().includes(lowered)) {
+          if (!taskTableIds) taskTableIds = new Set();
+          for (const id of tableIds) taskTableIds.add(id);
+        }
+      }
+    }
+
     return graphData.entries.filter((entry) => {
       if (activeStatuses.size > 0 && !activeStatuses.has(entry.status)) {
         return false;
@@ -329,6 +350,9 @@ export function GlobalLineageListView({
       if (!lowered) {
         return true;
       }
+
+      // Match by task name
+      if (taskTableIds?.has(entry.nodeId)) return true;
 
       const searchable = [
         entry.qualifiedName,
@@ -342,7 +366,7 @@ export function GlobalLineageListView({
 
       return searchable.includes(lowered);
     });
-  }, [activeStatuses, graphData.entries, searchTerm]);
+  }, [activeStatuses, graphData.entries, graphData.taskTables, searchTerm]);
 
   const quickViewEntries = useMemo(() => {
     switch (quickView) {
@@ -377,7 +401,9 @@ export function GlobalLineageListView({
     (searchTerm.trim() ? 1 : 0) +
     (quickView !== 'all' ? 1 : 0) +
     (selectedFileGroup ? 1 : 0);
-  const selectedEntry = selectedNodeId ? graphData.entryMap.get(selectedNodeId) ?? null : null;
+  const selectedEntry =
+    (detailedEntry && detailedEntry.nodeId === selectedNodeId ? detailedEntry : null) ??
+    (selectedNodeId ? graphData.entryMap.get(selectedNodeId) ?? null : null);
   const totalFilteredEntries = sortedEntries.length;
   const totalPages = Math.max(1, Math.ceil(totalFilteredEntries / pageSize));
   const paginatedEntries = useMemo(() => {
@@ -480,10 +506,16 @@ export function GlobalLineageListView({
 
   const openEntry = useCallback((nodeId: string, context?: SelectionContext) => {
     setSelectedNodeId(nodeId);
+    setDetailedEntry(null);
     if (context) {
       setSelectionContext(context);
     }
-  }, []);
+    // 轻量模式：按需加载完整详情
+    if (isLightweight && loadEntryDetail) {
+      const detail = loadEntryDetail(nodeId);
+      if (detail) setDetailedEntry(detail);
+    }
+  }, [isLightweight, loadEntryDetail]);
 
   const handleResetFilters = useCallback(() => {
     setSearchTerm('');

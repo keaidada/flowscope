@@ -2,7 +2,7 @@
  * SQLite-WASM based storage for schema files.
  */
 
-import { getDb, esc, persist } from './duckdb';
+import { getDb, esc, flushPersistNow } from './duckdb';
 
 export interface StoredSchemaFile {
   id: string;
@@ -18,7 +18,7 @@ export async function saveSchemaFiles(projectId: string, files: StoredSchemaFile
     db.run(`DELETE FROM schema_files WHERE project_id = '${esc(projectId)}'`);
 
     if (files.length === 0) {
-      persist();
+      await flushPersistNow();
       return;
     }
 
@@ -31,7 +31,7 @@ export async function saveSchemaFiles(projectId: string, files: StoredSchemaFile
     }
     stmt.free();
     db.run('COMMIT');
-    persist();
+    await flushPersistNow();
   } catch (error) {
     console.error(`[schema-storage] Failed to save schema files for project ${projectId}:`, error);
   }
@@ -69,7 +69,7 @@ export async function deleteSchemaFiles(projectId: string): Promise<void> {
   try {
     const db = await getDb();
     db.run(`DELETE FROM schema_files WHERE project_id = '${esc(projectId)}'`);
-    persist();
+    await flushPersistNow();
   } catch (error) {
     console.error(
       `[schema-storage] Failed to delete schema files for project ${projectId}:`,

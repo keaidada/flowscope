@@ -1,9 +1,76 @@
 /**
  * SQLite-WASM based analysis result cache with LRU eviction.
+ *
+ * Heavy AnalyzeResult JSON blobs are stored as individual OPFS files
+ * (not in the SQLite DB) to keep the DB small and fast to load.
+ * The project_file_results table only stores the file_path and hash;
+ * the actual result JSON lives in:
+ *   OPFS:  /flowscope/results/<project_id>/<encoded_path>.json
  */
 
 import type { AnalyzeResult, StatementLineage, Node, Edge } from '@pondpilot/flowscope-core';
-import { getDb, esc, persist, persistNow } from './duckdb';
+import { getDb, esc, persistNow } from './duckdb';
+
+// ── OPFS helpers for per-file result storage ─────────────────────────
+
+const RESULTS_DIR = 'results';
+
+async function getResultsRoot(): Promise<FileSystemDirectoryHandle> {
+  const root = await navigator.storage.getDirectory();
+  const flowscope = await root.getDirectoryHandle('flowscope', { create: true });
+  return flowscope.getDirectoryHandle(RESULTS_DIR, { create: true });
+}
+
+function encodeResultPath(filePath: string): string {
+  return encodeURIComponent(filePath) + '.json';
+}
+
+async function writeResultToOPFS(
+  projectId: string,
+  filePath: string,
+  result: AnalyzeResult
+): Promise<void> {
+  try {
+    const root = await getResultsRoot();
+    const projectDir = await root.getDirectoryHandle(projectId, { create: true });
+    const fileName = encodeResultPath(filePath);
+    const fileHandle = await projectDir.getFileHandle(fileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    const writer = writable.getWriter();
+    await writer.write(JSON.stringify(result));
+    await writer.close();
+  } catch (error) {
+    console.error('[analysis-cache] OPFS write failed for', filePath, error);
+  }
+}
+
+async function readResultFromOPFS(
+  projectId: string,
+  filePath: string
+): Promise<AnalyzeResult | null> {
+  try {
+    const root = await getResultsRoot();
+    const projectDir = await root.getDirectoryHandle(projectId);
+    const fileName = encodeResultPath(filePath);
+    const fileHandle = await projectDir.getFileHandle(fileName);
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    return JSON.parse(text) as AnalyzeResult;
+  } catch {
+    return null;
+  }
+}
+
+async function removeProjectResultsDir(projectId: string): Promise<void> {
+  try {
+    const root = await navigator.storage.getDirectory();
+    const flowscope = await root.getDirectoryHandle('flowscope');
+    const resultsDir = await flowscope.getDirectoryHandle(RESULTS_DIR);
+    await resultsDir.removeEntry(projectId, { recursive: true });
+  } catch {
+    // Directory doesn't exist or can't be removed — ignore
+  }
+}
 
 export async function readCachedAnalysisResult(cacheKey: string): Promise<AnalyzeResult | null> {
   try {
@@ -23,7 +90,7 @@ export async function readCachedAnalysisResult(cacheKey: string): Promise<Analyz
     db.run(
       `UPDATE analysis_cache SET last_accessed_at = ${Date.now()} WHERE cache_key = '${esc(cacheKey)}'`
     );
-    persist();
+    await persistNow();
 
     return JSON.parse(json) as AnalyzeResult;
   } catch (error) {
@@ -71,7 +138,7 @@ export async function writeCachedAnalysisResult(
       }
     }
 
-    persist();
+    await persistNow();
   } catch (error) {
     console.error('[analysis-cache] Failed to write cache:', error);
   }
@@ -81,7 +148,7 @@ export async function deleteCachedAnalysisResult(cacheKey: string): Promise<void
   try {
     const db = await getDb();
     db.run(`DELETE FROM analysis_cache WHERE cache_key = '${esc(cacheKey)}'`);
-    persist();
+    await persistNow();
   } catch (error) {
     console.error('[analysis-cache] Failed to delete cache entry:', error);
   }
@@ -90,8 +157,48 @@ export async function deleteCachedAnalysisResult(cacheKey: string): Promise<void
 // ── Per-file result cache (for global lineage) ─────────────────────
 
 /**
- * 保存单文件分析结果（大 JSON），按 (project_id, file_path) UPSERT。
+ * 保存单文件分析结果。
+ * - OPFS 文件名用 contentHash（相同结果共享文件）
+ * - DB result_json 置空，content_hash 存 hash
  */
+/**
+ * Write the merged AnalyzeResult to OPFS once, then batch-insert DB pointer rows
+ * for many files in a single transaction.  This avoids writing the same 10MB+ JSON
+ * to OPFS thousands of times when many files share one result.
+ */
+export async function writeBatchFileResults(
+  projectId: string,
+  filePaths: string[],
+  contentHash: string,
+  result: AnalyzeResult
+): Promise<void> {
+  try {
+    const hash = contentHash || 'no_hash';
+
+    // Write the big JSON to OPFS once
+    await writeResultToOPFS(projectId, hash, result);
+
+    // Batch insert DB pointer rows in one transaction
+    const db = await getDb();
+    db.run('BEGIN TRANSACTION');
+    const stmt = db.prepare(
+      'INSERT OR REPLACE INTO project_file_results (project_id, file_path, result_json, content_hash, updated_at) VALUES (?, ?, ?, ?, ?)'
+    );
+    const now = Date.now();
+    for (const fp of filePaths) {
+      try {
+        console.log('[analysis-cache] writeBatchFileResults:', { projectId, filePath: fp, hash });
+      } catch (_) { /* ignore */ }
+      stmt.run([projectId, fp, '', hash, now]);
+    }
+    stmt.free();
+    db.run('COMMIT');
+  } catch (error) {
+    console.error('[analysis-cache] Failed to write batch file results:', error);
+    throw error;
+  }
+}
+
 export async function writeFileResult(
   projectId: string,
   filePath: string,
@@ -99,61 +206,172 @@ export async function writeFileResult(
   result: AnalyzeResult
 ): Promise<void> {
   try {
+    const hash = contentHash || 'no_hash';
+
+    // Write to OPFS using contentHash as key (shared across files with same result)
+    await writeResultToOPFS(projectId, hash, result);
+
+    // DB row: lightweight pointer (filePath → contentHash).
+    // This is ALWAYS required for the restore path — never skip it.
     const db = await getDb();
-    const resultJson = JSON.stringify(result);
     const now = Date.now();
+    // Diagnostic: record stored filePath/hash to help debug path mismatches
+    try {
+      console.log('[analysis-cache] writeFileResult:', { projectId, filePath, hash });
+    } catch (err) {}
     const stmt = db.prepare(
       'INSERT OR REPLACE INTO project_file_results (project_id, file_path, result_json, content_hash, updated_at) VALUES (?, ?, ?, ?, ?)'
     );
-    stmt.run([projectId, filePath, resultJson, contentHash, now]);
+    stmt.run([projectId, filePath, '', hash, now]);
     stmt.free();
-    await persistNow();
   } catch (error) {
     console.error('[analysis-cache] Failed to write file result:', error);
   }
 }
 
 /**
+ * 读取项目下所有已缓存的分析结果文件路径（轻量查询，不解析 JSON）。
+ * 同时查 project_file_results 和 lineage_statements 两张表取并集，
+ * 避免因单表写入失败导致所有图标消失。
+ */
+export async function readFileResultPaths(
+  projectId: string
+): Promise<string[]> {
+  try {
+    const db = await getDb();
+    const stmt = db.prepare(
+      `SELECT DISTINCT file_path FROM project_file_results WHERE project_id = ?
+       UNION
+       SELECT DISTINCT file_path FROM lineage_statements WHERE project_id = ?`
+    );
+    stmt.bind([projectId, projectId]);
+    const paths: string[] = [];
+    while (stmt.step()) {
+      paths.push(String(stmt.get()[0]));
+    }
+    stmt.free();
+    return paths;
+  } catch (error) {
+    console.error('[analysis-cache] Failed to read file result paths:', error);
+    return [];
+  }
+}
+
+/**
  * 读取项目下所有已缓存的文件分析结果。
- * SQL 层面按 content_hash 去重读取 JSON，避免重复 parse 大对象。
+ *
+ * 数据兼容三种存储代际：
+ *   Gen1: result_json=''          → OPFS 文件按 filePath 存储 (encodeResultPath(filePath))
+ *   Gen2: result_json='{...}'    → DB 列直接存 JSON (旧迁移数据)
+ *   Gen3: result_json=contentHash → OPFS 文件按 hash 存储 (encodeResultPath(hash))
+ *
+ * 策略：按内容来源分组，每组只读取/解析一次。
  */
 export async function readAllFileResults(
   projectId: string
 ): Promise<{ filePath: string; result: AnalyzeResult }[]> {
   try {
     const db = await getDb();
-
-    // 1. 先读去重的 JSON（按 content_hash 只读一次）
-    const hashStmt = db.prepare(
-      'SELECT content_hash, result_json FROM project_file_results WHERE project_id = ? GROUP BY content_hash'
+    const stmt = db.prepare(
+      'SELECT file_path, result_json, content_hash FROM project_file_results WHERE project_id = ?'
     );
-    hashStmt.bind([projectId]);
-    const parsedCache = new Map<string, AnalyzeResult>();
-    while (hashStmt.step()) {
-      const row = hashStmt.get();
-      const hash = String(row[0]);
-      parsedCache.set(hash, JSON.parse(String(row[1])) as AnalyzeResult);
+    stmt.bind([projectId]);
+    const rows: Array<{ filePath: string; dbJson: string; contentHash: string }> = [];
+    while (stmt.step()) {
+      const row = stmt.get();
+      rows.push({
+        filePath: String(row[0]),
+        dbJson: String(row[1] ?? ''),
+        contentHash: String(row[2] ?? ''),
+      });
     }
-    hashStmt.free();
+    stmt.free();
 
-    if (parsedCache.size === 0) return [];
+    if (rows.length === 0) return [];
 
-    // 2. 读所有文件的路径和 hash（不读 result_json，已缓存）
-    const fileStmt = db.prepare(
-      'SELECT file_path, content_hash FROM project_file_results WHERE project_id = ?'
-    );
-    fileStmt.bind([projectId]);
-    const results: { filePath: string; result: AnalyzeResult }[] = [];
-    while (fileStmt.step()) {
-      const row = fileStmt.get();
-      const filePath = String(row[0]);
-      const hash = String(row[1]);
-      const result = parsedCache.get(hash);
-      if (result) {
-        results.push({ filePath, result });
+    // ── Classify rows by data generation ──
+    // Gen3: contentHash column is non-empty → OPFS by hash
+    // Gen2: result_json column starts with '{' → DB JSON blob
+    // Gen1: both empty → OPFS by filePath
+    const hashGroups = new Map<string, string[]>(); // hash → filePaths (Gen3)
+    const legacyByPath: Array<{ filePath: string; json: string }> = []; // Gen2: DB JSON
+    const emptyByPath: Array<{ filePath: string }> = []; // Gen1: OPFS by filePath
+
+    for (const row of rows) {
+      if (row.contentHash) {
+        // Gen3: content_hash stores the OPFS key
+        if (!hashGroups.has(row.contentHash)) hashGroups.set(row.contentHash, []);
+        hashGroups.get(row.contentHash)!.push(row.filePath);
+      } else if (row.dbJson.startsWith('{')) {
+        // Gen2: result_json is a JSON blob
+        legacyByPath.push({ filePath: row.filePath, json: row.dbJson });
+      } else {
+        // Gen1: OPFS stored by filePath
+        emptyByPath.push({ filePath: row.filePath });
       }
     }
-    fileStmt.free();
+
+    console.log('[readAllFileResults] total DB rows:', rows.length,
+      'Gen1 (empty):', emptyByPath.length,
+      'Gen2 (JSON):', legacyByPath.length,
+      'Gen3 (hash):', hashGroups.size, 'groups,', [...hashGroups.values()].reduce((s, a) => s + a.length, 0), 'files');
+
+    const results: { filePath: string; result: AnalyzeResult }[] = [];
+
+    // ── Gen2: parse DB JSON directly (cached by JSON string) ──
+    const jsonCache = new Map<string, AnalyzeResult>();
+    for (const entry of legacyByPath) {
+      let parsed = jsonCache.get(entry.json);
+      if (!parsed) {
+        try { parsed = JSON.parse(entry.json) as AnalyzeResult; jsonCache.set(entry.json, parsed); }
+        catch { continue; }
+      }
+      results.push({ filePath: entry.filePath, result: parsed });
+    }
+
+    // ── Gen1: read OPFS by filePath, with content-dedup for runMode=all ──
+    // Gen1 stores identical results per file when runMode=all (3000× same JSON).
+    // Use a content fingerprint cache to skip re-reading identical OPFS files.
+    if (emptyByPath.length > 0) {
+      const sigCache = new Map<string, AnalyzeResult>(); // fingerprint → result
+      const CONCURRENCY = 8;
+      for (let i = 0; i < emptyByPath.length; i += CONCURRENCY) {
+        const batch = emptyByPath.slice(i, i + CONCURRENCY);
+        const batchResults = await Promise.all(
+          batch.map(async ({ filePath }) => {
+            const opfsResult = await readResultFromOPFS(projectId, filePath);
+            if (!opfsResult) return [] as typeof results;
+            // Fingerprint: statement count + first sourceName
+            const sig = `${opfsResult.statements.length}|${opfsResult.statements[0]?.sourceName ?? ''}`;
+            const cached = sigCache.get(sig);
+            sigCache.set(sig, opfsResult);
+            return [{ filePath, result: cached ?? opfsResult }]; // reuse cached if available
+          })
+        );
+        for (const group of batchResults) results.push(...group);
+      }
+    }
+
+    // ── Gen3: read OPFS once per unique hash, distribute to all files ──
+    const uniqueHashes = [...hashGroups.keys()];
+    for (let i = 0; i < uniqueHashes.length; i += 6) {
+      const batch = uniqueHashes.slice(i, i + 6);
+      const batchResults = await Promise.all(
+        batch.map(async (hash) => {
+          const filePaths = hashGroups.get(hash) || [];
+          if (filePaths.length === 0) return null;
+          const opfsResult = await readResultFromOPFS(projectId, hash);
+          if (opfsResult) {
+            return filePaths.map((fp) => ({ filePath: fp, result: opfsResult }));
+          }
+          return null;
+        })
+      );
+      for (const group of batchResults) {
+        if (group) results.push(...group);
+      }
+    }
+
     return results;
   } catch (error) {
     console.error('[analysis-cache] Failed to read file results:', error);
@@ -163,24 +381,43 @@ export async function readAllFileResults(
 
 /**
  * 按文件路径读取单个文件的分析结果。
+ * OPFS 优先（按 filePath 查找，GEN1），然后尝试 contentHash（GEN3），最后 DB JSON 兜底（GEN2）。
  */
 export async function readFileResult(
   projectId: string,
   filePath: string
 ): Promise<AnalyzeResult | null> {
+  // Try OPFS by filePath (Gen1 — original storage)
+  const opfsByPath = await readResultFromOPFS(projectId, filePath);
+  if (opfsByPath) return opfsByPath;
+
+  // Read content_hash from DB
   try {
     const db = await getDb();
     const stmt = db.prepare(
-      'SELECT result_json FROM project_file_results WHERE project_id = ? AND file_path = ?'
+      'SELECT content_hash, result_json FROM project_file_results WHERE project_id = ? AND file_path = ?'
     );
     stmt.bind([projectId, filePath]);
     if (!stmt.step()) {
       stmt.free();
       return null;
     }
-    const json = String(stmt.get()[0]);
+    const contentHash = String(stmt.get()[0] ?? '');
+    const dbJson = String(stmt.get()[1] ?? '');
     stmt.free();
-    return JSON.parse(json) as AnalyzeResult;
+
+    // Gen3: contentHash → OPFS by hash
+    if (contentHash && !dbJson.startsWith('{')) {
+      const opfsByHash = await readResultFromOPFS(projectId, contentHash);
+      if (opfsByHash) return opfsByHash;
+    }
+
+    // Gen2: result_json is a JSON blob
+    if (dbJson.startsWith('{')) {
+      return JSON.parse(dbJson) as AnalyzeResult;
+    }
+
+    return null;
   } catch (error) {
     console.error('[analysis-cache] Failed to read file result:', error);
     return null;
@@ -202,17 +439,27 @@ export async function writeLineageData(
   try {
     const db = await getDb();
     const now = Date.now();
+    // Begin a transaction to speed up many inserts and avoid partial writes
+    try {
+      db.run('BEGIN TRANSACTION');
+    } catch (e) {
+      // ignore if transaction cannot be started
+    }
 
     // 清除该文件的旧数据
     for (const table of ['lineage_statements', 'lineage_nodes', 'lineage_columns', 'lineage_edges']) {
       db.run(`DELETE FROM ${table} WHERE project_id = '${esc(projectId)}' AND file_path = '${esc(filePath)}'`);
     }
 
-    for (const stmt of result.statements) {
-      // 1. lineage_statements（含 SQL 原文）
-      const stmtInsert = db.prepare(
-        'INSERT INTO lineage_statements (project_id, file_path, statement_index, statement_type, source_name, sql_text, join_count, complexity_score, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      );
+    // Process statements in small batches and yield to the main thread occasionally
+    const YIELD_EVERY = 50;
+    for (let si = 0; si < result.statements.length; si++) {
+      const stmt = result.statements[si];
+      try {
+        // 1. lineage_statements（含 SQL 原文）
+        const stmtInsert = db.prepare(
+          'INSERT OR REPLACE INTO lineage_statements (project_id, file_path, statement_index, statement_type, source_name, sql_text, join_count, complexity_score, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
       // 从 span 截取 SQL 原文
       let sqlText: string | null = null;
       if (fileContent && stmt.span) {
@@ -220,11 +467,18 @@ export async function writeLineageData(
       } else if (fileContent && result.statements.length === 1) {
         sqlText = fileContent;
       }
-      stmtInsert.run([
-        projectId, filePath, stmt.statementIndex, stmt.statementType,
-        stmt.sourceName ?? null, sqlText, stmt.joinCount ?? 0, stmt.complexityScore ?? 0, now,
-      ]);
-      stmtInsert.free();
+        stmtInsert.run([
+          projectId,
+          filePath,
+          stmt.statementIndex,
+          stmt.statementType,
+          stmt.sourceName ?? null,
+          sqlText,
+          stmt.joinCount ?? 0,
+          stmt.complexityScore ?? 0,
+          now,
+        ]);
+        stmtInsert.free();
 
       // 构建 ownership 映射：column_id -> parent_node_id
       const ownershipMap = new Map<string, string>();
@@ -236,44 +490,87 @@ export async function writeLineageData(
 
       // 2. lineage_nodes + lineage_columns
       for (const node of stmt.nodes) {
-        if (node.type === 'column') {
-          const colInsert = db.prepare(
-            'INSERT OR REPLACE INTO lineage_columns (project_id, file_path, column_id, label, qualified_name, parent_node_id, expression, statement_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-          );
-          colInsert.run([
-            projectId, filePath, node.id, node.label,
-            node.qualifiedName ?? null, ownershipMap.get(node.id) ?? null,
-            node.expression ?? null, stmt.statementIndex,
-          ]);
-          colInsert.free();
-        } else {
-          const nodeInsert = db.prepare(
-            'INSERT OR REPLACE INTO lineage_nodes (project_id, file_path, node_id, node_type, label, qualified_name, statement_index, resolution_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-          );
-          nodeInsert.run([
-            projectId, filePath, node.id, node.type, node.label,
-            node.qualifiedName ?? null, stmt.statementIndex,
-            node.resolutionSource ?? null,
-          ]);
-          nodeInsert.free();
+        try {
+          if (node.type === 'column') {
+            const colInsert = db.prepare(
+              'INSERT OR REPLACE INTO lineage_columns (project_id, file_path, column_id, label, qualified_name, parent_node_id, expression, statement_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            colInsert.run([
+              projectId,
+              filePath,
+              node.id,
+              node.label,
+              node.qualifiedName ?? null,
+              ownershipMap.get(node.id) ?? null,
+              node.expression ?? null,
+              stmt.statementIndex,
+            ]);
+            colInsert.free();
+          } else {
+            const nodeInsert = db.prepare(
+              'INSERT OR REPLACE INTO lineage_nodes (project_id, file_path, node_id, node_type, label, qualified_name, statement_index, resolution_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            nodeInsert.run([
+              projectId,
+              filePath,
+              node.id,
+              node.type,
+              node.label,
+              node.qualifiedName ?? null,
+              stmt.statementIndex,
+              node.resolutionSource ?? null,
+            ]);
+            nodeInsert.free();
+          }
+        } catch (err) {
+          console.error('[analysis-cache] writeLineageData: node insert failed', { projectId, filePath, nodeId: node.id, error: err });
+          // continue with other nodes
         }
       }
 
       // 3. lineage_edges
       for (const edge of stmt.edges) {
-        const edgeInsert = db.prepare(
-          'INSERT OR REPLACE INTO lineage_edges (project_id, file_path, edge_id, from_id, to_id, edge_type, expression, statement_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-        edgeInsert.run([
-          projectId, filePath, edge.id, edge.from, edge.to, edge.type,
-          edge.expression ?? null, stmt.statementIndex,
-        ]);
-        edgeInsert.free();
+        try {
+          const edgeInsert = db.prepare(
+            'INSERT OR REPLACE INTO lineage_edges (project_id, file_path, edge_id, from_id, to_id, edge_type, expression, statement_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+          );
+          edgeInsert.run([
+            projectId,
+            filePath,
+            edge.id,
+            edge.from,
+            edge.to,
+            edge.type,
+            edge.expression ?? null,
+            stmt.statementIndex,
+          ]);
+          edgeInsert.free();
+        } catch (err) {
+          console.error('[analysis-cache] writeLineageData: edge insert failed', { projectId, filePath, edgeId: edge.id, error: err });
+        }
+      }
+
+      // Periodically yield to the browser to avoid long main-thread blocking and reduce memory pressure
+      if (si > 0 && si % YIELD_EVERY === 0) {
+        await new Promise<void>((res) => requestAnimationFrame(() => res()));
+      }
+      
+      } catch (err) {
+        // If a fatal allocation error occurs, attempt to rollback and surface the error
+        console.error('[analysis-cache] writeLineageData: statement processing failed', { projectId, filePath, statementIndex: si, error: err });
+        try {
+          db.run('ROLLBACK');
+        } catch (e) {}
+        return;
       }
     }
-
     console.log(`[analysis-cache] writeLineageData: projectId=${projectId}, filePath=${filePath}, statements=${result.statements.length}`);
-    await persistNow();
+
+    try {
+      db.run('COMMIT');
+    } catch (e) {
+      // ignore commit errors — they will be surfaced elsewhere
+    }
   } catch (error) {
     console.error('[analysis-cache] Failed to write lineage data:', error);
   }
@@ -621,7 +918,7 @@ export async function clearAnalysisCache(): Promise<void> {
   try {
     const db = await getDb();
     db.run('DELETE FROM analysis_cache');
-    persist();
+    await persistNow();
   } catch (error) {
     console.error('[analysis-cache] Failed to clear cache:', error);
   }
@@ -646,6 +943,8 @@ export async function clearProjectLineage(projectId: string): Promise<void> {
     ]) {
       db.run(`DELETE FROM ${table} WHERE project_id = '${esc(projectId)}'`);
     }
+    // Also delete OPFS result files
+    await removeProjectResultsDir(projectId);
     console.log(`[analysis-cache] clearProjectLineage: projectId=${projectId}`);
     await persistNow();
   } catch (error) {
@@ -666,6 +965,9 @@ export async function writeTableFlows(
 ): Promise<void> {
   try {
     const db = await getDb();
+    try {
+      db.run('BEGIN TRANSACTION');
+    } catch (e) {}
     db.run(`DELETE FROM lineage_table_flows WHERE project_id = '${esc(projectId)}' AND file_path = '${esc(filePath)}'`);
 
     // 构建临时表名集合
@@ -687,7 +989,10 @@ export async function writeTableFlows(
 
     const flows = new Set<string>();
 
-    for (const stmt of result.statements) {
+    // Process statements with index and yield periodically to reduce memory pressure
+    const YIELD_EVERY = 80;
+    for (let si = 0; si < result.statements.length; si++) {
+      const stmt = result.statements[si];
       const nodeById = new Map(stmt.nodes.map((n) => [n.id, n]));
       const physicalIds = new Set(stmt.nodes.filter(isPhysical).map((n) => n.id));
 
@@ -721,18 +1026,35 @@ export async function writeTableFlows(
           }
         }
       }
+
+      if (si > 0 && si % YIELD_EVERY === 0) {
+        await new Promise<void>((res) => requestAnimationFrame(() => res()));
+      }
     }
 
+    // Insert flows in batches with error handling and periodic yielding
+    let inserted = 0;
     for (const key of flows) {
-      const [src, tgt] = key.split('\t');
-      const ins = db.prepare(
-        'INSERT OR REPLACE INTO lineage_table_flows (project_id, file_path, source_table, target_table) VALUES (?, ?, ?, ?)'
-      );
-      ins.run([projectId, filePath, src, tgt]);
-      ins.free();
+      try {
+        const [src, tgt] = key.split('\t');
+        const ins = db.prepare(
+          'INSERT OR REPLACE INTO lineage_table_flows (project_id, file_path, source_table, target_table) VALUES (?, ?, ?, ?)'
+        );
+        ins.run([projectId, filePath, src, tgt]);
+        ins.free();
+        inserted++;
+      } catch (err) {
+        console.error('[analysis-cache] writeTableFlows: insert failed', { projectId, filePath, key, error: err });
+      }
+      if (inserted > 0 && inserted % YIELD_EVERY === 0) {
+        await new Promise<void>((res) => requestAnimationFrame(() => res()));
+      }
     }
 
-    await persistNow();
+    try {
+      db.run('COMMIT');
+    } catch (e) {}
+
   } catch (error) {
     console.error('[analysis-cache] Failed to write table flows:', error);
   }
@@ -775,7 +1097,6 @@ export async function writeSchemaData(
       }
     }
 
-    await persistNow();
   } catch (error) {
     console.error('[analysis-cache] Failed to write schema data:', error);
   }
@@ -820,7 +1141,6 @@ export async function writeHierarchyData(
       ins.free();
     }
 
-    await persistNow();
   } catch (error) {
     console.error('[analysis-cache] Failed to write hierarchy data:', error);
   }

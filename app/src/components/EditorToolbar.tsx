@@ -1,4 +1,4 @@
-import { Play, Loader2, ChevronDown, Braces, Code, FileCode, Network, WrapText, Wand2 } from 'lucide-react';
+import { Play, Loader2, ChevronDown, Braces, Code, FileCode, Network, WrapText, Wand2, Save } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
@@ -47,6 +47,7 @@ interface EditorToolbarProps {
   onOpenLineage?: () => void;
   hasLineageResult?: boolean;
   onOpenEtl?: () => void;
+  onSave?: () => void;
 }
 
 export function EditorToolbar({
@@ -71,6 +72,7 @@ export function EditorToolbar({
   onOpenLineage,
   hasLineageResult = false,
   onOpenEtl,
+  onSave,
 }: EditorToolbarProps) {
   const { t } = useTranslation();
 
@@ -201,6 +203,25 @@ export function EditorToolbar({
               </TooltipTrigger>
               <TooltipContent>
                 <p>ETL 工具</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {onSave && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={onSave}
+                >
+                  <Save className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>保存 ({navigator.platform.includes('Mac') ? '⌘S' : 'Ctrl+S'})</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

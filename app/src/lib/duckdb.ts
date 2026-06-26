@@ -49,14 +49,58 @@ async function loadFromOPFS(): Promise<Uint8Array | null> {
 
 async function saveToOPFS(data: Uint8Array): Promise<void> {
   const root = await navigator.storage.getDirectory();
-  const fileHandle = await root.getFileHandle(DB_FILENAME, { create: true });
-  // Use createWritable for async write (works in main thread)
-  const writable = await (fileHandle as FileSystemFileHandle & {
-    createWritable: () => Promise<WritableStream>;
-  }).createWritable();
-  const writer = writable.getWriter();
-  await writer.write(data);
-  await writer.close();
+  // Atomic write: write to a temp file first, then move to the real file.
+  // createWritable truncates on open — if the write fails mid-stream, the
+  // existing data is lost forever. Using a temp+rename pattern avoids this.
+  const tmpName = `${DB_FILENAME}.tmp`;
+  let tmpHandle: FileSystemFileHandle;
+  try {
+    tmpHandle = await root.getFileHandle(tmpName, { create: true });
+    const writable = await (tmpHandle as FileSystemFileHandle & {
+      createWritable: () => Promise<WritableStream>;
+    }).createWritable();
+    const writer = writable.getWriter();
+    await writer.write(data);
+    await writer.close();
+  } catch (e) {
+    // Clean up temp file on write failure
+    try { await root.removeEntry(tmpName); } catch (_) { /* best effort */ }
+    throw e;
+  }
+
+  // Rename temp → real.  We try in-place swap: remove the old real file,
+  // then move the temp file to that name.  If move() is unavailable we fall
+  // back to a copy-then-remove (still safe because the temp copy is complete).
+  let moved = false;
+  const tmpMove = tmpHandle as FileSystemFileHandle & {
+    move?: (newName: string) => Promise<void>;
+  };
+  if (typeof tmpMove.move === 'function') {
+    try {
+      await root.removeEntry(DB_FILENAME);
+    } catch (_) {
+      /* file may not exist yet — that's fine */
+    }
+    try {
+      await tmpMove.move(DB_FILENAME);
+      moved = true;
+    } catch (e) {
+      console.warn('[sqlite] OPFS move() failed, falling back to copy:', e);
+    }
+  }
+
+  if (!moved) {
+    const tempFile = await tmpHandle.getFile();
+    const tempBuf = await tempFile.arrayBuffer();
+    const realHandle = await root.getFileHandle(DB_FILENAME, { create: true });
+    const writable = await (realHandle as FileSystemFileHandle & {
+      createWritable: () => Promise<WritableStream>;
+    }).createWritable();
+    const writer = writable.getWriter();
+    await writer.write(new Uint8Array(tempBuf));
+    await writer.close();
+    await root.removeEntry(tmpName);
+  }
 }
 
 // ── IndexedDB fallback ───────────────────────────────────────────────
@@ -91,18 +135,14 @@ async function loadFromIDB(): Promise<Uint8Array | null> {
 }
 
 async function saveToIDB(data: Uint8Array): Promise<void> {
-  try {
-    const idb = await openIDB();
-    const tx = idb.transaction(IDB_STORE_NAME, 'readwrite');
-    const store = tx.objectStore(IDB_STORE_NAME);
-    store.put(data, IDB_KEY);
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (error) {
-    console.error('[sqlite] Failed to persist database to IndexedDB:', error);
-  }
+  const idb = await openIDB();
+  const tx = idb.transaction(IDB_STORE_NAME, 'readwrite');
+  const store = tx.objectStore(IDB_STORE_NAME);
+  store.put(data, IDB_KEY);
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 // ── unified load / save ──────────────────────────────────────────────
@@ -117,18 +157,46 @@ async function loadDbBytes(): Promise<Uint8Array | null> {
 }
 
 async function saveDbBytes(data: Uint8Array): Promise<void> {
+  let opfsFail: unknown = null;
   if (useOPFS) {
     try {
       await saveToOPFS(data);
       return;
     } catch (error) {
+      opfsFail = error;
       console.warn('[sqlite] OPFS write failed, falling back to IndexedDB:', error);
     }
   }
-  await saveToIDB(data);
+  try {
+    await saveToIDB(data);
+  } catch (idbError) {
+    console.error('[sqlite] IndexedDB write also failed:', idbError, 'OPFS error was:', opfsFail);
+    throw new Error(`数据库持久化失败: OPFS=${opfsFail ?? 'skipped'}, IDB=${idbError}`);
+  }
 }
 
 // ── init ─────────────────────────────────────────────────────────────
+
+/** Delete persisted DB from both OPFS and IndexedDB. */
+async function deleteSavedDb(): Promise<void> {
+  if (useOPFS) {
+    try {
+      const root = await navigator.storage.getDirectory();
+      await root.removeEntry(DB_FILENAME);
+      await root.removeEntry(`${DB_FILENAME}.tmp`);
+    } catch { /* ignore — file may not exist */ }
+  }
+  try {
+    const idb = await openIDB();
+    const tx = idb.transaction(IDB_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(IDB_STORE_NAME);
+    store.delete(IDB_KEY);
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch { /* ignore */ }
+}
 
 async function init(): Promise<Database> {
   // Detect OPFS support
@@ -140,9 +208,30 @@ async function init(): Promise<Database> {
     locateFile: () => `${base}sql.js/sql-wasm.wasm`,
   });
 
-  // Restore from persistent storage
+  // Restore from persistent storage — with corruption recovery
   const saved = await loadDbBytes();
-  db = saved ? new SQL.Database(saved) : new SQL.Database();
+  if (saved) {
+    try {
+      db = new SQL.Database(saved);
+      // sql.js Database constructor does NOT validate the binary on load.
+      // Corrupted bytes are loaded silently and only fail on first query.
+      const check = db.exec('PRAGMA integrity_check');
+      const ok = check.length > 0 && check[0]?.values?.[0]?.[0] === 'ok';
+      if (!ok) {
+        const detail = check[0]?.values?.map((r: unknown[]) => r[0]).join('; ') || 'unknown error';
+        console.warn(`[sqlite] Integrity check failed: ${detail} — starting fresh`);
+        db.close();
+        await deleteSavedDb();
+        db = new SQL.Database();
+      }
+    } catch (e) {
+      console.warn('[sqlite] Restored database is corrupted — deleting and starting fresh:', e);
+      await deleteSavedDb();
+      db = new SQL.Database();
+    }
+  } else {
+    db = new SQL.Database();
+  }
 
   db.run('PRAGMA journal_mode = MEMORY');
   db.run('PRAGMA synchronous = OFF');
@@ -339,10 +428,27 @@ export function persist(): void {
   }, 500);
 }
 
-/** Immediately flush the SQLite database to disk (OPFS) or IndexedDB. */
+/** Runtime flag: when true, `persistNow` becomes a no-op to avoid frequent large writes. */
+export let __FLOWSCOPE_DEFER_PERSIST = false;
+
+/** Immediately flush the SQLite database to disk (OPFS) or IndexedDB. No-op when defer flag is set. */
 export async function persistNow(): Promise<void> {
   if (!db) return;
+  if ((globalThis as any).__FLOWSCOPE_DEFER_PERSIST) return;
   const data = db.export();
+  await saveDbBytes(data);
+}
+
+/** Force a flush regardless of the defer flag. */
+export async function flushPersistNow(): Promise<void> {
+  if (!db) return;
+  let data: Uint8Array;
+  try {
+    data = db.export();
+  } catch (e) {
+    console.error('[sqlite] db.export() failed (database may be corrupted):', e);
+    throw new Error('数据库已损坏，请重新加载页面。');
+  }
   await saveDbBytes(data);
 }
 
@@ -351,12 +457,28 @@ export function getStorageBackend(): string {
   return useOPFS ? 'OPFS (disk)' : 'IndexedDB';
 }
 
-// Flush on page unload
+// Flush on page hide (visibilitychange), NOT on beforeunload.
+// beforeunload is fire-and-forget async — the page may unload before OPFS write
+// completes, corrupting the database file on disk.
 if (typeof window !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && db) {
+      const data = db.export();
+      saveDbBytes(data).catch((e) =>
+        console.warn('[sqlite] visibilitychange flush failed:', e)
+      );
+    }
+  });
+
+  // Safety net: on unload, write directly to IndexedDB (which completes
+  // synchronously enough in Chrome to survive page teardown).  This only
+  // matters if visibilitychange didn't fire (e.g. browser crash, force quit).
   window.addEventListener('beforeunload', () => {
     if (db) {
       const data = db.export();
-      saveDbBytes(data);
+      // Fire-and-forget to IDB — we can't await, but IDB writes are durable
+      // in Chrome even during unload.
+      saveToIDB(data).catch(() => {});
     }
   });
 }

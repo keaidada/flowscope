@@ -81,7 +81,8 @@ export interface AnalysisWorkerResponse {
     | 'version-result'
     | 'sync-result'
     | 'clear-cache-result'
-    | 'export-result';
+    | 'export-result'
+    | 'batch-progress';
   requestId: string;
   result?: AnalyzeResult | null;
   cacheKey?: string;
@@ -94,6 +95,13 @@ export interface AnalysisWorkerResponse {
   error?: string;
   /** Structured error code for programmatic handling */
   errorCode?: WorkerErrorCode;
+  /** Batch progress indicator, e.g. "批次 3/9" */
+  batchProgress?: string | null;
+  batchFile?: string;
+  batchIndex?: number;
+  batchTotal?: number;
+  completedFiles?: number;
+  totalFiles?: number;
 }
 
 let wasmReady = false;
@@ -257,34 +265,82 @@ async function runAnalysis(
   const { schema, schemaErrors } = await buildImportedSchema(resolvedPayload);
   const schemaParseMs = nowMs() - schemaStart;
 
-  const analyzeStart = nowMs();
-  // Build templateConfig if a non-raw template mode is specified
-  // The WASM layer handles template rendering before SQL parsing
   const templateConfig =
     resolvedPayload.templateMode && resolvedPayload.templateMode !== 'raw'
       ? { mode: resolvedPayload.templateMode, context: {} }
       : undefined;
-  // Note: templateConfig is supported by the WASM API but not yet typed in @pondpilot/flowscope-core.
-  // The request is serialized to JSON, and the Rust side deserializes it with templateConfig support.
-  const analysisRequest: Parameters<typeof analyzeSql>[0] & {
-    templateConfig?: { mode: TemplateMode; context: Record<string, unknown> };
-  } = {
-    sql: '',
-    files: resolvedPayload.files,
-    dialect: resolvedPayload.dialect,
-    schema,
-    options: {
-      enableColumnLineage: resolvedPayload.enableColumnLineage,
-      hideCtes: resolvedPayload.hideCTEs,
-      lint: { enabled: resolvedPayload.enableLinting ?? false },
-    },
-  };
-  if (templateConfig) {
-    analysisRequest.templateConfig = templateConfig;
-  }
-  const result = await analyzeSql(analysisRequest);
-  const analyzeMs = nowMs() - analyzeStart;
 
+  const options = {
+    enableColumnLineage: resolvedPayload.enableColumnLineage,
+    hideCtes: resolvedPayload.hideCTEs,
+    lint: { enabled: resolvedPayload.enableLinting ?? false },
+  };
+
+  // Batch analysis: split files to avoid WASM memory exhaustion
+  const BATCH_SIZE = 120;
+  const allFiles = resolvedPayload.files;
+  const batches: Array<Array<{ name: string; content: string }>> = [];
+  for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
+    batches.push(allFiles.slice(i, i + BATCH_SIZE));
+  }
+
+  const analyzeStart = nowMs();
+  let mergedResult: AnalyzeResult | null = null;
+  let firstBatchError: string | null = null;
+
+  for (let bi = 0; bi < batches.length; bi++) {
+    const batch = batches[bi];
+    const firstFile = batch[0]?.name ?? '';
+    const progress = batches.length > 1
+      ? `批次 ${bi + 1}/${batches.length}`
+      : undefined;
+
+    // Send progress with file info
+    const completedCount = bi * BATCH_SIZE;
+    self.postMessage({
+      type: 'batch-progress',
+      batchProgress: progress ?? null,
+      batchFile: firstFile,
+      batchIndex: bi,
+      batchTotal: batches.length,
+      completedFiles: completedCount,
+      totalFiles: allFiles.length,
+    });
+
+    const analysisRequest: Parameters<typeof analyzeSql>[0] & {
+      templateConfig?: { mode: string; context: Record<string, unknown> };
+    } = {
+      sql: '',
+      files: batch,
+      dialect: resolvedPayload.dialect,
+      schema,
+      options,
+    };
+    if (templateConfig) {
+      analysisRequest.templateConfig = templateConfig;
+    }
+
+    try {
+      const batchResult = await analyzeSql(analysisRequest);
+      mergedResult = mergedResult ? mergeBatchResults(mergedResult, batchResult) : batchResult;
+    } catch (err) {
+      if (!firstBatchError) {
+        firstBatchError = err instanceof Error ? err.message : String(err);
+      }
+      // Continue with next batch — don't fail the whole analysis
+    }
+  }
+
+  if (!mergedResult) {
+    throw new Error(firstBatchError || 'All batches failed');
+  }
+
+  // Clear batch progress
+  if (batches.length > 1) {
+    self.postMessage({ type: 'batch-progress', batchProgress: null });
+  }
+
+  // Attach schema errors
   if (schemaErrors.length > 0) {
     const schemaIssues = schemaErrors.map((errorMessage) => ({
       severity: 'warning' as const,
@@ -292,12 +348,13 @@ async function runAnalysis(
       message: `Schema DDL: ${errorMessage}`,
       locations: [],
     }));
-
-    result.issues = [...(result.issues || []), ...schemaIssues];
+    mergedResult.issues = [...(mergedResult.issues || []), ...schemaIssues];
   }
 
+  const analyzeMs = nowMs() - analyzeStart;
+
   try {
-    await writeCachedAnalysisResult(cacheKey, result, cacheMaxBytes);
+    await writeCachedAnalysisResult(cacheKey, mergedResult, cacheMaxBytes);
   } catch {
     // Cache write failure is non-critical
   }
@@ -305,7 +362,7 @@ async function runAnalysis(
   return {
     type: 'analyze-result',
     requestId: '',
-    result,
+    result: mergedResult,
     cacheKey,
     cacheHit: false,
     timings: {
@@ -314,6 +371,74 @@ async function runAnalysis(
       schemaParseMs,
       analyzeMs,
     },
+  };
+}
+
+/** Merge two AnalyzeResult objects from different batches. */
+function mergeBatchResults(a: AnalyzeResult, b: AnalyzeResult): AnalyzeResult {
+  // statements: concat (each batch has different files)
+  const statements = [...a.statements, ...b.statements];
+
+  // globalLineage.nodes: merge by id, union statementRefs
+  const nodeMap = new Map<string, (typeof a.globalLineage.nodes)[0]>();
+  for (const node of a.globalLineage.nodes) {
+    nodeMap.set(node.id, { ...node, statementRefs: [...node.statementRefs] });
+  }
+  for (const node of b.globalLineage.nodes) {
+    const existing = nodeMap.get(node.id);
+    if (existing) {
+      // Merge statementRefs — dedup by (statementIndex, sourceName)
+      const existingKeys = new Set(
+        existing.statementRefs.map((r: any) => `${r.statementIndex}|${r.sourceName ?? ''}`)
+      );
+      for (const ref of node.statementRefs) {
+        const key = `${ref.statementIndex}|${(ref as any).sourceName ?? ''}`;
+        if (!existingKeys.has(key)) {
+          existing.statementRefs.push(ref);
+        }
+      }
+    } else {
+      nodeMap.set(node.id, { ...node, statementRefs: [...node.statementRefs] });
+    }
+  }
+  const nodes = [...nodeMap.values()];
+
+  // globalLineage.edges: concat, dedup by edge id
+  const edgeIds = new Set(a.globalLineage.edges.map((e) => e.id));
+  const edges = [...a.globalLineage.edges];
+  for (const e of b.globalLineage.edges) {
+    if (!edgeIds.has(e.id)) {
+      edgeIds.add(e.id);
+      edges.push(e);
+    }
+  }
+
+  const globalLineage = { ...a.globalLineage, nodes, edges };
+
+  // issues: concat
+  const issues = [...a.issues, ...b.issues];
+
+  // summary: aggregate
+  const summary = {
+    ...a.summary,
+    statementCount: a.summary.statementCount + b.summary.statementCount,
+    tableCount: nodeMap.size,
+    joinCount: a.summary.joinCount + b.summary.joinCount,
+    complexityScore: Math.max(a.summary.complexityScore, b.summary.complexityScore),
+    hasErrors: a.summary.hasErrors || b.summary.hasErrors,
+    issueCount: {
+      errors: a.summary.issueCount.errors + b.summary.issueCount.errors,
+      warnings: a.summary.issueCount.warnings + b.summary.issueCount.warnings,
+      infos: a.summary.issueCount.infos + b.summary.issueCount.infos,
+    },
+  };
+
+  return {
+    statements,
+    globalLineage,
+    issues,
+    summary,
+    resolvedSchema: a.resolvedSchema,
   };
 }
 
@@ -356,6 +481,7 @@ async function getCachedAnalysis(payload: AnalysisWorkerPayload): Promise<Analys
 }
 
 self.onmessage = async (event: MessageEvent<AnalysisWorkerRequest>) => {
+  console.log('[analysis.worker] onmessage:', event.data?.type);
   const { type, requestId, payload, syncPayload, exportPayload, cacheMaxBytes, knownCacheKey } =
     event.data;
 

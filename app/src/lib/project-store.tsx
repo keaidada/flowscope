@@ -130,6 +130,7 @@ export interface ProjectFile {
   path: string; // Relative path including filename, e.g., "queries/users/get-all.sql"
   content: string;
   language: 'sql' | 'json' | 'text';
+  size?: number;
 }
 
 export interface Project {
@@ -166,6 +167,7 @@ interface ProjectContextType {
   deleteFiles: (fileIds: string[]) => void;
   renameFile: (fileId: string, newName: string) => void;
   renameFolder: (oldFolderPath: string, newFolderName: string) => void;
+  deleteFolder: (folderPath: string) => void;
   selectFile: (fileId: string) => void;
 
   // Schema SQL management
@@ -448,14 +450,19 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     const loadFiles = async () => {
-      const updatedProjects = await Promise.all(
-        projects.map(async (p) => {
-          if (p.files.length > 0) return null;
-          const files = await loadProjectFiles(p.id);
-          if (files.length === 0) return null;
-          return { id: p.id, files };
-        })
-      );
+      // Load files per-project in small batches to avoid blocking the main thread
+      const updatedProjects: Array<{ id: string; files: ProjectFile[] } | null> = [];
+      for (const p of projects) {
+        if (p.files.length > 0) {
+          updatedProjects.push(null);
+          continue;
+        }
+        // Load files from DB
+        const files = await loadProjectFiles(p.id);
+        updatedProjects.push(files.length > 0 ? { id: p.id, files } : null);
+        // Yield to main thread to allow rendering progress
+        await new Promise((res) => requestAnimationFrame(res));
+      }
 
       if (cancelled) return;
 
@@ -477,7 +484,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       prevFileSignaturesRef.current = newSigs;
 
       if (projectsWithFiles.length > 0) {
-        // Use startTransition to avoid blocking the UI while React processes 700+ files
+        // Use startTransition and incremental updates to avoid UI freeze when injecting many files
         startTransition(() => {
           setProjects((prev) =>
             prev.map((p) => {
@@ -948,6 +955,32 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     [activeProjectId]
   );
 
+  const deleteFolder = useCallback(
+    (folderPath: string) => {
+      if (!activeProjectId) return;
+      const prefix = `${folderPath}/`;
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          const remaining = p.files.filter(
+            (f) => f.path !== folderPath && !f.path.startsWith(prefix)
+          );
+          const newActiveFileId =
+            remaining.some((f) => f.id === p.activeFileId) ? p.activeFileId : remaining[0]?.id ?? null;
+          return {
+            ...p,
+            files: remaining,
+            activeFileId: newActiveFileId,
+            selectedFileIds: (p.selectedFileIds || []).filter((id) =>
+              remaining.some((f) => f.id === id)
+            ),
+          };
+        })
+      );
+    },
+    [activeProjectId]
+  );
+
   const selectFile = useCallback(
     (fileId: string) => {
       if (isBackendMode) {
@@ -1151,6 +1184,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     deleteFiles,
     renameFile,
     renameFolder,
+    deleteFolder,
     selectFile,
     updateSchemaSQL,
     importFiles,

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, memo, useDeferredValue } from 'react';
 import {
   ChevronRight,
   ChevronDown,
@@ -52,6 +52,8 @@ interface FileTreeProps {
   onDeleteClick: (e: React.MouseEvent, fileId: string) => void;
   onCancelDelete: () => void;
   isFileIncludedInAnalysis: (fileId: string) => boolean;
+  /** Returns true if the file already has lineage analysis results */
+  hasLineageFile: (filePath: string) => boolean;
   canDeleteFiles: boolean;
   renameInputRef: React.RefObject<HTMLInputElement | null>;
   /** When true, hides rename/delete buttons (backend mode) */
@@ -62,6 +64,8 @@ interface FileTreeProps {
   onCreateFolderInFolder?: (folderPath: string) => void;
   /** Called when user confirms renaming a folder */
   onRenameFolder?: (oldFolderPath: string, newFolderName: string) => void;
+  /** Called when user clicks the delete button on a folder */
+  onDeleteFolder?: (folderPath: string) => void;
   /** Current search query — when non-empty, auto-expand folders containing matched files */
   searchQuery?: string;
   /** Reports the rendered tree content width so the sidebar can auto-resize */
@@ -146,6 +150,8 @@ interface FolderNodeProps {
   props: FileTreeProps;
   expandedFolders: Set<string>;
   onToggleFolder: (path: string) => void;
+  /** Precomputed folder file IDs — avoids per-folder recursive traversal */
+  folderFileIdsMap: Map<string, string[]>;
 }
 
 /** Recursively collect all file IDs under a tree node */
@@ -162,21 +168,42 @@ function collectFileIds(node: TreeNode): string[] {
   return ids;
 }
 
-/** Count total files recursively under a tree node */
-function countFiles(node: TreeNode): number {
+/** Count direct files under a tree node (non-recursive) */
+function countDirectFiles(node: TreeNode): number {
   let count = 0;
   for (const child of node.children.values()) {
     if (child.file) count++;
-    if (child.children.size > 0) count += countFiles(child);
   }
   return count;
 }
 
-function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: FolderNodeProps) {
+/** Count direct child sub-folders under a tree node */
+function countDirectSubFolders(node: TreeNode): number {
+  let count = 0;
+  for (const child of node.children.values()) {
+    if (child.children.size > 0) count++;
+  }
+  return count;
+}
+
+const FolderNode = memo(function FolderNode({ node, depth, props, expandedFolders, onToggleFolder, folderFileIdsMap }: FolderNodeProps) {
   const isExpanded = expandedFolders.has(node.path);
   const sortedChildren = useMemo(() => sortTreeNodes(Array.from(node.children.values())), [node]);
 
-  const fileCount = useMemo(() => countFiles(node), [node]);
+  const fileCount = useMemo(() => countDirectFiles(node), [node]);
+
+  const lineageCount = useMemo(
+    () => {
+      let cnt = 0;
+      for (const child of node.children.values()) {
+        if (child.file && props.hasLineageFile(child.file.path)) cnt++;
+      }
+      return cnt;
+    },
+    [node, props.hasLineageFile]
+  );
+
+  const subFolderCount = useMemo(() => countDirectSubFolders(node), [node]);
 
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(node.name);
@@ -196,10 +223,10 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
     setIsRenaming(false);
   };
 
-  // Folder selection state — only compute when expanded or checkboxes shown
+  // Folder selection state — precomputed at tree level, O(1) lookup
   const folderFileIds = useMemo(
-    () => (props.showCheckboxes ? collectFileIds(node) : []),
-    [node, props.showCheckboxes]
+    () => (props.showCheckboxes ? (folderFileIdsMap.get(node.path) ?? []) : []),
+    [node.path, props.showCheckboxes, folderFileIdsMap]
   );
   const selectedSet = useMemo(() => new Set(props.selectedFileIds), [props.selectedFileIds]);
   const { allSelected, someSelected } = useMemo(() => {
@@ -257,6 +284,7 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
             props={props}
             expandedFolders={expandedFolders}
             onToggleFolder={onToggleFolder}
+            folderFileIdsMap={folderFileIdsMap}
           />
         )}
       </div>
@@ -300,7 +328,24 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
           <Folder className="size-4 shrink-0 text-amber-500" />
         )}
         <span className="whitespace-nowrap">{node.name}</span>
-        <span className="text-[10px] text-muted-foreground shrink-0 mr-1">({fileCount})</span>
+        {fileCount > 0 && (
+          <span className="text-[10px] text-muted-foreground shrink-0 mr-1">
+            {lineageCount > 0 ? (
+              <>
+                <span className="text-emerald-500 font-medium">{lineageCount}</span>
+                <span className="text-muted-foreground/60">/</span>
+                <span>{fileCount}f</span>
+              </>
+            ) : (
+              `(${fileCount}f)`
+            )}
+          </span>
+        )}
+        {fileCount === 0 && subFolderCount > 0 && (
+          <span className="text-[10px] text-muted-foreground/60 shrink-0 mr-1">
+            ({subFolderCount}d)
+          </span>
+        )}
         {!props.isReadOnly && (
           <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity">
             {props.onCreateFileInFolder && (
@@ -340,6 +385,18 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
                 <Pencil className="size-3" />
               </button>
             )}
+            {props.onDeleteFolder && (
+              <button
+                className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onDeleteFolder!(node.path);
+                }}
+                title="Delete folder"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -350,14 +407,15 @@ function FolderNode({ node, depth, props, expandedFolders, onToggleFolder }: Fol
           props={props}
           expandedFolders={expandedFolders}
           onToggleFolder={onToggleFolder}
+          folderFileIdsMap={folderFileIdsMap}
         />
       )}
     </div>
   );
-}
+})
 
 /** Flat file list with render limit */
-function FlatFileList({
+const FlatFileList = memo(function FlatFileList({
   sortedChildren,
   props,
 }: {
@@ -392,21 +450,23 @@ function FlatFileList({
       )}
     </div>
   );
-}
+})
 
 /** Renders folder children with a render limit to avoid blocking the UI */
-function FolderChildren({
+const FolderChildren = memo(function FolderChildren({
   sortedChildren,
   depth,
   props,
   expandedFolders,
   onToggleFolder,
+  folderFileIdsMap,
 }: {
   sortedChildren: TreeNode[];
   depth: number;
   props: FileTreeProps;
   expandedFolders: Set<string>;
   onToggleFolder: (path: string) => void;
+  folderFileIdsMap: Map<string, string[]>;
 }) {
   const [renderLimit, setRenderLimit] = useState(FOLDER_RENDER_LIMIT);
   const visible = sortedChildren.slice(0, renderLimit);
@@ -425,6 +485,7 @@ function FolderChildren({
             props={props}
             expandedFolders={expandedFolders}
             onToggleFolder={onToggleFolder}
+            folderFileIdsMap={folderFileIdsMap}
           />
         )
       )}
@@ -439,7 +500,7 @@ function FolderChildren({
       )}
     </div>
   );
-}
+})
 
 interface FileNodeProps {
   node: TreeNode;
@@ -447,8 +508,9 @@ interface FileNodeProps {
   props: FileTreeProps;
 }
 
-function FileNode({ node, depth, props }: FileNodeProps) {
-  const file = node.file!;
+const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
+  const file = node.file;
+  if (!file) return null;
   const {
     activeFileId,
     selectedFileIds,
@@ -466,6 +528,7 @@ function FileNode({ node, depth, props }: FileNodeProps) {
     onRenameValueChange,
     onDeleteClick,
     isFileIncludedInAnalysis,
+    hasLineageFile,
     canDeleteFiles,
     renameInputRef,
     isReadOnly,
@@ -473,6 +536,7 @@ function FileNode({ node, depth, props }: FileNodeProps) {
 
   const isActive = activeFileId === file.id;
   const isIncluded = isFileIncludedInAnalysis(file.id);
+  const hasLineage = hasLineageFile(file.path);
   const isSelected = selectedFileIds.includes(file.id);
   const isRenaming = renamingFileId === file.id;
   const isDeleting = deletingFileId === file.id;
@@ -552,14 +616,27 @@ function FileNode({ node, depth, props }: FileNodeProps) {
           data-testid={`file-checkbox-${file.id}`}
         />
       )}
-      <FileCode
-        className={cn('size-4 shrink-0', isIncluded ? 'text-primary' : 'text-muted-foreground')}
-      />
+      {hasLineage ? (
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <FileCode className="size-4 shrink-0 text-emerald-500" />
+            </TooltipTrigger>
+            <TooltipContent side="right" className="text-xs">
+              <p>Lineage available</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        <FileCode
+          className={cn('size-4 shrink-0', isIncluded ? 'text-primary' : 'text-muted-foreground')}
+        />
+      )}
       <span className={cn('whitespace-nowrap text-sm', isActive && 'font-semibold italic')}>
         {file.name}
       </span>
       <span className="text-[10px] text-muted-foreground/60 shrink-0 tabular-nums">
-        {formatFileSize(file.content.length)}
+        {formatFileSize(file.size ?? file.content.length)}
       </span>
       {/* Hide rename/delete actions in read-only mode */}
       {!isReadOnly && (
@@ -631,18 +708,35 @@ function FileNode({ node, depth, props }: FileNodeProps) {
       )}
     </div>
   );
-}
+})
 
 export function FileTree(props: FileTreeProps) {
   const { files, searchQuery, onContentWidthChange } = props;
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [renderLimit, setRenderLimit] = useState(FOLDER_RENDER_LIMIT);
   const treeRef = useRef<HTMLDivElement>(null);
   // Track if this is the initial mount to avoid collapsing on first render
   const isInitialMount = useRef(true);
   // Track previous search query to detect actual search changes
   const prevSearchQuery = useRef(searchQuery);
 
-  const tree = useMemo(() => buildFileTree(files), [files]);
+  // Defer file updates so content lazy-loading doesn't trigger tree rebuild on every keypress
+  const deferredFiles = useDeferredValue(files);
+
+  const tree = useMemo(() => buildFileTree(deferredFiles), [deferredFiles]);
+
+  // Precompute folder→fileIds mapping once (avoid per-folder recursive traversal)
+  const folderFileIdsMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    function walk(node: TreeNode) {
+      if (node.path) map.set(node.path, collectFileIds(node));
+      for (const child of node.children.values()) {
+        if (child.children.size > 0) walk(child);
+      }
+    }
+    walk(tree);
+    return map;
+  }, [tree]);
 
   // Check if we have any nested structure
   const hasNestedStructure = useMemo(() => {
@@ -713,16 +807,22 @@ export function FileTree(props: FileTreeProps) {
     });
   };
 
-  const sortedChildren = sortTreeNodes(Array.from(tree.children.values()));
+  const sortedChildren = useMemo(
+    () => sortTreeNodes(Array.from(tree.children.values())),
+    [tree]
+  );
 
   // If no nested structure, render flat list (no need for tree)
   if (!hasNestedStructure) {
     return <FlatFileList sortedChildren={sortedChildren} props={props} />;
   }
 
+  const visible = Math.min(sortedChildren.length, renderLimit);
+  const remaining = sortedChildren.length - visible;
+
   return (
     <div ref={treeRef} className="p-1 min-w-max" role="tree" aria-label="File tree">
-      {sortedChildren.map((node) =>
+      {sortedChildren.slice(0, visible).map((node) =>
         node.file ? (
           <FileNode key={node.file.id} node={node} depth={0} props={props} />
         ) : (
@@ -733,8 +833,17 @@ export function FileTree(props: FileTreeProps) {
             props={props}
             expandedFolders={expandedFolders}
             onToggleFolder={toggleFolder}
+            folderFileIdsMap={folderFileIdsMap}
           />
         )
+      )}
+      {remaining > 0 && (
+        <div
+          className="flex items-center gap-1 px-1 py-1 cursor-pointer text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm ml-4"
+          onClick={() => setRenderLimit((prev) => prev + FOLDER_RENDER_LIMIT)}
+        >
+          +{remaining} more items...
+        </div>
       )}
     </div>
   );

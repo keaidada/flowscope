@@ -268,8 +268,20 @@ pub fn analyze_sql_json(request_json: &str) -> String {
     let encoding = wasm_req.encoding;
     let sql = wasm_req.inner.sql.clone();
 
-    // Call handler
-    let result = analyze(&wasm_req.inner);
+    // Call handler, catching panics so one bad file can't crash the worker.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        analyze(&wasm_req.inner)
+    }))
+    .unwrap_or_else(|panic_info| {
+        let message = if let Some(s) = panic_info.downcast_ref::<String>() {
+            s.clone()
+        } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+            s.to_string()
+        } else {
+            "Unknown panic during analysis".to_string()
+        };
+        AnalyzeResult::from_error("INTERNAL_ERROR", message)
+    });
 
     // Serialize result
     let mut json_value = match serde_json::to_value(&result) {

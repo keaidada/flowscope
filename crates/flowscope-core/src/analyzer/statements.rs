@@ -190,6 +190,8 @@ impl<'a> Analyzer<'a> {
                             }
                             combined_type.push_str(&lineage.statement_type);
                             has_lineage = true;
+                            // Push inner DML lineage so nodes/edges are preserved
+                            self.statement_lineages.push(lineage);
                         }
                         Err(e) => return Err(e),
                     }

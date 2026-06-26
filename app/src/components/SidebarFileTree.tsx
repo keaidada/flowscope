@@ -1,15 +1,14 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
 import {
   Upload,
   FolderUp,
   Plus,
   Search,
   FolderPlus,
-  Loader2,
-  CheckCircle2,
   Trash2,
   CheckSquare,
 } from 'lucide-react';
+import ProgressOverlay from './ProgressOverlay';
 import { useTranslation } from 'react-i18next';
 import { useProject } from '@/lib/project-store';
 import type { ProjectFile } from '@/lib/project-store';
@@ -26,9 +25,11 @@ import {
 
 interface SidebarFileTreeProps {
   onContentWidthChange?: (widthPx: number) => void;
+  /** Set of file paths that already have lineage analysis results */
+  lineageFileIds?: Set<string>;
 }
 
-export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) {
+export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: SidebarFileTreeProps) {
   const { t } = useTranslation();
   const {
     currentProject,
@@ -43,6 +44,7 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
     setFileSelection,
     renameFile,
     renameFolder,
+    deleteFolder,
     isReadOnly,
   } = useProject();
 
@@ -58,6 +60,7 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
     loaded: number;
     skipped: number;
     done: boolean;
+    stage?: 'reading' | 'saving';
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -100,7 +103,7 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
 
       const allFiles = Array.from(e.target.files);
 
-      setUploadProgress({ total: allFiles.length, loaded: 0, skipped: 0, done: false });
+      setUploadProgress({ total: allFiles.length, loaded: 0, skipped: 0, done: false, stage: 'reading' });
 
       // Phase 1: Filter supported files
       const acceptedSet = new Set(ACCEPTED_FILE_TYPES_ARRAY.map((ext) => ext.toLowerCase()));
@@ -117,7 +120,7 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
       }
 
       const importTotal = supportedFiles.length;
-      setUploadProgress({ total: importTotal, loaded: 0, skipped, done: false });
+      setUploadProgress({ total: importTotal, loaded: 0, skipped, done: false, stage: 'reading' });
 
       const getFileLanguage = (fileName: string): ProjectFile['language'] => {
         if (fileName.endsWith(FILE_EXTENSIONS.JSON)) return 'json';
@@ -167,21 +170,18 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
         updateFiles(updates);
 
         loaded += batchFiles.length;
-        setUploadProgress({ total: importTotal, loaded, skipped, done: false });
+        setUploadProgress({ total: importTotal, loaded, skipped, done: false, stage: 'reading' });
       }
 
-      // Phase 4: Ensure SQLite persistence is complete before showing "done"
+      // Phase 4: Persist to SQLite → OPFS/IndexedDB
+      setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false, stage: 'saving' });
       const { saveProjectFiles } = await import('@/lib/file-storage');
       if (currentProject) {
-        // Merge with existing files in project
         const allProjectFiles = [
           ...(currentProject.files.filter((f) => !projectFiles.some((pf) => pf.id === f.id))),
           ...projectFiles,
         ];
         await saveProjectFiles(currentProject.id, allProjectFiles);
-        // Force immediate IndexedDB flush
-        const { persistNow } = await import('@/lib/duckdb');
-        await persistNow();
       }
 
       setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: true });
@@ -235,7 +235,7 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
     }
   };
 
-  const isFileIncludedInAnalysis = (fileId: string) => {
+  const isFileIncludedInAnalysis = useCallback((fileId: string) => {
     if (!currentProject) return false;
     switch (currentProject.runMode) {
       case 'all':
@@ -247,7 +247,14 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
       default:
         return false;
     }
-  };
+  }, [currentProject]);
+
+  // Defer lineage set changes so 3000+ FolderNode re-renders don't block UI
+  const deferredLineageIds = useDeferredValue(lineageFileIds);
+
+  const hasLineageFile = useCallback((filePath: string) => {
+    return deferredLineageIds?.has(filePath) ?? false;
+  }, [deferredLineageIds]);
 
   const handleToggleFolderSelection = useCallback(
     (fileIds: string[], select: boolean) => {
@@ -259,7 +266,16 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
 
   if (!currentProject) return null;
 
-  const selectedCount = currentProject.selectedFileIds?.length ?? 0;
+  // Display the count only for files that are actually loaded into the project files list
+  const visibleSelectedCount = (() => {
+    const stored = currentProject.selectedFileIds || [];
+    if (!currentProject.files || currentProject.files.length === 0) return 0;
+    const fileIdSet = new Set(currentProject.files.map((f) => f.id));
+    let cnt = 0;
+    for (const id of stored) if (fileIdSet.has(id)) cnt++;
+    return cnt;
+  })();
+  const selectedCount = visibleSelectedCount;
 
   const handleBatchDeleteClick = () => {
     if (!currentProject || selectedCount === 0) return;
@@ -510,6 +526,7 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
             onDeleteClick={handleDeleteClick}
             onCancelDelete={() => setDeletingFileId(null)}
             isFileIncludedInAnalysis={isFileIncludedInAnalysis}
+            hasLineageFile={hasLineageFile}
             canDeleteFiles={true}
             renameInputRef={renameInputRef}
             isReadOnly={isReadOnly}
@@ -547,6 +564,16 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
               );
             }}
             onRenameFolder={(oldPath, newName) => renameFolder(oldPath, newName)}
+            onDeleteFolder={(folderPath) => {
+              // 需要二次确认防止误删
+              if (window.confirm(`确定要删除文件夹 "${folderPath}" 及其所有文件吗？此操作不可撤销。`)) {
+                try {
+                  deleteFolder(folderPath);
+                } catch (e) {
+                  console.error('[deleteFolder] sync error:', e);
+                }
+              }
+            }}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4 text-center">
@@ -575,47 +602,20 @@ export function SidebarFileTree({ onContentWidthChange }: SidebarFileTreeProps) 
 
       {/* Upload progress overlay */}
       {uploadProgress && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-xs">
-          <div className="bg-background border rounded-xl shadow-lg p-5 w-[240px] space-y-3">
-            <div className="flex items-center gap-2">
-              {uploadProgress.done ? (
-                <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
-              ) : (
-                <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
-              )}
-              <span className="text-sm font-medium">
-                {uploadProgress.done ? t('sidebar.uploadDone') : t('sidebar.uploading')}
-              </span>
-            </div>
-
-            {/* Progress bar */}
-            <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary rounded-full transition-all duration-300"
-                style={{
-                  width: `${uploadProgress.total > 0 ? (uploadProgress.loaded / uploadProgress.total) * 100 : 0}%`,
-                }}
-              />
-            </div>
-
-            <div className="text-xs text-muted-foreground space-y-0.5">
-              <p>
-                {t('sidebar.uploadProgress', {
-                  loaded: uploadProgress.loaded,
-                  total: uploadProgress.total,
-                })}
-              </p>
-              {uploadProgress.done && (
-                <p>
-                  {t('sidebar.uploadResult', {
-                    imported: uploadProgress.total - uploadProgress.skipped,
-                    skipped: uploadProgress.skipped,
-                  })}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
+        <ProgressOverlay
+          visible={Boolean(uploadProgress)}
+          title={
+            uploadProgress.done
+              ? t('sidebar.uploadDone')
+              : uploadProgress.stage === 'saving'
+              ? t('sidebar.uploadSaving')
+              : t('sidebar.uploadReading')
+          }
+          progress={uploadProgress.total > 0 ? (uploadProgress.loaded / uploadProgress.total) * 100 : 0}
+          loaded={uploadProgress.loaded}
+          total={uploadProgress.total}
+          done={uploadProgress.done}
+        />
       )}
 
       {/* Hidden file inputs */}

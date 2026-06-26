@@ -20,6 +20,7 @@ import {
   Settings,
   Table2,
 } from 'lucide-react';
+import ProgressOverlay from './ProgressOverlay';
 import { toPng, toSvg } from 'html-to-image';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
@@ -55,6 +56,7 @@ import { SchemaEditor } from './SchemaEditor';
 interface AnalysisViewProps {
   graphContainerRef?: React.RefObject<HTMLDivElement | null>;
   isAnalyzing?: boolean;
+  progress?: number;
   lastAnalyzedAt?: number | null;
   resultStatus?: {
     origin: 'cache' | 'fresh';
@@ -67,6 +69,8 @@ interface AnalysisViewProps {
     runMode: 'current' | 'all' | 'custom';
     fileCount: number;
     stage: 'preparing' | 'loadingSchema' | 'buildingLineage' | 'persisting' | 'rendering';
+    batchProgress?: string;
+    processedFiles?: number;
   } | null;
 }
 
@@ -776,6 +780,7 @@ function SchemaListView({ schema }: SchemaListViewProps) {
 export function AnalysisView({
   graphContainerRef: externalGraphRef,
   isAnalyzing = false,
+  progress = 0,
   lastAnalyzedAt = null,
   resultStatus = null,
   loadingContext = null,
@@ -829,30 +834,6 @@ export function AnalysisView({
         return t('analysis.analyzingDesc');
     }
   }, [loadingContext?.stage, t]);
-  const runModeLabel = useMemo(() => {
-    switch (loadingContext?.runMode) {
-      case 'all':
-        return t('analysis.loadingRunModeAll');
-      case 'custom':
-        return t('analysis.loadingRunModeCustom');
-      default:
-        return t('analysis.loadingRunModeCurrent');
-    }
-  }, [loadingContext?.runMode, t]);
-  const loadingTargetSummary = useMemo(() => {
-    const primary = loadingContext?.fileName;
-    const total = loadingContext?.fileCount ?? 0;
-    if (!primary) {
-      return t('analysis.loadingCurrentFilePending');
-    }
-    if (total <= 1) {
-      return primary;
-    }
-    return t('analysis.loadingTargetSummary', {
-      primary,
-      rest: Math.max(0, total - 1),
-    });
-  }, [loadingContext?.fileCount, loadingContext?.fileName, t]);
   const statusSourceLabel = useMemo(() => {
     if (!resultStatus) return null;
     if (resultStatus.origin === 'fresh') {
@@ -1301,9 +1282,32 @@ export function AnalysisView({
             <>
               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-3 opacity-70" />
               <h3 className="font-semibold mb-2">{t('analysis.analyzingSql')}</h3>
-              <p className="text-sm max-w-xs mx-auto">
+              <p className="text-sm max-w-xs mx-auto mb-4">
                 {t('analysis.analyzingDesc')}
               </p>
+              {/* Progress bar for the building lineage phase */}
+              <div className="w-64 mx-auto space-y-1.5">
+                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all duration-300"
+                    style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span>{Math.round(progress)}%</span>
+                  {loadingContext?.batchProgress && (
+                    <span>{loadingContext.batchProgress}</span>
+                  )}
+                  {typeof loadingContext?.processedFiles === 'number' &&
+                    typeof loadingContext?.fileCount === 'number' &&
+                    loadingContext.fileCount > 0 && (
+                      <span>
+                        {loadingContext.processedFiles.toLocaleString()} /{' '}
+                        {loadingContext.fileCount.toLocaleString()}
+                      </span>
+                    )}
+                </div>
+              </div>
             </>
           ) : (
             <>
@@ -1440,67 +1444,16 @@ export function AnalysisView({
 
         <div className="flex-1 overflow-hidden relative">
           {isAnalyzing && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/88 backdrop-blur-sm">
-              <div className="mx-6 flex w-full max-w-lg flex-col items-center rounded-2xl border border-border/60 bg-background/95 px-8 py-10 text-center shadow-lg">
-                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-primary/8 text-primary">
-                  <Loader2 className="h-7 w-7 animate-spin" />
-                </div>
-                <h3 className="text-lg font-semibold text-foreground">
-                  {t('analysis.analyzingSql')}
-                </h3>
-                <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                  {loadingStageLabel}
-                </p>
-                <div className="mt-5 grid w-full gap-3 text-left sm:grid-cols-3">
-                  <div className="rounded-xl border bg-muted/35 px-4 py-3">
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {t('analysis.loadingCurrentFile')}
-                    </div>
-                    <div className="mt-1 truncate text-sm font-medium text-foreground">
-                      {loadingContext?.fileName || t('analysis.loadingCurrentFilePending')}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border bg-muted/35 px-4 py-3">
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {t('analysis.loadingTargetSummaryLabel')}
-                    </div>
-                    <div className="mt-1 line-clamp-2 text-sm font-medium text-foreground">
-                      {loadingTargetSummary}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border bg-muted/35 px-4 py-3">
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {t('analysis.loadingRunMode')}
-                    </div>
-                    <div className="mt-1 text-sm font-medium text-foreground">{runModeLabel}</div>
-                  </div>
-                  <div className="rounded-xl border bg-muted/35 px-4 py-3">
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {t('analysis.loadingFileCount')}
-                    </div>
-                    <div className="mt-1 text-sm font-medium text-foreground">
-                      {t('analysis.loadingFileCountValue', {
-                        count: loadingContext?.fileCount ?? 0,
-                      })}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-6 grid w-full gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl border bg-muted/35 px-3 py-3">
-                    <div className="h-1.5 w-16 animate-pulse rounded-full bg-primary/30" />
-                    <div className="mt-3 h-3 w-20 animate-pulse rounded bg-muted-foreground/20" />
-                  </div>
-                  <div className="rounded-xl border bg-muted/35 px-3 py-3">
-                    <div className="h-1.5 w-12 animate-pulse rounded-full bg-primary/30" />
-                    <div className="mt-3 h-3 w-24 animate-pulse rounded bg-muted-foreground/20" />
-                  </div>
-                  <div className="rounded-xl border bg-muted/35 px-3 py-3">
-                    <div className="h-1.5 w-14 animate-pulse rounded-full bg-primary/30" />
-                    <div className="mt-3 h-3 w-16 animate-pulse rounded bg-muted-foreground/20" />
-                  </div>
-                </div>
-              </div>
-            </div>
+            <ProgressOverlay
+              visible={Boolean(isAnalyzing)}
+              title={`${Math.round(progress)}% — ${t('analysis.analyzingSql')}${loadingContext?.fileCount ? ` (${loadingContext.fileCount} 个文件)` : ''}`}
+              progress={progress}
+              loaded={loadingContext?.processedFiles}
+              total={loadingContext?.fileCount}
+              batch={loadingContext?.batchProgress ?? undefined}
+              stage={loadingStageLabel}
+              done={false}
+            />
           )}
           {/* forceMount keeps components mounted when switching tabs to preserve state */}
 

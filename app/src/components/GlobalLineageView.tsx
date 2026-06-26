@@ -1,5 +1,5 @@
 import { useCallback, useMemo, type FC } from 'react';
-import { Network, Rows3, LayoutGrid } from 'lucide-react';
+import { Network, Rows3, LayoutGrid, Loader2 } from 'lucide-react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import {
   GraphErrorBoundary,
@@ -23,6 +23,7 @@ interface GlobalLineageViewProps {
   focusNodeId?: string;
   onFocusApplied?: () => void;
   className?: string;
+  loading?: boolean;
 }
 
 export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
@@ -32,29 +33,36 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
   focusNodeId,
   onFocusApplied,
   className,
+  loading,
 }) => {
   const { t } = useTranslation();
   const lineageActions = useLineageActions();
 
   // Shared data — computed once, consumed by list and matrix
-  useGlobalLineageData(result);
+  const { isLightweight, loadEntryDetail } = useGlobalLineageData(result);
   const { tasks: pipelineTasks, taskNames: pipelineTaskNames } = usePipelineData(result);
 
-  // Dynamic layers from actual data
+  // Dynamic layers L1-Ln based on actual pipeline data
   const pipelineLayers = useMemo<LayerDef[]>(() => {
-    const seen = new Map<string, number>();
-    for (const t of pipelineTasks) {
-      const key = t.layer;
-      if (!seen.has(key)) seen.set(key, seen.size);
+    const layerMap = new Map<string, number>();
+    for (const task of pipelineTasks) {
+      const key = task.layer;
+      layerMap.set(key, (layerMap.get(key) ?? 0) + 1);
     }
-    return [...seen.entries()]
-      .sort(([, a], [, b]) => b - a)
-      .map(([key]) => ({
-        key,
-        label: key,
-        type: 'logical' as const,
-        order: 0,
-      }));
+    if (layerMap.size === 0) {
+      return [{ key: 'L1', label: 'L1', type: 'logical' as const, order: 0 }];
+    }
+    const sorted = Array.from(layerMap.entries()).sort(([a], [b]) => {
+      const na = parseInt(a.slice(1));
+      const nb = parseInt(b.slice(1));
+      return na - nb;
+    });
+    return sorted.map(([key, count]) => ({
+      key,
+      label: `${key} (${count})`,
+      type: 'logical' as const,
+      order: 0,
+    }));
   }, [pipelineTasks]);
 
   // Navigate from list → graph (focus on a specific node)
@@ -110,7 +118,17 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
       </div>
 
       {/* Content */}
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 relative">
+        {loading && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">
+                {t('app.loading', '加载血缘数据中...')}
+              </p>
+            </div>
+          </div>
+        )}
         {mode === 'graph' && (
           <GraphErrorBoundary>
             <GraphView
@@ -124,6 +142,8 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
           <GlobalLineageListView
             result={result}
             onOpenGraphForNode={handleOpenGraphForNode}
+            isLightweight={isLightweight}
+            loadEntryDetail={loadEntryDetail}
           />
         )}
         {mode === 'matrix' && (

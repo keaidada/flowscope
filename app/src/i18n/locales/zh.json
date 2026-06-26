@@ -70,7 +70,9 @@
     "failedToRender": "SQL 编辑器渲染失败",
     "tryReloading": "请尝试刷新页面",
     "analysisError": "分析错误",
-    "noFileSelected": "未选择文件"
+    "noFileSelected": "未选择文件",
+    "saved": "已保存",
+    "saveFailed": "保存失败"
   },
   "project": {
     "projects": "项目",
@@ -165,6 +167,7 @@
   },
   "analysis": {
     "analyzingSql": "正在分析 SQL",
+    "tooManyNodesForGraph": "血缘图包含 {{count}} 个节点（超出图形渲染上限 {{limit}}），已自动切换到矩阵视图。列表视图可查看完整血缘明细。",
     "analyzingDesc": "正在为当前分析构建血缘、Schema 和问题详情。",
     "loadingCurrentFile": "当前文件",
     "loadingCurrentFilePending": "正在准备...",
@@ -499,6 +502,8 @@
     "newFolder": "新建文件夹",
     "folderName": "文件夹名称",
     "uploading": "正在读取文件...",
+    "uploadReading": "正在读取文件...",
+    "uploadSaving": "正在保存...",
     "uploadDone": "上传完成",
     "uploadProgress": "正在读取 {{loaded}} / {{total}} 个文件",
     "uploadResult": "已导入 {{imported}} 个，跳过 {{skipped}} 个",

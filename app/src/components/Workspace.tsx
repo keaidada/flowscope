@@ -37,6 +37,7 @@ import { useProject } from '@/lib/project-store';
 import { NavigationProvider } from '@/lib/navigation-context';
 import { FocusRegistryProvider } from '@/lib/focus-registry';
 import { useGlobalShortcuts, useAnalysis } from '@/hooks';
+import { readFileResultPaths } from '@/lib/analysis-cache';
 import type { GlobalShortcut } from '@/hooks';
 import { useThemeStore, type Theme } from '@/lib/theme-store';
 import { useViewStateStore } from '@/lib/view-state-store';
@@ -82,12 +83,33 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   const [editorOpen, setEditorOpen] = useState(true);
   const [lineageWorkspaceOpen, setLineageWorkspaceOpen] = useState(false);
   const [globalLineageOpen, setGlobalLineageOpen] = useState(false);
-  const [globalLineageView, setGlobalLineageView] = useState<GlobalLineageMode>('graph');
+  const [globalLineageView, setGlobalLineageView] = useState<GlobalLineageMode>('list');
   const [globalFocusNodeId, setGlobalFocusNodeId] = useState<string | undefined>(undefined);
   const previousResultRef = useRef(result);
   const previousLayoutRef = useRef(layoutAlgorithm);
   // 缓存全局血缘加载的各文件分析结果，跳转时直接使用
   const globalFileResultsRef = useRef<Map<string, AnalyzeResult>>(new Map());
+
+  // 血缘文件图标
+  const [lineageFileIds, setLineageFileIds] = useState<Set<string>>(new Set());
+
+  // 页面刷新后从 SQLite 恢复已有的血缘图标
+  useEffect(() => {
+    if (activeProjectId) {
+      readFileResultPaths(activeProjectId).then((paths) => {
+        setLineageFileIds(new Set(paths));
+      });
+    }
+  }, [activeProjectId]);
+
+  // 分析完成后更新血缘图标
+  useEffect(() => {
+    if (activeProjectId && analysis.lastAnalyzedAt) {
+      readFileResultPaths(activeProjectId).then((paths) => {
+        setLineageFileIds(new Set(paths));
+      });
+    }
+  }, [activeProjectId, analysis.lastAnalyzedAt]);
 
   // 打开全局血缘：从 SQLite 加载所有文件结果并合并
   const handleGlobalLineageToggle = useCallback(async () => {
@@ -766,6 +788,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                           {sidebarView === 'files' && (
                             <SidebarFileTree
                               onContentWidthChange={handleSidebarContentWidthChange}
+                              lineageFileIds={lineageFileIds}
                             />
                           )}
                           {sidebarView === 'search' && (
@@ -815,6 +838,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                         <AnalysisView
                           graphContainerRef={graphContainerRef}
                           isAnalyzing={analysis.isAnalyzing}
+                          progress={analysis.progress}
                           lastAnalyzedAt={analysis.lastAnalyzedAt}
                           resultStatus={analysis.resultStatus}
                           loadingContext={analysis.loadingContext}

@@ -404,6 +404,44 @@ fn parse_full_sql_buffer<'a>(
         return Ok(Vec::new());
     }
 
+    // When parser fallback was used (e.g., BigQuery procedure sanitizer), the parsed
+    // statements come from a different SQL text. Use the sanitized SQL for range
+    // computation instead of trying to align with the original statement ranges.
+    if parser_fallback_used {
+        if let Some(sanitized_sql) = parsed_output.source_sql {
+            let sanitized_sql: Cow<'a, str> = Cow::Owned(sanitized_sql);
+            let sanitized_ranges =
+                compute_statement_ranges_for_dialect(&sanitized_sql, ctx.dialect);
+            let aligned_ranges = align_statement_ranges(
+                &sanitized_sql,
+                &sanitized_ranges,
+                ctx.dialect,
+                parsed.len(),
+            )
+            .map_err(|e| Some(e))?;
+
+            let mut statements = Vec::with_capacity(parsed.len());
+            for (_index, (stmt, range)) in parsed
+                .into_iter()
+                .zip(aligned_ranges.into_iter())
+                .enumerate()
+            {
+                statements.push(StatementInput {
+                    statement: stmt,
+                    source_name: ctx.source_name.clone(),
+                    source_sql: sanitized_sql.clone(),
+                    source_range: range,
+                    source_sql_untemplated: None,
+                    source_range_untemplated: None,
+                    templating_applied: false,
+                    parser_fallback_used,
+                });
+            }
+            return Ok(statements);
+        }
+        // If no sanitized SQL available, fall through to normal alignment
+    }
+
     let aligned_ranges = match align_statement_ranges(
         &ctx.source_sql,
         statement_ranges,

@@ -1,13 +1,17 @@
 use crate::error::ParseError;
 use crate::types::Dialect;
 use sqlparser::ast::Statement;
-use sqlparser::dialect::PostgreSqlDialect;
+use sqlparser::dialect::{GenericDialect, PostgreSqlDialect};
 use sqlparser::parser::Parser;
 
 /// Result of parsing SQL with fallback metadata.
 pub struct ParseSqlOutput {
     pub statements: Vec<Statement>,
     pub parser_fallback_used: bool,
+    /// When parser fallback was used (e.g., BigQuery procedure sanitizer),
+    /// this contains the sanitized SQL text that was actually parsed.
+    /// Callers should use this instead of the original SQL for range computation.
+    pub source_sql: Option<String>,
 }
 
 /// Parse SQL using the specified dialect
@@ -23,29 +27,37 @@ pub fn parse_sql_with_dialect_output(
     let sqlparser_dialect = dialect.to_sqlparser_dialect();
     match Parser::parse_sql(sqlparser_dialect.as_ref(), sql) {
         Ok(statements) => {
-            // If parser returned 0 statements but SQL looks like a BigQuery procedure,
-            // try the sanitizer to extract actual DML/SELECT.
-            if statements.is_empty()
-                && ((matches!(dialect, Dialect::Bigquery)
-                    || matches!(dialect, Dialect::Generic))
-                    && looks_like_bigquery_procedure(sql))
-            {
-                if let Some(sanitized_sql) = sanitize_bigquery_raw_double_quoted_literals(sql)
-                {
-                    if let Ok(parsed) =
-                        Parser::parse_sql(sqlparser_dialect.as_ref(), &sanitized_sql)
-                    {
-                        return Ok(ParseSqlOutput {
-                            statements: parsed,
-                            parser_fallback_used: true,
-                        });
+            // For BigQuery procedures, the parser produces DECLARE/SET statements but
+            // often drops INSERT/SELECT DML inside IF blocks. Always use the sanitizer
+            // to extract the actual DML/SELECT from the procedure body.
+            let is_bq_procedure = (matches!(dialect, Dialect::Bigquery)
+                || matches!(dialect, Dialect::Generic))
+                && looks_like_bigquery_procedure(sql);
+
+            if is_bq_procedure {
+                match sanitize_bigquery_raw_double_quoted_literals(sql) {
+                    Some(sanitized_sql) => {
+                        match Parser::parse_sql(sqlparser_dialect.as_ref(), &sanitized_sql) {
+                            Ok(parsed) => {
+                                if !parsed.is_empty() {
+                                    return Ok(ParseSqlOutput {
+                                        statements: parsed,
+                                        parser_fallback_used: true,
+                                        source_sql: Some(sanitized_sql),
+                                    });
+                                }
+                            }
+                            Err(_) => {}
+                        }
                     }
+                    None => {}
                 }
-                // If sanitizer produced nothing useful, fall through to return empty
+                // If sanitizer failed, return original statements (at least they have DELETEs)
             }
             Ok(ParseSqlOutput {
                 statements,
                 parser_fallback_used: false,
+                source_sql: None,
             })
         }
         Err(primary_err) => {
@@ -56,6 +68,7 @@ pub fn parse_sql_with_dialect_output(
                     return Ok(ParseSqlOutput {
                         statements,
                         parser_fallback_used: true,
+                        source_sql: None,
                     });
                 }
             }
@@ -67,6 +80,7 @@ pub fn parse_sql_with_dialect_output(
                     return Ok(ParseSqlOutput {
                         statements,
                         parser_fallback_used: true,
+                        source_sql: None,
                     });
                 }
             }
@@ -79,19 +93,46 @@ pub fn parse_sql_with_dialect_output(
                         return Ok(ParseSqlOutput {
                             statements,
                             parser_fallback_used: true,
+                            source_sql: None,
                         });
                     }
                 }
             }
 
             if matches!(dialect, Dialect::Bigquery) || (matches!(dialect, Dialect::Generic) && looks_like_bigquery_procedure(sql)) {
-                if let Some(sanitized_sql) = sanitize_bigquery_raw_double_quoted_literals(sql) {
+                match sanitize_bigquery_raw_double_quoted_literals(sql) {
+                    Some(sanitized_sql) => {
+                        // Try Generic dialect first — the sanitized output contains standard
+                        // DML (DELETE, INSERT…SELECT) and the BigQuery dialect may choke on
+                        // CASE WHEN or other expressions.
+                        let generic = GenericDialect {};
+                        let parsed = Parser::parse_sql(&generic, &sanitized_sql)
+                            .or_else(|_| Parser::parse_sql(sqlparser_dialect.as_ref(), &sanitized_sql));
+                        if let Ok(statements) = parsed {
+                            if !statements.is_empty() {
+                                return Ok(ParseSqlOutput {
+                                    statements,
+                                    parser_fallback_used: true,
+                                    source_sql: Some(sanitized_sql),
+                                });
+                            }
+                        }
+                    }
+                    None => {}
+                }
+            }
+
+            // ClickHouse FINAL: ClickHouse allows `FROM table FINAL alias` as a table
+            // modifier, which sqlparser-rs does not support. Strip it before re-parsing.
+            if matches!(dialect, Dialect::Clickhouse) || matches!(dialect, Dialect::Generic) {
+                if let Some(sanitized_sql) = strip_clickhouse_final(sql) {
                     if let Ok(statements) =
                         Parser::parse_sql(sqlparser_dialect.as_ref(), &sanitized_sql)
                     {
                         return Ok(ParseSqlOutput {
                             statements,
                             parser_fallback_used: true,
+                            source_sql: Some(sanitized_sql),
                         });
                     }
                 }
@@ -109,6 +150,7 @@ pub fn parse_sql_with_dialect_output(
                         return Ok(ParseSqlOutput {
                             statements,
                             parser_fallback_used: true,
+                            source_sql: None,
                         });
                     }
                 }
@@ -122,6 +164,7 @@ pub fn parse_sql_with_dialect_output(
                     return Ok(ParseSqlOutput {
                         statements,
                         parser_fallback_used: true,
+                        source_sql: None,
                     });
                 }
             }
@@ -197,6 +240,56 @@ fn sanitize_escaped_identifiers_for_dialect(sql: &str, dialect: Dialect) -> Opti
 fn sanitize_trailing_comma_before_from(sql: &str) -> Option<String> {
     let rewritten = remove_trailing_comma_before_from(sql);
     (rewritten != sql).then_some(rewritten)
+}
+
+/// Strip ClickHouse `FINAL` keyword from table references.
+///
+/// ClickHouse DDL allows `FROM table_name FINAL alias` but sqlparser-rs does not
+/// recognize FINAL as a keyword. This strips it so the parser can proceed.
+fn strip_clickhouse_final(sql: &str) -> Option<String> {
+    if !sql.contains("FINAL") {
+        return None;
+    }
+    let bytes = sql.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    let mut changed = false;
+    while i < bytes.len() {
+        if bytes[i] == b'F' || bytes[i] == b'f' {
+            let remaining = &bytes[i..];
+            if remaining.len() >= 5
+                && remaining[0].eq_ignore_ascii_case(&b'F')
+                && remaining[1].eq_ignore_ascii_case(&b'I')
+                && remaining[2].eq_ignore_ascii_case(&b'N')
+                && remaining[3].eq_ignore_ascii_case(&b'A')
+                && remaining[4].eq_ignore_ascii_case(&b'L')
+                && (i == 0 || bytes[i - 1].is_ascii_whitespace())
+            {
+                let after = remaining.get(5);
+                let is_end = after.is_none() || after == Some(&b')') || after.map_or(false, |b| b.is_ascii_whitespace());
+                if is_end {
+                    i += 5;
+                    changed = true;
+                    // Skip trailing whitespace after FINAL
+                    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                        i += 1;
+                    }
+                    // Put back a space between the tokens separated by FINAL
+                    if !out.is_empty() && i < bytes.len() && bytes[i] != b')' {
+                        out.push(b' ');
+                    }
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    if changed {
+        Some(String::from_utf8_lossy(&out).to_string())
+    } else {
+        None
+    }
 }
 
 fn push_current_char(sql: &str, i: &mut usize, out: &mut String) {
@@ -343,6 +436,99 @@ fn sanitize_ansi_national_literal_spacing(sql: &str) -> Option<String> {
     changed.then_some(out)
 }
 
+/// BigQuery identifiers may contain hyphens (e.g., `my-project.dataset.table`),
+/// but sqlparser-rs's BigQuery dialect treats unquoted hyphens as minus signs.
+/// Wrap each identifier segment that contains a hyphen in backticks.
+fn backtick_quote_hyphenated_identifiers(sql: &str) -> String {
+    let bytes = sql.as_bytes();
+    let mut out = String::with_capacity(sql.len() + 32);
+    let mut i = 0;
+    let mut in_backtick = false;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        // Track string/comment states
+        if !in_single && !in_double && !in_backtick && !in_line_comment && !in_block_comment {
+            if b == b'`' {
+                in_backtick = true;
+                out.push(b as char);
+                i += 1;
+                continue;
+            }
+            if b == b'\'' {
+                in_single = true;
+                out.push(b as char);
+                i += 1;
+                continue;
+            }
+            if b == b'"' {
+                in_double = true;
+                out.push(b as char);
+                i += 1;
+                continue;
+            }
+            if b == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+                in_line_comment = true;
+                out.push(b as char);
+                i += 1;
+                continue;
+            }
+            if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                in_block_comment = true;
+                out.push(b as char);
+                i += 1;
+                continue;
+            }
+            // If this is a letter (start of an identifier), collect the full word
+            if b.is_ascii_alphabetic() || b == b'_' {
+                let start = i;
+                while i < bytes.len() {
+                    let c = bytes[i];
+                    if c.is_ascii_alphanumeric() || c == b'_' || c == b'-' {
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let word = &sql[start..i];
+                if word.contains('-') {
+                    out.push('`');
+                    out.push_str(word);
+                    out.push('`');
+                } else {
+                    out.push_str(word);
+                }
+                continue;
+            }
+        } else if in_single {
+            if b == b'\'' { in_single = false; }
+        } else if in_double {
+            if b == b'"' { in_double = false; }
+        } else if in_backtick {
+            if b == b'`' { in_backtick = false; }
+        } else if in_line_comment {
+            if b == b'\n' { in_line_comment = false; }
+        } else if in_block_comment {
+            if b == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                out.push(b as char);
+                out.push('/');
+                i += 2;
+                in_block_comment = false;
+                continue;
+            }
+        }
+
+        out.push(b as char);
+        i += 1;
+    }
+    out
+}
+
 /// Sanitize BigQuery stored procedures: extract DML/SELECT from BEGIN...END body.
 fn sanitize_bigquery_procedure(sql: &str) -> Option<String> {
     let upper = sql.to_uppercase();
@@ -352,7 +538,8 @@ fn sanitize_bigquery_procedure(sql: &str) -> Option<String> {
         let before_proc = upper[..proc_pos].trim_end();
         if before_proc.ends_with("CREATE") || before_proc.ends_with("REPLACE") {
             if let Some(begin_idx) = upper[proc_pos..].find("BEGIN").map(|i| proc_pos + i) {
-                return extract_begin_end_body(sql, &upper, begin_idx);
+                return extract_begin_end_body(sql, &upper, begin_idx)
+                    .map(|body| backtick_quote_hyphenated_identifiers(&body));
             }
         }
     }
@@ -366,6 +553,34 @@ fn sanitize_bigquery_procedure(sql: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Check if the bytes after END start with a control-flow keyword (IF, WHILE, LOOP),
+/// meaning this END belongs to a control-flow block, not a procedure-level END.
+fn is_control_flow_end(after_end: &[u8]) -> bool {
+    let mut i = 0;
+    while i < after_end.len() && after_end[i].is_ascii_whitespace() { i += 1; }
+    let rest = &after_end[i..];
+    rest.len() >= 2 && (
+        rest[..2].eq_ignore_ascii_case(b"IF")
+        || rest.len() >= 5 && rest[..5].eq_ignore_ascii_case(b"WHILE")
+        || rest.len() >= 4 && rest[..4].eq_ignore_ascii_case(b"LOOP")
+    )
+}
+
+/// Check that after END (skipping whitespace), the next character is `;`.
+/// This prevents matching `END,` (CASE WHEN expression) or `END)` as a
+/// procedure-level END.
+fn is_end_followed_by_semicolon(after_end: &[u8]) -> bool {
+    let mut i = 0;
+    while i < after_end.len() && after_end[i].is_ascii_whitespace() { i += 1; }
+    // Allow single-line comment before the semicolon
+    if i + 1 < after_end.len() && after_end[i] == b'-' && after_end[i + 1] == b'-' {
+        // Skip to end of line
+        while i < after_end.len() && after_end[i] != b'\n' { i += 1; }
+        while i < after_end.len() && after_end[i].is_ascii_whitespace() { i += 1; }
+    }
+    i >= after_end.len() || after_end[i] == b';'
 }
 
 /// Extract DML/SELECT from a BEGIN...END body starting at begin_idx
@@ -393,8 +608,21 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
         } else if in_line_comment { if c == b'\n' { in_line_comment = false; } i += 1; continue; }
         else if in_block_comment { if c == b'*' && i+1 < bytes.len() && bytes[i+1] == b'/' { in_block_comment = false; i+=2; continue; } i+=1; continue; }
         if !in_string && !in_line_comment && !in_block_comment {
-            if i+5 <= bytes.len() && upper[i..].starts_with("BEGIN") && is_word_boundary(bytes,i,5) { depth += 1; }
-            if i+3 <= bytes.len() && upper[i..].starts_with("END") && is_word_boundary(bytes,i,3) { if depth == 0 { body_end = i; break; } depth -= 1; }
+            if i+5 <= bytes.len() && upper[i..].starts_with("BEGIN") && is_word_boundary(bytes,i,5) && is_leading_word_boundary(bytes,i) { depth += 1; }
+            if i+3 <= bytes.len() && upper[i..].starts_with("END") && is_word_boundary(bytes,i,3) && is_leading_word_boundary(bytes,i) {
+                // Distinguish END IF / END WHILE / END LOOP from procedure-level END
+                if is_control_flow_end(&bytes[i+3..]) {
+                    i += 3;
+                    continue;
+                }
+                // Skip END that is not followed by `;` or `--` comment — it's
+                // likely a CASE WHEN expression like `END,` or `END)`.
+                if !is_end_followed_by_semicolon(&bytes[i+3..]) {
+                    i += 3; // advance past this END keyword
+                    continue;
+                }
+                if depth == 0 { body_end = i; break; } depth -= 1;
+            }
         }
         i += 1;
     }
@@ -408,14 +636,40 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
     for stmt in &statements {
         let trimmed = stmt.trim();
         if trimmed.is_empty() { continue; }
-        let upper_stmt = trimmed.to_uppercase();
+
+        // Skip leading single-line comments (lines starting with "--") so that
+        // statements like:
+        //     -- Truncate temporary tables
+        //     TRUNCATE TABLE ...
+        // are correctly identified by their DML keyword.
+        let content = {
+            let mut s = trimmed;
+            loop {
+                let ss = s.trim_start();
+                if ss.starts_with("--") {
+                    // Skip to end of this comment line
+                    if let Some(nl) = ss.find('\n') {
+                        s = &ss[nl..];
+                    } else {
+                        break; // entire statement is a comment, drop it
+                    }
+                } else {
+                    break;
+                }
+            }
+            s.trim()
+        };
+        if content.is_empty() { continue; }
+
+        let upper_stmt = content.to_uppercase();
         let first_word = upper_stmt.split_whitespace().next().unwrap_or("");
         match first_word {
             "DECLARE" | "SET" | "IF" | "ELSE" | "ELSEIF" | "WHILE" | "LOOP" | "FOR"
             | "BREAK" | "CONTINUE" | "RETURN" | "RAISE" | "BEGIN" | "END"
-            | "CALL" | "EXECUTE" | "EXEC" | "DROP" | "ALTER" | "GRANT" | "REVOKE" => {}
+            | "CALL" | "EXECUTE" | "EXEC" | "DROP" | "ALTER" | "GRANT" | "REVOKE"
+            | "UPDATE" => {} // UPDATE with CASE WHEN may not parse in Generic dialect
             "CREATE" => { if upper_stmt.contains("AS SELECT") || upper_stmt.contains("AS\nSELECT") { out.push_str(trimmed); if !trimmed.ends_with(';') { out.push(';'); } out.push('\n'); has_any = true; } }
-            "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" => { out.push_str(trimmed); if !trimmed.ends_with(';') { out.push(';'); } out.push('\n'); has_any = true; }
+            "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" => { out.push_str(trimmed); if !trimmed.ends_with(';') { out.push(';'); } out.push('\n'); has_any = true; }
             _ => {}
         }
     }
@@ -426,6 +680,12 @@ fn is_word_boundary(bytes: &[u8], i: usize, word_len: usize) -> bool {
     let next = i + word_len;
     if next >= bytes.len() { return true; }
     matches!(bytes[next], b' ' | b'\t' | b'\n' | b'\r' | b';' | b'(' | b')' | b',' | b'.')
+}
+
+/// Check that the character before position `i` is not an identifier character
+/// (alphanumeric or underscore). Used to prevent matching `v_END` as keyword `END`.
+fn is_leading_word_boundary(bytes: &[u8], i: usize) -> bool {
+    i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_'
 }
 
 fn split_sql_statements(body: &str) -> Vec<String> {
@@ -454,7 +714,7 @@ fn split_sql_statements(body: &str) -> Vec<String> {
     result
 }
 
-fn sanitize_bigquery_raw_double_quoted_literals(sql: &str) -> Option<String> {
+pub fn sanitize_bigquery_raw_double_quoted_literals(sql: &str) -> Option<String> {
     // Try procedure sanitizer first for BigQuery stored procedures
     if let Some(inner) = sanitize_bigquery_procedure(sql) {
         return Some(inner);

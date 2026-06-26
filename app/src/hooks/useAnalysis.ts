@@ -3,6 +3,7 @@ import { useLineageStore } from '@pondpilot/flowscope-react';
 import { toast } from 'sonner';
 import { analyzeWithWorker, getCachedAnalysis, syncAnalysisFiles } from '@/lib/analysis-worker';
 import type { BackendAdapter, AnalysisPayload } from '@/lib/backend-adapter';
+import type { BatchProgress } from '@/lib/analysis-worker';
 import { useProject } from '@/lib/project-store';
 import type { Project } from '@/lib/project-store';
 import { useAnalysisStore } from '@/lib/analysis-store';
@@ -12,7 +13,8 @@ import { buildScopedSchemaSQL } from '@/lib/scoped-schema';
 import { AnalysisErrorCode, isAnalysisError } from '@/types';
 import type { AnalysisState, AnalysisContext, FileValidationResult } from '@/types';
 import { loadSchemaFiles } from '@/lib/schema-storage';
-import { writeFileResult, writeLineageData, readFileResult, writeTableFlows, writeSchemaData, writeHierarchyData } from '@/lib/analysis-cache';
+import { writeBatchFileResults, readFileResult, writeSchemaData, writeHierarchyData } from '@/lib/analysis-cache';
+import { flushPersistNow } from '@/lib/duckdb';
 import i18n from '@/i18n';
 
 // Maximum retry attempts for file sync errors to prevent infinite loops
@@ -20,6 +22,13 @@ const MAX_FILE_SYNC_RETRIES = 1;
 
 // Debug flag for analysis-related logging - only enabled in development
 const ANALYSIS_DEBUG = !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+
+// Temporary feature flag: when true, skip all heavy SQLite structured writes
+// and only persist per-file results to OPFS. Use for debugging sql.js allocation
+// issues. Will be turned off once stability is confirmed.
+const SKIP_STRUCTURED_SQL = true;
+// expose runtime flag so other modules (analysis-cache) can skip heavy sqlite writes
+(globalThis as any).__FLOWSCOPE_SKIP_STRUCTURED_SQL = SKIP_STRUCTURED_SQL;
 
 // Safe time measurement function with fallback for test environments
 function nowMs(): number {
@@ -66,6 +75,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     lastAnalyzedAt: null,
     resultStatus: null,
     loadingContext: null,
+    progress: 0,
   });
   const analysisRequestRef = useRef(0);
   const currentProjectRef = useRef<Project | null>(currentProject);
@@ -652,7 +662,36 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
           while (true) {
             try {
-              analysisResponse = await analyzeWithWorker(workerPayload, { knownCacheKey });
+              analysisResponse = await analyzeWithWorker(workerPayload, {
+                knownCacheKey,
+                onProgress: (prog: BatchProgress) => {
+                  // Compute percent: prefer completedFiles/totalFiles, else fallback to batchIndex/batchTotal
+                  let pct: number | undefined;
+                  if (prog.totalFiles && prog.totalFiles > 0) {
+                    pct = Math.round(((prog.completedFiles ?? 0) / prog.totalFiles) * 100);
+                  } else if (
+                    typeof prog.batchIndex === 'number' &&
+                    typeof prog.batchTotal === 'number' &&
+                    prog.batchTotal > 0
+                  ) {
+                    // Use batchIndex (0-based) to estimate progress across batches
+                    pct = Math.round(((prog.batchIndex + 1) / prog.batchTotal) * 100);
+                  }
+
+                  setState((prev) => ({
+                    ...prev,
+                    progress: pct ?? prev.progress,
+                    loadingContext: prev.loadingContext
+                      ? {
+                          ...prev.loadingContext,
+                          batchProgress: prog.batchProgress ?? prev.loadingContext.batchProgress,
+                          processedFiles: prog.completedFiles ?? prev.loadingContext.processedFiles,
+                          fileName: prog.batchFile ?? prev.loadingContext.fileName,
+                        }
+                      : prev.loadingContext,
+                  }));
+                },
+              });
               break;
             } catch (error) {
               // Handle missing file content by syncing files and retrying.
@@ -678,6 +717,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         const durationMs = performance.now() - analysisStart;
 
         if (!analysisResponse.skipped && analysisResponse.result) {
+          const result = analysisResponse.result; // narrowed to non-null
           setLoadingContext({
             fileName: context.files[0]?.name ?? requestedFileName,
             runMode,
@@ -687,27 +727,43 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           // Use startTransition to make the result update low-priority,
           // allowing UI interactions and worker callbacks to proceed without blocking
           startTransition(() => {
-            setLineageResult(analysisResponse.result);
+            setLineageResult(result);
           });
           if (activeProjectId) {
-            storeResult(activeProjectId, analysisResponse.result, hideCTEs);
-            // 持久化每个文件的分析结果到 SQLite（用于全局血缘）
+            storeResult(activeProjectId, result, hideCTEs);
+            // Defer frequent DB persists while performing many writes to reduce sql.js memory pressure.
+            (globalThis as any).__FLOWSCOPE_DEFER_PERSIST = true;
             const cacheKey = analysisResponse.cacheKey ?? '';
-            for (const file of context.files) {
-              writeFileResult(activeProjectId, file.name, cacheKey, analysisResponse.result).catch(
-                () => {}
-              );
-              // 写入结构化表 + 源表→目标表
-              writeLineageData(activeProjectId, file.name, analysisResponse.result, file.content).catch(
-                () => {}
-              );
-              writeTableFlows(activeProjectId, file.name, analysisResponse.result).catch(
-                () => {}
-              );
+
+            // Collect all file paths, then write the merged result to OPFS once
+            // and batch-insert DB pointer rows.  This avoids writing the same
+            // 10MB+ JSON O(N) times when N files share one result.
+            const allFilePaths = context.files.map((f: { name: string; path?: string }) => f.path ?? f.name);
+            try {
+              await writeBatchFileResults(activeProjectId, allFilePaths, cacheKey, result);
+            } catch (err) {
+              console.error('[useAnalysis] writeBatchFileResults failed', err);
             }
-            // 写入 schema 和层级（项目级，只需一次）
-            writeSchemaData(activeProjectId, analysisResponse.result).catch(() => {});
-            writeHierarchyData(activeProjectId, analysisResponse.result).catch(() => {});
+
+            // Update progress bar to show completion
+            setState((prev) => ({
+              ...prev,
+              progress: 100,
+              loadingContext: prev.loadingContext
+                ? { ...prev.loadingContext, processedFiles: context.files.length }
+                : prev.loadingContext,
+            }));
+
+            // Write global artifacts once
+            await writeSchemaData(activeProjectId, result);
+            await writeHierarchyData(activeProjectId, result);
+            // Force flush DB changes once at the end to reduce sync overhead
+            try {
+              await flushPersistNow();
+            } finally {
+              // Always restore defer flag to false
+              (globalThis as any).__FLOWSCOPE_DEFER_PERSIST = false;
+            }
           }
 
           toast.success(i18n.t('analysis.persistedCurrentResult'), {

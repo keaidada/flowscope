@@ -167,6 +167,8 @@ export function FileSelector({ open: controlledOpen, onOpenChange }: FileSelecto
     }
   };
 
+  const noLineageFile = useCallback(() => false, []);
+
   const handleStartRename = (fileId: string, currentName: string) => {
     if (isReadOnly) return;
     setRenamingFileId(fileId);
@@ -479,6 +481,7 @@ export function FileSelector({ open: controlledOpen, onOpenChange }: FileSelecto
                 onDeleteClick={handleDeleteClick}
                 onCancelDelete={handleCancelDelete}
                 isFileIncludedInAnalysis={isFileIncludedInAnalysis}
+                hasLineageFile={noLineageFile}
                 canDeleteFiles={currentProject ? currentProject.files.length > 1 : false}
                 renameInputRef={renameInputRef}
                 isReadOnly={isReadOnly}

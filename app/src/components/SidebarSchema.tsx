@@ -17,9 +17,8 @@ import {
   GripVertical,
   Plus,
   Pencil,
-  Loader2,
-  CheckCircle2,
 } from 'lucide-react';
+import ProgressOverlay from './ProgressOverlay';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -1628,48 +1627,16 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       </div>
 
       {/* Upload progress overlay */}
+      {/* Unified progress overlay (reused by AnalysisView too) */}
       {uploadProgress && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-xs">
-          <div className="bg-background border rounded-xl shadow-lg p-5 w-[240px] space-y-3">
-            <div className="flex items-center gap-2">
-              {uploadProgress.done ? (
-                <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
-              ) : (
-                <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
-              )}
-              <span className="text-sm font-medium">
-                {uploadProgress.done ? t('sidebar.uploadDone') : t('sidebar.uploading')}
-              </span>
-            </div>
-
-            {/* Progress bar */}
-            <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary rounded-full transition-all duration-300"
-                style={{
-                  width: `${uploadProgress.total > 0 ? (uploadProgress.loaded / uploadProgress.total) * 100 : 0}%`,
-                }}
-              />
-            </div>
-
-            <div className="text-xs text-muted-foreground space-y-0.5">
-              <p>
-                {t('sidebar.uploadProgress', {
-                  loaded: uploadProgress.loaded,
-                  total: uploadProgress.total,
-                })}
-              </p>
-              {uploadProgress.skipped > 0 && (
-                <p className="text-muted-foreground/70">
-                  {t('sidebar.uploadResult', {
-                    imported: uploadProgress.loaded,
-                    skipped: uploadProgress.skipped,
-                  })}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
+        <ProgressOverlay
+          visible={Boolean(uploadProgress)}
+          title={uploadProgress.done ? t('sidebar.uploadDone') : t('sidebar.uploading')}
+          progress={uploadProgress.total > 0 ? (uploadProgress.loaded / uploadProgress.total) * 100 : 0}
+          loaded={uploadProgress.loaded}
+          total={uploadProgress.total}
+          done={uploadProgress.done}
+        />
       )}
     </div>
   );

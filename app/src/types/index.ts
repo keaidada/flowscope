@@ -59,6 +59,7 @@ export interface AnalysisState {
   isAnalyzing: boolean;
   error: string | null;
   lastAnalyzedAt: number | null;
+  progress: number;
   resultStatus?: {
     origin: 'cache' | 'fresh';
     source: 'memory' | 'indexeddb' | 'sqlite' | 'fresh';
@@ -70,6 +71,9 @@ export interface AnalysisState {
     runMode: 'current' | 'all' | 'custom';
     fileCount: number;
     stage: 'preparing' | 'loadingSchema' | 'buildingLineage' | 'persisting' | 'rendering';
+    batchProgress?: string;
+    processedFiles?: number;
+    processingFile?: string;
   } | null;
 }
 

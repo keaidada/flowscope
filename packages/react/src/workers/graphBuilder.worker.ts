@@ -884,53 +884,67 @@ function normalizeStatement(statement: StatementLineage): StatementLineage {
  * Ensures nodes carry sourceName in metadata when available.
  */
 function mergeStatements(statements: StatementLineage[]): StatementLineage {
-  if (statements.length === 1) {
-    return normalizeStatement(statements[0]);
+  try {
+    if (statements.length === 1) {
+      return normalizeStatement(statements[0]);
+    }
+
+    // Guard: if input is extremely large, log and limit behavior to avoid recursion/stack
+    const MAX_SAFE_STATEMENTS = 2000;
+    if (statements.length > MAX_SAFE_STATEMENTS) {
+      console.warn('[GraphBuilder Worker] mergeStatements: large input size', statements.length);
+      // Truncate to a reasonable number to avoid OOM/stack issues
+      statements = statements.slice(0, MAX_SAFE_STATEMENTS);
+    }
+
+    const mergedNodes = new Map<string, Node>();
+    const mergedEdges = new Map<string, Edge>();
+
+    for (let si = 0; si < statements.length; si++) {
+      const stmt = statements[si];
+      const sourceName = stmt.sourceName;
+      for (let ni = 0; ni < stmt.nodes.length; ni++) {
+        const node = stmt.nodes[ni];
+        const nodeWithSource = withSourceName(node, sourceName);
+        const existing = mergedNodes.get(node.id);
+        if (!existing) {
+          mergedNodes.set(node.id, nodeWithSource);
+        } else {
+          if (node.filters && node.filters.length > 0) {
+            existing.filters = [...(existing.filters || []), ...node.filters];
+          }
+          if (!existing.metadata?.sourceName && nodeWithSource.metadata?.sourceName) {
+            existing.metadata = {
+              ...(existing.metadata || {}),
+              sourceName: nodeWithSource.metadata.sourceName,
+            };
+          }
+        }
+      }
+
+      for (let ei = 0; ei < stmt.edges.length; ei++) {
+        const edge = stmt.edges[ei];
+        if (!mergedEdges.has(edge.id)) mergedEdges.set(edge.id, edge);
+      }
+    }
+
+    const totalJoinCount = statements.reduce((sum, stmt) => sum + (stmt.joinCount || 0), 0);
+    const maxComplexity =
+      statements.length > 0 ? Math.max(...statements.map((stmt) => stmt.complexityScore || 0)) : 1;
+
+    return {
+      statementIndex: 0,
+      statementType: 'SELECT',
+      nodes: Array.from(mergedNodes.values()),
+      edges: Array.from(mergedEdges.values()),
+      joinCount: totalJoinCount,
+      complexityScore: maxComplexity,
+    };
+  } catch (err) {
+    console.error('[GraphBuilder Worker] mergeStatements failed:', err);
+    // Fallback: return an empty statement to allow the pipeline to continue
+    return { statementIndex: 0, statementType: 'SELECT', nodes: [], edges: [], joinCount: 0, complexityScore: 1 };
   }
-
-  const mergedNodes = new Map<string, Node>();
-  const mergedEdges = new Map<string, Edge>();
-
-  statements.forEach((stmt) => {
-    const sourceName = stmt.sourceName;
-    stmt.nodes.forEach((node) => {
-      const nodeWithSource = withSourceName(node, sourceName);
-      const existing = mergedNodes.get(node.id);
-      if (!existing) {
-        mergedNodes.set(node.id, nodeWithSource);
-        return;
-      }
-
-      if (node.filters && node.filters.length > 0) {
-        existing.filters = [...(existing.filters || []), ...node.filters];
-      }
-      if (!existing.metadata?.sourceName && nodeWithSource.metadata?.sourceName) {
-        existing.metadata = {
-          ...(existing.metadata || {}),
-          sourceName: nodeWithSource.metadata.sourceName,
-        };
-      }
-    });
-
-    stmt.edges.forEach((edge) => {
-      if (!mergedEdges.has(edge.id)) {
-        mergedEdges.set(edge.id, edge);
-      }
-    });
-  });
-
-  const totalJoinCount = statements.reduce((sum, stmt) => sum + stmt.joinCount, 0);
-  const maxComplexity =
-    statements.length > 0 ? Math.max(...statements.map((stmt) => stmt.complexityScore)) : 1;
-
-  return {
-    statementIndex: 0,
-    statementType: 'SELECT',
-    nodes: Array.from(mergedNodes.values()),
-    edges: Array.from(mergedEdges.values()),
-    joinCount: totalJoinCount,
-    complexityScore: maxComplexity,
-  };
 }
 
 function getScriptIO(stmts: StatementLineageWithSource[]) {
