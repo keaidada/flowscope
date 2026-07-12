@@ -325,6 +325,18 @@ pub struct IssueCount {
     pub infos: usize,
 }
 
+/// Pre-computed lineage entry — passed from frontend Schema computation to backend export.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LineageEntry {
+    /// Script file path or name.
+    pub script: String,
+    /// Source (input) physical table qualified name.
+    pub input_table: String,
+    /// Target (output) physical table qualified name.
+    pub output_table: String,
+}
+
 /// Machine-readable issue codes.
 pub mod issue_codes {
     pub const PARSE_ERROR: &str = "PARSE_ERROR";

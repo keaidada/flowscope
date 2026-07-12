@@ -52,6 +52,7 @@ pub use types::{
     IssueAutofix,
     IssueAutofixApplicability,
     IssueCount,
+    LineageEntry,
     IssuePatchEdit,
     JoinType,
     // Legacy

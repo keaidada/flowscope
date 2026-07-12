@@ -39,6 +39,7 @@ impl<'a> Analyzer<'a> {
             issues: self.issues.clone(),
             summary,
             resolved_schema,
+            precomputed_lineage: None,
         }
     }
 

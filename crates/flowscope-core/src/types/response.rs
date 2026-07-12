@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::common::{Issue, IssueCount, Span, Summary};
+use super::common::{Issue, IssueCount, Severity, Span, Summary};
 use super::request::ForeignKeyRef;
 
 /// The result of analyzing SQL for data lineage.
@@ -30,6 +30,13 @@ pub struct AnalyzeResult {
     /// Effective schema used during analysis (imported + implied)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_schema: Option<ResolvedSchemaMetadata>,
+
+    /// Pre-computed lineage entries from the frontend Schema module.
+    /// When set, the backend export will use these directly instead of
+    /// re-computing lineage from the raw graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
+    pub precomputed_lineage: Option<Vec<super::common::LineageEntry>>,
 }
 
 /// The result of splitting SQL into statement spans.
@@ -74,7 +81,155 @@ impl AnalyzeResult {
                 has_errors: true,
             },
             resolved_schema: None,
+            precomputed_lineage: None,
         }
+    }
+
+    /// Merge multiple per-file analysis results into a single combined result.
+    /// Statement indices are re-numbered sequentially across all inputs.
+    /// Statements must already carry `source_name` so the export layer can
+    /// group lineage by script.
+    pub fn merge(results: &[Self]) -> Self {
+        let mut statements = Vec::new();
+        let mut issues = Vec::new();
+
+        for (group_idx, result) in results.iter().enumerate() {
+            for (local_idx, stmt) in result.statements.iter().enumerate() {
+                let mut cloned = stmt.clone();
+                cloned.statement_index = statements.len();
+                // Ensure every statement has a source_name
+                if cloned.source_name.is_none() && result.statements.len() == 1 {
+                    // Single-statement results often come from the file picker;
+                    // use the first statement's source_name as a fallback
+                    cloned.source_name = result
+                        .statements
+                        .first()
+                        .and_then(|s| s.source_name.clone());
+                }
+                let _ = (group_idx, local_idx);
+                statements.push(cloned);
+            }
+            issues.extend(result.issues.iter().cloned());
+        }
+
+        let table_count = statements
+            .iter()
+            .flat_map(|s| &s.nodes)
+            .filter(|n| n.node_type.is_table_like())
+            .count();
+
+        let column_count = statements
+            .iter()
+            .flat_map(|s| &s.nodes)
+            .filter(|n| n.node_type == NodeType::Column)
+            .count();
+        let join_count: usize = statements.iter().map(|s| s.join_count).sum();
+        let total = statements.len();
+        let error_count = issues.iter().filter(|i| i.severity == Severity::Error).count();
+        let warn_count = issues.iter().filter(|i| i.severity == Severity::Warning).count();
+        let info_count = issues.iter().filter(|i| i.severity == Severity::Info).count();
+        let complexity = if total == 0 {
+            1.0
+        } else {
+            statements
+                .iter()
+                .map(|s| s.complexity_score as f64)
+                .sum::<f64>()
+                / total as f64
+        };
+
+        Self {
+            statements,
+            global_lineage: GlobalLineage::default(),
+            issues,
+            summary: Summary {
+                statement_count: total,
+                table_count,
+                column_count,
+                join_count,
+                complexity_score: (complexity.clamp(1.0, 100.0)) as u8,
+                issue_count: IssueCount {
+                    errors: error_count,
+                    warnings: warn_count,
+                    infos: info_count,
+                },
+                has_errors: error_count > 0,
+            },
+            resolved_schema: None,
+            precomputed_lineage: None,
+        }
+    }
+
+    /// Merge another AnalyzeResult into self in-place (progressive accumulation).
+    /// Used by WASM progressive export to avoid holding all results in JS heap.
+    pub fn merge_into(&mut self, other: AnalyzeResult) {
+        let other_len = other.statements.len();
+        let offset = self.statements.len();
+        for (local_idx, mut stmt) in other.statements.into_iter().enumerate() {
+            stmt.statement_index = offset + local_idx;
+            if stmt.source_name.is_none() && other_len == 1 {
+                stmt.source_name = self
+                    .statements
+                    .first()
+                    .and_then(|s| s.source_name.clone());
+            }
+            self.statements.push(stmt);
+        }
+        self.issues.extend(other.issues);
+
+        // Recompute summary
+        let total = self.statements.len();
+        let table_count = self
+            .statements
+            .iter()
+            .flat_map(|s| &s.nodes)
+            .filter(|n| n.node_type.is_table_like())
+            .count();
+        let column_count = self
+            .statements
+            .iter()
+            .flat_map(|s| &s.nodes)
+            .filter(|n| n.node_type == NodeType::Column)
+            .count();
+        let join_count: usize = self.statements.iter().map(|s| s.join_count).sum();
+        let error_count = self
+            .issues
+            .iter()
+            .filter(|i| i.severity == Severity::Error)
+            .count();
+        let warn_count = self
+            .issues
+            .iter()
+            .filter(|i| i.severity == Severity::Warning)
+            .count();
+        let info_count = self
+            .issues
+            .iter()
+            .filter(|i| i.severity == Severity::Info)
+            .count();
+        let complexity = if total == 0 {
+            1.0
+        } else {
+            self.statements
+                .iter()
+                .map(|s| s.complexity_score as f64)
+                .sum::<f64>()
+                / total as f64
+        };
+
+        self.summary = Summary {
+            statement_count: total,
+            table_count,
+            column_count,
+            join_count,
+            complexity_score: (complexity.clamp(1.0, 100.0)) as u8,
+            issue_count: IssueCount {
+                errors: error_count,
+                warnings: warn_count,
+                infos: info_count,
+            },
+            has_errors: error_count > 0,
+        };
     }
 }
 

@@ -27,11 +27,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useProject } from '@/lib/project-store';
 import { useThemeStore, resolveTheme } from '@/lib/theme-store';
 import { schemaMetadataToSQL } from '@/lib/schema-parser';
-import { cn } from '@/lib/utils';
+import { cn, genId } from '@/lib/utils';
+import { BINARY_EXTENSIONS } from '@/lib/constants';
 import { saveSchemaFiles, loadSchemaFiles } from '@/lib/schema-storage';
 import { onSchemaFileSelect } from '@/lib/schema-events';
-// Schema files accept a broader set of extensions than the main SQL file tree
-const SCHEMA_ACCEPTED_EXTENSIONS = ['.sql', '.hql', '.ddl', '.txt'] as const;
 
 // --- Schema file model ---
 interface SchemaFile {
@@ -503,7 +502,7 @@ interface SidebarSchemaProps {
 // --- Main component ---
 export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
   const { t } = useTranslation();
-  const { currentProject, updateSchemaSQL, activeProjectId, isBackendMode, backendSchema } =
+  const { currentProject, updateSchemaSQL, activeProjectId, isBackendMode, isReadOnly, backendSchema } =
     useProject();
   const theme = useThemeStore((state) => state.theme);
   const isDark = resolveTheme(theme) === 'dark';
@@ -576,7 +575,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
         // Last resort fallback: create from schemaSQL stored in project
         const initial = [
           {
-            id: crypto.randomUUID(),
+            id: genId(),
             name: 'schema.sql',
             path: 'schema.sql',
             content: existingSchemaSQL,
@@ -840,7 +839,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       return;
     }
     const newFile: SchemaFile = {
-      id: crypto.randomUUID(),
+      id: genId(),
       name: 'new_schema.sql',
       path: filePath,
       content: '',
@@ -914,7 +913,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
     }
     const filePath = buildPath(finalName);
     const newFile: SchemaFile = {
-      id: crypto.randomUUID(),
+      id: genId(),
       name: finalName,
       path: filePath,
       content: '',
@@ -944,7 +943,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
   // Quick-create a file via double-click (in specified folder or root)
   const handleDoubleClickCreateFile = useCallback(
     (folderPath: string) => {
-      if (isBackendMode) return;
+      if (isReadOnly) return;
       const existingPaths = new Set(schemaFiles.map((f) => f.path));
       const buildPath = (n: string) => (folderPath ? `${folderPath}/${n}` : n);
       let name = 'new_schema.sql';
@@ -954,7 +953,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
         i++;
       }
       const filePath = buildPath(name);
-      const newFile: SchemaFile = { id: crypto.randomUUID(), name, path: filePath, content: '' };
+      const newFile: SchemaFile = { id: genId(), name, path: filePath, content: '' };
       setSchemaFiles((prev) => [...prev, newFile]);
       if (folderPath) {
         const parts = folderPath.split('/');
@@ -967,13 +966,13 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       setActiveFolderPath(folderPath);
       setActiveFileId(newFile.id);
     },
-    [isBackendMode, schemaFiles, setSchemaFiles, setExpandedFolders, setActiveFileId]
+    [isReadOnly, schemaFiles, setSchemaFiles, setExpandedFolders, setActiveFileId]
   );
 
   // Create a sub-folder inside the specified folder (with a placeholder file)
   const handleCreateFolderInFolder = useCallback(
     (parentPath: string) => {
-      if (isBackendMode) return;
+      if (isReadOnly) return;
       const existingPaths = new Set(schemaFiles.map((f) => f.path));
       let folderName = 'new_folder';
       let i = 1;
@@ -984,7 +983,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       }
       const filePath = buildFolderFile(folderName);
       const newFile: SchemaFile = {
-        id: crypto.randomUUID(),
+        id: genId(),
         name: 'new_schema.sql',
         path: filePath,
         content: '',
@@ -1001,7 +1000,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       setActiveFolderPath(newFolderPath);
       setActiveFileId(newFile.id);
     },
-    [isBackendMode, schemaFiles, setSchemaFiles, setExpandedFolders, setActiveFileId]
+    [isReadOnly, schemaFiles, setSchemaFiles, setExpandedFolders, setActiveFileId]
   );
 
   // Edit active file content
@@ -1023,7 +1022,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       const newFiles: SchemaFile[] = [];
       for (const file of Array.from(files)) {
         const content = await file.text();
-        newFiles.push({ id: crypto.randomUUID(), name: file.name, path: file.name, content });
+        newFiles.push({ id: genId(), name: file.name, path: file.name, content });
       }
       // Deduplicate: update existing files by path, add new ones
       setSchemaFiles((prev) => {
@@ -1065,17 +1064,16 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
 
       setUploadProgress({ total: totalScanned, loaded: 0, skipped: 0, done: false });
 
-      // Phase 1: Filter supported files (Set for O(1) lookup)
-      const acceptedSet = new Set(SCHEMA_ACCEPTED_EXTENSIONS.map((ext) => ext.toLowerCase()));
+      // Phase 1: Accept all text files — skip known binary extensions only
       const supportedFiles: File[] = [];
       let skipped = 0;
       for (const file of allFiles) {
         const dotIdx = file.name.lastIndexOf('.');
         const ext = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : '';
-        if (acceptedSet.has(ext)) {
-          supportedFiles.push(file);
-        } else {
+        if (BINARY_EXTENSIONS.has(ext)) {
           skipped++;
+        } else {
+          supportedFiles.push(file);
         }
       }
 
@@ -1094,7 +1092,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
       const newFiles: SchemaFile[] = supportedFiles.map((file) => {
         const relativePath =
           (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-        return { id: crypto.randomUUID(), name: file.name, path: relativePath, content: '' };
+        return { id: genId(), name: file.name, path: relativePath, content: '' };
       });
 
       // Compute expand paths
@@ -1252,7 +1250,7 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
         </div>
         <TooltipProvider delayDuration={300}>
           <div className="flex items-center gap-0.5">
-            {!isBackendMode && (
+            {!isReadOnly && (
               <>
                 {/* Delete selected */}
                 {selectedFileIds.size > 0 &&
@@ -1612,9 +1610,9 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
                 <div className="flex-1 min-h-0 overflow-hidden">
                   <SqlView
                     value={activeFile.content}
-                    onChange={isBackendMode ? undefined : handleEditorChange}
+                    onChange={isReadOnly ? undefined : handleEditorChange}
                     className="h-full text-sm"
-                    editable={!isBackendMode}
+                    editable={!isReadOnly}
                     isDark={isDark}
                     lineWrapping={lineWrapping}
                     highlightedSpan={schemaHighlightSpan}

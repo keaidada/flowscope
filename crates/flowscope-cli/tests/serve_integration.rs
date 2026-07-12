@@ -28,6 +28,7 @@ fn test_state_from_files(config: ServerConfig, files: Vec<FileSource>) -> Arc<Ap
         files: RwLock::new(files),
         schema: RwLock::new(None),
         mtimes: RwLock::new(HashMap::new()),
+        merge_sessions: RwLock::new(HashMap::new()),
     })
 }
 
@@ -330,6 +331,7 @@ async fn app_state_reload_updates_files() {
         files: RwLock::new(files),
         schema: RwLock::new(None),
         mtimes: RwLock::new(mtimes),
+        merge_sessions: RwLock::new(HashMap::new()),
     });
 
     // Verify initial state

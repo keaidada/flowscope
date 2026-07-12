@@ -5,12 +5,14 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 #[cfg(feature = "templating")]
 use flowscope_core::TemplateConfig;
-use flowscope_core::{Dialect, FileSource, SchemaMetadata};
+use flowscope_core::{AnalyzeResult, Dialect, FileSource, SchemaMetadata};
+use rusqlite::Connection;
 use tokio::sync::RwLock;
 
 /// Server configuration derived from CLI arguments.
@@ -35,6 +37,14 @@ pub struct ServerConfig {
     /// Default template configuration (from CLI flags)
     #[cfg(feature = "templating")]
     pub template_config: Option<TemplateConfig>,
+    /// DB-only mode: skip static file serving, only REST API
+    pub db_only: bool,
+}
+
+/// Server-side state for a progressive project export session.
+pub struct MergeSession {
+    /// Incrementally merged project result.
+    pub merged: Option<AnalyzeResult>,
 }
 
 /// Shared application state.
@@ -47,6 +57,10 @@ pub struct AppState {
     pub schema: RwLock<Option<SchemaMetadata>>,
     /// File modification times for change detection
     pub mtimes: RwLock<HashMap<PathBuf, SystemTime>>,
+    /// Active progressive merge sessions (keyed by short session id)
+    pub merge_sessions: RwLock<HashMap<String, MergeSession>>,
+    /// SQLite database connection for persistence
+    pub db: Mutex<Connection>,
 }
 
 impl AppState {
@@ -70,6 +84,15 @@ impl AppState {
         // Load schema from database if URL provided
         let schema = Self::load_schema(&config).await?;
 
+        // Open (or create) the SQLite database for persistence
+        let db_path = config
+            .watch_dirs
+            .first()
+            .map(|d| d.join("flowscope.db"))
+            .unwrap_or_else(|| PathBuf::from("app/flowscope.db"));
+        let db = super::store::open_db(&db_path)?;
+        println!("flowscope: database at {}", db_path.display());
+
         if file_count > 0 {
             println!("flowscope: loaded {} SQL file(s)", file_count);
         }
@@ -79,6 +102,8 @@ impl AppState {
             files: RwLock::new(files),
             schema: RwLock::new(schema),
             mtimes: RwLock::new(mtimes),
+            merge_sessions: RwLock::new(HashMap::new()),
+            db,
         })
     }
 

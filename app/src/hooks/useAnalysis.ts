@@ -14,7 +14,6 @@ import { AnalysisErrorCode, isAnalysisError } from '@/types';
 import type { AnalysisState, AnalysisContext, FileValidationResult } from '@/types';
 import { loadSchemaFiles } from '@/lib/schema-storage';
 import { writeBatchFileResults, readFileResult, writeSchemaData, writeHierarchyData } from '@/lib/analysis-cache';
-import { flushPersistNow } from '@/lib/duckdb';
 import i18n from '@/i18n';
 
 // Maximum retry attempts for file sync errors to prevent infinite loops
@@ -634,7 +633,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         if (adapter) {
           while (true) {
             try {
-              analysisResponse = await adapter.analyze(adapterPayload, { knownCacheKey });
+              analysisResponse = await adapter.analyze(adapterPayload);
               break;
             } catch (error) {
               if (
@@ -733,7 +732,17 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             storeResult(activeProjectId, result, hideCTEs);
             // Defer frequent DB persists while performing many writes to reduce sql.js memory pressure.
             (globalThis as any).__FLOWSCOPE_DEFER_PERSIST = true;
-            const cacheKey = analysisResponse.cacheKey ?? '';
+            // Fallback content hash so files with different content get distinct cache keys.
+            // Otherwise all results collapse to 'no_hash' and only one is kept/exported.
+            const cacheKey = analysisResponse.cacheKey || (() => {
+              let h = 5381;
+              for (const f of context.files) {
+                const c = (f as { content?: string }).content ?? '';
+                const id = (f as { path?: string; name?: string }).path ?? f.name ?? '';
+                h = (((h * 33) ^ id.length) ^ c.length) | 0;
+              }
+              return 'h' + (h >>> 0).toString(36);
+            })();
 
             // Collect all file paths, then write the merged result to OPFS once
             // and batch-insert DB pointer rows.  This avoids writing the same
@@ -754,16 +763,32 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
                 : prev.loadingContext,
             }));
 
-            // Write global artifacts once
-            await writeSchemaData(activeProjectId, result);
-            await writeHierarchyData(activeProjectId, result);
-            // Force flush DB changes once at the end to reduce sync overhead
+            // Persist lineage data (nodes/columns/edges) per file — do this FIRST
+            // before other writes that may fail in serve mode (writeSchemaData etc. use DuckDB/OPFS)
+            const { writeLineageData, writeTableMetadata } = await import('@/lib/analysis-cache');
             try {
-              await flushPersistNow();
-            } finally {
-              // Always restore defer flag to false
-              (globalThis as any).__FLOWSCOPE_DEFER_PERSIST = false;
+              await writeLineageData(activeProjectId, result);
+            } catch (err) {
+              console.error('[useAnalysis] writeLineageData failed', err);
             }
+            // 预计算表级血缘(穿透 CTE)物化到 table_level_edges,供导出快速读取
+            try {
+              const { writeTableLevelEdges } = await import('@/lib/analysis-cache');
+              await writeTableLevelEdges(activeProjectId, result);
+            } catch (err) {
+              console.error('[useAnalysis] writeTableLevelEdges failed', err);
+            }
+
+            // Persist table/column metadata from resolvedSchema
+            try {
+              await writeTableMetadata(activeProjectId, result);
+            } catch (err) {
+              console.error('[useAnalysis] writeTableMetadata failed', err);
+            }
+
+            // Write global artifacts (best-effort)
+            try { await writeSchemaData(activeProjectId, result); } catch {}
+            try { await writeHierarchyData(activeProjectId, result); } catch {}
           }
 
           toast.success(i18n.t('analysis.persistedCurrentResult'), {

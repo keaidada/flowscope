@@ -16,6 +16,11 @@ import reservedKeywordsJson from './reserved-keywords.json';
 
 // Import WASM functions (will be available after init)
 let analyzeSqlJson: ((request: string) => string) | null = null;
+let mergeAnalyzeResultsFn: ((requestJson: string) => string) | null = null;
+let mergeAndExportFn: ((requestJson: string) => Uint8Array) | null = null;
+let mergeProgressiveInitFn: (() => void) | null = null;
+let mergeProgressiveAddFn: ((resultJson: string) => void) | null = null;
+let mergeProgressiveExportFn: ((optsJson: string) => Uint8Array) | null = null;
 let exportToDuckDbSqlFn: ((resultJson: string) => string) | null = null;
 let exportJsonFn: ((requestJson: string) => string) | null = null;
 let exportMermaidFn: ((requestJson: string) => string) | null = null;
@@ -175,6 +180,24 @@ async function ensureWasmReady(): Promise<void> {
       analyzeSqlJson = wasmModule.analyze_sql_json;
     }
 
+    if (!mergeAnalyzeResultsFn && typeof wasmModule.merge_analyze_results === 'function') {
+      mergeAnalyzeResultsFn = wasmModule.merge_analyze_results;
+    }
+
+    if (!mergeAndExportFn && typeof wasmModule.merge_and_export === 'function') {
+      mergeAndExportFn = wasmModule.merge_and_export;
+    }
+
+    if (!mergeProgressiveInitFn && typeof wasmModule.merge_progressive_init === 'function') {
+      mergeProgressiveInitFn = wasmModule.merge_progressive_init;
+    }
+    if (!mergeProgressiveAddFn && typeof wasmModule.merge_progressive_add === 'function') {
+      mergeProgressiveAddFn = wasmModule.merge_progressive_add;
+    }
+    if (!mergeProgressiveExportFn && typeof wasmModule.merge_progressive_export === 'function') {
+      mergeProgressiveExportFn = wasmModule.merge_progressive_export;
+    }
+
     if (!exportToDuckDbSqlFn) {
       exportToDuckDbSqlFn = wasmModule.export_to_duckdb_sql;
     }
@@ -219,6 +242,15 @@ async function ensureWasmReady(): Promise<void> {
   })();
 
   return wasmInitPromise;
+}
+
+/**
+ * Ensure analyzer-level WASM bindings are fully initialized.
+ * This is stronger than `initWasm()` alone because it wires exported
+ * function pointers used by analysis and progressive export helpers.
+ */
+export async function ensureAnalyzerReady(): Promise<void> {
+  await ensureWasmReady();
 }
 
 /**
@@ -401,7 +433,7 @@ export async function exportToDuckDbSql(result: AnalyzeResult, schema?: string):
 
 export async function exportJson(
   result: AnalyzeResult,
-  options: { compact?: boolean } = {}
+  options: { compact?: boolean; sheets?: string[] } = {}
 ): Promise<string> {
   await ensureWasmReady();
 
@@ -409,7 +441,11 @@ export async function exportJson(
     throw new Error('WASM module not properly initialized');
   }
 
-  const requestJson = JSON.stringify({ result, compact: options.compact ?? false });
+  const requestJson = JSON.stringify({
+    result,
+    compact: options.compact ?? false,
+    sheets: options.sheets ?? null,
+  });
   return exportJsonFn(requestJson);
 }
 
@@ -445,25 +481,31 @@ export async function exportHtml(
   return exportHtmlFn(requestJson);
 }
 
-export async function exportCsvArchive(result: AnalyzeResult): Promise<Uint8Array> {
+export async function exportCsvArchive(
+  result: AnalyzeResult,
+  sheets?: string[]
+): Promise<Uint8Array> {
   await ensureWasmReady();
 
   if (!exportCsvBundleFn) {
     throw new Error('WASM module not properly initialized');
   }
 
-  const requestJson = JSON.stringify({ result });
+  const requestJson = JSON.stringify({ result, sheets: sheets ?? null });
   return exportCsvBundleFn(requestJson);
 }
 
-export async function exportXlsx(result: AnalyzeResult): Promise<Uint8Array> {
+export async function exportXlsx(
+  result: AnalyzeResult,
+  sheets?: string[]
+): Promise<Uint8Array> {
   await ensureWasmReady();
 
   if (!exportXlsxFn) {
     throw new Error('WASM module not properly initialized');
   }
 
-  const requestJson = JSON.stringify({ result });
+  const requestJson = JSON.stringify({ result, sheets: sheets ?? null });
   return exportXlsxFn(requestJson);
 }
 
@@ -514,4 +556,85 @@ function buildExportFormatPayload(
     default:
       return { type: 'json', compact: compact ?? false };
   }
+}
+
+/**
+ * Merge multiple per-file AnalyzeResult objects into a single combined result.
+ * All statements are combined, indices are renumbered, and the summary is
+ * recalculated. The result can be passed to any export function.
+ */
+export async function mergeAnalyzeResults(
+  results: AnalyzeResult[]
+): Promise<AnalyzeResult> {
+  await ensureWasmReady();
+
+  if (!mergeAnalyzeResultsFn) {
+    throw new Error('WASM module not properly initialized');
+  }
+
+  const requestJson = JSON.stringify(results);
+  const mergedJson = mergeAnalyzeResultsFn(requestJson);
+  return JSON.parse(mergedJson) as AnalyzeResult;
+}
+
+/**
+ * Merge multiple results and export in one Rust-side call.
+ * The merged result never goes through JSON — it goes directly to export output,
+ * avoiding the OOM from serializing a huge merged AnalyzeResult.
+ *
+ * @param results - Array of per-file AnalyzeResult objects
+ * @param format - Export format
+ * @param options.sheets - Which sheets to include (omit for all)
+ * @param options.compact - Compact JSON output (format: 'json' only)
+ * @returns Export bytes (XLSX, CSV zip, or JSON as UTF-8)
+ */
+export async function mergeAndExport(
+  results: AnalyzeResult[],
+  format: 'xlsx' | 'csv' | 'json',
+  options: { sheets?: string[]; compact?: boolean } = {}
+): Promise<Uint8Array> {
+  await ensureWasmReady();
+
+  if (!mergeAndExportFn) {
+    throw new Error('WASM module not properly initialized');
+  }
+
+  const requestJson = JSON.stringify({
+    results,
+    format,
+    sheets: options.sheets ?? null,
+    compact: options.compact ?? false,
+  });
+  return mergeAndExportFn(requestJson);
+}
+
+/**
+ * Progressive export: merge results one at a time in WASM memory,
+ * then export. JS heap never holds more than one AnalyzeResult at once.
+ *
+ * Usage:
+ *   mergeProgressiveInit();
+ *   for (const result of results) { mergeProgressiveAdd(result); }
+ *   const bytes = mergeProgressiveExport({ format, sheets, compact });
+ */
+export function mergeProgressiveInit(): void {
+  if (!mergeProgressiveInitFn) throw new Error('WASM not initialized');
+  mergeProgressiveInitFn();
+}
+
+export function mergeProgressiveAdd(result: AnalyzeResult): void {
+  if (!mergeProgressiveAddFn) throw new Error('WASM not initialized');
+  mergeProgressiveAddFn(JSON.stringify(result));
+}
+
+export async function mergeProgressiveExport(
+  options: { format: 'xlsx' | 'csv' | 'json'; sheets?: string[]; compact?: boolean }
+): Promise<Uint8Array> {
+  await ensureWasmReady();
+  if (!mergeProgressiveExportFn) throw new Error('WASM not initialized');
+  return mergeProgressiveExportFn(JSON.stringify({
+    format: options.format,
+    sheets: options.sheets ?? null,
+    compact: options.compact ?? false,
+  }));
 }

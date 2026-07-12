@@ -10,11 +10,12 @@ import { useTranslation } from 'react-i18next';
 import { Button } from './ui/button';
 import { GlobalLineageListView } from './GlobalLineageListView';
 import { TaskLayerMatrix } from './TaskLayerMatrix';
+import { G6GraphView } from './G6GraphView';
 import { useGlobalLineageData } from '@/hooks/useGlobalLineageData';
 import { usePipelineData } from '@/hooks/usePipelineData';
 import type { LayerDef } from '@/types/pipeline-matrix';
 
-export type GlobalLineageMode = 'graph' | 'list' | 'matrix';
+export type GlobalLineageMode = 'graph' | 'g6' | 'list' | 'matrix';
 
 interface GlobalLineageViewProps {
   result: AnalyzeResult | null;
@@ -24,6 +25,7 @@ interface GlobalLineageViewProps {
   onFocusApplied?: () => void;
   className?: string;
   loading?: boolean;
+  debug?: boolean;
 }
 
 export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
@@ -34,6 +36,7 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
   onFocusApplied,
   className,
   loading,
+  debug,
 }) => {
   const { t } = useTranslation();
   const lineageActions = useLineageActions();
@@ -106,6 +109,15 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
             <LayoutGrid className="h-3.5 w-3.5" />
             Matrix
           </Button>
+          <Button
+            variant={mode === 'g6' ? 'secondary' : 'ghost'}
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => onModeChange('g6')}
+          >
+            <Network className="h-3.5 w-3.5 text-emerald-500" />
+            G6
+          </Button>
         </div>
         {result && (
           <div className="text-xs text-muted-foreground">
@@ -152,6 +164,15 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
             tasks={pipelineTasks}
             taskNames={pipelineTaskNames}
             layers={pipelineLayers}
+          />
+        )}
+        {mode === 'g6' && result && (
+          <G6GraphView
+            className="h-full w-full"
+            result={result}
+            focusNodeId={focusNodeId}
+            onFocusApplied={onFocusApplied}
+            debug={debug}
           />
         )}
       </div>

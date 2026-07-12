@@ -15,8 +15,8 @@ use axum::{
     Router,
 };
 use flowscope_cli::fix::{apply_lint_fixes_with_runtime_options, LintFixRuntimeOptions};
-use flowscope_cli::server::{build_router, state::AppState, state::ServerConfig};
-use flowscope_core::{Dialect, FileSource, LintConfig};
+use flowscope_cli::server::{build_router, state::AppState, state::MergeSession, state::ServerConfig};
+use flowscope_core::{AnalyzeResult, Dialect, FileSource, LintConfig};
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 use tower::ServiceExt;
@@ -32,6 +32,7 @@ fn test_state(config: ServerConfig, files: Vec<FileSource>) -> Arc<AppState> {
         files: RwLock::new(files),
         schema: RwLock::new(None),
         mtimes: RwLock::new(HashMap::new()),
+        merge_sessions: RwLock::new(HashMap::<uuid::Uuid, MergeSession>::new()),
     })
 }
 
@@ -155,6 +156,45 @@ async fn analyze_with_join() {
     // Verify we got statements back
     assert!(json["statements"].is_array());
     assert!(!json["statements"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn project_export_add_accepts_large_body_within_server_limit() {
+    let state = test_state(default_config(), vec![]);
+    let app = build_router(state, 3000);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/api/project-export/start")
+                .header("content-type", "application/json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    let session_id = json["session_id"].as_str().unwrap();
+
+    let result = AnalyzeResult::from_error("TEST", "x".repeat(3 * 1024 * 1024));
+    let payload = serde_json::to_vec(&result).unwrap();
+
+    let response = app
+        .oneshot(
+            Request::post(format!("/api/project-export/{session_id}/add"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
 }
 
 // === Completion endpoint tests ===

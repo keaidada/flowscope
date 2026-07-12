@@ -47,7 +47,7 @@ fn exports_html_report() {
 #[test]
 fn exports_csv_archive() {
     let result = analyze_sample();
-    let bytes = export_csv_bundle(&result).expect("csv bundle");
+    let bytes = export_csv_bundle(&result, None).expect("csv bundle");
 
     let reader = std::io::Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(reader).expect("zip archive");
@@ -62,6 +62,6 @@ fn exports_csv_archive() {
 #[test]
 fn exports_xlsx_bytes() {
     let result = analyze_sample();
-    let bytes = export_xlsx(&result).expect("xlsx export");
+    let bytes = export_xlsx(&result, None).expect("xlsx export");
     assert!(!bytes.is_empty());
 }

@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { Share2, Github, Settings, Network, Trash2, Download } from 'lucide-react';
+import { Share2, Github, Settings, Network, Trash2, Download, Bug, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useLineageActions, useLineageState } from '@pondpilot/flowscope-react';
@@ -42,7 +42,7 @@ import type { GlobalShortcut } from '@/hooks';
 import { useThemeStore, type Theme } from '@/lib/theme-store';
 import { useViewStateStore } from '@/lib/view-state-store';
 import { useBackend } from '@/lib/backend-context';
-import { readAllFileResults, clearProjectLineage, exportSqliteDb } from '@/lib/analysis-cache';
+import { readAllFileResults, clearProjectLineage } from '@/lib/analysis-cache';
 import { mergeAnalyzeResults, buildTableLevelLineage, extractTableComments } from '@/lib/merge-results';
 
 interface WorkspaceProps {
@@ -60,7 +60,7 @@ interface WorkspaceProps {
 
 export function Workspace({ backendReady, error, onRetry, isRetrying }: WorkspaceProps) {
   const { t } = useTranslation();
-  const { currentProject, selectFile, activeProjectId, isBackendMode } = useProject();
+  const { currentProject, selectFile, activeProjectId, isReadOnly } = useProject();
   const { adapter } = useBackend();
   const analysis = useAnalysis(backendReady, { adapter });
   const lineageActions = useLineageActions();
@@ -83,8 +83,10 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   const [editorOpen, setEditorOpen] = useState(true);
   const [lineageWorkspaceOpen, setLineageWorkspaceOpen] = useState(false);
   const [globalLineageOpen, setGlobalLineageOpen] = useState(false);
+  const [globalLineageLoading, setGlobalLineageLoading] = useState(false);
   const [globalLineageView, setGlobalLineageView] = useState<GlobalLineageMode>('list');
   const [globalFocusNodeId, setGlobalFocusNodeId] = useState<string | undefined>(undefined);
+  const [lineageDebug, setLineageDebug] = useState(false);
   const previousResultRef = useRef(result);
   const previousLayoutRef = useRef(layoutAlgorithm);
   // 缓存全局血缘加载的各文件分析结果，跳转时直接使用
@@ -127,15 +129,19 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
     // 保存当前 result 和布局以便恢复
     previousResultRef.current = result;
     previousLayoutRef.current = layoutAlgorithm;
+    // 先清空结果再打开视图，避免 G6GraphView 用巨大的原始数据渲染
+    setLineageResult(null);
     setGlobalLineageOpen(true);
-    // 全局血缘默认使用 ELK（最小化交叉）布局
-    setLayoutAlgorithm('elk');
+    setGlobalLineageLoading(true);
+    // 全局血缘默认使用 dagre（对表级血缘足够快），ELK 可手动切换
+    setLayoutAlgorithm('dagre');
 
     try {
       const startTime = performance.now();
       const fileResults = await readAllFileResults(activeProjectId);
       if (fileResults.length === 0) {
         toast.info(t('analysis.emptyState.runAnalysis'));
+        setGlobalLineageLoading(false);
         return;
       }
       console.log(`[GlobalLineage] Loaded ${fileResults.length} files in ${(performance.now() - startTime).toFixed(0)}ms`);
@@ -157,6 +163,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
         : mergeAnalyzeResults(fileResults.map((r) => r.result));
       if (!merged) {
         toast.info(t('analysis.emptyState.runAnalysis'));
+        setGlobalLineageLoading(false);
         return;
       }
       // 从文件内容提取中文注释
@@ -172,9 +179,11 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       const tableLevelResult = buildTableLevelLineage(merged, tableComments);
       console.log(`[GlobalLineage] Merge + build in ${(performance.now() - mergeStart).toFixed(0)}ms, tables=${tableLevelResult.statements.reduce((s, st) => s + st.nodes.length, 0)}`);
       setLineageResult(tableLevelResult);
+      setGlobalLineageLoading(false);
     } catch (error) {
       console.error('[Workspace] Failed to load global lineage:', error);
       toast.error('Failed to load global lineage');
+      setGlobalLineageLoading(false);
     }
   }, [globalLineageOpen, activeProjectId, result, setLineageResult, t]);
 
@@ -251,23 +260,10 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalLineageOpen, viewMode]);
 
-  // 导出 SQLite 数据库文件
-  const handleExportLineage = useCallback(async () => {
-    try {
-      const data = await exportSqliteDb();
-      const blob = new Blob([new Uint8Array(data)], { type: 'application/x-sqlite3' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `flowscope-${currentProject?.name ?? 'export'}.db`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success('SQLite 数据库已导出');
-    } catch (error) {
-      console.error('[Workspace] Failed to export SQLite:', error);
-      toast.error('导出失败');
-    }
-  }, [currentProject?.name]);
+  // 导出 SQLite 数据库文件 — now managed by Rust backend, file is at flowscope.db
+  const handleExportLineage = useCallback(() => {
+    toast.info('SQLite DB is at flowscope.db next to the CLI binary.');
+  }, []);
 
   // Theme cycling for keyboard shortcut
   const { theme, setTheme } = useThemeStore();
@@ -297,7 +293,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       if (displayLen > maxLen) maxLen = displayLen;
     }
     const pct = Math.round(((maxLen * 2) / 3) * 0.5);
-    return Math.max(15, Math.min(35, pct));
+    return Math.max(22, Math.min(42, pct));
   }, [currentProject?.files]);
 
   const handleSidebarContentWidthChange = useCallback((contentWidthPx: number) => {
@@ -307,7 +303,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
     // Keep the files sidebar conservative: size it to about 2/3 of the longest visible row.
     const targetPx = contentWidthPx * (2 / 3);
-    const targetPct = Math.max(15, Math.min(35, (targetPx / layoutWidth) * 100));
+    const targetPct = Math.max(22, Math.min(42, (targetPx / layoutWidth) * 100));
     const currentPct = sidebarPanel.getSize();
 
     if (Math.abs(targetPct - currentPct) > 0.5) {
@@ -459,7 +455,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
         cmdOrCtrl: true,
         shift: true,
         handler: () => {
-          if (currentProject && !isBackendMode) {
+          if (currentProject && !isReadOnly) {
             setShareDialogOpen(true);
           }
         },
@@ -477,7 +473,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
         handler: () => setCommandPaletteOpen(true),
       },
     ],
-    [toggleEditorPanel, currentProject, cycleTheme, isBackendMode]
+    [toggleEditorPanel, currentProject, cycleTheme, isReadOnly]
   );
 
   useGlobalShortcuts(shortcuts);
@@ -527,7 +523,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
         // Actions
         case 'share':
-          if (currentProject && !isBackendMode) setShareDialogOpen(true);
+          if (currentProject && !isReadOnly) setShareDialogOpen(true);
           break;
 
         // Settings
@@ -576,7 +572,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       toggleShowScriptTables,
       setLayoutAlgorithm,
       layoutAlgorithm,
-      isBackendMode,
+      isReadOnly,
     ]
   );
 
@@ -662,8 +658,9 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                     result={result}
                     projectName={currentProject.name}
                     graphRef={graphContainerRef}
+                    activeProjectId={activeProjectId}
                   />
-                  {!isBackendMode && (
+                  {!isReadOnly && (
                     <DropdownMenuItem onClick={() => setShareDialogOpen(true)}>
                       <Share2 className="h-4 w-4 mr-2" />
                       {t('app.shareProject')}
@@ -687,6 +684,20 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                 <LanguageToggle />
                 <ThemeToggle />
               </div>
+              <DropdownMenuSeparator />
+              {/* Debug toggle */}
+              <DropdownMenuItem onClick={() => setLineageDebug(!lineageDebug)} className="cursor-pointer">
+                <Bug className={`h-4 w-4 mr-2 ${lineageDebug ? 'text-orange-500' : ''}`} />
+                <span className="flex-1">{t('app.debug', 'Debug')}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded ${lineageDebug ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' : 'text-muted-foreground'}`}>
+                  {lineageDebug ? 'ON' : 'OFF'}
+                </span>
+              </DropdownMenuItem>
+              {/* Clear lineage cache */}
+              <DropdownMenuItem onClick={handleClearGlobalLineage} className="cursor-pointer">
+                <Trash2 className="h-4 w-4 mr-2 text-red-500" />
+                <span className="text-red-500">{t('app.clearGlobalLineage', '清理血缘缓存')}</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -751,7 +762,14 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                     onModeChange={setGlobalLineageView}
                     focusNodeId={globalFocusNodeId}
                     onFocusApplied={() => setGlobalFocusNodeId(undefined)}
+                    loading={globalLineageLoading}
+                    debug={lineageDebug}
                   />
+                ) : globalLineageLoading ? (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
+                    <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                    <p className="text-sm">{t('app.loading', '加载血缘数据中...')}</p>
+                  </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
                     <Network className="h-10 w-10 opacity-30" />
@@ -769,7 +787,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                 <ActivityBar
                   activeView={sidebarView}
                   onViewChange={setSidebarView}
-                  hideSchema={isBackendMode}
+                  hideSchema={false}
                 />
 
                 {/* Main area with optional resizable sidebar */}

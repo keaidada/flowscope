@@ -6,6 +6,7 @@
 pub mod api;
 mod assets;
 pub mod state;
+pub mod store;
 mod watcher;
 
 use std::net::SocketAddr;
@@ -14,6 +15,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -25,15 +27,19 @@ pub use state::{AppState, ServerConfig};
 pub async fn run_server(config: ServerConfig) -> Result<()> {
     let state = Arc::new(AppState::new(config.clone()).await?);
 
-    // Start file watcher in background
-    let watcher_state = Arc::clone(&state);
-    let watcher_handle = tokio::spawn(async move {
-        if let Err(e) = watcher::start_watcher(watcher_state).await {
-            eprintln!("flowscope: watcher error: {e}");
-        }
-    });
+    // Start file watcher in background (skip in db-only mode)
+    if !config.db_only {
+        let watcher_state = Arc::clone(&state);
+        let watcher_handle = tokio::spawn(async move {
+            if let Err(e) = watcher::start_watcher(watcher_state).await {
+                eprintln!("flowscope: watcher error: {e}");
+            }
+        });
+        // Store handle in a way that it gets aborted on shutdown
+        let _watcher = watcher_handle;
+    }
 
-    let app = build_router(state, config.port);
+    let app = build_router(state, config.port, config.db_only);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], config.port));
 
@@ -57,7 +63,6 @@ pub async fn run_server(config: ServerConfig) -> Result<()> {
         .await
         .context("Server error")?;
 
-    watcher_handle.abort();
     println!("\nflowscope: server stopped");
 
     Ok(())
@@ -77,14 +82,17 @@ pub async fn run_server(config: ServerConfig) -> Result<()> {
 const MAX_REQUEST_BODY_SIZE: usize = 100 * 1024 * 1024;
 
 /// Build the main router with all routes.
-pub fn build_router(state: Arc<AppState>, port: u16) -> Router {
+pub fn build_router(state: Arc<AppState>, port: u16, db_only: bool) -> Router {
     // Restrict CORS to same-origin to prevent cross-site requests from reading local files.
-    // The server only binds to localhost, but without CORS restrictions any website could
-    // make requests to http://127.0.0.1:<port> and read the user's SQL files.
-    let allowed_origins = [
+    let mut allowed_origins = vec![
         format!("http://localhost:{port}").parse().unwrap(),
         format!("http://127.0.0.1:{port}").parse().unwrap(),
     ];
+    // In db-only mode, also allow Vite dev server on port 5173
+    if db_only {
+        allowed_origins.push("http://localhost:5173".parse().unwrap());
+        allowed_origins.push("http://127.0.0.1:5173".parse().unwrap());
+    }
 
     let cors = CorsLayer::new()
         .allow_origin(allowed_origins)
@@ -95,11 +103,20 @@ pub fn build_router(state: Arc<AppState>, port: u16) -> Router {
         ])
         .allow_headers([axum::http::header::CONTENT_TYPE]);
 
-    Router::new()
-        .nest("/api", api::api_routes())
-        .fallback(assets::static_handler)
+    let router = Router::new()
+        .nest("/api", api::api_routes());
+
+    // Only serve static assets in full serve mode (not db-only)
+    let router = if db_only {
+        router
+    } else {
+        router.fallback(assets::static_handler)
+    };
+
+    router
         .with_state(state)
         .layer(cors)
+        .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_SIZE))
         .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BODY_SIZE))
 }
 

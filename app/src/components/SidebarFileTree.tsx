@@ -18,10 +18,11 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ACCEPTED_FILE_TYPES,
-  ACCEPTED_FILE_TYPES_ARRAY,
+  BINARY_EXTENSIONS,
   FILE_EXTENSIONS,
   DEFAULT_FILE_NAMES,
 } from '@/lib/constants';
+import { genId } from '@/lib/utils';
 
 interface SidebarFileTreeProps {
   onContentWidthChange?: (widthPx: number) => void;
@@ -105,17 +106,16 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
       setUploadProgress({ total: allFiles.length, loaded: 0, skipped: 0, done: false, stage: 'reading' });
 
-      // Phase 1: Filter supported files
-      const acceptedSet = new Set(ACCEPTED_FILE_TYPES_ARRAY.map((ext) => ext.toLowerCase()));
+      // Phase 1: Accept all text files — skip known binary extensions only
       const supportedFiles: File[] = [];
       let skipped = 0;
       for (const file of allFiles) {
         const dotIdx = file.name.lastIndexOf('.');
         const ext = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : '';
-        if (acceptedSet.has(ext)) {
-          supportedFiles.push(file);
-        } else {
+        if (BINARY_EXTENSIONS.has(ext)) {
           skipped++;
+        } else {
+          supportedFiles.push(file);
         }
       }
 
@@ -136,7 +136,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       const projectFiles: ProjectFile[] = supportedFiles.map((file) => {
         const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
         return {
-          id: crypto.randomUUID(),
+          id: genId(),
           name: file.name,
           path: relativePath || file.name,
           content: '',
@@ -175,13 +175,17 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
       // Phase 4: Persist to SQLite → OPFS/IndexedDB
       setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false, stage: 'saving' });
-      const { saveProjectFiles } = await import('@/lib/file-storage');
-      if (currentProject) {
-        const allProjectFiles = [
-          ...(currentProject.files.filter((f) => !projectFiles.some((pf) => pf.id === f.id))),
-          ...projectFiles,
-        ];
-        await saveProjectFiles(currentProject.id, allProjectFiles);
+      try {
+        const { saveProjectFiles } = await import('@/lib/file-storage');
+        if (currentProject) {
+          const allProjectFiles = [
+            ...(currentProject.files.filter((f) => !projectFiles.some((pf) => pf.id === f.id))),
+            ...projectFiles,
+          ];
+          await saveProjectFiles(currentProject.id, allProjectFiles);
+        }
+      } catch (e) {
+        console.error('Failed to persist imported files:', e);
       }
 
       setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: true });
@@ -264,13 +268,14 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     [currentProject, setFileSelection]
   );
 
-  if (!currentProject) return null;
+  const currentFiles = currentProject?.files ?? [];
 
   // Display the count only for files that are actually loaded into the project files list
   const visibleSelectedCount = (() => {
+    if (!currentProject) return 0;
     const stored = currentProject.selectedFileIds || [];
-    if (!currentProject.files || currentProject.files.length === 0) return 0;
-    const fileIdSet = new Set(currentProject.files.map((f) => f.id));
+    if (currentFiles.length === 0) return 0;
+    const fileIdSet = new Set(currentFiles.map((f) => f.id));
     let cnt = 0;
     for (const id of stored) if (fileIdSet.has(id)) cnt++;
     return cnt;
@@ -291,47 +296,48 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     setConfirmBatchDelete(false);
   };
 
-  const allSelected =
-    currentProject.files.length > 0 && selectedCount === currentProject.files.length;
+  const allSelected = currentFiles.length > 0 && selectedCount === currentFiles.length;
 
   const handleSelectAll = useCallback(() => {
     if (!currentProject) return;
     setFileSelection(
       currentProject.id,
-      currentProject.files.map((file) => file.id),
+      currentFiles.map((file) => file.id),
       !allSelected
     );
-  }, [allSelected, currentProject, setFileSelection]);
+  }, [allSelected, currentFiles, currentProject, setFileSelection]);
 
   const filteredFiles = useMemo(() => {
-    if (!search.trim()) return currentProject.files;
+    if (!search.trim()) return currentFiles;
     const searchLower = search.toLowerCase();
-    return currentProject.files.filter(
+    return currentFiles.filter(
       (f) =>
         f.name.toLowerCase().includes(searchLower) || f.path.toLowerCase().includes(searchLower)
     );
-  }, [currentProject.files, search]);
+  }, [currentFiles, search]);
+
+  if (!currentProject) return null;
 
   return (
     <div className="flex flex-col h-full bg-background relative">
       {/* Header with action buttons */}
       <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 min-w-0">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
             {t('common.files')}
           </span>
           {currentProject.files.length > 0 && (
-            <span className="text-xs text-muted-foreground">({currentProject.files.length})</span>
+            <span className="text-xs text-muted-foreground whitespace-nowrap">({currentProject.files.length})</span>
           )}
           {selectedCount > 0 && (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
               · {t('sidebar.selectedCount', { count: selectedCount })}
             </span>
           )}
         </div>
         {!isReadOnly && (
           <TooltipProvider delayDuration={300}>
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-0.5 shrink-0">
               {/* Delete selected */}
               {selectedCount > 0 &&
                 (confirmBatchDelete ? (

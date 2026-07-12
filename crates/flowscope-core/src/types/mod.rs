@@ -14,7 +14,8 @@ pub mod serde_utils;
 // Re-export all public types
 pub use common::{
     issue_codes, CaseSensitivity, Issue, IssueAutofix, IssueAutofixApplicability, IssueCount,
-    IssuePatchEdit, LintConfidence, LintEngine, LintFallbackSource, Severity, Span, Summary,
+    IssuePatchEdit, LineageEntry, LintConfidence, LintEngine, LintFallbackSource, Severity, Span,
+    Summary,
 };
 pub use completion::{
     CompletionClause, CompletionColumn, CompletionContext, CompletionItem, CompletionItemCategory,

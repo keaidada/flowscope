@@ -15,7 +15,19 @@ import {
   ExternalLink,
   X,
 } from 'lucide-react';
-import { exportToDuckDbSql } from '@/lib/analysis-worker';
+import {
+  exportToDuckDbSql,
+  exportStreamLazy,
+} from '@/lib/analysis-worker';
+import {
+  streamUniqueProjectResultJsons,
+} from '@/lib/analysis-cache';
+import {
+  projectExportStreamViaBackend,
+  isRestBackendAvailable,
+} from '@/lib/backend-adapter';
+import { extractSchemaFromResult } from './AnalysisView';
+import { loadTableLevelEdges } from '@/lib/server-db';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,14 +48,12 @@ import {
 } from './ui/dialog';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Checkbox } from './ui/checkbox';
 import type { AnalyzeResult, ExportFormat, MermaidView } from '@pondpilot/flowscope-core';
 import {
-  exportCsvArchive,
   exportFilename,
   exportHtml,
-  exportJson,
   exportMermaid,
-  exportXlsx,
   formatSchemaError,
   validateSchemaName,
 } from '@pondpilot/flowscope-core';
@@ -56,6 +66,65 @@ import {
 } from '@/lib/share';
 
 // ============================================================================
+// Lineage computation — mirrors Schema module logic
+// ============================================================================
+
+/** Compute lineage entries matching the Schema module's logic.
+ *  Extracts (script, inputTable, outputTable) triples from flow edges. */
+function computeLineageFromSchema(result: AnalyzeResult) {
+  const entries: Array<{ script: string; inputTable: string; outputTable: string }> = [];
+  const seen = new Set<string>();
+
+  const schema = extractSchemaFromResult(result, null);
+
+  for (const table of schema) {
+    const fullName = [table.catalog, table.schema, table.name].filter(Boolean).join('.');
+    const incomingSources = (table.columns || [])
+      .filter((col) => col.name.startsWith('← '))
+      .map((col) => col.name.replace('← ', ''));
+
+    for (const src of incomingSources) {
+      const key = `${src}→${fullName}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push({ script: '', inputTable: src, outputTable: fullName });
+    }
+  }
+
+  // Per-script entries for script attribution
+  const scriptEntries: Array<{ script: string; inputTable: string; outputTable: string }> = [];
+  const scriptSeen = new Set<string>();
+  const scripts = [...new Set(result.statements.map(s => s.sourceName).filter(Boolean))];
+  for (const script of scripts) {
+    const miniResult: AnalyzeResult = {
+      ...result,
+      statements: result.statements.filter(s => s.sourceName === script) as AnalyzeResult['statements'],
+    };
+    const miniSchema = extractSchemaFromResult(miniResult, script!);
+    for (const table of miniSchema) {
+      const fullName = [table.catalog, table.schema, table.name].filter(Boolean).join('.');
+      const incomingSources = (table.columns || [])
+        .filter((col) => col.name.startsWith('← '))
+        .map((col) => col.name.replace('← ', ''));
+      for (const src of incomingSources) {
+        const key = `${script}::${src}→${fullName}`;
+        if (scriptSeen.has(key)) continue;
+        scriptSeen.add(key);
+        scriptEntries.push({ script: script!, inputTable: src, outputTable: fullName });
+      }
+    }
+  }
+
+  // Deduplicate: if a per-script entry already covers the same (input→output) pair,
+  // skip the global version of it.
+  const scriptPairKeys = new Set(scriptEntries.map(e => `${e.inputTable}→${e.outputTable}`));
+  return [
+    ...scriptEntries,
+    ...entries.filter(e => !scriptPairKeys.has(`${e.inputTable}→${e.outputTable}`)),
+  ];
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -63,7 +132,23 @@ export interface ExportDialogProps {
   result: AnalyzeResult | null;
   projectName: string;
   graphRef?: React.RefObject<HTMLDivElement | null>;
+  /** Project ID — when provided, export includes ALL project file results. */
+  activeProjectId?: string | null;
 }
+
+// Sheet types available for selective export
+const ALL_SHEETS = [
+  { key: 'scripts', label: 'Scripts' },
+  { key: 'tables', label: 'Tables' },
+  { key: 'column_mappings', label: 'Column Mappings' },
+  { key: 'table_dependencies', label: 'Dependency Matrix' },
+  { key: 'lineage', label: 'Lineage' },
+  { key: 'issues', label: 'Issues' },
+  { key: 'summary', label: 'Summary' },
+  { key: 'resolved_schema', label: 'Resolved Schema' },
+] as const;
+
+type SheetKey = (typeof ALL_SHEETS)[number]['key'];
 
 // ============================================================================
 // Helpers
@@ -133,14 +218,11 @@ function createPondPilotUrl(
 // Component
 // ============================================================================
 
-// ============================================================================
-// Component
-// ============================================================================
-
 export function ExportDialog({
   result,
   projectName,
   graphRef,
+  activeProjectId,
 }: ExportDialogProps): JSX.Element | null {
   const { t } = useTranslation();
   const isDarkMode = useIsDarkMode();
@@ -155,48 +237,178 @@ export function ExportDialog({
   const [imageExportStatus, setImageExportStatus] = useState<'idle' | 'exporting' | 'done' | 'error'>('idle');
   const [imageExportMessage, setImageExportMessage] = useState('');
 
-  const handleDownloadXlsx = useCallback(async () => {
-    if (!result) return;
+  // Sheet selection dialog
+  const [sheetDialogOpen, setSheetDialogOpen] = useState(false);
+  const [pendingExportFormat, setPendingExportFormat] = useState<'csv' | 'xlsx' | 'json' | null>(null);
+  const [selectedSheets, setSelectedSheets] = useState<Set<SheetKey>>(
+    new Set(ALL_SHEETS.map((s) => s.key))
+  );
+
+  /**
+   * Export all project results.
+   *
+   * Preferred path: stream raw per-file JSON blobs to the Rust backend so
+   * merge/export happens outside the browser heap. Fallback to the Worker
+   * path only when the REST backend is unavailable.
+   */
+  const handleSheetExport = useCallback(async (format: 'csv' | 'xlsx' | 'json') => {
+    if (!result && !activeProjectId) return;
+    setIsExporting(true);
     try {
-      const { filename } = await buildExportFilename(projectName, 'xlsx');
-      const bytes = await exportXlsx(result);
-      downloadBlob(
-        toArrayBuffer(bytes),
-        filename,
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      const { filename } = await buildExportFilename(projectName, format);
+      const sheetNames = selectedSheets.size > 0
+        ? Array.from(selectedSheets) as string[]
+        : undefined;
+
+      const onDone = (output: Uint8Array | string) => {
+        if (typeof output === 'string') {
+          downloadBlob(output, filename, 'application/json');
+        } else {
+          const mime = format === 'csv'
+            ? 'application/zip'
+            : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+          downloadBlob(toArrayBuffer(output), filename, mime);
+        }
+        toast.success(`${format.toUpperCase()} export downloaded`);
+      };
+
+      if (activeProjectId) {
+        // 预加载物化表级血缘(table_level_edges,穿透 CTE),injectLineage 优先用;fallback schema 推断
+        let preloadedLineage: Array<{ script: string; inputTable: string; outputTable: string }> | null = null;
+        try {
+          const tlEdges = await loadTableLevelEdges(activeProjectId);
+          if (tlEdges.length > 0) {
+            preloadedLineage = tlEdges.map(([from, to, script]) => ({ script, inputTable: from, outputTable: to }));
+          }
+        } catch {
+          /* fallback to computeLineageFromSchema */
+        }
+        const lineageInjector = (resultJson: string): string => {
+          try {
+            const parsed = JSON.parse(resultJson);
+            parsed.precomputedLineage = preloadedLineage ?? computeLineageFromSchema(parsed);
+            return JSON.stringify(parsed);
+          } catch {
+            return resultJson;
+          }
+        };
+        const uniqueResultJsons = streamUniqueProjectResultJsons(activeProjectId);
+        const firstChunk = await uniqueResultJsons.next();
+        if (firstChunk.done) {
+          if (!result) { toast.error('No analysis results to export'); return; }
+          // Stream is empty but result exists in React state.  Serialize it once
+          // and send through the backend to avoid structuredClone OOM via worker postMessage.
+          const restAvailable = await isRestBackendAvailable('');
+          if (restAvailable) {
+            const singleJson = JSON.stringify(result);
+            const output = await projectExportStreamViaBackend(
+              '',
+              (async function* () {
+                yield singleJson;
+              })(),
+              format,
+              { sheets: sheetNames, injectLineage: lineageInjector },
+            );
+            if (!output) {
+              throw new Error('Backend project export failed');
+            }
+            onDone(output.data);
+            setSheetDialogOpen(false);
+            return;
+          }
+          // no backend — use the original single-result path as last resort
+        } else {
+          const restAvailable = await isRestBackendAvailable('');
+
+          if (restAvailable) {
+            const output = await projectExportStreamViaBackend(
+              '',
+              (async function* () {
+                yield firstChunk.value;
+                yield* uniqueResultJsons;
+              })(),
+              format,
+              { sheets: sheetNames, injectLineage: lineageInjector },
+            );
+            if (!output) {
+              throw new Error('Backend project export failed');
+            }
+
+            onDone(output.data);
+            setSheetDialogOpen(false);
+            return;
+          }
+
+          const jsonIterator = (async function* () {
+            yield firstChunk.value;
+            yield* uniqueResultJsons;
+          })()[Symbol.asyncIterator]();
+          const output = await exportStreamLazy(
+            async () => {
+              const next = await jsonIterator.next();
+              if (next.done) {
+                return null;
+              }
+              return JSON.parse(next.value) as AnalyzeResult;
+            },
+            format,
+            { sheets: sheetNames }
+          );
+          onDone(output);
+          setSheetDialogOpen(false);
+          return;
+        }
+      }
+
+      // Single result fallback
+      if (!result) { toast.error('No analysis results to export'); return; }
+      const output = await exportStreamLazy(
+        async () => result,
+        format,
+        { sheets: sheetNames }
       );
-      toast.success('Excel export downloaded');
+      onDone(output);
+      setSheetDialogOpen(false);
     } catch (err) {
-      console.error('Failed to export Excel:', err);
-      toast.error('Failed to export Excel');
+      console.error(`Failed to export ${format.toUpperCase()}:`, err);
+      toast.error(`Failed to export ${format.toUpperCase()}`);
+    } finally {
+      setIsExporting(false);
     }
-  }, [result, projectName]);
+  }, [result, activeProjectId, projectName, selectedSheets]);
+
+  const handleOpenSheetDialog = useCallback((format: 'csv' | 'xlsx' | 'json') => {
+    setPendingExportFormat(format);
+    setSheetDialogOpen(true);
+  }, []);
+
+  const toggleSheet = useCallback((key: SheetKey) => {
+    setSelectedSheets((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleAllSheets = useCallback(() => {
+    setSelectedSheets((prev) => {
+      if (prev.size === ALL_SHEETS.length) return new Set();
+      return new Set(ALL_SHEETS.map((s) => s.key));
+    });
+  }, []);
+
+  const handleDownloadXlsx = useCallback(async () => {
+    handleOpenSheetDialog('xlsx');
+  }, [handleOpenSheetDialog]);
 
   const handleDownloadJson = useCallback(async () => {
-    if (!result) return;
-    try {
-      const { filename } = await buildExportFilename(projectName, 'json', { compact: false });
-      const jsonString = await exportJson(result, { compact: false });
-      downloadBlob(jsonString, filename, 'application/json');
-      toast.success('JSON export downloaded');
-    } catch (err) {
-      console.error('Failed to export JSON:', err);
-      toast.error('Failed to export JSON');
-    }
-  }, [result, projectName]);
+    handleOpenSheetDialog('json');
+  }, [handleOpenSheetDialog]);
 
   const handleDownloadCsv = useCallback(async () => {
-    if (!result) return;
-    try {
-      const { filename } = await buildExportFilename(projectName, 'csv');
-      const bytes = await exportCsvArchive(result);
-      downloadBlob(toArrayBuffer(bytes), filename, 'application/zip');
-      toast.success('CSV archive downloaded');
-    } catch (err) {
-      console.error('Failed to export CSV archive:', err);
-      toast.error('Failed to export CSV archive');
-    }
-  }, [result, projectName]);
+    handleOpenSheetDialog('csv');
+  }, [handleOpenSheetDialog]);
 
   const handleDownloadPng = useCallback(async () => {
     if (!graphRef?.current) {
@@ -464,6 +676,58 @@ export function ExportDialog({
         </DialogContent>
       </Dialog>
 
+      {/* Sheet Selection Dialog */}
+      <Dialog open={sheetDialogOpen} onOpenChange={setSheetDialogOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogClose className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </DialogClose>
+          <DialogHeader>
+            <DialogTitle>Select Sheets</DialogTitle>
+            <DialogDescription>
+              Choose which datasets to include in the {pendingExportFormat === 'csv' ? 'CSV archive' : pendingExportFormat === 'xlsx' ? 'Excel workbook' : 'JSON file'}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 py-2">
+            <div className="flex items-center gap-2 pb-1 border-b">
+              <Checkbox
+                id="sheet-all"
+                checked={selectedSheets.size === ALL_SHEETS.length}
+                onCheckedChange={toggleAllSheets}
+              />
+              <Label htmlFor="sheet-all" className="font-medium cursor-pointer">
+                Select All
+              </Label>
+            </div>
+            {ALL_SHEETS.map((sheet) => (
+              <div key={sheet.key} className="flex items-center gap-2">
+                <Checkbox
+                  id={`sheet-${sheet.key}`}
+                  checked={selectedSheets.has(sheet.key)}
+                  onCheckedChange={() => toggleSheet(sheet.key)}
+                />
+                <Label
+                  htmlFor={`sheet-${sheet.key}`}
+                  className="cursor-pointer text-sm"
+                >
+                  {sheet.label}
+                </Label>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => pendingExportFormat && handleSheetExport(pendingExportFormat)}
+              disabled={selectedSheets.size === 0 || isExporting}
+            >
+              <Download className="size-4 mr-2" />
+              {isExporting ? t('common.exporting') : t('common.download')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* 图片导出进度弹窗 */}
       <Dialog open={imageExportOpen} onOpenChange={(open) => {
         if (!open && imageExportStatus !== 'exporting') {
@@ -481,29 +745,25 @@ export function ExportDialog({
                 <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
               )}
               {imageExportStatus === 'done' && (
-                <div className="h-8 w-8 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-green-600 dark:text-green-400">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                </div>
+                <div className="text-green-500 text-4xl">&#10003;</div>
               )}
               {imageExportStatus === 'error' && (
-                <div className="h-8 w-8 rounded-full bg-red-100 dark:bg-red-900 flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-red-600 dark:text-red-400">
-                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </div>
+                <div className="text-destructive text-4xl">&#10007;</div>
               )}
-              <p className="text-sm">{imageExportMessage}</p>
+              <p className="text-sm text-muted-foreground">{imageExportMessage}</p>
             </div>
           </DialogDescription>
-          {imageExportStatus !== 'exporting' && (
-            <DialogFooter className="justify-center">
-              <Button variant="outline" onClick={() => { setImageExportOpen(false); setImageExportStatus('idle'); }}>
-                关闭
-              </Button>
-            </DialogFooter>
-          )}
+          <DialogFooter className="justify-center">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setImageExportOpen(false);
+                setImageExportStatus('idle');
+              }}
+            >
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

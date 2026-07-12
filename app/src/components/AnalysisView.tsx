@@ -23,6 +23,7 @@ import {
 import ProgressOverlay from './ProgressOverlay';
 import { toPng, toSvg } from 'html-to-image';
 import { toast } from 'sonner';
+import { queryLineageNodes as queryLineageNodesFromDB } from '@/lib/analysis-cache';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
@@ -83,7 +84,7 @@ interface AnalysisViewProps {
  * @param filterSourceName - If provided, only include statements from this source file.
  *                           Pass undefined/null to include all statements (global schema).
  */
-function extractSchemaFromResult(
+export function extractSchemaFromResult(
   result: AnalyzeResult,
   filterSourceName?: string | null
 ): SchemaTable[] {
@@ -809,7 +810,7 @@ export function AnalysisView({
     actionsRef.current = actions;
     stateRef.current = state;
   }, [actions, state]);
-  const { currentProject, updateSchemaSQL, activeProjectId, isBackendMode, backendSchema } =
+  const { currentProject, updateSchemaSQL, activeProjectId, isReadOnly, backendSchema } =
     useProject();
   const [schemaEditorOpen, setSchemaEditorOpen] = useState(false);
   const [matchedDDL, setMatchedDDL] = useState<string>('');
@@ -931,7 +932,7 @@ export function AnalysisView({
 
   // When Schema editor opens, extract matched DDL from schema files for physical tables in analysis
   useEffect(() => {
-    if (!schemaEditorOpen || isBackendMode || !activeProjectId || !result) {
+    if (!schemaEditorOpen || isReadOnly || !activeProjectId || !result) {
       return;
     }
     setSchemaLoading(true);
@@ -978,7 +979,7 @@ export function AnalysisView({
       }
       setSchemaLoading(false);
     });
-  }, [schemaEditorOpen, isBackendMode, activeProjectId, result]);
+  }, [schemaEditorOpen, isReadOnly, activeProjectId, result]);
 
   // Persisted state hooks for each view
   const matrixState = usePersistedMatrixState(activeProjectId);
@@ -1034,6 +1035,24 @@ export function AnalysisView({
     if (!result || !activeFilePath) return [];
     return extractSchemaFromResult(result, activeFilePath);
   }, [result, activeFilePath]);
+
+  // When analysis result is not available (page reload), query per-file schema from persisted lineage tables
+  const [persistedCurrentSchema, setPersistedCurrentSchema] = useState<SchemaTable[]>([]);
+  useEffect(() => {
+    if (!currentFileSchema.length && activeFilePath && activeProjectId) {
+      let cancelled = false;
+      (async () => {
+        try {
+          const nodes = await queryLineageNodesFromDB(activeProjectId, ['table', 'view', 'materialized_view'], activeFilePath);
+          if (cancelled || !nodes.length) return;
+          const tables: SchemaTable[] = nodes.map(n => ({ name: n.label }));
+          setPersistedCurrentSchema(tables);
+        } catch {}
+      })();
+      return () => { cancelled = true; };
+    }
+  }, [currentFileSchema, activeFilePath, activeProjectId]);
+  const effectiveCurrentSchema = currentFileSchema.length ? currentFileSchema : persistedCurrentSchema;
 
   const globalSchema = useMemo(() => {
     if (!result) return [];
@@ -1168,7 +1187,7 @@ export function AnalysisView({
         cmdOrCtrl: true,
         shift: true,
         handler: () => {
-          if (!isBackendMode) {
+          if (!isReadOnly) {
             setSchemaEditorOpen(true);
           }
         },
@@ -1261,7 +1280,7 @@ export function AnalysisView({
         },
       },
     ],
-    [hasIssues, focusSearchInput, isBackendMode]
+    [hasIssues, focusSearchInput, isReadOnly]
   );
 
   useGlobalShortcuts(tabShortcuts);
@@ -1374,8 +1393,8 @@ export function AnalysisView({
               joinCount={resolvedSummary.joinCount}
               complexityScore={resolvedSummary.complexityScore}
             />
-            {/* Hide Schema editor button in serve mode - schema comes from CLI */}
-            {!isBackendMode && (
+            {/* Schema editor button — hidden when current project is read-only (Server Files) */}
+            {!isReadOnly && (
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1528,9 +1547,9 @@ export function AnalysisView({
                       )}
                     >
                       {t('analysis.schemaCurrentFile')}
-                      {currentFileSchema.length > 0 && (
+                      {effectiveCurrentSchema.length > 0 && (
                         <span className="ml-1 text-muted-foreground">
-                          ({currentFileSchema.length})
+                          ({effectiveCurrentSchema.length})
                         </span>
                       )}
                     </button>
@@ -1552,7 +1571,7 @@ export function AnalysisView({
                 </div>
                 <div className="flex-1 overflow-hidden">
                   {schemaScope === 'current' ? (
-                    <SchemaListView schema={currentFileSchema} />
+                    <SchemaListView schema={effectiveCurrentSchema} />
                   ) : (
                     <SchemaView
                       schema={globalSchema}
@@ -1587,11 +1606,11 @@ export function AnalysisView({
         <SchemaEditor
           open={schemaEditorOpen}
           onOpenChange={setSchemaEditorOpen}
-          schemaSQL={isBackendMode ? schemaMetadataToSQL(backendSchema) : matchedDDL}
+          schemaSQL={isReadOnly ? schemaMetadataToSQL(backendSchema) : matchedDDL}
           dialect={currentProject.dialect}
           onSave={handleSaveSchema}
-          isReadOnly
-          loading={!isBackendMode && schemaLoading}
+          isReadOnly={isReadOnly}
+          loading={!isReadOnly && schemaLoading}
         />
       )}
     </div>

@@ -8,12 +8,18 @@ use flowscope_core::{
 };
 use flowscope_export::{
     export_csv_bundle as export_csv_bundle_internal, export_html as export_html_internal,
-    export_json as export_json_internal, export_mermaid as export_mermaid_internal,
+    export_json as export_json_internal, export_json_sheets as export_json_sheets_internal,
+    export_mermaid as export_mermaid_internal,
     export_sql as export_sql_internal, export_xlsx as export_xlsx_internal, ExportFormat,
     ExportNaming, MermaidView,
 };
 use serde::Deserialize;
+use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
+
+/// Progressive merge accumulator — stays in WASM linear memory.
+/// JS never sees the merged result until export time.
+static PROGRESSIVE: Mutex<Option<AnalyzeResult>> = Mutex::new(None);
 
 /// Request payload for export_to_duckdb_sql.
 #[derive(Deserialize)]
@@ -30,6 +36,8 @@ struct ExportJsonRequest {
     result: AnalyzeResult,
     #[serde(default)]
     compact: bool,
+    #[serde(default)]
+    sheets: Option<Vec<flowscope_export::ExportSheet>>,
 }
 
 #[derive(Deserialize)]
@@ -51,11 +59,15 @@ struct ExportHtmlRequest {
 #[derive(Deserialize)]
 struct ExportCsvRequest {
     result: AnalyzeResult,
+    #[serde(default)]
+    sheets: Option<Vec<flowscope_export::ExportSheet>>,
 }
 
 #[derive(Deserialize)]
 struct ExportXlsxRequest {
     result: AnalyzeResult,
+    #[serde(default)]
+    sheets: Option<Vec<flowscope_export::ExportSheet>>,
 }
 
 #[derive(Deserialize)]
@@ -401,6 +413,131 @@ pub fn get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Merge multiple per-file AnalyzeResult JSON values into a single combined result.
+/// The input is a JSON array of AnalyzeResult objects (stringified).
+/// Returns the merged AnalyzeResult as a JSON string.
+// ============================================================================
+// Progressive Merge + Export — one result at a time, merged in WASM memory
+// ============================================================================
+
+/// Reset the progressive merge accumulator.
+#[wasm_bindgen]
+pub fn merge_progressive_init() {
+    *PROGRESSIVE.lock().unwrap() = None;
+}
+
+/// Merge a single AnalyzeResult (as JSON) into the progressive accumulator.
+#[wasm_bindgen]
+pub fn merge_progressive_add(result_json: &str) -> Result<(), JsValue> {
+    let result: AnalyzeResult = serde_json::from_str(result_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid result JSON: {e}")))?;
+
+    let mut acc = PROGRESSIVE.lock().unwrap();
+    match acc.as_mut() {
+        None => *acc = Some(result),
+        Some(existing) => AnalyzeResult::merge_into(existing, result),
+    }
+    Ok(())
+}
+
+/// Finalize and export the progressive merge accumulator.
+/// Input: `{ "format": "xlsx", "sheets": [...], "compact": false }`
+#[wasm_bindgen]
+pub fn merge_progressive_export(request_json: &str) -> Result<Vec<u8>, JsValue> {
+    #[derive(Deserialize)]
+    struct ExportOpts {
+        format: String,
+        #[serde(default)]
+        sheets: Option<Vec<flowscope_export::ExportSheet>>,
+        #[serde(default)]
+        compact: bool,
+    }
+
+    let opts: ExportOpts = serde_json::from_str(request_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid export options: {e}")))?;
+
+    let merged = PROGRESSIVE
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| JsValue::from_str("No results accumulated"))?;
+
+    let sheets = opts.sheets.as_deref();
+
+    match opts.format.as_str() {
+        "xlsx" => export_xlsx_internal(&merged, sheets)
+            .map_err(|e| JsValue::from_str(&format!("Export error: {e}"))),
+        "csv" => export_csv_bundle_internal(&merged, sheets)
+            .map_err(|e| JsValue::from_str(&format!("Export error: {e}"))),
+        "json" => {
+            let output = if let Some(s) = sheets {
+                export_json_sheets_internal(&merged, Some(s), opts.compact)
+            } else {
+                export_json_internal(&merged, opts.compact)
+            }
+            .map_err(|e| JsValue::from_str(&format!("Export error: {e}")))?;
+            Ok(output.into_bytes())
+        }
+        _ => Err(JsValue::from_str(&format!("Unknown format: {}", opts.format))),
+    }
+}
+
+#[wasm_bindgen]
+pub fn merge_analyze_results(results_json: &str) -> Result<String, JsValue> {
+    let results: Vec<AnalyzeResult> = serde_json::from_str(results_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid results JSON: {e}")))?;
+    let merged = AnalyzeResult::merge(&results);
+    serde_json::to_string(&merged)
+        .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))
+}
+
+/// Merge multiple results and export directly — no JSON round-trip of merged data.
+/// Request JSON: `{ "results": [...], "format": "xlsx", "sheets": [...], "compact": false }`
+/// Returns export bytes (for xlsx/csv) or JSON string (for json format).
+#[wasm_bindgen]
+pub fn merge_and_export(request_json: &str) -> Result<Vec<u8>, JsValue> {
+    #[derive(Deserialize)]
+    struct MergeExportRequest {
+        results: Vec<AnalyzeResult>,
+        format: String,
+        #[serde(default)]
+        sheets: Option<Vec<flowscope_export::ExportSheet>>,
+        #[serde(default)]
+        compact: bool,
+    }
+
+    let request: MergeExportRequest = serde_json::from_str(request_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid request JSON: {e}")))?;
+
+    let merged = if request.results.len() == 1 {
+        request.results.into_iter().next().unwrap()
+    } else {
+        AnalyzeResult::merge(&request.results)
+    };
+
+    let sheets = request.sheets.as_deref();
+
+    match request.format.as_str() {
+        "xlsx" => export_xlsx_internal(&merged, sheets)
+            .map_err(|e| JsValue::from_str(&format!("Export error: {e}"))),
+        "csv" => export_csv_bundle_internal(&merged, sheets)
+            .map_err(|e| JsValue::from_str(&format!("Export error: {e}"))),
+        "json" => {
+            let output = if let Some(s) = sheets {
+                export_json_sheets_internal(&merged, Some(s), request.compact)
+            } else {
+                export_json_internal(&merged, request.compact)
+            }
+            .map_err(|e| JsValue::from_str(&format!("Export error: {e}")))?;
+            Ok(output.into_bytes())
+        }
+        _ => Err(JsValue::from_str(&format!(
+            "Unknown format: {}",
+            request.format
+        ))),
+    }
+}
+
 /// Export analysis result to SQL statements for DuckDB-WASM.
 ///
 /// Takes a JSON object with:
@@ -425,8 +562,16 @@ pub fn export_json(request_json: &str) -> Result<String, JsValue> {
     let request: ExportJsonRequest = serde_json::from_str(request_json)
         .map_err(|e| JsValue::from_str(&format!("Invalid request JSON: {e}")))?;
 
-    export_json_internal(&request.result, request.compact)
-        .map_err(|e| JsValue::from_str(&format!("Export error: {e}")))
+    let sheets: Option<Vec<_>> = request.sheets.as_ref().map(|v| {
+        v.iter().map(|s| *s).collect()
+    });
+    if sheets.is_some() {
+        export_json_sheets_internal(&request.result, sheets.as_deref(), request.compact)
+            .map_err(|e| JsValue::from_str(&format!("Export error: {e}")))
+    } else {
+        export_json_internal(&request.result, request.compact)
+            .map_err(|e| JsValue::from_str(&format!("Export error: {e}")))
+    }
 }
 
 #[wasm_bindgen]
@@ -453,7 +598,10 @@ pub fn export_csv_bundle(request_json: &str) -> Result<Vec<u8>, JsValue> {
     let request: ExportCsvRequest = serde_json::from_str(request_json)
         .map_err(|e| JsValue::from_str(&format!("Invalid request JSON: {e}")))?;
 
-    export_csv_bundle_internal(&request.result)
+    let sheets: Option<Vec<_>> = request.sheets.as_ref().map(|v| {
+        v.iter().map(|s| *s).collect()
+    });
+    export_csv_bundle_internal(&request.result, sheets.as_deref())
         .map_err(|e| JsValue::from_str(&format!("Export error: {e}")))
 }
 
@@ -462,7 +610,10 @@ pub fn export_xlsx(request_json: &str) -> Result<Vec<u8>, JsValue> {
     let request: ExportXlsxRequest = serde_json::from_str(request_json)
         .map_err(|e| JsValue::from_str(&format!("Invalid request JSON: {e}")))?;
 
-    export_xlsx_internal(&request.result)
+    let sheets: Option<Vec<_>> = request.sheets.as_ref().map(|v| {
+        v.iter().map(|s| *s).collect()
+    });
+    export_xlsx_internal(&request.result, sheets.as_deref())
         .map_err(|e| JsValue::from_str(&format!("Export error: {e}")))
 }
 

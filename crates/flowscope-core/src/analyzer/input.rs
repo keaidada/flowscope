@@ -20,9 +20,9 @@ use crate::templater::{template_sql, TemplateMode};
 /// on malformed SQL input.
 const MAX_MERGE_ITERATIONS: usize = 10_000;
 
-/// Wraps template variables (`{var}` and `${var}`) in single quotes when they
-/// appear as bare tokens (not already inside quotes), so the SQL parser treats
-/// them as string literals.
+/// Wraps bare shell-style template variables in single quotes so the SQL
+/// parser treats them as string literals.  Variables already inside single
+/// quotes are left untouched — their content is a string constant.
 ///
 /// This is a standalone version usable without the `templating` feature flag.
 ///
@@ -31,66 +31,61 @@ const MAX_MERGE_ITERATIONS: usize = 10_000;
 /// - `WHERE dt = ${DATA_DT}` → `WHERE dt = '${DATA_DT}'`
 /// - `WHERE dt = {date_id}` → `WHERE dt = '{date_id}'`
 /// - `WHERE dt = '${DATA_DT}'` → unchanged
+/// - `WHERE dt = 'prefix_${DATA_DT}23'` → unchanged (inside quotes)
 /// - `{1, 2, 3}` → unchanged (non-identifier content)
 fn quote_shell_vars(sql: &str) -> String {
     let mut result = String::with_capacity(sql.len() + 32);
     let mut remaining = sql;
+    let mut in_single_quote = false;
 
-    while let Some(special_pos) = remaining.find(['{', '$']) {
+    while let Some(special_pos) = remaining.find(['{', '$', '\'']) {
+        let ch = remaining.as_bytes()[special_pos];
+
+        if ch == b'\'' {
+            // Track single-quote state
+            in_single_quote = !in_single_quote;
+            result.push_str(&remaining[..special_pos + 1]);
+            remaining = &remaining[special_pos + 1..];
+            continue;
+        }
+
+        // Push everything up to the special character
         result.push_str(&remaining[..special_pos]);
+
+        // Inside single quotes → copy as-is (string literal, don't touch)
+        if in_single_quote {
+            result.push(ch as char);
+            remaining = &remaining[special_pos + 1..];
+            continue;
+        }
 
         let rest = &remaining[special_pos..];
 
         if let Some(after_open) = rest.strip_prefix("${") {
-            // ${var} pattern
             if let Some(close_pos) = after_open.find('}') {
                 let var_end = 2 + close_pos + 1;
-
-                let already_quoted = special_pos > 0
-                    && remaining.as_bytes().get(special_pos.wrapping_sub(1)) == Some(&b'\'')
-                    && rest.as_bytes().get(var_end) == Some(&b'\'');
-
                 let var_text = &rest[..var_end];
-                if already_quoted {
-                    result.push_str(var_text);
-                } else {
-                    result.push('\'');
-                    result.push_str(var_text);
-                    result.push('\'');
-                }
+                result.push('\'');
+                result.push_str(var_text);
+                result.push('\'');
                 remaining = &rest[var_end..];
             } else {
                 result.push_str(rest);
                 return result;
             }
         } else if let Some(after_open) = rest.strip_prefix('{') {
-            // {var} pattern
             if let Some(close_pos) = after_open.find('}') {
                 let content = &after_open[..close_pos];
                 let is_template_var = content
                     .starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
-                    && content
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '_');
+                    && content.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
 
                 let var_end = 1 + close_pos + 1;
-
                 if !is_template_var {
                     result.push_str(&rest[..var_end]);
-                    remaining = &rest[var_end..];
-                    continue;
-                }
-
-                let already_quoted = special_pos > 0
-                    && remaining.as_bytes().get(special_pos.wrapping_sub(1)) == Some(&b'\'')
-                    && rest.as_bytes().get(var_end) == Some(&b'\'');
-
-                let var_text = &rest[..var_end];
-                if already_quoted {
-                    result.push_str(var_text);
                 } else {
                     result.push('\'');
-                    result.push_str(var_text);
+                    result.push_str(&rest[..var_end]);
                     result.push('\'');
                 }
                 remaining = &rest[var_end..];
@@ -108,6 +103,7 @@ fn quote_shell_vars(sql: &str) -> String {
     result.push_str(remaining);
     result
 }
+
 
 /// Creates an issue for a template rendering error.
 #[cfg(feature = "templating")]
@@ -1409,10 +1405,38 @@ mod tests {
     }
 
     #[test]
-    fn quote_shell_vars_preserves_quoted_curly() {
+    fn quote_shell_vars_preserves_vars_inside_single_quotes() {
+        // Anything inside single quotes is a string literal — don't touch it
+        assert_eq!(
+            quote_shell_vars("WHERE tdbank_imp_date='${DATA_DT}23'"),
+            "WHERE tdbank_imp_date='${DATA_DT}23'"
+        );
+        assert_eq!(
+            quote_shell_vars("WHERE dt = '${DATA_DT}'"),
+            "WHERE dt = '${DATA_DT}'"
+        );
         assert_eq!(
             quote_shell_vars("WHERE date_id = '{date_id}'"),
             "WHERE date_id = '{date_id}'"
+        );
+        // Prefix text before the variable — still inside quotes
+        assert_eq!(
+            quote_shell_vars("WHERE dt = concat('prefix_', '${DATA_DT}23')"),
+            "WHERE dt = concat('prefix_', '${DATA_DT}23')"
+        );
+        // Multi-variable inside single quotes
+        assert_eq!(
+            quote_shell_vars("WHERE x = '${A}_${B}'"),
+            "WHERE x = '${A}_${B}'"
+        );
+    }
+
+    #[test]
+    fn quote_shell_vars_still_wraps_unquoted_dollar_brace_with_trailing_digits() {
+        // ${DATA_DT}23 without surrounding quotes should still be wrapped
+        assert_eq!(
+            quote_shell_vars("WHERE dt = ${DATA_DT}23"),
+            "WHERE dt = '${DATA_DT}'23"
         );
     }
 

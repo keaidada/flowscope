@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FlowScope · 产品功能梳理与优化蓝图</title>
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --surface: #ffffff;
+    --surface-2: #fafbff;
+    --ink: #0f172a;
+    --ink-2: #475569;
+    --ink-3: #94a3b8;
+    --line: #e6e8ef;
+    --brand: #4f46e5;
+    --brand-soft: #eef2ff;
+    --p0: #dc2626; --p0-bg: #fef2f2;   /* 功能缺失 / serve 隐藏 */
+    --p1: #d97706; --p1-bg: #fffbeb;   /* 性能 */
+    --p2: #2563eb; --p2-bg: #eff6ff;   /* UX / 交互 */
+    --p3: #64748b; --p3-bg: #f1f5f9;   /* 架构 / 技术债 */
+    --ok: #059669; --ok-bg: #ecfdf5;
+    --shadow: 0 1px 2px rgba(15,23,42,.04), 0 4px 16px rgba(15,23,42,.06);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  code, .mono { font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px 120px; }
+
+  /* Hero */
+  .hero {
+    background: linear-gradient(135deg, #1e1b4b 0%, #4f46e5 55%, #7c3aed 100%);
+    color: #fff;
+    padding: 56px 0 48px;
+    margin-bottom: 40px;
+  }
+  .hero .wrap { padding-bottom: 0; }
+  .hero h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: -.02em; }
+  .hero .tag { font-size: 17px; opacity: .88; max-width: 720px; }
+  .hero .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+  .chip { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22); padding: 5px 12px; border-radius: 999px; font-size: 13px; backdrop-filter: blur(4px); }
+
+  /* Sticky nav */
+  .nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(246,247,251,.85); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+    margin: 0 0 32px;
+  }
+  .nav .wrap { display: flex; gap: 4px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
+  .nav a { color: var(--ink-2); text-decoration: none; padding: 6px 12px; border-radius: 8px; font-size: 14px; font-weight: 500; }
+  .nav a:hover { background: var(--surface); color: var(--brand); }
+
+  /* Section */
+  section { margin-bottom: 56px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  .sec-head h2 { margin: 0; font-size: 24px; letter-spacing: -.01em; }
+  .sec-num { font-family: ui-monospace, monospace; color: var(--brand); font-weight: 700; font-size: 14px; }
+  .sec-desc { color: var(--ink-2); margin: 0 0 24px; max-width: 780px; }
+
+  /* Architecture diagram */
+  .arch { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 20px 0 8px; }
+  .arch .box { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; box-shadow: var(--shadow); }
+  .arch .box h4 { margin: 0 0 4px; font-size: 14px; color: var(--brand); }
+  .arch .box p { margin: 0; font-size: 12.5px; color: var(--ink-2); }
+  @media (max-width: 820px) { .arch { grid-template-columns: repeat(2, 1fr); } }
+
+  /* Legend */
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 28px; }
+  .legend .item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
+
+  /* Module grid */
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  details.module {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  details.module[open] { border-color: var(--brand); }
+  details.module > summary {
+    list-style: none; cursor: pointer; padding: 14px 16px;
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 600; font-size: 15px;
+  }
+  details.module > summary::-webkit-details-marker { display: none; }
+  details.module > summary::after {
+    content: "▸"; margin-left: auto; color: var(--ink-3); transition: transform .2s;
+  }
+  details.module[open] > summary::after { transform: rotate(90deg); }
+  .mod-icon { width: 30px; height: 30px; border-radius: 8px; background: var(--brand-soft); color: var(--brand); display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
+  .mod-body { padding: 0 16px 16px; }
+  .mod-body .row { margin-top: 12px; }
+  .mod-body .label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); margin-bottom: 4px; }
+  .mod-body .func { color: var(--ink-2); font-size: 14px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag-i { background: var(--surface-2); border: 1px solid var(--line); padding: 2px 8px; border-radius: 6px; font-size: 12px; color: var(--ink-2); }
+  ul.opts { margin: 0; padding: 0; list-style: none; }
+  ul.opts li { padding: 5px 0 5px 0; font-size: 13.5px; display: flex; gap: 8px; align-items: flex-start; }
+  .p { flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 5px; margin-top: 1px; letter-spacing: .03em; white-space: nowrap; }
+  .p0 { background: var(--p0-bg); color: var(--p0); } .p1 { background: var(--p1-bg); color: var(--p1); }
+  .p2 { background: var(--p2-bg); color: var(--p2); } .p3 { background: var(--p3-bg); color: var(--p3); }
+
+  /* Capability list (Layer 2 analysis) */
+  .cap { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  .cap h3 { margin: 0 0 6px; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .cap .desc { color: var(--ink-2); font-size: 14px; margin: 0 0 8px; }
+  .cap .edge { font-size: 13px; color: var(--ink-3); margin: 0; }
+
+  /* Global issues */
+  .issues { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .issue { background: var(--surface); border-left: 4px solid var(--p0); border-radius: 8px; padding: 14px 16px; box-shadow: var(--shadow); display: flex; gap: 14px; align-items: flex-start; }
+  .issue.p1-l { border-left-color: var(--p1); } .issue.p2-l { border-left-color: var(--p2); } .issue.p3-l { border-left-color: var(--p3); }
+  .issue .ttl { font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+  .issue .body { color: var(--ink-2); font-size: 13.5px; }
+  .issue .p { margin-top: 2px; }
+
+  .foot { color: var(--ink-3); font-size: 13px; text-align: center; margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap">
+    <h1>FlowScope · 产品功能梳理与优化蓝图</h1>
+    <div class="tag">面向「整个 SQL 项目」的血缘管理工具 —— 跨文件全局血缘、列级追踪、多视图可视化、本地 Rust 引擎。本文档按模块梳理现状,并标注每个模块的优化机会与优先级,供逐模块优化设计。</div>
+    <div class="meta">
+      <span class="chip">React 19 + TypeScript</span>
+      <span class="chip">Chrome MV3 扩展</span>
+      <span class="chip">Rust 引擎(core / cli / wasm)</span>
+      <span class="chip">AntV G6 + React Flow</span>
+      <span class="chip">sql.js + SQLite</span>
+      <span class="chip">14 SQL 方言</span>
+    </div>
+  </div>
+</div>
+
+<div class="nav">
+  <div class="wrap">
+    <a href="#arch">架构</a>
+    <a href="#legend">图例</a>
+    <a href="#layer1">① 界面与交互外壳</a>
+    <a href="#layer2">② 分析与可视化</a>
+    <a href="#layer3">③ 数据 · IO · 引擎</a>
+    <a href="#global">④ 跨模块全局问题</a>
+  </div>
+</div>
+
+<div class="wrap">
+
+<!-- ============ ARCH ============ -->
+<section id="arch">
+  <div class="sec-head"><span class="sec-num">00</span><h2>架构分层</h2></div>
+  <p class="sec-desc">monorepo 结构。前端通过 REST 连本地 Rust 后端(serve 模式);扩展形态另有 WASM 路径(serve 模式已弃用)。优化设计需理解数据在哪一层流动。</p>
+  <div class="arch">
+    <div class="box"><h4>app/</h4><p>React 前端。Chrome 扩展 + serve 模式。所有 UI 组件、hooks、lib(存储/适配器/缓存)。</p></div>
+    <div class="box"><h4>packages/core</h4><p>TS 分析封装层。analyzer.ts 统一入口,对接 WASM/REST。</p></div>
+    <div class="box"><h4>packages/react</h4><p>血缘可视化组件库。GraphView/MatrixView/SchemaView/HierarchyView 等可复用组件。</p></div>
+    <div class="box"><h4>crates/core + export</h4><p>Rust 分析引擎(全局/列级/lint/14 方言)+ 多格式导出。</p></div>
+    <div class="box"><h4>crates/cli + wasm</h4><p>cli = serve HTTP 后端(SQLite 持久化);wasm = 浏览器内分析(扩展用)。</p></div>
+  </div>
+</section>
+
+<!-- ============ LEGEND ============ -->
+<section id="legend">
+  <div class="sec-head"><span class="sec-num">★</span><h2>优化优先级图例</h2></div>
+  <div class="legend">
+    <div class="item"><span class="p p0">P0</span> 功能缺失 / serve 模式隐藏(用户不可用)</div>
+    <div class="item"><span class="p p1">P1</span> 性能瓶颈</div>
+    <div class="item"><span class="p p2">P2</span> UX / 交互体验</div>
+    <div class="item"><span class="p p3">P3</span> 架构 / 技术债 / 重构</div>
+  </div>
+</section>
+
+<!-- ============ LAYER 1 ============ -->
+<section id="layer1">
+  <div class="sec-head"><span class="sec-num">01</span><h2>界面与交互外壳</h2></div>
+  <p class="sec-desc">用户直接感知的导航、布局、文件管理、编辑器、命令面板。这一层决定了「上手成本」和「日常流畅度」。多个模块在 serve 模式下被系统性隐藏(见 P0)。</p>
+  <div class="grid">
+
+    <details class="module" open><summary><span class="mod-icon">▦</span>Workspace · 主布局</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">全局编排:顶栏(Logo/项目选择/全局血缘/设置)+ 左侧边栏 + SQL 编辑器 + 血缘分析面板;全局血缘打开时全屏覆盖。</div></div>
+      <div class="row"><div class="label">关键交互</div><div class="tags"><span class="tag-i">侧边栏宽度自适应</span><span class="tag-i">全局血缘↔单文件跳转</span><span class="tag-i">⌘O/P/B/K/S/\\ 快捷键</span></div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p0">P0</span><span>serve 模式隐藏分享功能(快捷键死路径)</span></li>
+        <li><span class="p p2">P2</span><span>全局血缘↔单文件切换的状态恢复逻辑复杂,易丢失上下文</span></li>
+        <li><span class="p p2">P2</span><span>「清理缓存」按钮文案中英混用,未国际化</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">▭</span>ActivityBar · 视图切换条</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">VS Code 风窄竖条,切换 文件/搜索/Schema 三个侧边栏视图。</div></div>
+      <div class="row"><div class="label">关键交互</div><div class="tags"><span class="tag-i">点击切换/再点关闭</span><span class="tag-i">hover 显示快捷键 tooltip</span></div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p0">P0</span><span>serve 模式下 Schema 入口被 <code>hideSchema</code> 隐藏(已临时修复为 false)</span></li>
+        <li><span class="p p2">P2</span><span>仅 3 个固定视图,不可自定义/扩展插件位</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">📁</span>SidebarFileTree · 文件树</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">创建/导入/重命名/删除 SQL 文件和文件夹,勾选文件参与分析。</div></div>
+      <div class="row"><div class="label">关键交互</div><div class="tags"><span class="tag-i">拖拽上传(批量渐进)</span><span class="tag-i">树内搜索过滤</span><span class="tag-i">右键菜单</span></div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p0">P0</span><span>serve 模式(<code>isReadOnly</code>)隐藏所有编辑按钮,只能看不能改</span></li>
+        <li><span class="p p2">P2</span><span>无拖拽排序(改文件/文件夹层级)</span></li>
+        <li><span class="p p2">P2</span><span>大量文件时无虚拟滚动</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">🔍</span>SidebarSearch · 跨文件搜索</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">跨文件内容搜索,按目录树分组展示匹配,支持文件模式与 Schema 模式。</div></div>
+      <div class="row"><div class="label">关键交互</div><div class="tags"><span class="tag-i">点击跳转编辑器+高亮</span><span class="tag-i">hover 预览上下文</span><span class="tag-i">大小写切换</span></div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p2">P2</span><span>纯文本搜索,无正则/全词匹配</span></li>
+        <li><span class="p p2">P2</span><span>每文件最多 20 条匹配,无「展开更多」</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">🗂️</span>SidebarSchema · Schema DDL 管理</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">Schema DDL 文件管理 + 内置 SQL 编辑器,维护表结构定义供血缘分析(1643 行,最大组件之一)。</div></div>
+      <div class="row"><div class="label">关键交互</div><div class="tags"><span class="tag-i">树形 CRUD + 批量选择</span><span class="tag-i">DDL 编辑预览</span><span class="tag-i">树/编辑器宽度拖拽</span></div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p0">P0</span><span>serve 模式下编辑/新建/导入全部禁用,仅查看</span></li>
+        <li><span class="p p3">P3</span><span>1643 行单文件,树节点组件嵌套深,难维护,需拆分</span></li>
+        <li><span class="p p1">P1</span><span>DDL dialect 硬编码 Hive,多方言 schema 不准</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">📂</span>ProjectSelector · 项目切换</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">在多项目间切换、创建新项目、清理分析缓存。</div></div>
+      <div class="row"><div class="label">关键交互</div><div class="tags"><span class="tag-i">下拉列表 + 高亮当前</span><span class="tag-i">内联创建项目</span><span class="tag-i">⌘P</span></div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p0">P0</span><span>serve 模式被 Static Files indicator 替换(已修复为显示选择器)</span></li>
+        <li><span class="p p2">P2</span><span>无项目排序/搜索/标签</span></li>
+        <li><span class="p p2">P2</span><span>无项目导出/导入/备份</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">✎</span>EditorArea · SQL 编辑器</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">编写 SQL、运行血缘分析、切换模板/解析视图、ETL 模板对话框。</div></div>
+      <div class="row"><div class="label">关键交互</div><div class="tags"><span class="tag-i">⌘Enter 分析(⇧仅当前文件)</span><span class="tag-i">模板/解析切换</span><span class="tag-i">schema 变更自动重分析</span></div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p1">P1</span><span>解析 SQL 超 10MB 截断,大文件体验差</span></li>
+        <li><span class="p p2">P2</span><span>schema 变更 300ms 防抖重分析,密集编辑时抖动</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">⌘</span>CommandPalette · 命令面板</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">⌘K 模糊搜索并执行所有快捷键命令,按类别分组。</div></div>
+      <div class="row"><div class="label">关键交互</div><div class="tags"><span class="tag-i">模糊搜索 + 评分排序</span><span class="tag-i">分组导航/视图/操作/设置</span></div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p2">P2</span><span>命令列表完全静态,无动态项目/文件/表搜索</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">⤓</span>GlobalDropZone · 拖拽导入</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">文件/文件夹拖到窗口任意位置导入项目,递归保持层级。</div></div>
+      <div class="row"><div class="label">关键交互</div><div class="tags"><span class="tag-i">全屏遮罩提示</span><span class="tag-i">文件夹递归</span><span class="tag-i">类型/大小校验</span></div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p0">P0</span><span>serve 模式(<code>isReadOnly</code>)完全禁用拖放</span></li>
+        <li><span class="p p2">P2</span><span>无 .zip 批量导入</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">👋</span>WelcomeModal · 欢迎引导</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">首次使用欢迎弹窗,介绍血缘/多文件/隐私/键盘四大特性。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p2">P2</span><span>纯展示无交互引导,无 onboarding 流程</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">⌨</span>KeyboardShortcutsDialog · 快捷键</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">按类别展示所有快捷键,根据当前 Tab 过滤。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p2">P2</span><span>标题/分类名硬编码英文,未国际化</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">◐</span>Theme / Language Toggle</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">主题(亮/暗/系统)+ 语言(中/英)切换。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p2">P2</span><span>仅 en/zh,不可扩展(社区翻译/其他语言)</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">⚠</span>ErrorBoundary · 错误边界</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">捕获渲染崩溃,展示错误 + 重试/重载。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p3">P3</span><span>仅捕获渲染错误,不捕获事件回调中的异步错误</span></li>
+      </ul></div>
+    </div></details>
+
+    <details class="module"><summary><span class="mod-icon">▪</span>ui/ · 基础组件库</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">17 个 shadcn/ui 风格基础组件:badge/button/checkbox/collapsible/dialog/dropdown-menu/input/label/resizable/scroll-area/select/separator/sheet/skeleton/sonner/tabs/tooltip。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p3">P3</span><span>无 design token 统一(间距/色板散落 tailwind class),建议提取 tokens</span></li>
+      </ul></div>
+    </div></details>
+
+  </div>
+</section>
+
+<!-- ============ LAYER 2 ============ -->
+<section id="layer2">
+  <div class="sec-head"><span class="sec-num">02</span><h2>分析与可视化核心</h2></div>
+  <p class="sec-desc">产品的灵魂。分析能力(引擎能算什么)+ 视图模式(怎么呈现)+ 可视化组件。这里是差异化竞争点,也是技术债集中区(双引擎、重复逻辑)。</p>
+
+  <h3 style="margin:24px 0 12px;font-size:17px;">A. 分析能力(引擎层)</h3>
+
+  <div class="cap"><h3>🔁 单文件血缘</h3>
+    <p class="desc">解析单个 SQL 出语句级血缘图(表/视图/CTE/列节点 + data_flow/ownership 边),识别 JOIN 与复杂度。</p>
+    <p class="edge">边界:13 方言 · 单文件 ≤10MB · <code>current</code> 模式仅分析当前文件。 · <span class="p p2">P2</span> 10MB 截断 · <span class="p p3">P3</span> 与多文件逻辑两套并存</p>
+  </div>
+  <div class="cap"><h3>🌐 多文件 / 全局血缘</h3>
+    <p class="desc">合并多文件 AnalyzeResult,构建跨文件 globalLineage(节点去重、边合并),BFS 穿透临时表/CTE 建立物理表直接依赖。</p>
+    <p class="edge">边界:WASM 内存合并 + JS 表级精简 + 拓扑 DAG 层级。 · <span class="p p1">P1</span> 大数据集 OOM · <span class="p p1">P1</span> 跨语句穿透在前端 BFS 而非后端 SQL 计算</p>
+  </div>
+  <div class="cap"><h3>🎯 列级血缘</h3>
+    <p class="desc">默认启用,产出 column 节点 + expression/ownership 边,支持列到列数据流追踪。</p>
+    <p class="edge">边界:GraphView 可 toggle · G6GraphView toggle 已加但列边渲染未完整接入 · 持久化到 SQLite columns 表。 · <span class="p p0">P0</span> G6 列边渲染未接入 · <span class="p p2">P2</span> G6GraphView 无 ColumnPanel 联动</p>
+  </div>
+  <div class="cap"><h3>📊 表级血缘</h3>
+    <p class="desc">从 globalLineage 提取物理表(排除 CTE/临时/别名),BFS 建立表到表数据流。</p>
+    <p class="edge">边界:支持 Spark/Hive TEMP_*/TMP_* 过滤、USE database 推断。 · <span class="p p3">P3</span> <code>extractSchemaFromResult</code> 与 <code>buildTableLevelLineage</code> 两套重复逻辑并存</p>
+  </div>
+  <div class="cap"><h3>🧹 SQL Lint</h3>
+    <p class="desc">Rust 内置规则集,产出 Issue(severity/span/autofix patch),支持 per-rule 配置与禁用。</p>
+    <p class="edge">边界:默认关闭,issues 面板开关激活 · 支持 autofix 直接修补。 · <span class="p p2">P2</span> 默认关闭发现性差 · <span class="p p2">P2</span> 规则文档/说明缺失</p>
+  </div>
+  <div class="cap"><h3>🧩 其他能力</h3>
+    <p class="desc">Schema 解析与推断(resolvedSchema/PK/类型/temporary)· Hierarchy 层级树 · Pipeline 文件级 DAG 层级 · SQL 自动补全 · 语句分割 · 模板模式(Jinja-like)。</p>
+  </div>
+
+  <h3 style="margin:28px 0 12px;font-size:17px;">B. 视图模式(呈现层)</h3>
+  <div class="grid">
+    <details class="module"><summary><span class="mod-icon">🔗</span>Graph · 图谱视图</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">交互式血缘图。<b>双引擎并存</b>:React Flow(GraphView 1101 行)+ AntV G6(G6GraphView 913 行)。table/script 视图、dagre/ELK 布局。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p3">P3</span><span>双引擎并存,状态不共享,维护成本翻倍 —— 需明确选型收敛</span></li>
+        <li><span class="p p1">P1</span><span>节点 &gt;2000 禁用 MiniMap/ELK;G6 &gt;3000 进 lite 模式;大图布局延迟</span></li>
+        <li><span class="p p1">P1</span><span>G6 的 ELK 布局用内联 Worker 无复用</span></li>
+      </ul></div>
+    </div></details>
+    <details class="module"><summary><span class="mod-icon">📋</span>List · 列表视图</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">分页表清单(1629 行),含 impact score/bridge/source/sink/isolated 分类、按文件分组、上下游详情展开。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p1">P1</span><span>排序/分组全量计算,无虚拟滚动</span></li>
+      </ul></div>
+    </div></details>
+    <details class="module"><summary><span class="mod-icon">▦</span>Matrix · 矩阵视图</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">依赖密度矩阵(table/script 双模式,1765 行),heatmap/x-ray/扫描线。另有文件级 TaskLayerMatrix(1277 行)展示 pipeline DAG 层级。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p1">P1</span><span>大 cell 渲染性能受限,无虚拟化</span></li>
+        <li><span class="p p2">P2</span><span>无矩阵导出</span></li>
+        <li><span class="p p2">P2</span><span>TaskLayerMatrix 无调度时间信息(schedule 全空)</span></li>
+      </ul></div>
+    </div></details>
+    <details class="module"><summary><span class="mod-icon">🌲</span>Hierarchy · 层级树</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">可折叠树形上下游链路(1350 行),含列映射与脚本来源,flat/tree 切换。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p1">P1</span><span>递归渲染无虚拟化,深层级性能下降</span></li>
+        <li><span class="p p2">P2</span><span>列映射仅展示不可编辑</span></li>
+      </ul></div>
+    </div></details>
+    <details class="module"><summary><span class="mod-icon">🗃</span>Schema · 结构视图</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">表结构展示。当前文件模式(SchemaListView)+ 全局模式(packages/react SchemaView 1038 行)。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p2">P2</span><span>全局 SchemaView 无搜索过滤</span></li>
+        <li><span class="p p2">P2</span><span>列数据来自 resolvedSchema 可能不完整</span></li>
+      </ul></div>
+    </div></details>
+  </div>
+
+  <h3 style="margin:28px 0 12px;font-size:17px;">C. 辅助组件</h3>
+  <div class="grid">
+    <details class="module"><summary><span class="mod-icon">📊</span>StatsPopover · 统计</summary><div class="mod-body"><div class="row"><div class="label">优化机会</div><ul class="opts"><li><span class="p p2">P2</span><span>复杂度评分 complexityScore 引擎常返回 0</span></li></ul></div></div></details>
+    <details class="module"><summary><span class="mod-icon">🎚</span>NamespaceFilterBar · 命名空间过滤</summary><div class="mod-body"><div class="row"><div class="label">优化机会</div><ul class="opts"><li><span class="p p2">P2</span><span>仅过滤图谱显示,不影响分析/导出</span></li></ul></div></div></details>
+    <details class="module"><summary><span class="mod-icon">🐛</span>SchemaAwareIssuesPanel · 问题面板</summary><div class="mod-body"><div class="row"><div class="label">优化机会</div><ul class="opts"><li><span class="p p2">P2</span><span>lint 默认关闭需手动启用,发现性差</span></li></ul></div></div></details>
+    <details class="module"><summary><span class="mod-icon">⫶</span>LayoutModeToggle · 三栏布局</summary><div class="mod-body"><div class="row"><div class="label">功能</div><div class="func">sidebar/lineage/editor 三栏一键展开折叠。</div></div></div></details>
+  </div>
+</section>
+
+<!-- ============ LAYER 3 ============ -->
+<section id="layer3">
+  <div class="sec-head"><span class="sec-num">03</span><h2>数据 · IO · 引擎</h2></div>
+  <p class="sec-desc">数据在哪、怎么进出、引擎能算什么。这是「能力上限」和「扩展性」的基础。</p>
+
+  <h3 style="margin:8px 0 12px;font-size:17px;">A. 存储机制</h3>
+  <div class="grid">
+    <details class="module"><summary><span class="mod-icon">💾</span>项目元数据 / 视图状态</summary><div class="mod-body"><div class="row"><div class="label">功能</div><div class="func">项目配置存 localStorage(<code>flowscope-projects</code>),视图状态按项目隔离存 Zustand persist(<code>flowscope-view-states</code>)。</div></div><div class="row"><div class="label">优化机会</div><ul class="opts"><li><span class="p p2">P2</span><span>localStorage 5MB 上限,大项目元数据风险</span></li></ul></div></div></details>
+    <details class="module"><summary><span class="mod-icon">🗄</span>SQL 文件 / Schema / 缓存 / 血缘</summary><div class="mod-body"><div class="row"><div class="label">功能</div><div class="func">均经 REST 存后端 SQLite(project-files / schema-files / cache KV / lineage 三表 / table_metadata)。文件 500ms 防抖全量覆盖写。</div></div><div class="row"><div class="label">优化机会</div><ul class="opts">
+      <li><span class="p p1">P1</span><span>文件全量替换式写入,无增量更新,大项目保存慢</span></li>
+      <li><span class="p p1">P1</span><span>file-results batch save 逐行串行 POST,无批量接口</span></li>
+      <li><span class="p p2">P2</span><span>table_metadata 的 row_count/size_bytes 始终 -1(未采集)</span></li>
+    </ul></div></div></details>
+    <details class="module"><summary><span class="mod-icon">⚡</span>Backend 模式文件(内存)</summary><div class="mod-body"><div class="row"><div class="label">功能</div><div class="func">serve 模式 watch 的文件 → 内存虚拟项目 <code>__backend__</code>,只读不持久化。</div></div><div class="row"><div class="label">优化机会</div><ul class="opts"><li><span class="p p0">P0</span><span>刷新即丢失选中态外的所有状态(不持久化)</span></li></ul></div></div></details>
+  </div>
+
+  <h3 style="margin:28px 0 12px;font-size:17px;">B. 导入 / 导出 / 分享</h3>
+  <div class="grid">
+    <details class="module"><summary><span class="mod-icon">📤</span>导出(9 种格式)</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">XLSX(多 sheet)/ CSV(zip 多文件)/ JSON / DuckDB SQL / Mermaid / HTML / PNG / SVG / PondPilot 跳转。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p2">P2</span><span>XLSX 缺 Issues/ResolvedSchema sheet(仅 CSV/JSON 有)</span></li>
+        <li><span class="p p2">P2</span><span>CSV 必为 zip,无法单文件导出</span></li>
+        <li><span class="p p1">P1</span><span>PNG/SVG html-to-image 主线程阻塞,大图卡顿</span></li>
+        <li><span class="p p3">P3</span><span>DuckDB 仅 SQL 文本,无 .duckdb 二进制(WASM 限制)</span></li>
+      </ul></div>
+    </div></details>
+    <details class="module"><summary><span class="mod-icon">🔗</span>分享(URL 编解码)</summary><div class="mod-body">
+      <div class="row"><div class="label">功能</div><div class="func">项目 gzip+base64url 编码到 <code>#share=</code> hash,可选文件/含 schema。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p0">P0</span><span>serve 模式禁用分享(快捷键死路径)</span></li>
+        <li><span class="p p2">P2</span><span>纯客户端无短链,超大项目无法分享</span></li>
+        <li><span class="p p3">P3</span><span>仅 v1 payload,无版本迁移</span></li>
+      </ul></div>
+    </div></details>
+    <details class="module"><summary><span class="mod-icon">🌊</span>流式项目导出</summary><div class="mod-body"><div class="row"><div class="label">功能</div><div class="func">三步 session(start/add/finish)逐文件结果流式 merge → 统一导出,避免浏览器内存爆炸。</div></div><div class="row"><div class="label">优化机会</div><ul class="opts"><li><span class="p p2">P2</span><span>无进度可视化(逐文件提交无反馈)</span></li></ul></div></div></details>
+    <details class="module"><summary><span class="mod-icon">📥</span>文件导入</summary><div class="mod-body"><div class="row"><div class="label">优化机会</div><ul class="opts"><li><span class="p p2">P2</span><span>无 .zip 批量导入</span></li></ul></div></div></details>
+  </div>
+
+  <h3 style="margin:28px 0 12px;font-size:17px;">C. 后端 REST API &amp; Rust 引擎</h3>
+  <div class="grid">
+    <details class="module"><summary><span class="mod-icon">🛠</span>REST 端点(7 组)</summary><div class="mod-body">
+      <div class="row"><div class="label">分组</div><div class="tags">
+        <span class="tag-i">health</span><span class="tag-i">analyze</span><span class="tag-i">completion/split/lint-fix</span>
+        <span class="tag-i">files/schema/config</span><span class="tag-i">export/{format}</span>
+        <span class="tag-i">project-export 流式</span><span class="tag-i">db/* 持久化</span>
+      </div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p2">P2</span><span>无 API 鉴权(本地工具可接受,但需文档说明)</span></li>
+        <li><span class="p p2">P2</span><span>无批量 db 写入接口(逐行 POST)</span></li>
+      </ul></div>
+    </div></details>
+    <details class="module"><summary><span class="mod-icon">⚙</span>Rust 分析引擎</summary><div class="mod-body">
+      <div class="row"><div class="label">能力</div><div class="func">全局血缘(self-join 折叠/CTE 作用域/孤立 edge 清理)· 列级(5 种 edge 类型)· 复杂度评分 · 14 方言(含 MSSQL GO)· 模板预处理(Jinja/dbt/shell 变量)· 容错降级解析 · resolvedSchema · lint 防回归修复。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p1">P1</span><span>全局血缘跨语句穿透导出时需前端注入 precomputedLineage 才准</span></li>
+        <li><span class="p p2">P2</span><span>复杂度评分公式硬编码(table*5+cte*8+join*10+filter*2)</span></li>
+      </ul></div>
+    </div></details>
+    <details class="module"><summary><span class="mod-icon">🧬</span>WASM 引擎</summary><div class="mod-body">
+      <div class="row"><div class="label">角色</div><div class="func">扩展模式本地分析(无后端)· 导出能力对齐 Rust native · 渐进式内存合并 · UTF-16 span 兼容 Monaco。</div></div>
+      <div class="row"><div class="label">优化机会</div><ul class="opts">
+        <li><span class="p p3">P3</span><span>serve 模式已弃用 WASM(<code>backend-adapter</code> 注释 No fallback to WASM),但代码路径仍在 —— 需决策保留(扩展用)还是移除</span></li>
+        <li><span class="p p3">P3</span><span>不支持 DuckDB 二进制导出</span></li>
+      </ul></div>
+    </div></details>
+  </div>
+</section>
+
+<!-- ============ GLOBAL ============ -->
+<section id="global">
+  <div class="sec-head"><span class="sec-num">04</span><h2>跨模块全局问题(优化重点)</h2></div>
+  <p class="sec-desc">不是单个模块的问题,而是影响多个模块的系统性议题。优先解决这些,收益最大。</p>
+  <div class="issues">
+    <div class="issue"><span class="p p0">P0</span><div><div class="ttl">serve 模式系统性隐藏前端功能</div><div class="body">ProjectSelector(Static Files indicator)、ActivityBar Schema、SidebarSchema 编辑、GlobalDropZone、ShareDialog —— 一致性地把"纯前端能力"在连后端时禁用。根因:<code>isBackendMode</code> 在 UI 多处控制显隐。<b>建议:统一决策 serve 模式该开放哪些前端能力,集中到一个策略层,而非散落判断。</b></div></div></div>
+    <div class="issue p3-l"><span class="p p3">P3</span><div><div class="ttl">血缘图双引擎并存(React Flow + AntV G6)</div><div class="body">GraphView(1101 行)与 G6GraphView(913 行)功能对齐但状态不共享,维护成本翻倍,列级血缘只在 RF 接入。<b>建议:明确选型收敛到一个引擎(结合性能/交互/包体权衡),或明确分工(RF 交互探索 / G6 大图)。</b></div></div></div>
+    <div class="issue p3-l"><span class="p p3">P3</span><div><div class="ttl">表级血缘两套重复逻辑</div><div class="body"><code>extractSchemaFromResult</code>(AnalysisView)与 <code>buildTableLevelLineage</code>(merge-results.ts)并行存在。<b>建议:合并为单一实现。</b></div></div></div>
+    <div class="issue p1-l"><span class="p p1">P1</span><div><div class="ttl">大数据集性能(无虚拟化)</div><div class="body">List/Matrix/Hierarchy/FileTree 全量渲染无虚拟滚动;全局血缘前端 BFS 而非后端 SQL 计算;布局计算大图延迟。<b>建议:虚拟滚动 + 全局血缘下沉到后端 SQL。</b></div></div></div>
+    <div class="issue p2-l"><span class="p p2">P2</span><div><div class="ttl">国际化不全</div><div class="body">KeyboardShortcutsDialog 标题/分类、清理缓存文案等硬编码英文。<b>建议:补全 i18n key + 加缺失文案校验。</b></div></div></div>
+    <div class="issue p0"><span class="p p0">P0</span><div><div class="ttl">Backend 模式状态不持久化</div><div class="body">serve 模式虚拟项目 <code>__backend__</code> 在内存,刷新丢失选中态外所有状态。<b>建议:至少持久化选中文件/展开节点/视图状态到后端或 localStorage。</b></div></div></div>
+  </div>
+</section>
+
+<div class="foot">
+  FlowScope 产品功能梳理 · 基于 app/ + packages/ + crates/ 源码梳理生成 · 优化优先级供逐模块设计参考
+</div>
+
+</div>
+</body>
+</html>

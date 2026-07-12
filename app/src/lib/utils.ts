@@ -7,6 +7,40 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
+ * Short unique id generator — replaces crypto.randomUUID() for shorter ids.
+ * ~12 chars: timestamp(base36) + process-local counter + random. Short enough
+ * for project/file/schema ids (user-scale) while staying unique in a session.
+ */
+let _genIdCounter = 0;
+export function genId(): string {
+  _genIdCounter += 1;
+  return (
+    Date.now().toString(36) +
+    _genIdCounter.toString(36) +
+    Math.random().toString(36).slice(2, 5)
+  );
+}
+
+/**
+ * Detect whether a file is text by scanning the first chunk for NULL bytes (0x00).
+ * Classic heuristic (same as git/file): text (UTF-8/ASCII) has no NULL bytes;
+ * binaries (images, archives, executables) almost always do.
+ * Note: UTF-16 text contains NULL bytes and would be misdetected as binary — rare in practice.
+ */
+export async function isTextFile(file: File, sampleBytes = 8192): Promise<boolean> {
+  try {
+    const buf = await file.slice(0, sampleBytes).arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] === 0) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Convert a UTF-8 byte offset into a line:column position within a string.
  * Lines are 1-indexed, columns are 1-indexed.
  *

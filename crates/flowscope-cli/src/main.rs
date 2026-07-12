@@ -53,7 +53,7 @@ fn main() -> ExitCode {
     let args = Args::parse();
 
     #[cfg(feature = "serve")]
-    if args.serve {
+    if args.serve || args.db_only {
         return run_serve_mode(args);
     }
 
@@ -103,7 +103,10 @@ fn run_serve_mode(args: Args) -> ExitCode {
     });
 
     // Determine input source: watch directories or static files
-    let (watch_dirs, static_files) = if !args.watch.is_empty() {
+    let (watch_dirs, static_files) = if args.db_only {
+        // DB-only mode: no files needed, just the API server
+        (vec![], None)
+    } else if !args.watch.is_empty() {
         // Watch mode takes precedence
         if !args.files.is_empty() {
             eprintln!("flowscope: warning: ignoring positional files when --watch is provided");
@@ -138,7 +141,8 @@ fn run_serve_mode(args: Args) -> ExitCode {
         metadata_schema: None,
         schema_path: args.schema.clone(),
         port: args.port,
-        open_browser: args.open,
+        open_browser: args.open && !args.db_only,
+        db_only: args.db_only,
         #[cfg(feature = "templating")]
         template_config,
     };
@@ -807,7 +811,7 @@ fn run(args: Args) -> Result<bool> {
         OutputFormat::Sql => export_sql(&result, args.export_schema.as_deref())
             .context("Failed to export DuckDB SQL")?,
         OutputFormat::Csv => {
-            let bytes = export_csv_bundle(&result).context("Failed to export CSV archive")?;
+            let bytes = export_csv_bundle(&result, None).context("Failed to export CSV archive")?;
             return write_binary_output(
                 &args.output,
                 &bytes,
@@ -817,7 +821,7 @@ fn run(args: Args) -> Result<bool> {
             );
         }
         OutputFormat::Xlsx => {
-            let bytes = export_xlsx(&result).context("Failed to export XLSX")?;
+            let bytes = export_xlsx(&result, None).context("Failed to export XLSX")?;
             return write_binary_output(
                 &args.output,
                 &bytes,

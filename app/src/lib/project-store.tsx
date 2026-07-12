@@ -23,8 +23,10 @@ import { DEFAULT_PROJECT, DEFAULT_DBT_PROJECT } from './default-projects';
 import { useBackend } from './backend-context';
 import { useBackendFiles } from '@/hooks/useBackendFiles';
 import { saveProjectFiles, loadProjectFiles, deleteProjectFiles } from './file-storage';
+import * as serverDb from '@/lib/server-db';
+import { genId } from '@/lib/utils';
 
-const uuidv4 = () => crypto.randomUUID();
+const uuidv4 = () => genId();
 
 const MAX_PROJECT_NAME_LENGTH = 50;
 const VALID_RUN_MODES: readonly RunMode[] = ['current', 'all', 'custom'];
@@ -207,7 +209,7 @@ const loadProjectsFromStorage = (): Project[] => {
     if (saved) {
       const parsed = JSON.parse(saved);
       return parsed.map((p: Partial<Project>) => ({
-        id: p.id || crypto.randomUUID(),
+        id: p.id || genId(),
         name: p.name || 'Untitled',
         dialect: p.dialect || 'generic',
         runMode:
@@ -229,6 +231,26 @@ const loadProjectsFromStorage = (): Project[] => {
   return [DEFAULT_PROJECT, DEFAULT_DBT_PROJECT];
 };
 
+/** Convert backend ProjectMeta row → frontend Project (files loaded separately). */
+const metaToProject = (m: serverDb.ProjectMeta): Project => ({
+  id: m.id,
+  name: m.name,
+  dialect: isValidDialect(m.dialect) ? (m.dialect as Dialect) : 'generic',
+  runMode: VALID_RUN_MODES.includes(m.run_mode as RunMode) ? (m.run_mode as RunMode) : 'current',
+  selectedFileIds: (() => {
+    try {
+      const parsed = JSON.parse(m.selected_file_ids);
+      return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+    } catch {
+      return [];
+    }
+  })(),
+  schemaSQL: m.schema_sql,
+  templateMode: parseTemplateMode(m.template_mode),
+  files: [],
+  activeFileId: m.active_file_id,
+});
+
 /**
  * Persist project settings to localStorage (lightweight, sync).
  * File contents are saved to DuckDB separately (async).
@@ -246,9 +268,34 @@ const saveProjectSettingsToStorage = (projects: Project[]) => {
       activeFileId: p.activeFileId,
     }));
     localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(settings));
+    // 同步到后端(db 为 source of truth),debounced
+    scheduleBackendProjectSync(projects);
   } catch (error) {
     console.error('Failed to save project settings to storage:', error);
   }
+};
+
+let backendProjectSyncTimer: ReturnType<typeof setTimeout> | undefined;
+const scheduleBackendProjectSync = (projects: Project[]) => {
+  if (backendProjectSyncTimer) clearTimeout(backendProjectSyncTimer);
+  backendProjectSyncTimer = setTimeout(() => {
+    for (const p of projects) {
+      serverDb
+        .saveProject({
+          id: p.id,
+          name: p.name,
+          dialect: p.dialect,
+          run_mode: p.runMode,
+          template_mode: p.templateMode,
+          schema_sql: p.schemaSQL,
+          selected_file_ids: JSON.stringify(p.selectedFileIds),
+          active_file_id: p.activeFileId,
+          created_at: 0,
+          updated_at: 0,
+        })
+        .catch((e) => console.error('Failed to sync project to backend:', e));
+    }
+  }, 500);
 };
 
 /** Debounced IndexedDB file save — 500ms delay to avoid frequent writes */
@@ -405,6 +452,22 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     return files.map((f) => `${f.id}:${f.path}:${f.content.length}`).join('|');
   };
 
+  // 回填:localStorage 无项目时,从后端 loadProjects 恢复(换设备/清缓存)
+  useEffect(() => {
+    if (localStorage.getItem(STORAGE_KEYS.PROJECTS)) return;
+    serverDb
+      .loadProjects()
+      .then((rows) => {
+        if (rows.length > 0) {
+          setProjects(rows.map(metaToProject));
+        }
+      })
+      .catch(() => {
+        /* backend unavailable, keep defaults */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Save project settings to localStorage (sync, lightweight)
   useEffect(() => {
     saveProjectSettingsToStorage(projects);
@@ -525,8 +588,10 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const effectiveProjects =
     isBackendMode && backendProject ? [backendProject, ...projects] : projects;
 
-  // In backend mode, default to backend project
-  const effectiveActiveProjectId = isBackendMode ? BACKEND_PROJECT_ID : activeProjectId;
+  // In backend mode, default to backend project unless user selected a valid local project
+  const effectiveActiveProjectId = isBackendMode
+    ? (activeProjectId && projects.some((p) => p.id === activeProjectId) ? activeProjectId : BACKEND_PROJECT_ID)
+    : activeProjectId;
 
   const currentProjectRaw =
     effectiveProjects.find((p) => p.id === effectiveActiveProjectId) || null;
@@ -573,6 +638,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     (id: string) => {
       setProjects((prev) => prev.filter((p) => p.id !== id));
       deleteProjectFiles(id); // Clean up IndexedDB
+      serverDb.deleteProject(id).catch((e) => console.error('Failed to delete project from backend:', e));
       if (activeProjectId === id) {
         setActiveProjectId(null);
       }
@@ -983,7 +1049,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   const selectFile = useCallback(
     (fileId: string) => {
-      if (isBackendMode) {
+      // 只有当前是后端项目(Server Files)才更新 backendActiveFileId;
+      // 本地项目(serve 模式 + 本地)走常规路径更新 project.activeFileId
+      if (isBackendMode && effectiveActiveProjectId === BACKEND_PROJECT_ID) {
         setBackendActiveFileId(fileId);
         return;
       }
@@ -996,7 +1064,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         })
       );
     },
-    [activeProjectId, isBackendMode]
+    [activeProjectId, isBackendMode, effectiveActiveProjectId]
   );
 
   const updateSchemaSQL = useCallback((projectId: string, schemaSQL: string) => {

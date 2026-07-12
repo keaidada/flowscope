@@ -83,6 +83,34 @@ export function export_xlsx(request_json: string): Uint8Array;
  */
 export function get_version(): string;
 
+export function merge_analyze_results(results_json: string): string;
+
+/**
+ * Merge multiple results and export directly — no JSON round-trip of merged data.
+ * Request JSON: `{ "results": [...], "format": "xlsx", "sheets": [...], "compact": false }`
+ * Returns export bytes (for xlsx/csv) or JSON string (for json format).
+ */
+export function merge_and_export(request_json: string): Uint8Array;
+
+/**
+ * Merge a single AnalyzeResult (as JSON) into the progressive accumulator.
+ */
+export function merge_progressive_add(result_json: string): void;
+
+/**
+ * Finalize and export the progressive merge accumulator.
+ * Input: `{ "format": "xlsx", "sheets": [...], "compact": false }`
+ */
+export function merge_progressive_export(request_json: string): Uint8Array;
+
+/**
+ * Merge multiple per-file AnalyzeResult JSON values into a single combined result.
+ * The input is a JSON array of AnalyzeResult objects (stringified).
+ * Returns the merged AnalyzeResult as a JSON string.
+ * Reset the progressive merge accumulator.
+ */
+export function merge_progressive_init(): void;
+
 /**
  * Install panic hook for better error messages in browser console
  */
@@ -115,7 +143,12 @@ export interface InitOutput {
     readonly export_to_duckdb_sql: (a: number, b: number) => [number, number, number, number];
     readonly export_xlsx: (a: number, b: number) => [number, number, number, number];
     readonly get_version: () => [number, number];
+    readonly merge_analyze_results: (a: number, b: number) => [number, number, number, number];
+    readonly merge_and_export: (a: number, b: number) => [number, number, number, number];
+    readonly merge_progressive_add: (a: number, b: number) => [number, number];
+    readonly merge_progressive_export: (a: number, b: number) => [number, number, number, number];
     readonly split_statements_json: (a: number, b: number) => [number, number];
+    readonly merge_progressive_init: () => void;
     readonly set_panic_hook: () => void;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

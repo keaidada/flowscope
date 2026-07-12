@@ -59,10 +59,10 @@ notify-debouncer-mini = { version = "0.5", optional = true }
 mime_guess = { version = "2", optional = true }
 open = { version = "5", optional = true }
 walkdir = { version = "2", optional = true }
+rusqlite = "0.32"
 
 [dev-dependencies]
 tempfile = "3"
-rusqlite = "0.32"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

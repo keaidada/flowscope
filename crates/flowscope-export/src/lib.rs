@@ -7,6 +7,7 @@
 //! - **SQL export** (`export_sql`): Generates DDL + INSERT statements (WASM-compatible)
 
 mod csv;
+pub use csv::ExportSheet;
 mod error;
 mod extract;
 mod html;
@@ -59,8 +60,8 @@ pub fn export(result: &AnalyzeResult, format: ExportFormat) -> Result<Vec<u8>, E
         ExportFormat::Html => {
             Ok(html::export_html(result, "FlowScope", chrono::Utc::now()).into_bytes())
         }
-        ExportFormat::CsvBundle => csv::export_csv_bundle(result),
-        ExportFormat::Xlsx => xlsx::export_xlsx(result),
+        ExportFormat::CsvBundle => csv::export_csv_bundle(result, None),
+        ExportFormat::Xlsx => xlsx::export_xlsx(result, None),
         ExportFormat::Png => Err(ExportError::UnsupportedFormat("PNG export is UI-only")),
     }
 }
@@ -90,16 +91,30 @@ pub fn export_json(result: &AnalyzeResult, compact: bool) -> Result<String, Expo
     json::export_json(result, compact)
 }
 
+pub fn export_json_sheets(
+    result: &AnalyzeResult,
+    sheets: Option<&[ExportSheet]>,
+    compact: bool,
+) -> Result<String, ExportError> {
+    json::export_json_sheets(result, sheets, compact)
+}
+
 pub fn export_mermaid(result: &AnalyzeResult, view: MermaidView) -> Result<String, ExportError> {
     Ok(mermaid::export_mermaid(result, view))
 }
 
-pub fn export_csv_bundle(result: &AnalyzeResult) -> Result<Vec<u8>, ExportError> {
-    csv::export_csv_bundle(result)
+pub fn export_csv_bundle(
+    result: &AnalyzeResult,
+    sheets: Option<&[ExportSheet]>,
+) -> Result<Vec<u8>, ExportError> {
+    csv::export_csv_bundle(result, sheets)
 }
 
-pub fn export_xlsx(result: &AnalyzeResult) -> Result<Vec<u8>, ExportError> {
-    xlsx::export_xlsx(result)
+pub fn export_xlsx(
+    result: &AnalyzeResult,
+    sheets: Option<&[ExportSheet]>,
+) -> Result<Vec<u8>, ExportError> {
+    xlsx::export_xlsx(result, sheets)
 }
 
 pub fn export_html(

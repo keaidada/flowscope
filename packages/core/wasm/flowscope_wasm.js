@@ -325,6 +325,91 @@ export function get_version() {
 }
 
 /**
+ * @param {string} results_json
+ * @returns {string}
+ */
+export function merge_analyze_results(results_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(results_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.merge_analyze_results(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * Merge multiple results and export directly — no JSON round-trip of merged data.
+ * Request JSON: `{ "results": [...], "format": "xlsx", "sheets": [...], "compact": false }`
+ * Returns export bytes (for xlsx/csv) or JSON string (for json format).
+ * @param {string} request_json
+ * @returns {Uint8Array}
+ */
+export function merge_and_export(request_json) {
+    const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.merge_and_export(ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * Merge a single AnalyzeResult (as JSON) into the progressive accumulator.
+ * @param {string} result_json
+ */
+export function merge_progressive_add(result_json) {
+    const ptr0 = passStringToWasm0(result_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.merge_progressive_add(ptr0, len0);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
+    }
+}
+
+/**
+ * Finalize and export the progressive merge accumulator.
+ * Input: `{ "format": "xlsx", "sheets": [...], "compact": false }`
+ * @param {string} request_json
+ * @returns {Uint8Array}
+ */
+export function merge_progressive_export(request_json) {
+    const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.merge_progressive_export(ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * Merge multiple per-file AnalyzeResult JSON values into a single combined result.
+ * The input is a JSON array of AnalyzeResult objects (stringified).
+ * Returns the merged AnalyzeResult as a JSON string.
+ * Reset the progressive merge accumulator.
+ */
+export function merge_progressive_init() {
+    wasm.merge_progressive_init();
+}
+
+/**
  * Install panic hook for better error messages in browser console
  */
 export function set_panic_hook() {

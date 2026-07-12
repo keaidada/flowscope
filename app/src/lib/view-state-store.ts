@@ -11,6 +11,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import * as serverDb from '@/lib/server-db';
 
 // ============================================================================
 // Types
@@ -235,6 +236,19 @@ export const useViewStateStore = create<ViewStateStore>()(
     }
   )
 );
+
+// 双写:store 变化 → debounced 同步全部 viewStates 到后端 db(localStorage 为缓存,后端 source of truth)
+let viewStateSyncTimer: ReturnType<typeof setTimeout> | undefined;
+useViewStateStore.subscribe((state) => {
+  if (viewStateSyncTimer) clearTimeout(viewStateSyncTimer);
+  viewStateSyncTimer = setTimeout(() => {
+    for (const [pid, vs] of Object.entries(state.viewStates)) {
+      serverDb.saveViewState(pid, JSON.stringify(vs)).catch(() => {
+        /* backend unavailable, localStorage still has it */
+      });
+    }
+  }, 500);
+});
 
 // ============================================================================
 // Utility Hooks

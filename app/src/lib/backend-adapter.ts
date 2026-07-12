@@ -1,28 +1,13 @@
 /**
- * Backend adapter abstraction for FlowScope analysis.
+ * Backend adapter for FlowScope analysis (REST only).
  *
- * Provides a unified interface for running lineage analysis either via:
- * - REST API (serve mode with CLI backend)
- * - WASM (client-side analysis in a web worker)
- *
- * The factory function detects available backends and returns the appropriate adapter.
+ * All analysis runs through the Rust CLI backend via REST API.
+ * SQLite persistence is handled by the backend.
  */
 
 import type { AnalyzeResult, Dialect } from '@pondpilot/flowscope-core';
 import type { TemplateMode } from '@/types';
-import {
-  analyzeWithWorker,
-  syncAnalysisFiles,
-  initializeAnalysisWorker,
-  getCachedAnalysis,
-  getAnalysisWorkerVersion,
-  clearAnalysisWorkerCache,
-} from './analysis-worker';
-import type { AnalysisWorkerResult, AnalyzeWorkerOptions } from './analysis-worker';
 
-/**
- * Payload for running analysis.
- */
 export interface AnalysisPayload {
   files: Array<{ name: string; content: string }>;
   dialect: Dialect;
@@ -33,9 +18,6 @@ export interface AnalysisPayload {
   templateMode?: TemplateMode;
 }
 
-/**
- * Result from analysis operations.
- */
 export interface AnalysisResult {
   result: AnalyzeResult | null;
   cacheKey: string;
@@ -49,36 +31,21 @@ export interface AnalysisResult {
   } | null;
 }
 
-/**
- * Backend adapter interface for analysis operations.
- */
 export interface BackendAdapter {
-  /** Unique identifier for this backend type */
-  readonly type: 'rest' | 'wasm';
-
-  /** Initialize the backend (load WASM, check server health, etc.) */
+  readonly type: 'rest';
   initialize(): Promise<void>;
-
-  /** Run lineage analysis */
-  analyze(payload: AnalysisPayload, options?: AnalyzeWorkerOptions): Promise<AnalysisResult>;
-
-  /** Get cached analysis result (if available) */
-  getCached(payload: AnalysisPayload): Promise<AnalysisResult | null>;
-
-  /** Get the engine version */
+  analyze(payload: AnalysisPayload): Promise<AnalysisResult>;
+  getCached(_payload: AnalysisPayload): Promise<AnalysisResult | null>;
   getVersion(): Promise<string | null>;
-
-  /** Sync files to the backend (for WASM worker file cache) */
-  syncFiles(files: Array<{ name: string; content: string }>): Promise<void>;
-
-  /** Clear the analysis cache */
+  syncFiles(_files: Array<{ name: string; content: string }>): Promise<void>;
   clearCache(): Promise<void>;
 }
 
-/**
- * REST backend adapter for serve mode.
- * Calls the CLI server's REST API endpoints.
- */
+export interface BackendDetectionResult {
+  adapter: BackendAdapter;
+  detectedType: 'rest';
+}
+
 export class RestBackendAdapter implements BackendAdapter {
   readonly type = 'rest' as const;
   private baseUrl: string;
@@ -100,8 +67,6 @@ export class RestBackendAdapter implements BackendAdapter {
   async analyze(payload: AnalysisPayload): Promise<AnalysisResult> {
     const startTime = performance.now();
 
-    // Note: dialect and schema are controlled by the server (--dialect flag and database introspection)
-    // so we don't send them from the client - only analysis options and files
     const response = await fetch(`${this.baseUrl}/api/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -138,7 +103,6 @@ export class RestBackendAdapter implements BackendAdapter {
   }
 
   async getCached(): Promise<AnalysisResult | null> {
-    // REST backend doesn't support caching in the same way
     return null;
   }
 
@@ -147,7 +111,7 @@ export class RestBackendAdapter implements BackendAdapter {
   }
 
   async syncFiles(): Promise<void> {
-    // REST backend doesn't need file syncing - files are sent with each request
+    // REST backend doesn't need file syncing
   }
 
   async clearCache(): Promise<void> {
@@ -156,140 +120,102 @@ export class RestBackendAdapter implements BackendAdapter {
 }
 
 /**
- * WASM backend adapter.
- * Wraps the existing analysis worker for client-side analysis.
- */
-export class WasmBackendAdapter implements BackendAdapter {
-  readonly type = 'wasm' as const;
-
-  async initialize(): Promise<void> {
-    await initializeAnalysisWorker();
-  }
-
-  async analyze(payload: AnalysisPayload, options?: AnalyzeWorkerOptions): Promise<AnalysisResult> {
-    // Ensure files are synced before analysis
-    await this.syncFiles(payload.files);
-
-    const workerResult: AnalysisWorkerResult = await analyzeWithWorker(
-      {
-        fileNames: payload.files.map((f) => f.name),
-        dialect: payload.dialect,
-        schemaSQL: payload.schemaSQL,
-        hideCTEs: payload.hideCTEs,
-        enableColumnLineage: payload.enableColumnLineage,
-        enableLinting: payload.enableLinting,
-        templateMode: payload.templateMode,
-      },
-      options
-    );
-
-    return {
-      result: workerResult.result,
-      cacheKey: workerResult.cacheKey,
-      cacheHit: workerResult.cacheHit,
-      skipped: workerResult.skipped,
-      timings: workerResult.timings,
-    };
-  }
-
-  async getCached(payload: AnalysisPayload): Promise<AnalysisResult | null> {
-    // Ensure files are synced before checking cache
-    await this.syncFiles(payload.files);
-
-    const cached = await getCachedAnalysis({
-      fileNames: payload.files.map((f) => f.name),
-      dialect: payload.dialect,
-      schemaSQL: payload.schemaSQL,
-      hideCTEs: payload.hideCTEs,
-      enableColumnLineage: payload.enableColumnLineage,
-      enableLinting: payload.enableLinting,
-      templateMode: payload.templateMode,
-    });
-
-    if (!cached) {
-      return null;
-    }
-
-    return {
-      result: cached.result,
-      cacheKey: cached.cacheKey,
-      cacheHit: cached.cacheHit,
-      skipped: cached.skipped,
-      timings: cached.timings,
-    };
-  }
-
-  async getVersion(): Promise<string | null> {
-    return getAnalysisWorkerVersion();
-  }
-
-  async syncFiles(files: Array<{ name: string; content: string }>): Promise<void> {
-    await syncAnalysisFiles(files);
-  }
-
-  async clearCache(): Promise<void> {
-    await clearAnalysisWorkerCache();
-  }
-}
-
-/**
- * Backend detection result.
- */
-export interface BackendDetectionResult {
-  adapter: BackendAdapter;
-  detectedType: 'rest' | 'wasm';
-}
-
-/**
- * Create a backend adapter with automatic detection.
- *
- * Detection logic:
- * 1. Try to reach /api/health endpoint
- * 2. If successful, use REST backend (serve mode)
- * 3. If failed, fall back to WASM backend (client-side)
- *
- * @param preferWasm - Force WASM backend even if REST is available
- * @param restBaseUrl - Base URL for REST API (defaults to same origin)
+ * Always use REST backend. No fallback to WASM.
  */
 export async function createBackendAdapter(
-  preferWasm = false,
   restBaseUrl = ''
 ): Promise<BackendDetectionResult> {
-  // Chrome extension mode: always use WASM (no REST backend)
-  const isChromeExtension = typeof chrome !== 'undefined' && chrome.runtime?.id;
-  if (isChromeExtension || preferWasm) {
-    const adapter = new WasmBackendAdapter();
-    await adapter.initialize();
-    return { adapter, detectedType: 'wasm' };
-  }
-
-  // Try REST backend first
-  try {
-    const adapter = new RestBackendAdapter(restBaseUrl);
-    await adapter.initialize();
-    return { adapter, detectedType: 'rest' };
-  } catch {
-    // REST not available, fall back to WASM
-  }
-
-  // Fall back to WASM
-  const adapter = new WasmBackendAdapter();
+  const adapter = new RestBackendAdapter(restBaseUrl);
   await adapter.initialize();
-  return { adapter, detectedType: 'wasm' };
+  return { adapter, detectedType: 'rest' };
 }
 
-/**
- * Check if REST backend is available.
- * Useful for UI to show backend status.
- */
-export async function isRestBackendAvailable(baseUrl = ''): Promise<boolean> {
+/** Always true — serve mode is the only supported mode now. */
+export async function isRestBackendAvailable(_baseUrl = ''): Promise<boolean> {
+  return true;
+}
+
+// ── Project export (REST) ─────────────────────────────────────────────
+
+async function readProjectExportResponse(
+  response: Response,
+  format: 'xlsx' | 'csv' | 'json'
+): Promise<{ data: Uint8Array | string; contentType: string }> {
+  const contentType = response.headers.get('content-type') || 'application/octet-stream';
+  if (format === 'json') {
+    return { data: await response.text(), contentType };
+  }
+  return { data: new Uint8Array(await response.arrayBuffer()), contentType };
+}
+
+export async function projectExportViaBackend(
+  baseUrl: string,
+  results: AnalyzeResult[],
+  format: 'xlsx' | 'csv' | 'json',
+  options: { sheets?: string[]; compact?: boolean } = {}
+): Promise<{ data: Uint8Array | string; contentType: string } | null> {
   try {
-    const response = await fetch(`${baseUrl}/api/health`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(2000),
+    const response = await fetch(`${baseUrl}/api/project-export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        results,
+        format,
+        sheets: options.sheets ?? null,
+        compact: options.compact ?? false,
+      }),
+      signal: AbortSignal.timeout(120_000),
     });
-    return response.ok;
-  } catch {
-    return false;
+    if (!response.ok) return null;
+    return await readProjectExportResponse(response, format);
+  } catch (err) {
+    console.error('[backend-adapter] project-export error:', err);
+    return null;
+  }
+}
+
+export async function projectExportStreamViaBackend(
+  baseUrl: string,
+  resultJsons: AsyncIterable<string>,
+  format: 'xlsx' | 'csv' | 'json',
+  options: { sheets?: string[]; compact?: boolean; injectLineage?: (json: string) => string } = {}
+): Promise<{ data: Uint8Array | string; contentType: string } | null> {
+  let sessionId: string | null = null;
+  try {
+    const startResponse = await fetch(`${baseUrl}/api/project-export/start`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!startResponse.ok) return null;
+    const startData = (await startResponse.json()) as { session_id: string };
+    sessionId = startData.session_id;
+
+    const inject = options.injectLineage;
+    for await (const resultJson of resultJsons) {
+      const body = inject ? inject(resultJson) : resultJson;
+      const addResponse = await fetch(`${baseUrl}/api/project-export/${sessionId}/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (!addResponse.ok) return null;
+    }
+
+    const finishResponse = await fetch(`${baseUrl}/api/project-export/${sessionId}/finish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        format,
+        sheets: options.sheets ?? null,
+        compact: options.compact ?? false,
+      }),
+    });
+    if (!finishResponse.ok) return null;
+
+    return await readProjectExportResponse(finishResponse, format);
+  } catch (err) {
+    console.error('[backend-adapter] project-export streaming error:', err);
+    return null;
   }
 }

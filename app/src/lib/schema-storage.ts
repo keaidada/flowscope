@@ -1,8 +1,10 @@
 /**
- * SQLite-WASM based storage for schema files.
+ * SQLite-based storage for schema files.
+ *
+ * All storage goes through the Rust backend SQLite via REST API.
  */
 
-import { getDb, esc, flushPersistNow } from './duckdb';
+import * as serverDb from './server-db';
 
 export interface StoredSchemaFile {
   id: string;
@@ -13,67 +15,30 @@ export interface StoredSchemaFile {
 
 /** Save schema files for a project (replaces existing) */
 export async function saveSchemaFiles(projectId: string, files: StoredSchemaFile[]): Promise<void> {
-  try {
-    const db = await getDb();
-    db.run(`DELETE FROM schema_files WHERE project_id = '${esc(projectId)}'`);
-
-    if (files.length === 0) {
-      await flushPersistNow();
-      return;
-    }
-
-    db.run('BEGIN TRANSACTION');
-    const stmt = db.prepare(
-      'INSERT INTO schema_files (project_id, file_id, name, path, content) VALUES (?, ?, ?, ?, ?)'
-    );
-    for (const f of files) {
-      stmt.run([projectId, f.id, f.name, f.path, f.content]);
-    }
-    stmt.free();
-    db.run('COMMIT');
-    await flushPersistNow();
-  } catch (error) {
-    console.error(`[schema-storage] Failed to save schema files for project ${projectId}:`, error);
-  }
+  await serverDb.saveSchemaFiles(projectId, files.map(f => ({
+    name: f.name,
+    path: f.path,
+    content: f.content,
+    size: new TextEncoder().encode(f.content).length,
+    created_at: Date.now(),
+    updated_at: Date.now(),
+  })));
+  // Table/column metadata is extracted by the Rust backend
+  // when POST /api/db/schema-files is called.
 }
 
 /** Load schema files for a project */
 export async function loadSchemaFiles(projectId: string): Promise<StoredSchemaFile[]> {
-  try {
-    const db = await getDb();
-    const stmt = db.prepare(
-      `SELECT file_id, name, path, content FROM schema_files WHERE project_id = ? ORDER BY path`
-    );
-    stmt.bind([projectId]);
-
-    const rows: StoredSchemaFile[] = [];
-    while (stmt.step()) {
-      const row = stmt.get();
-      rows.push({
-        id: String(row[0]),
-        name: String(row[1]),
-        path: String(row[2]),
-        content: String(row[3]),
-      });
-    }
-    stmt.free();
-    return rows;
-  } catch (error) {
-    console.error(`[schema-storage] Failed to load schema files for project ${projectId}:`, error);
-    return [];
-  }
+  const files = await serverDb.loadSchemaFiles(projectId);
+  return files.map(f => ({
+    id: f.path,  // use path as stable identifier
+    name: f.name,
+    path: f.path,
+    content: f.content,
+  }));
 }
 
 /** Delete stored schema files for a project */
 export async function deleteSchemaFiles(projectId: string): Promise<void> {
-  try {
-    const db = await getDb();
-    db.run(`DELETE FROM schema_files WHERE project_id = '${esc(projectId)}'`);
-    await flushPersistNow();
-  } catch (error) {
-    console.error(
-      `[schema-storage] Failed to delete schema files for project ${projectId}:`,
-      error
-    );
-  }
+  await serverDb.saveSchemaFiles(projectId, []);
 }

@@ -7,29 +7,73 @@ use zip::write::FileOptions;
 use zip::CompressionMethod;
 
 use crate::extract::{
-    extract_column_mappings, extract_script_info, extract_table_dependencies, extract_table_info,
+    extract_column_mappings, extract_lineage_entries, extract_script_info,
+    extract_table_dependencies, extract_table_info,
 };
 use crate::ExportError;
+use serde::{Deserialize, Serialize};
 
-pub fn export_csv_bundle(result: &AnalyzeResult) -> Result<Vec<u8>, ExportError> {
-    let files: Vec<(String, Vec<u8>)> = vec![
-        ("scripts.csv".to_string(), export_scripts_csv(result)?),
-        ("tables.csv".to_string(), export_tables_csv(result)?),
-        (
-            "column_mappings.csv".to_string(),
-            export_column_mappings_csv(result)?,
-        ),
-        (
-            "table_dependencies.csv".to_string(),
-            export_table_dependencies_csv(result)?,
-        ),
-        ("summary.csv".to_string(), export_summary_csv(result)?),
-        ("issues.csv".to_string(), export_issues_csv(result)?),
-        (
-            "resolved_schema.csv".to_string(),
-            export_schema_csv(result)?,
-        ),
+/// Sheet/file identifiers used for selective export filtering.
+/// Matches the TypeScript `ExportSheetType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportSheet {
+    Summary,
+    Scripts,
+    Tables,
+    ColumnMappings,
+    TableDependencies,
+    Issues,
+    Lineage,
+    ResolvedSchema,
+}
+
+pub fn export_csv_bundle(
+    result: &AnalyzeResult,
+    sheets: Option<&[ExportSheet]>,
+) -> Result<Vec<u8>, ExportError> {
+    let file_name = |sheet: ExportSheet| -> &str {
+        match sheet {
+            ExportSheet::Summary => "summary.csv",
+            ExportSheet::Scripts => "scripts.csv",
+            ExportSheet::Tables => "tables.csv",
+            ExportSheet::ColumnMappings => "column_mappings.csv",
+            ExportSheet::TableDependencies => "table_dependencies.csv",
+            ExportSheet::Issues => "issues.csv",
+            ExportSheet::Lineage => "lineage.csv",
+            ExportSheet::ResolvedSchema => "resolved_schema.csv",
+        }
+    };
+
+    let gen = |sheet: ExportSheet| -> Result<Vec<u8>, ExportError> {
+        match sheet {
+            ExportSheet::Summary => export_summary_csv(result),
+            ExportSheet::Scripts => export_scripts_csv(result),
+            ExportSheet::Tables => export_tables_csv(result),
+            ExportSheet::ColumnMappings => export_column_mappings_csv(result),
+            ExportSheet::TableDependencies => export_table_dependencies_csv(result),
+            ExportSheet::Issues => export_issues_csv(result),
+            ExportSheet::Lineage => export_lineage_csv(result),
+            ExportSheet::ResolvedSchema => export_schema_csv(result),
+        }
+    };
+
+    let all_sheets = [
+        ExportSheet::Scripts,
+        ExportSheet::Tables,
+        ExportSheet::ColumnMappings,
+        ExportSheet::TableDependencies,
+        ExportSheet::Summary,
+        ExportSheet::Issues,
+        ExportSheet::Lineage,
+        ExportSheet::ResolvedSchema,
     ];
+
+    let files: Vec<(String, Vec<u8>)> = all_sheets
+        .iter()
+        .filter(|s| sheets.map_or(true, |filter| filter.contains(s)))
+        .map(|s| Ok((file_name(*s).to_string(), gen(*s)?)))
+        .collect::<Result<_, ExportError>>()?;
 
     let cursor = Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(cursor);
@@ -88,7 +132,15 @@ fn export_tables_csv(result: &AnalyzeResult) -> Result<Vec<u8>, ExportError> {
         .from_writer(Vec::new());
 
     writer
-        .write_record(["Table Name", "Qualified Name", "Type", "Columns", "Source"])
+        .write_record([
+            "Table Name",
+            "Qualified Name",
+            "Catalog",
+            "Schema",
+            "Type",
+            "Columns",
+            "Source",
+        ])
         .map_err(|err| ExportError::Csv(err.to_string()))?;
 
     for table in tables {
@@ -96,6 +148,8 @@ fn export_tables_csv(result: &AnalyzeResult) -> Result<Vec<u8>, ExportError> {
             .write_record([
                 table.name,
                 table.qualified_name,
+                table.catalog.unwrap_or_default(),
+                table.schema.unwrap_or_default(),
                 table.table_type.as_str().to_string(),
                 table.columns.join(", "),
                 table.source_name.unwrap_or_default(),
@@ -290,6 +344,27 @@ fn export_schema_csv(result: &AnalyzeResult) -> Result<Vec<u8>, ExportError> {
                 }
             }
         }
+    }
+
+    writer
+        .into_inner()
+        .map_err(|err| ExportError::Csv(err.to_string()))
+}
+
+fn export_lineage_csv(result: &AnalyzeResult) -> Result<Vec<u8>, ExportError> {
+    let entries = extract_lineage_entries(result);
+    let mut writer = WriterBuilder::new()
+        .has_headers(true)
+        .from_writer(Vec::new());
+
+    writer
+        .write_record(["Script", "Input Tables", "Output Table"])
+        .map_err(|err| ExportError::Csv(err.to_string()))?;
+
+    for entry in entries {
+        writer
+            .write_record([entry.script, entry.input_table, entry.output_table])
+            .map_err(|err| ExportError::Csv(err.to_string()))?;
     }
 
     writer

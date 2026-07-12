@@ -1,8 +1,11 @@
 import {
   analyzeSql,
-  initWasm,
+  ensureAnalyzerReady,
   getEngineVersion,
   exportToDuckDbSql,
+  mergeProgressiveInit,
+  mergeProgressiveAdd,
+  mergeProgressiveExport,
 } from '@pondpilot/flowscope-core';
 import type { AnalyzeResult, Dialect } from '@pondpilot/flowscope-core';
 import { parseSchemaSQL } from '../lib/schema-parser';
@@ -32,9 +35,33 @@ export interface SyncFilesPayload {
 }
 
 export interface ExportPayload {
-  result: AnalyzeResult;
+  /** Single result to export (legacy / single-file). */
+  result?: AnalyzeResult;
+  /** Multiple results to merge in worker before export. */
+  results?: AnalyzeResult[];
   /** Optional schema name to prefix all tables/views (e.g., "lineage") */
   schema?: string;
+  /** Export format: "duckdb" | "xlsx" | "csv" | "json" — defaults to "duckdb" */
+  format?: 'duckdb' | 'xlsx' | 'csv' | 'json';
+  /** Sheet selection for xlsx/csv/json exports */
+  sheets?: string[];
+  /** Compact JSON (only for format: "json") */
+  compact?: boolean;
+}
+
+/** Streaming export: one AnalyzeResult as a JSON string.
+ *  String transfer bypasses structured-clone OOM (zero-copy string path). */
+export interface ExportChunkPayload {
+  /** JSON-serialized AnalyzeResult */
+  resultJson: string;
+}
+
+export interface ExportStartPayload {
+  format: 'xlsx' | 'csv' | 'json';
+  sheets?: string[];
+  compact?: boolean;
+  /** Total chunks expected (used to skip merge if only 1 chunk). */
+  totalChunks: number;
 }
 
 export interface AnalysisWorkerRequest {
@@ -46,11 +73,16 @@ export interface AnalysisWorkerRequest {
     | 'sync-files'
     | 'clear-files'
     | 'clear-cache'
-    | 'export';
+    | 'export'
+    | 'export-stream-start'
+    | 'export-stream-chunk'
+    | 'export-stream-finish';
   requestId: string;
   payload?: AnalysisWorkerPayload;
   syncPayload?: SyncFilesPayload;
   exportPayload?: ExportPayload;
+  exportStartPayload?: ExportStartPayload;
+  exportChunkPayload?: ExportChunkPayload;
   cacheMaxBytes?: number;
   knownCacheKey?: string | null;
 }
@@ -92,6 +124,8 @@ export interface AnalysisWorkerResponse {
   version?: string;
   /** SQL statements for DuckDB export */
   exportSql?: string;
+  /** Binary export data (XLSX, CSV zip) — transferred as ArrayBuffer via postMessage */
+  exportBytes?: ArrayBuffer;
   error?: string;
   /** Structured error code for programmatic handling */
   errorCode?: WorkerErrorCode;
@@ -106,6 +140,15 @@ export interface AnalysisWorkerResponse {
 
 let wasmReady = false;
 const fileCache = new Map<string, string>();
+
+// ── Progressive streaming export: chunks merged into WASM one-by-one ──
+// No JS array accumulation — each chunk is JSON.parsed → mergeProgressiveAdd
+// → immediately released from JS heap. The merged result lives in WASM.
+let streamFormat = '';
+let streamSheets: string[] | undefined;
+let streamCompact = false;
+let streamRequestId = '';
+let streamChunkCount = 0;
 
 /**
  * Worker-side error with structured error code.
@@ -132,7 +175,7 @@ async function ensureWasmReady(): Promise<void> {
   if (wasmReady) {
     return;
   }
-  await initWasm();
+  await ensureAnalyzerReady();
   wasmReady = true;
 }
 
@@ -480,8 +523,52 @@ async function getCachedAnalysis(payload: AnalysisWorkerPayload): Promise<Analys
   };
 }
 
+/**
+ * Export the progressively-merged result (already in WASM memory from mergeProgressiveAdd calls).
+ */
+async function doProgressiveExport(): Promise<void> {
+  const format = streamFormat;
+  const sheets = streamSheets;
+  const compact = streamCompact;
+  const requestId = streamRequestId;
+
+  // Reset
+  streamFormat = '';
+  streamSheets = undefined;
+  streamCompact = false;
+  streamRequestId = '';
+  streamChunkCount = 0;
+
+  try {
+    const bytes = await mergeProgressiveExport({ format: format as 'xlsx' | 'csv' | 'json', sheets, compact });
+    // #region debug-point S:worker-progressive-export-done
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"S",location:"analysis.worker.ts:doProgressiveExport:done",msg:`[DEBUG] worker progressive export done format=${format}`,data:{format,byteLength:bytes.length},ts:Date.now()})}).catch(()=>{});
+    // #endregion
+
+    if (format === 'json') {
+      const text = new TextDecoder().decode(bytes);
+      self.postMessage({ type: 'export-result' as const, requestId, exportSql: text });
+    } else {
+      const buf = bytes.buffer as ArrayBuffer;
+      const sliced = buf.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      (self as unknown as Worker).postMessage(
+        { type: 'export-result' as const, requestId, exportBytes: sliced },
+        [sliced]
+      );
+    }
+  } catch (error) {
+    // #region debug-point T:worker-progressive-export-catch
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"T",location:"analysis.worker.ts:doProgressiveExport:catch",msg:`[DEBUG] worker progressive export catch format=${format}`,data:{format,errorMessage:error instanceof Error ? error.message : String(error)},ts:Date.now()})}).catch(()=>{});
+    // #endregion
+    self.postMessage({
+      type: 'export-result' as const,
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 self.onmessage = async (event: MessageEvent<AnalysisWorkerRequest>) => {
-  console.log('[analysis.worker] onmessage:', event.data?.type);
   const { type, requestId, payload, syncPayload, exportPayload, cacheMaxBytes, knownCacheKey } =
     event.data;
 
@@ -563,25 +650,119 @@ self.onmessage = async (event: MessageEvent<AnalysisWorkerRequest>) => {
       return;
     }
 
+    // ── Progressive streaming export: merge each chunk into WASM immediately ──
+    if (type === 'export-stream-start') {
+      const { exportStartPayload: start } = event.data;
+      if (!start) {
+        self.postMessage({ type: 'export-result', requestId, error: 'Missing export-start payload' });
+        return;
+      }
+      await ensureWasmReady();
+      mergeProgressiveInit();
+      // #region debug-point U:worker-stream-start
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"U",location:"analysis.worker.ts:streamStart",msg:`[DEBUG] worker stream start format=${start.format}`,data:{format:start.format},ts:Date.now()})}).catch(()=>{});
+      // #endregion
+      streamFormat = start.format;
+      streamSheets = start.sheets;
+      streamCompact = start.compact ?? false;
+      streamRequestId = requestId;
+      streamChunkCount = 0;
+      return;
+    }
+
+    if (type === 'export-stream-chunk') {
+      const { exportChunkPayload: chunk } = event.data;
+      if (!streamRequestId || !chunk?.resultJson) {
+        self.postMessage({ type: 'export-result', requestId, error: 'Unexpected export chunk' });
+        return;
+      }
+      try {
+        // Parse → merge into WASM → drop JS object immediately
+        const result: AnalyzeResult = JSON.parse(chunk.resultJson);
+        mergeProgressiveAdd(result);
+        streamChunkCount++;
+        // #region debug-point V:worker-stream-chunk
+        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"V",location:"analysis.worker.ts:streamChunk",msg:"[DEBUG] worker stream chunk merged",data:{chunkCount:streamChunkCount,jsonSize:chunk.resultJson.length},ts:Date.now()})}).catch(()=>{});
+        // #endregion
+      } catch (e) {
+        self.postMessage({ type: 'export-result', requestId: streamRequestId, error: `Chunk parse error: ${e}` });
+      }
+      return;
+    }
+
+    if (type === 'export-stream-finish') {
+      if (!streamRequestId || streamChunkCount === 0) {
+        self.postMessage({ type: 'export-result', requestId, error: 'No streaming export data' });
+        return;
+      }
+      // #region debug-point W:worker-stream-finish
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"W",location:"analysis.worker.ts:streamFinish",msg:"[DEBUG] worker stream finish received",data:{requestId,streamChunkCount},ts:Date.now()})}).catch(()=>{});
+      // #endregion
+      await doProgressiveExport();
+      return;
+    }
+
     if (type === 'export') {
       if (!exportPayload) {
-        const response: AnalysisWorkerResponse = {
-          type: 'export-result',
-          requestId,
-          error: 'Missing export payload',
-        };
-        self.postMessage(response);
+        self.postMessage({ type: 'export-result' as const, requestId, error: 'Missing export payload' });
         return;
       }
 
       await ensureWasmReady();
-      const sql = await exportToDuckDbSql(exportPayload.result, exportPayload.schema);
-      const response: AnalysisWorkerResponse = {
-        type: 'export-result',
-        requestId,
-        exportSql: sql,
-      };
-      self.postMessage(response);
+
+      const format = exportPayload.format ?? 'duckdb';
+
+      // DuckDB export: use result directly
+      if (format === 'duckdb') {
+        const exportResult = exportPayload.result!;
+        const sql = await exportToDuckDbSql(exportResult, exportPayload.schema);
+        self.postMessage({ type: 'export-result' as const, requestId, exportSql: sql });
+        return;
+      }
+
+      // Merge + export in one Rust-side operation
+      let allResults: AnalyzeResult[] = [];
+      if (exportPayload.results && exportPayload.results.length > 0) {
+        allResults = exportPayload.results;
+      } else if (exportPayload.result) {
+        allResults = [exportPayload.result];
+      }
+
+      if (allResults.length === 0) {
+        self.postMessage({ type: 'export-result' as const, requestId, error: 'No results to export' });
+        return;
+      }
+
+      try {
+        // Progressive merge: one at a time into WASM memory
+        mergeProgressiveInit();
+        for (const r of allResults) {
+          mergeProgressiveAdd(r);
+        }
+        const bytes = await mergeProgressiveExport({
+          format: format as 'xlsx' | 'csv' | 'json',
+          sheets: exportPayload.sheets,
+          compact: exportPayload.compact,
+        });
+
+        if (format === 'json') {
+          const text = new TextDecoder().decode(bytes);
+          self.postMessage({ type: 'export-result' as const, requestId, exportSql: text });
+        } else {
+          const buf = bytes.buffer as ArrayBuffer;
+          const sliced = buf.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+          (self as unknown as Worker).postMessage(
+            { type: 'export-result' as const, requestId, exportBytes: sliced },
+            [sliced]
+          );
+        }
+      } catch (error) {
+        self.postMessage({
+          type: 'export-result' as const,
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       return;
     }
 

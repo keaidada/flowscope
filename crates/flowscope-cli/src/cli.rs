@@ -122,6 +122,12 @@ pub struct Args {
     #[arg(long)]
     pub serve: bool,
 
+    /// API-only mode: no embedded UI, just the REST API + SQLite database
+    /// (use with Vite dev server on a different port)
+    #[cfg(feature = "serve")]
+    #[arg(long)]
+    pub db_only: bool,
+
     /// Port for HTTP server (default: 3000)
     #[cfg(feature = "serve")]
     #[arg(long, default_value = "3000")]

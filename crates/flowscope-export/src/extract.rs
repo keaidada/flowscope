@@ -17,11 +17,23 @@ pub struct ScriptInfo {
 pub struct TableInfo {
     pub name: String,
     pub qualified_name: String,
+    pub catalog: Option<String>,
+    pub schema: Option<String>,
     #[serde(rename = "type")]
     pub table_type: TableType,
     pub columns: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_name: Option<String>,
+}
+
+/// Split a qualified table name into (catalog, schema, name) parts.
+fn split_qualified_parts(qualified: &str) -> (Option<String>, Option<String>, String) {
+    let parts: Vec<&str> = qualified.split('.').collect();
+    match parts.len() {
+        3 => (Some(parts[0].to_string()), Some(parts[1].to_string()), parts[2].to_string()),
+        2 => (None, Some(parts[0].to_string()), parts[1].to_string()),
+        _ => (None, None, qualified.to_string()),
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -58,6 +70,153 @@ pub struct ColumnMapping {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expression: Option<String>,
     pub edge_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LineageEntry {
+    /// Script file name
+    pub script: String,
+    /// Single input (source) physical table qualified name
+    pub input_table: String,
+    /// Single output (target) physical table qualified name
+    pub output_table: String,
+}
+
+/// Extract physical-table-level lineage: one row per (script, input_table, output_table).
+///
+/// Logically mirrors `extractSchemaFromResult` in the Schema view (AnalysisView.tsx):
+/// - `isPhysicalTable`: type is table/view, not temp, has resolutionSource or qualified name contains '.'
+/// - Per-statement BFS through intermediate nodes (CTE, output, column) to find physical→physical flows
+/// - Also uses globalLineage for cross-statement flows through temp tables
+/// - Deduplicated and sorted by script, output, then input
+pub fn extract_lineage_entries(result: &AnalyzeResult) -> Vec<LineageEntry> {
+    // If the frontend has already computed the correct lineage (using the Schema
+    // module's logic), use it directly.
+    if let Some(ref pre) = result.precomputed_lineage {
+        let mut entries: Vec<LineageEntry> = pre
+            .iter()
+            .map(|e| LineageEntry {
+                script: e.script.clone(),
+                input_table: e.input_table.clone(),
+                output_table: e.output_table.clone(),
+            })
+            .collect();
+        entries.sort_by(|a, b| {
+            a.script
+                .cmp(&b.script)
+                .then(a.output_table.cmp(&b.output_table))
+                .then(a.input_table.cmp(&b.input_table))
+        });
+        entries.dedup_by(|a, b| {
+            a.script == b.script && a.input_table == b.input_table && a.output_table == b.output_table
+        });
+        return entries;
+    }
+
+    // Fallback: compute lineage from raw graph (may be incomplete compared to
+    // the Schema module's BFS logic).
+    /// True if any part of the name starts with Temp_ or TMP_ (Spark/Hive cache temp tables).
+    fn is_spark_temp(name: &str) -> bool {
+        name.split('.').any(|part| {
+            let upper = part.to_uppercase();
+            upper.starts_with("TEMP_") || upper.starts_with("TMP_")
+        })
+    }
+
+    /// Check if a node is a real physical table (not CTE, alias, subquery, or temp table).
+    /// Mirrors `isPhysicalTable` in AnalysisView.tsx.
+    fn is_physical(node: &flowscope_core::Node) -> bool {
+        if !matches!(node.node_type, NodeType::Table | NodeType::View) {
+            return false;
+        }
+        let qn = node.qualified_name.as_deref().unwrap_or(&node.label);
+        if is_spark_temp(qn) || is_spark_temp(&node.label) {
+            return false;
+        }
+        if node.resolution_source.is_some() {
+            return true;
+        }
+        qn.contains('.')
+    }
+
+    let mut entries: Vec<LineageEntry> = Vec::new();
+
+    for stmt in &result.statements {
+        let script = stmt
+            .source_name
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+
+        // Collect physical node ids & qualified names
+        let physical_ids: std::collections::HashSet<&str> = stmt
+            .nodes
+            .iter()
+            .filter(|n| is_physical(n))
+            .map(|n| n.id.as_ref())
+            .collect();
+        let physical_qn: std::collections::HashMap<&str, &str> = stmt
+            .nodes
+            .iter()
+            .filter(|n| is_physical(n))
+            .map(|n| (n.id.as_ref(), n.qualified_name.as_deref().unwrap_or(&n.label)))
+            .collect();
+
+        // Build adjacency for BFS (ownership edges reversed: column → owner table)
+        let mut adj: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+        for edge in &stmt.edges {
+            if edge.edge_type == EdgeType::Ownership {
+                // Reverse: column → owner table
+                adj.entry(edge.to.as_ref()).or_default().push(edge.from.as_ref());
+            } else {
+                adj.entry(edge.from.as_ref()).or_default().push(edge.to.as_ref());
+            }
+        }
+
+        // BFS from each physical source to find reachable physical targets
+        for (&src_id, &src_qn) in &physical_qn {
+            let mut visited: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            let mut queue: Vec<&str> = vec![src_id];
+            visited.insert(src_id);
+            while let Some(current) = queue.pop() {
+                for &next in adj.get(current).unwrap_or(&vec![]) {
+                    if !visited.insert(next) {
+                        continue;
+                    }
+                    if physical_ids.contains(next) {
+                        let tgt_qn = physical_qn[&next];
+                        if src_qn != tgt_qn {
+                            entries.push(LineageEntry {
+                                script: script.clone(),
+                                input_table: src_qn.to_string(),
+                                output_table: tgt_qn.to_string(),
+                            });
+                        }
+                    } else {
+                        // Intermediate node — continue BFS
+                        queue.push(next);
+                    }
+                }
+            }
+        }
+    }
+
+    // Deduplicate and sort.
+    // Also filter: only keep entries where BOTH input and output table names
+    // contain a dot (schema-qualified) — this excludes SQL aliases that happen
+    // to have resolutionSource set, matching the Schema view's logic.
+    entries.retain(|e| e.input_table.contains('.') && e.output_table.contains('.'));
+    entries.sort_by(|a, b| {
+        a.script
+            .cmp(&b.script)
+            .then(a.output_table.cmp(&b.output_table))
+            .then(a.input_table.cmp(&b.input_table))
+    });
+    entries.dedup_by(|a, b| {
+        a.script == b.script && a.input_table == b.input_table && a.output_table == b.output_table
+    });
+
+    entries
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -167,12 +326,17 @@ pub fn extract_table_info(result: &AnalyzeResult) -> Vec<TableInfo> {
                 _ => TableType::Table,
             };
 
-            let entry = table_map.entry(key.clone()).or_insert_with(|| TableInfo {
-                name: table_node.label.to_string(),
-                qualified_name: key.clone(),
-                table_type,
-                columns: Vec::new(),
-                source_name: stmt.source_name.clone(),
+            let entry = table_map.entry(key.clone()).or_insert_with(|| {
+                let (catalog, schema, _name) = split_qualified_parts(&key);
+                TableInfo {
+                    name: table_node.label.to_string(),
+                    qualified_name: key.clone(),
+                    catalog,
+                    schema,
+                    table_type,
+                    columns: Vec::new(),
+                    source_name: stmt.source_name.clone(),
+                }
             });
 
             let mut merged: BTreeSet<String> = entry.columns.iter().cloned().collect();
@@ -299,5 +463,77 @@ fn edge_type_label(edge_type: EdgeType) -> &'static str {
         EdgeType::Derivation => "derivation",
         EdgeType::JoinDependency => "join_dependency",
         EdgeType::CrossStatement => "cross_statement",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_lineage_entries;
+    use flowscope_core::{AnalyzeResult, Edge, Node, StatementLineage};
+
+    #[test]
+    fn lineage_export_does_not_trace_into_other_statements() {
+        let shared_cte_id = "cte_shared";
+
+        let stmt_a = StatementLineage {
+            statement_index: 0,
+            statement_type: "INSERT".to_string(),
+            source_name: Some("S02_VPLAY_STATT_MTH.HQL".to_string()),
+            nodes: vec![
+                Node::table("table_src_a", "src_a").with_qualified_name("db.src_a"),
+                Node::cte(shared_cte_id, "tmp_shared"),
+                Node::table("table_out_a", "out_a").with_qualified_name("db.out_a"),
+            ],
+            edges: vec![
+                Edge::data_flow("edge_a1", "table_src_a", shared_cte_id),
+                Edge::data_flow("edge_a2", shared_cte_id, "table_out_a"),
+            ],
+            span: None,
+            join_count: 0,
+            complexity_score: 1,
+            resolved_sql: None,
+        };
+
+        let stmt_b = StatementLineage {
+            statement_index: 1,
+            statement_type: "INSERT".to_string(),
+            source_name: Some("OTHER.HQL".to_string()),
+            nodes: vec![
+                Node::table("table_src_b", "src_b").with_qualified_name("db.src_b"),
+                Node::cte(shared_cte_id, "tmp_shared"),
+                Node::table("table_out_b", "out_b").with_qualified_name("db.out_b"),
+            ],
+            edges: vec![
+                Edge::data_flow("edge_b1", "table_src_b", shared_cte_id),
+                Edge::data_flow("edge_b2", shared_cte_id, "table_out_b"),
+            ],
+            span: None,
+            join_count: 0,
+            complexity_score: 1,
+            resolved_sql: None,
+        };
+
+        let result = AnalyzeResult {
+            statements: vec![stmt_a, stmt_b],
+            ..AnalyzeResult::default()
+        };
+
+        let entries = extract_lineage_entries(&result);
+
+        assert_eq!(
+            entries,
+            vec![
+                super::LineageEntry {
+                    script: "OTHER.HQL".to_string(),
+                    input_table: "db.src_b".to_string(),
+                    output_table: "db.out_b".to_string(),
+                },
+                super::LineageEntry {
+                    script: "S02_VPLAY_STATT_MTH.HQL".to_string(),
+                    input_table: "db.src_a".to_string(),
+                    output_table: "db.out_a".to_string(),
+                },
+            ]
+        );
     }
 }

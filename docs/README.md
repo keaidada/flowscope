@@ -20,6 +20,8 @@ FlowScope code is released under Apache-2.0 unless stated otherwise. The `app/` 
   API surface for the TS wrapper (mirrors `packages/core/src/types.ts`).
 - `schema-handling-design.md`
   Schema metadata rules, implied schema capture, and resolution behavior.
+- `database-storage-design.md`
+  Browser SQLite-WASM and export-layer database schema, table structures, and data flow.
 - `column_lineage.md`
   Column lineage semantics and edge types.
 - `dialect-coverage.md`

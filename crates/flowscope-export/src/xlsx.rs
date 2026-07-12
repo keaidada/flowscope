@@ -1,44 +1,74 @@
 use rust_xlsxwriter::{Workbook, Worksheet};
 
 use crate::extract::{
-    extract_column_mappings, extract_script_info, extract_table_dependencies, extract_table_info,
+    extract_column_mappings, extract_lineage_entries, extract_script_info,
+    extract_table_dependencies, extract_table_info,
 };
 use crate::ExportError;
+use crate::csv::ExportSheet;
 use flowscope_core::AnalyzeResult;
 use std::collections::{BTreeSet, HashMap};
 
-pub fn export_xlsx(result: &AnalyzeResult) -> Result<Vec<u8>, ExportError> {
+const XLSX_MAX_ROWS: usize = 1_048_576;
+const XLSX_MAX_COLUMNS: usize = 16_384;
+
+pub fn export_xlsx(
+    result: &AnalyzeResult,
+    sheets: Option<&[ExportSheet]>,
+) -> Result<Vec<u8>, ExportError> {
+    let should_include = |s: ExportSheet| -> bool {
+        sheets.map_or(true, |filter| filter.contains(&s))
+    };
+
     let mut workbook = Workbook::new();
 
-    let scripts_sheet = workbook.add_worksheet();
-    scripts_sheet
-        .set_name("Scripts")
-        .map_err(|err| ExportError::Xlsx(err.to_string()))?;
-    write_scripts_sheet(scripts_sheet, result)?;
+    if should_include(ExportSheet::Scripts) {
+        let scripts_sheet = workbook.add_worksheet();
+        scripts_sheet
+            .set_name("Scripts")
+            .map_err(|err| ExportError::Xlsx(err.to_string()))?;
+        write_scripts_sheet(scripts_sheet, result)?;
+    }
 
-    let tables_sheet = workbook.add_worksheet();
-    tables_sheet
-        .set_name("Tables")
-        .map_err(|err| ExportError::Xlsx(err.to_string()))?;
-    write_tables_sheet(tables_sheet, result)?;
+    if should_include(ExportSheet::Tables) {
+        let tables_sheet = workbook.add_worksheet();
+        tables_sheet
+            .set_name("Tables")
+            .map_err(|err| ExportError::Xlsx(err.to_string()))?;
+        write_tables_sheet(tables_sheet, result)?;
+    }
 
-    let mappings_sheet = workbook.add_worksheet();
-    mappings_sheet
-        .set_name("Column Mappings")
-        .map_err(|err| ExportError::Xlsx(err.to_string()))?;
-    write_mappings_sheet(mappings_sheet, result)?;
+    if should_include(ExportSheet::ColumnMappings) {
+        let mappings_sheet = workbook.add_worksheet();
+        mappings_sheet
+            .set_name("Column Mappings")
+            .map_err(|err| ExportError::Xlsx(err.to_string()))?;
+        write_mappings_sheet(mappings_sheet, result)?;
+    }
 
-    let summary_sheet = workbook.add_worksheet();
-    summary_sheet
-        .set_name("Summary")
-        .map_err(|err| ExportError::Xlsx(err.to_string()))?;
-    write_summary_sheet(summary_sheet, result)?;
+    if should_include(ExportSheet::TableDependencies) {
+        let dep_sheet = workbook.add_worksheet();
+        dep_sheet
+            .set_name("Dependency Matrix")
+            .map_err(|err| ExportError::Xlsx(err.to_string()))?;
+        write_dependency_matrix_sheet(dep_sheet, result)?;
+    }
 
-    let dependency_sheet = workbook.add_worksheet();
-    dependency_sheet
-        .set_name("Dependency Matrix")
-        .map_err(|err| ExportError::Xlsx(err.to_string()))?;
-    write_dependency_matrix_sheet(dependency_sheet, result)?;
+    if should_include(ExportSheet::Lineage) {
+        let lineage_sheet = workbook.add_worksheet();
+        lineage_sheet
+            .set_name("Lineage")
+            .map_err(|err| ExportError::Xlsx(err.to_string()))?;
+        write_lineage_sheet(lineage_sheet, result)?;
+    }
+
+    if should_include(ExportSheet::Summary) {
+        let summary_sheet = workbook.add_worksheet();
+        summary_sheet
+            .set_name("Summary")
+            .map_err(|err| ExportError::Xlsx(err.to_string()))?;
+        write_summary_sheet(summary_sheet, result)?;
+    }
 
     workbook
         .save_to_buffer()
@@ -80,7 +110,15 @@ fn write_tables_sheet(sheet: &mut Worksheet, result: &AnalyzeResult) -> Result<(
     write_row(
         sheet,
         0,
-        &["Table Name", "Qualified Name", "Type", "Columns", "Source"],
+        &[
+            "Table Name",
+            "Qualified Name",
+            "Catalog",
+            "Schema",
+            "Type",
+            "Columns",
+            "Source",
+        ],
     )?;
 
     for (index, table) in tables.iter().enumerate() {
@@ -91,6 +129,8 @@ fn write_tables_sheet(sheet: &mut Worksheet, result: &AnalyzeResult) -> Result<(
             &[
                 &sanitize_xlsx_value(&table.name),
                 &sanitize_xlsx_value(&table.qualified_name),
+                &sanitize_xlsx_value(table.catalog.as_deref().unwrap_or("")),
+                &sanitize_xlsx_value(table.schema.as_deref().unwrap_or("")),
                 table.table_type.as_str(),
                 &sanitize_xlsx_value(&table.columns.join(", ")),
                 &sanitize_xlsx_value(table.source_name.as_deref().unwrap_or("")),
@@ -174,6 +214,10 @@ fn write_dependency_matrix_sheet(
 
     let table_list: Vec<String> = tables.into_iter().collect();
 
+    if should_use_dependency_edge_list(table_list.len()) {
+        return write_dependency_edge_list_sheet(sheet, &dependencies);
+    }
+
     let mut header = vec![String::new()];
     header.extend(table_list.iter().map(|table| sanitize_xlsx_value(table)));
     write_row(
@@ -220,6 +264,41 @@ fn write_dependency_matrix_sheet(
     Ok(())
 }
 
+fn should_use_dependency_edge_list(table_count: usize) -> bool {
+    let required_columns = table_count.saturating_add(1);
+    let required_rows = table_count.saturating_add(4);
+    required_columns > XLSX_MAX_COLUMNS || required_rows > XLSX_MAX_ROWS
+}
+
+fn write_dependency_edge_list_sheet(
+    sheet: &mut Worksheet,
+    dependencies: &[crate::extract::TableDependency],
+) -> Result<(), ExportError> {
+    write_row(
+        sheet,
+        0,
+        &[
+            "Dependency Matrix fallback",
+            "Exported as an edge list because the full matrix exceeds Excel sheet limits",
+        ],
+    )?;
+    write_row(sheet, 2, &["Source Table", "Target Table"])?;
+
+    for (index, dependency) in dependencies.iter().enumerate() {
+        let row = (index + 3) as u32;
+        write_row(
+            sheet,
+            row,
+            &[
+                &sanitize_xlsx_value(&dependency.source_table),
+                &sanitize_xlsx_value(&dependency.target_table),
+            ],
+        )?;
+    }
+
+    Ok(())
+}
+
 fn write_row(sheet: &mut Worksheet, row: u32, values: &[&str]) -> Result<(), ExportError> {
     for (col, value) in values.iter().enumerate() {
         sheet
@@ -239,4 +318,38 @@ fn sanitize_xlsx_value(value: &str) -> String {
     } else {
         value.to_string()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_use_dependency_edge_list;
+
+    #[test]
+    fn dependency_matrix_uses_edge_list_when_excel_limits_would_be_exceeded() {
+        assert!(!should_use_dependency_edge_list(16_383));
+        assert!(should_use_dependency_edge_list(16_384));
+    }
+}
+
+fn write_lineage_sheet(
+    sheet: &mut Worksheet,
+    result: &AnalyzeResult,
+) -> Result<(), ExportError> {
+    write_row(sheet, 0, &["Script", "Input Tables", "Output Table"])?;
+
+    let entries = extract_lineage_entries(result);
+    for (index, entry) in entries.iter().enumerate() {
+        let row = (index + 1) as u32;
+        write_row(
+            sheet,
+            row,
+            &[
+                &sanitize_xlsx_value(&entry.script),
+                &sanitize_xlsx_value(&entry.input_table),
+                &sanitize_xlsx_value(&entry.output_table),
+            ],
+        )?;
+    }
+
+    Ok(())
 }

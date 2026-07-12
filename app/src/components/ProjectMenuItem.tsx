@@ -150,6 +150,7 @@ export function ProjectMenuItem({
   return (
     <DropdownMenuItem
       onClick={onSelect}
+      onSelect={(e) => e.preventDefault()}
       onKeyDown={handleKeyDown}
       onMouseLeave={handleCancelDelete}
       className="gap-2 p-2 group"
