@@ -1,5 +1,5 @@
 import { useCallback, useMemo, type FC } from 'react';
-import { Network, Rows3, LayoutGrid, Loader2 } from 'lucide-react';
+import { Network, Rows3, LayoutGrid, Loader2, Database } from 'lucide-react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import {
   GraphErrorBoundary,
@@ -10,11 +10,12 @@ import { useTranslation } from 'react-i18next';
 import { Button } from './ui/button';
 import { GlobalLineageListView } from './GlobalLineageListView';
 import { TaskLayerMatrix } from './TaskLayerMatrix';
+import { InsightsGraphView } from './insights/InsightsGraphView';
 import { useGlobalLineageData } from '@/hooks/useGlobalLineageData';
 import { usePipelineData } from '@/hooks/usePipelineData';
 import type { LayerDef } from '@/types/pipeline-matrix';
 
-export type GlobalLineageMode = 'graph' | 'list' | 'matrix';
+export type GlobalLineageMode = 'graph' | 'list' | 'matrix' | 'insights';
 
 interface GlobalLineageViewProps {
   result: AnalyzeResult | null;
@@ -106,6 +107,15 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
             <LayoutGrid className="h-3.5 w-3.5" />
             Matrix
           </Button>
+          <Button
+            variant={mode === 'insights' ? 'secondary' : 'ghost'}
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => onModeChange('insights')}
+          >
+            <Database className="h-3.5 w-3.5" />
+            {t('globalLineageList.insightsView', '数据洞察')}
+          </Button>
         </div>
         {result && (
           <div className="text-xs text-muted-foreground">
@@ -152,6 +162,14 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
             tasks={pipelineTasks}
             taskNames={pipelineTaskNames}
             layers={pipelineLayers}
+          />
+        )}
+        {mode === 'insights' && (
+          <InsightsGraphView
+            className="h-full w-full"
+            result={result}
+            focusNodeId={focusNodeId}
+            onFocusApplied={onFocusApplied}
           />
         )}
       </div>
