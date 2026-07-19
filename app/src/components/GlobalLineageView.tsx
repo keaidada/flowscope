@@ -1,5 +1,5 @@
 import { useCallback, useMemo, type FC } from 'react';
-import { Network, Rows3, LayoutGrid, Loader2 } from 'lucide-react';
+import { Network, Rows3, LayoutGrid, Loader2, Database } from 'lucide-react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import {
   GraphErrorBoundary,
@@ -11,11 +11,12 @@ import { Button } from './ui/button';
 import { GlobalLineageListView } from './GlobalLineageListView';
 import { TaskLayerMatrix } from './TaskLayerMatrix';
 import { G6GraphView } from './G6GraphView';
+import { InsightsGraphView } from './insights/InsightsGraphView';
 import { useGlobalLineageData } from '@/hooks/useGlobalLineageData';
 import { usePipelineData } from '@/hooks/usePipelineData';
 import type { LayerDef } from '@/types/pipeline-matrix';
 
-export type GlobalLineageMode = 'graph' | 'g6' | 'list' | 'matrix';
+export type GlobalLineageMode = 'graph' | 'g6' | 'list' | 'matrix' | 'insights';
 
 interface GlobalLineageViewProps {
   result: AnalyzeResult | null;
@@ -118,6 +119,15 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
             <Network className="h-3.5 w-3.5 text-emerald-500" />
             G6
           </Button>
+          <Button
+            variant={mode === 'insights' ? 'secondary' : 'ghost'}
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => onModeChange('insights')}
+          >
+            <Database className="h-3.5 w-3.5" />
+            {t('globalLineageList.insightsView', '数据洞察')}
+          </Button>
         </div>
         {result && (
           <div className="text-xs text-muted-foreground">
@@ -173,6 +183,14 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
             focusNodeId={focusNodeId}
             onFocusApplied={onFocusApplied}
             debug={debug}
+          />
+        )}
+        {mode === 'insights' && (
+          <InsightsGraphView
+            className="h-full w-full"
+            result={result}
+            focusNodeId={focusNodeId}
+            onFocusApplied={onFocusApplied}
           />
         )}
       </div>
