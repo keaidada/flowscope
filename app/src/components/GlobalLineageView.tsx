@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useEffect, useRef, type FC } from 'react';
+import { useCallback, useMemo, type FC } from 'react';
 import { Network, Rows3, LayoutGrid, Loader2, Database } from 'lucide-react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import {
@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from './ui/button';
 import { GlobalLineageListView } from './GlobalLineageListView';
 import { TaskLayerMatrix } from './TaskLayerMatrix';
-import { convertToInsightsGraph, isInsightsResult } from './insights/data-mapper';
+import { InsightsGraphView } from './insights/InsightsGraphView';
 import { useGlobalLineageData } from '@/hooks/useGlobalLineageData';
 import { usePipelineData } from '@/hooks/usePipelineData';
 import type { LayerDef } from '@/types/pipeline-matrix';
@@ -38,7 +38,6 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
 }) => {
   const { t } = useTranslation();
   const lineageActions = useLineageActions();
-  const { setResult: setLineageResult } = lineageActions;
 
   // Shared data — computed once, consumed by list and matrix
   const { isLightweight, loadEntryDetail } = useGlobalLineageData(result);
@@ -75,29 +74,6 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
     },
     [lineageActions, onModeChange]
   );
-
-  // ── 数据洞察模式：转换数据并注入主 store，使 GraphView 完整复用 ──
-  const insightsConvertedRef = useRef(false);
-  const originalResultRef = useRef<AnalyzeResult | null>(null);
-
-  useEffect(() => {
-    if (mode === 'insights' && result && !insightsConvertedRef.current) {
-      // 进入洞察模式：保存原始数据并注入转换后的数据
-      if (!isInsightsResult(result)) {
-        originalResultRef.current = result;
-        const { result: converted } = convertToInsightsGraph(result);
-        setLineageResult(converted);
-      }
-      insightsConvertedRef.current = true;
-    } else if (mode !== 'insights' && insightsConvertedRef.current) {
-      // 离开洞察模式：还原原始数据
-      if (originalResultRef.current) {
-        setLineageResult(originalResultRef.current);
-        originalResultRef.current = null;
-      }
-      insightsConvertedRef.current = false;
-    }
-  }, [mode, result, setLineageResult]);
 
   return (
     <div className={`flex min-w-0 flex-1 flex-col ${className ?? ''}`}>
@@ -163,7 +139,7 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
             </div>
           </div>
         )}
-        {(mode === 'graph' || mode === 'insights') && (
+        {mode === 'graph' && (
           <GraphErrorBoundary>
             <GraphView
               className="h-full w-full"
@@ -171,6 +147,14 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
               onFocusApplied={onFocusApplied}
             />
           </GraphErrorBoundary>
+        )}
+        {mode === 'insights' && (
+          <InsightsGraphView
+            className="h-full w-full"
+            result={result}
+            focusNodeId={focusNodeId}
+            onFocusApplied={onFocusApplied}
+          />
         )}
         {mode === 'list' && (
           <GlobalLineageListView
