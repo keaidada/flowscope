@@ -22,7 +22,10 @@ function buildTestCase(): AnalyzeResult {
         statementIndex: 0,
         statementType: 'INSERT',
         sourceName: 'etl/scriptA.sql',
-        nodes: [],
+        nodes: [
+          { id: 'n1', type: 'table', label: 'users', qualifiedName: 'public.users' },
+          { id: 'n2', type: 'table', label: 'accounts', qualifiedName: 'public.accounts' },
+        ],
         edges: [],
         joinCount: 0,
         complexityScore: 1,
@@ -31,7 +34,10 @@ function buildTestCase(): AnalyzeResult {
         statementIndex: 1,
         statementType: 'SELECT',
         sourceName: 'etl/scriptB.sql',
-        nodes: [],
+        nodes: [
+          { id: 'n3', type: 'table', label: 'users', qualifiedName: 'public.users' },
+          { id: 'n4', type: 'table', label: 'orders', qualifiedName: 'public.orders' },
+        ],
         edges: [],
         joinCount: 0,
         complexityScore: 1,
@@ -142,6 +148,76 @@ function testIsInsightsResult(): void {
   assert(isInsightsResult(null) === false, 'null 不应被识别为 insights result');
 }
 
+function testMergedResultsStatementIndexCollision(): void {
+  console.log('\n--- testMergedResultsStatementIndexCollision ---');
+  // 模拟两个文件合并后 statementIndex 冲突的场景
+  // 文件 A 的 statement 0 和文件 B 的 statement 0 有相同的 statementIndex
+  const merged: AnalyzeResult = {
+    statements: [
+      // 文件 A 的 statement 0
+      {
+        statementIndex: 0,
+        statementType: 'INSERT',
+        sourceName: 'etl/fileA.sql',
+        nodes: [
+          { id: 'a1', type: 'table', label: 't1', qualifiedName: 'db.t1' },
+        ],
+        edges: [],
+        joinCount: 0,
+        complexityScore: 1,
+      },
+      // 文件 B 的 statement 0（statementIndex 冲突！）
+      {
+        statementIndex: 0,
+        statementType: 'SELECT',
+        sourceName: 'etl/fileB.sql',
+        nodes: [
+          { id: 'b1', type: 'table', label: 't1', qualifiedName: 'db.t1' },
+          { id: 'b2', type: 'table', label: 't2', qualifiedName: 'db.t2' },
+        ],
+        edges: [],
+        joinCount: 0,
+        complexityScore: 1,
+      },
+    ],
+    globalLineage: {
+      nodes: [
+        {
+          id: 'table_t1',
+          type: 'table',
+          label: 't1',
+          canonicalName: { schema: 'db', name: 't1' },
+          statementRefs: [{ statementIndex: 0 }, { statementIndex: 0 }],
+        },
+        {
+          id: 'table_t2',
+          type: 'table',
+          label: 't2',
+          canonicalName: { schema: 'db', name: 't2' },
+          statementRefs: [{ statementIndex: 0 }],
+        },
+      ],
+      edges: [],
+    },
+    issues: [],
+    summary: {
+      statementCount: 2,
+      tableCount: 2,
+      columnCount: 0,
+      joinCount: 0,
+      complexityScore: 1,
+      issueCount: { errors: 0, warnings: 0, infos: 0 },
+      hasErrors: false,
+    },
+  };
+
+  const { stats } = convertToInsightsGraph(merged);
+  // t1 被 fileA 和 fileB 同时引用，t2 只被 fileB 引用
+  // 应该有 2 个脚本节点（fileA 和 fileB）
+  assert(stats.scriptCount === 2, `合并后脚本数应为 2，实际 ${stats.scriptCount}`);
+  console.log('统计:', JSON.stringify(stats));
+}
+
 function testEmptyInput(): void {
   console.log('\n--- testEmptyInput ---');
   const empty: AnalyzeResult = {
@@ -212,6 +288,7 @@ function testTableWithNoScript(): void {
 console.log('🔧 数据洞察 data-mapper 单元测试\n');
 testBasicConversion();
 testIsInsightsResult();
+testMergedResultsStatementIndexCollision();
 testEmptyInput();
 testTableWithNoScript();
 console.log('\n🎉 全部测试通过！');

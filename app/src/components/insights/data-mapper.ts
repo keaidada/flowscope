@@ -110,15 +110,26 @@ export function convertToInsightsGraph(original: AnalyzeResult): InsightsGraph {
   const globalNodes = original.globalLineage?.nodes ?? [];
   const globalEdges = original.globalLineage?.edges ?? [];
 
-  // 1. 构建 statementIndex → sourceName 映射
-  const stmtToSource = new Map<number, string>();
+  // 1. 构建 qualifiedName → Set<sourceName> 映射
+  //    直接遍历 statements[].nodes，避免 statementIndex 在合并后冲突的问题
+  const tableQNameToSources = new Map<string, Set<string>>();
   for (const stmt of original.statements) {
-    if (stmt.sourceName && stmt.sourceName.trim()) {
-      stmtToSource.set(stmt.statementIndex, stmt.sourceName);
+    const source = stmt.sourceName?.trim();
+    if (!source) continue;
+    for (const node of stmt.nodes ?? []) {
+      if (node.type !== 'table' && node.type !== 'view') continue;
+      const qName = node.qualifiedName || node.label;
+      if (!qName) continue;
+      let set = tableQNameToSources.get(qName);
+      if (!set) {
+        set = new Set();
+        tableQNameToSources.set(qName, set);
+      }
+      set.add(source);
     }
   }
 
-  // 2. 收集所有物理表节点，并建立 nodeId → 表信息的映射
+  // 2. 收集所有物理表节点，通过 qualifiedName 匹配脚本
   interface TableInfo {
     nodeId: string;
     qualifiedName: string;
@@ -134,14 +145,24 @@ export function convertToInsightsGraph(original: AnalyzeResult): InsightsGraph {
     const qualifiedName = getTableQualifiedName(node);
     if (!qualifiedName) continue;
 
-    const scripts = new Set<string>();
-    for (const ref of node.statementRefs ?? []) {
-      const source = stmtToSource.get(ref.statementIndex);
-      if (source) scripts.add(source);
+    // 优先从 tableQNameToSources 获取脚本
+    let scripts = tableQNameToSources.get(qualifiedName);
+
+    // 兜底：尝试用 statementRefs 查找（单文件场景下有效）
+    if (!scripts || scripts.size === 0) {
+      scripts = new Set<string>();
+      for (const ref of node.statementRefs ?? []) {
+        const stmt = original.statements.find(
+          (s) => s.statementIndex === ref.statementIndex && s.sourceName
+        );
+        if (stmt?.sourceName) scripts.add(stmt.sourceName.trim());
+      }
     }
 
-    // 如果没有任何脚本引用（例如全局 schema 中定义但未使用的表），使用占位脚本
-    if (scripts.size === 0) scripts.add('(unreferenced)');
+    // 如果没有任何脚本引用，使用占位脚本
+    if (!scripts || scripts.size === 0) {
+      scripts = new Set(['(unreferenced)']);
+    }
 
     const info: TableInfo = { nodeId: node.id, qualifiedName, scripts };
     tableByNodeId.set(node.id, info);
