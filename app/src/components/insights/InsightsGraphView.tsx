@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, type JSX } from 'react';
+import { useMemo, type JSX } from 'react';
 import { Database } from 'lucide-react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import {
   GraphErrorBoundary,
   GraphView,
-  useLineageActions,
-  useLineageState,
+  LineageProvider,
 } from '@pondpilot/flowscope-react';
 import { useTranslation } from 'react-i18next';
 import { convertToInsightsGraph } from './data-mapper';
@@ -24,15 +23,11 @@ interface InsightsGraphViewProps {
 /**
  * 数据洞察图视图
  *
- * 本组件复用现有 GraphView，通过数据映射将「脚本 → 表」的关系
- * 转换为 GraphView 可渲染的「表 → 字段」结构。
+ * 通过嵌套 LineageProvider 创建隔离的 store，将转换后的数据注入
+ * 给 GraphView，不影响全局 store 状态。
  *
- * 生命周期：
- * - 挂载时：将转换后的 result 注入 lineage store
- * - 卸载时：还原原始 result
- *
- * 注意：GraphView 不接收 result prop，而是从 lineage store 中读取。
- * 因此本组件通过 setResult action 注入转换后的数据。
+ * 数据映射：脚本 → table 节点，表 → column 节点，
+ * ownership 边表示包含关系，data_flow 边表示跨脚本依赖。
  */
 export function InsightsGraphView({
   result,
@@ -41,36 +36,14 @@ export function InsightsGraphView({
   className,
 }: InsightsGraphViewProps): JSX.Element {
   const { t } = useTranslation();
-  const { setResult: setLineageResult } = useLineageActions();
-  const { result: storeResult } = useLineageState();
 
-  // 缓存原始 result，用于卸载时还原
-  const originalResultRef = useRef<AnalyzeResult | null>(storeResult);
-
-  // 执行数据转换
+  // 执行数据转换（仅在 result 引用变化时重新计算）
   const conversion = useMemo(() => {
     if (!result) return null;
     return convertToInsightsGraph(result);
   }, [result]);
 
-  // 注入转换后的 result 到 store；卸载时还原
-  useEffect(() => {
-    if (!conversion) return;
-
-    // 记录注入前的原始 result（仅首次）
-    if (originalResultRef.current === null || !isOriginalTrackable(originalResultRef.current)) {
-      originalResultRef.current = storeResult;
-    }
-
-    setLineageResult(conversion.result);
-
-    return () => {
-      // 还原原始 result
-      setLineageResult(originalResultRef.current);
-    };
-  }, [conversion, setLineageResult]);
-
-  // 空状态
+  // 空状态：无 result
   if (!result) {
     return (
       <div className="flex h-full w-full items-center justify-center text-muted-foreground">
@@ -82,14 +55,13 @@ export function InsightsGraphView({
     );
   }
 
+  // 空状态：无脚本数据
   if (!conversion || conversion.stats.scriptCount === 0) {
     return (
       <div className="flex h-full w-full items-center justify-center text-muted-foreground">
         <div className="flex flex-col items-center gap-3">
           <Database className="h-10 w-10 opacity-40" />
-          <p className="text-sm">
-            {t('insights.noScripts', '未发现任何脚本与表的关联关系')}
-          </p>
+          <p className="text-sm">{t('insights.noScripts', '未发现任何脚本与表的关联关系')}</p>
         </div>
       </div>
     );
@@ -111,28 +83,21 @@ export function InsightsGraphView({
         </span>
       </div>
 
-      {/* 复用 GraphView 渲染 */}
+      {/* 隔离的 store + 复用 GraphView 渲染 */}
       <div className="relative min-h-0 flex-1">
-        <GraphErrorBoundary>
-          <GraphView
-            className="h-full w-full"
-            focusNodeId={focusNodeId}
-            onFocusApplied={onFocusApplied}
-          />
-        </GraphErrorBoundary>
+        <LineageProvider
+          initialResult={conversion.result}
+          defaultLayoutAlgorithm="dagre"
+        >
+          <GraphErrorBoundary>
+            <GraphView
+              className="h-full w-full"
+              focusNodeId={focusNodeId}
+              onFocusApplied={onFocusApplied}
+            />
+          </GraphErrorBoundary>
+        </LineageProvider>
       </div>
     </div>
-  );
-}
-
-/**
- * 判断 result 是否可作为「原始」result 被追踪。
- * 数据洞察转换后的 result 含有特定 metadata 标记，不应被当作原始数据。
- */
-function isOriginalTrackable(result: AnalyzeResult | null): boolean {
-  if (!result?.globalLineage?.nodes) return true;
-  // 检查是否为洞察视图自身生成的 result
-  return !result.globalLineage.nodes.some(
-    (n) => n.metadata?.isInsightsScriptNode || n.metadata?.isInsightsTableNode
   );
 }
