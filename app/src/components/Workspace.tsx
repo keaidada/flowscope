@@ -129,7 +129,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
     // 保存当前 result 和布局以便恢复
     previousResultRef.current = result;
     previousLayoutRef.current = layoutAlgorithm;
-    // 先清空结果再打开视图，避免 G6GraphView 用巨大的原始数据渲染
+    // 先清空结果再打开视图，避免用巨大的原始数据渲染
     setLineageResult(null);
     setGlobalLineageOpen(true);
     setGlobalLineageLoading(true);
@@ -763,7 +763,6 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                     focusNodeId={globalFocusNodeId}
                     onFocusApplied={() => setGlobalFocusNodeId(undefined)}
                     loading={globalLineageLoading}
-                    debug={lineageDebug}
                   />
                 ) : globalLineageLoading ? (
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
