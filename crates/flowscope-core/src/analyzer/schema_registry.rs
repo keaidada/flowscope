@@ -231,6 +231,21 @@ impl SchemaRegistry {
         (registry, issues)
     }
 
+    /// 由 USE <schema> 语句触发:设置当前 schema,后续无 schema 限定的表
+    /// (如 `FROM s02_usr_vplay_indx`)会被 canonicalize 成 `<schema>.<table>`
+    /// (如 `sum_db.s02_usr_vplay_indx`)。
+    pub(crate) fn set_default_schema(&mut self, schema: &str) {
+        let normalized = self.normalize_identifier(schema);
+        self.default_schema = Some(normalized.clone());
+        self.search_path = vec![SearchPathEntry {
+            catalog: self.default_catalog.clone(),
+            schema: normalized,
+        }];
+        // 表 resolution 变了,清缓存
+        self.table_resolution_cache.borrow_mut().clear();
+        self.identifier_cache.borrow_mut().clear();
+    }
+
     /// Initializes the registry from schema metadata.
     fn initialize_from_metadata(&mut self, schema: Option<&SchemaMetadata>) -> Vec<Issue> {
         let issues = Vec::new();

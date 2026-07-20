@@ -4,6 +4,43 @@
 
 This file applies to the entire FlowScope monorepo.
 
+## Critical Rules (DO NOT VIOLATE)
+
+### Database Operations Require Explicit User Authorization
+
+**ANY operation that modifies, deletes, overwrites, or resets a database file
+or its data MUST be explicitly authorized by the user first.** This includes
+but is not limited to:
+
+- `rm`, `mv`, `cp`, `truncate` on any `*.db`, `*.sqlite`, `*.db-bak`,
+  `*.db-wal`, `*.db-shm`, or backup files.
+- `DROP TABLE`, `DELETE FROM`, `TRUNCATE`, `UPDATE ... ` bulk operations
+  inside any project database (dev or production).
+- Replacing a database file with a backup, a fresh empty DB, or a test fixture.
+- Running a migration that drops/rebuilds tables and resets data.
+- Bulk `INSERT`/`UPDATE` that overwrites existing rows.
+- Schema migrations that change column types and may discard values.
+
+**Always ask first**, even when:
+- The operation is "just a backup" (the user may not want any file movement).
+- You believe the DB is "empty" or "expendable" (the user may have data you
+  don't know about).
+- The operation is reversible (restoring still disrupts the running service).
+- You think it's "obvious" or "standard practice".
+
+**Acceptable without authorization** (read-only or trivially safe):
+- `SELECT`, `PRAGMA`, `EXPLAIN` queries.
+- `ls`, `stat`, `file`, `sqlite3 ".schema"` / `.tables` / `COUNT(*)` on DB files.
+- Writing to a brand-new DB file you just created in `/tmp/` for testing.
+
+When in doubt, **ask**. A 10-second confirmation beats an irreversible data loss.
+
+### Other Critical Rules
+
+- Never commit secrets/credentials to the repository.
+- Never force-push, rewrite git history, or amend pushed commits without
+  explicit user authorization.
+
 ## Repo Overview
 
 FlowScope is a Rust + TypeScript monorepo.
@@ -12,6 +49,7 @@ Key areas:
 - `packages/` TypeScript packages (`@pondpilot/flowscope-core`, `@pondpilot/flowscope-react`).
 - `app/` demo web app (Vite + React).
 - `vscode/` VS Code extension + `vscode/webview-ui`.
+
 
 ## Cursor/Copilot Rules
 
@@ -51,6 +89,75 @@ The `just build-cli-serve` target handles this dependency automatically.
 - `yarn dev` (from `app/` if you want direct Vite usage).
 - `just cli -- <args>` (run CLI in debug mode).
 - `just cli-release -- <args>` (run CLI in release mode).
+
+## Full Dev Environment (Frontend + Backend)
+
+Standard procedure to bring up a complete dev environment. All steps are mandatory for a working setup. Run from the repo root.
+
+### Prerequisites (first time only, or after Rust source changes)
+
+1. Build WASM module (dev mode skips `wasm-opt` for speed):
+   ```bash
+   just build-wasm-dev
+   ```
+   Output: `packages/core/wasm/flowscope_wasm_bg.wasm` and auto-symlinked into `app/node_modules`.
+
+2. Build TypeScript packages:
+   ```bash
+   just build-ts
+   ```
+   Builds `@pondpilot/flowscope-core`, `@pondpilot/flowscope-react`, and vscode webview.
+
+### Service 1: Frontend dev server (Vite)
+
+```bash
+nohup just dev > /tmp/flowscope-logs/dev.log 2>&1 &
+```
+- URL: http://localhost:5173/
+- Healthcheck: `curl -o /dev/null -w "%{http_code}\n" http://localhost:5173/` → `200`
+- Log: `/tmp/flowscope-logs/dev.log`
+- Stop: `pkill -f "vite"`
+- Requires: WASM + TS build steps above completed once.
+
+### Service 2: Backend CLI serve mode (embedded web UI + REST API)
+
+```bash
+# Build CLI with serve feature (debug, fast). Only needed once or after CLI/embedded-app changes.
+cargo build -p flowscope-cli --features serve
+
+# Run server (watches ./app for SQL changes, port 3000)
+nohup ./target/debug/flowscope --serve --port 3000 --watch ./app > /tmp/flowscope-logs/serve.log 2>&1 &
+```
+- URL: http://127.0.0.1:3000
+- Healthcheck: `curl http://127.0.0.1:3000/api/health` → `{"status":"ok","version":"0.6.0"}`
+- Config: `curl http://127.0.0.1:3000/api/config`
+- Log: `/tmp/flowscope-logs/serve.log`
+- Stop: `pkill -f "flowscope --serve"`
+- Requires: `embedded-app/` populated (run `just sync-cli-serve-assets` after frontend changes).
+
+### REST API endpoints (serve mode)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Health check with version |
+| `/api/config` | GET | Server configuration |
+| `/api/analyze` | POST | Run lineage analysis |
+| `/api/lint-fix` | POST | Apply lint auto-fixes |
+| `/api/completion` | POST | Get code completion items |
+| `/api/split` | POST | Split SQL into statements |
+| `/api/files` | GET | List watched files with content |
+| `/api/schema` | GET | Get schema metadata |
+| `/api/export/:format` | POST | Export to json/mermaid/html/csv/xlsx |
+
+### Verification
+
+After starting both services, verify they are up:
+
+```bash
+curl -o /dev/null -w "5173: %{http_code}\n" http://localhost:5173/
+curl -o /dev/null -w "3000: %{http_code}\n" http://127.0.0.1:3000/api/health
+```
+Both should return `200`.
 
 ## Lint, Format, Typecheck
 

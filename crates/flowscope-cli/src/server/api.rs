@@ -821,10 +821,7 @@ fn extract_and_save_ddl_metadata(
     project_id: &str,
     files: &[store::SchemaFileRow],
 ) -> Result<(), (StatusCode, String)> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
+    let now = || chrono::Utc::now().to_rfc3339();
 
     let mut all_tables: Vec<store::TableMetadataRow> = Vec::new();
     let mut all_columns: Vec<store::ColumnMetadataRow> = Vec::new();
@@ -872,8 +869,8 @@ fn extract_and_save_ddl_metadata(
                     comment: String::new(),
                     row_count: -1,
                     size_bytes: -1,
-                    created_at: now,
-                    updated_at: now,
+                    created_at: now(),
+                    updated_at: now(),
                     status: 1,
                 });
 
@@ -890,8 +887,8 @@ fn extract_and_save_ddl_metadata(
                         is_partition: false,
                         default_value: None,
                         comment: String::new(),
-                        created_at: now,
-                        updated_at: now,
+                        created_at: now(),
+                        updated_at: now(),
                         status: 1,
                     });
                 }

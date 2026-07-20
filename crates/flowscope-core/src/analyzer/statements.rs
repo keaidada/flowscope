@@ -170,7 +170,21 @@ impl<'a> Analyzer<'a> {
             Statement::Explain { .. } | Statement::ExplainTable { .. } => "EXPLAIN".to_string(),
             Statement::Analyze { .. } => "ANALYZE".to_string(),
             Statement::Call(_) => "CALL".to_string(),
-            Statement::Use(_) => "USE".to_string(),
+            Statement::Use(use_stmt) => {
+                // USE <schema>: 记录当前 schema,后续无 schema 表限定为此 schema
+                // (s02_usr_vplay_indx → sum_db.s02_usr_vplay_indx)
+                let schema_name = match use_stmt {
+                    sqlparser::ast::Use::Schema(obj)
+                    | sqlparser::ast::Use::Catalog(obj)
+                    | sqlparser::ast::Use::Database(obj)
+                    | sqlparser::ast::Use::Object(obj) => Some(obj.to_string()),
+                    _ => None,
+                };
+                if let Some(s) = schema_name {
+                    self.schema.set_default_schema(&s);
+                }
+                "USE".to_string()
+            }
             Statement::StartTransaction { statements: inner_stmts, .. } => {
                 // BigQuery BEGIN...END block — recursively analyze inner statements
                 let mut combined_type = String::new();
@@ -458,7 +472,9 @@ impl<'a> Analyzer<'a> {
 
     pub(super) fn analyze_insert(&mut self, ctx: &mut StatementContext, insert: &ast::Insert) {
         let target_name = insert.table.to_string();
-        let canonical = self.normalize_table_name(&target_name);
+        // Honor `USE <schema>;` — bare target names get canonicalized to
+        // `<default_schema>.<table>` so qualified_name carries the full prefix.
+        let canonical = self.canonicalize_table_reference(&target_name).canonical;
 
         // Create target table node
         let target_id = ctx.add_node(Node {
@@ -707,7 +723,7 @@ impl<'a> Analyzer<'a> {
         {
             for name in names {
                 let table_name = name.to_string();
-                let canonical = self.normalize_table_name(&table_name);
+                let canonical = self.canonicalize_table_reference(&table_name).canonical;
 
                 // Only remove if it's an implied entry (not imported)
                 self.schema.remove_implied(&canonical);
@@ -731,7 +747,7 @@ impl<'a> Analyzer<'a> {
         match source {
             CopySource::Table { table_name, .. } => {
                 let name = table_name.to_string();
-                let canonical = self.normalize_table_name(&name);
+                let canonical = self.canonicalize_table_reference(&name).canonical;
                 let node_id = generate_node_id("table", &canonical);
 
                 ctx.add_node(Node {
@@ -782,7 +798,7 @@ impl<'a> Analyzer<'a> {
             CopyIntoSnowflakeKind::Table => {
                 // COPY INTO table FROM stage: table is target (produced)
                 let name = into.to_string();
-                let canonical = self.normalize_table_name(&name);
+                let canonical = self.canonicalize_table_reference(&name).canonical;
                 let target_id = generate_node_id("table", &canonical);
 
                 ctx.add_node(Node {
@@ -814,7 +830,7 @@ impl<'a> Analyzer<'a> {
                 } else if let Some(table_name) = from_obj {
                     // Source is a table
                     let name = table_name.to_string();
-                    let canonical = self.normalize_table_name(&name);
+                    let canonical = self.canonicalize_table_reference(&name).canonical;
                     let node_id = generate_node_id("table", &canonical);
 
                     ctx.add_node(Node {
@@ -872,7 +888,7 @@ impl<'a> Analyzer<'a> {
 
         // Normalize and create nodes for both old and new table names
         let old_name_str = old_name.to_string();
-        let old_canonical = self.normalize_table_name(&old_name_str);
+        let old_canonical = self.canonicalize_table_reference(&old_name_str).canonical;
         let old_node_id = generate_node_id("table", &old_canonical);
 
         let new_name_str = new_table_name.to_string();
@@ -885,7 +901,7 @@ impl<'a> Analyzer<'a> {
         } else {
             new_name_str.clone()
         };
-        let new_canonical = self.normalize_table_name(&new_name_with_schema);
+        let new_canonical = self.canonicalize_table_reference(&new_name_with_schema).canonical;
         let new_node_id = generate_node_id("table", &new_canonical);
 
         // Create node for old table (source of rename)

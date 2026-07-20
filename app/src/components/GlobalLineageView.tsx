@@ -151,7 +151,6 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
         {mode === 'insights' && (
           <InsightsGraphView
             className="h-full w-full"
-            result={result}
             focusNodeId={focusNodeId}
             onFocusApplied={onFocusApplied}
           />

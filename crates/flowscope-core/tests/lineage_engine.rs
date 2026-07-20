@@ -4068,14 +4068,39 @@ fn ddl_multi_statement_temp_table_pipeline() {
         "temp table pipeline should have 4 statements"
     );
 
+    // Physical tables (raw_events as source, gold as persistent CTAS target)
+    // remain NodeType::Table.
     let tables = collect_table_names(&result);
-    for expected in ["raw_events", "bronze", "silver", "gold"] {
+    for expected in ["raw_events", "gold"] {
         assert!(
             tables.contains(expected),
-            "pipeline should track {expected}"
+            "pipeline should track physical table {expected}"
         );
     }
 
+    // TEMP tables are surfaced as NodeType::Cte so they don't pollute
+    // physical-table lineage, while still keeping `table_`-prefixed IDs so
+    // cross-statement edges resolve consistently.
+    let temp_names: HashSet<String> = result
+        .statements
+        .iter()
+        .flat_map(|s| s.nodes.iter())
+        .filter(|n| n.node_type == NodeType::Cte)
+        .map(|n| n.label.to_string())
+        .collect();
+    for expected in ["bronze", "silver"] {
+        assert!(
+            temp_names.contains(expected),
+            "temp table {expected} should be surfaced as NodeType::Cte"
+        );
+        assert!(
+            !tables.contains(expected),
+            "temp table {expected} must NOT appear in physical table set"
+        );
+    }
+
+    // Cross-statement edges are preserved because node IDs are stable
+    // (both CREATE and subsequent SELECT FROM use the same `table_`-prefixed id).
     let cross_edges: Vec<_> = result
         .global_lineage
         .edges
@@ -4084,7 +4109,8 @@ fn ddl_multi_statement_temp_table_pipeline() {
         .collect();
     assert!(
         cross_edges.len() >= 3,
-        "temp table pipeline should have cross-statement edges"
+        "temp table pipeline should have cross-statement edges (got {})",
+        cross_edges.len()
     );
 }
 

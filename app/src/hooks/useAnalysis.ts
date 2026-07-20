@@ -781,7 +781,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
             // Persist table/column metadata from resolvedSchema
             try {
-              await writeTableMetadata(activeProjectId, result);
+              await writeTableMetadata(activeProjectId, result, project.dialect);
             } catch (err) {
               console.error('[useAnalysis] writeTableMetadata failed', err);
             }

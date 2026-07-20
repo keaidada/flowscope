@@ -1358,6 +1358,21 @@ fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
             continue;
         }
 
+        // Skip Hive shell commands that sqlparser-rs doesn't support
+        // (ADD JAR / CREATE|DROP TEMPORARY FUNCTION / ADD FILE / LIST JAR).
+        // 剥离后避免整段 parse 失败,导致同范围内的 INSERT/SELECT 血缘语句连带丢失。
+        if upper.starts_with("ADD JAR")
+            || upper.starts_with("CREATE TEMPORARY FUNCTION")
+            || upper.starts_with("DROP TEMPORARY FUNCTION")
+            || upper.starts_with("ADD FILE")
+            || upper.starts_with("LIST JAR")
+            || upper.starts_with("LIST FILES")
+        {
+            out_lines.push(format!("-- hive-shell: {}", line));
+            changed = true;
+            continue;
+        }
+
         out_lines.push(line.to_string());
     }
 

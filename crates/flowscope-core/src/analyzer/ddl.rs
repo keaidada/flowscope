@@ -148,12 +148,27 @@ impl<'a> Analyzer<'a> {
         is_temporary: bool,
     ) {
         let target_name = table_name.to_string();
-        let canonical = self.normalize_table_name(&target_name);
+        // Use canonicalize_table_reference so a preceding `USE <schema>;` is
+        // honored: a bare target name (e.g. `s02_vplay_statt`) is canonicalized
+        // to `<default_schema>.<table>` (e.g. `sum_db.s02_vplay_statt`) even
+        // when the table is implied (not in known_tables).
+        let canonical = self.canonicalize_table_reference(&target_name).canonical;
 
-        // Create target table node
+        // Create target table node.
+        //
+        // Temporary tables (e.g. Hive's `CREATE TEMPORARY TABLE A AS SELECT ...`)
+        // are session-scoped and non-persistent. They are surfaced as
+        // `NodeType::Cte` so they don't pollute physical-table lineage
+        // (`is_table_or_view()`), while still keeping the `table_` ID prefix
+        // for cross-statement reference consistency.
+        let node_type = if is_temporary {
+            NodeType::Cte
+        } else {
+            NodeType::Table
+        };
         let target_id = ctx.add_node(Node {
             id: generate_node_id("table", &canonical),
-            node_type: NodeType::Table,
+            node_type,
             label: extract_simple_name(&target_name).into(),
             qualified_name: Some(canonical.clone().into()),
             expression: None,
@@ -164,8 +179,13 @@ impl<'a> Analyzer<'a> {
             aggregation: None,
         });
 
-        self.tracker
-            .record_produced(&canonical, ctx.statement_index);
+        if is_temporary {
+            self.tracker
+                .record_temporary_produced(&canonical, ctx.statement_index);
+        } else {
+            self.tracker
+                .record_produced(&canonical, ctx.statement_index);
+        }
 
         let projection_checkpoint = ctx.projection_checkpoint();
         // Analyze source query
@@ -227,13 +247,22 @@ impl<'a> Analyzer<'a> {
             "DDL",
         );
 
-        // Create target table node
-
+        // Create target table node.
+        //
+        // Temporary tables are surfaced as `NodeType::Cte` (statement-like,
+        // non-persistent) while keeping the `table_` ID prefix so cross-
+        // statement references resolve consistently. See
+        // `analyze_create_table_as` for the same rationale.
+        let node_type = if is_temporary {
+            NodeType::Cte
+        } else {
+            NodeType::Table
+        };
         let node_id = generate_node_id("table", &canonical);
 
         ctx.add_node(Node {
             id: node_id.clone(),
-            node_type: NodeType::Table,
+            node_type,
             label: extract_simple_name(&target_name).into(),
             qualified_name: Some(canonical.clone().into()),
             expression: None,
@@ -249,8 +278,13 @@ impl<'a> Analyzer<'a> {
             self.add_table_columns_from_schema(ctx, &canonical, &node_id);
         }
 
-        self.tracker
-            .record_produced(&canonical, ctx.statement_index);
+        if is_temporary {
+            self.tracker
+                .record_temporary_produced(&canonical, ctx.statement_index);
+        } else {
+            self.tracker
+                .record_produced(&canonical, ctx.statement_index);
+        }
     }
 
     pub(super) fn analyze_create_view(
@@ -261,7 +295,8 @@ impl<'a> Analyzer<'a> {
         is_temporary: bool,
     ) {
         let target_name = name.to_string();
-        let canonical = self.normalize_table_name(&target_name);
+        // Honor `USE <schema>;` for view targets too — see analyze_create_table_as.
+        let canonical = self.canonicalize_table_reference(&target_name).canonical;
 
         // Create target view node
         let target_id = ctx.add_node(Node {

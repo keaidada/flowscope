@@ -1,83 +1,186 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useCallback, useRef, useState, type JSX } from 'react';
+import { Search, X, Database } from 'lucide-react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
-import { GraphErrorBoundary, GraphView, useLineageActions } from '@pondpilot/flowscope-react';
-import { convertToInsightsGraph, isInsightsResult } from './data-mapper';
+import {
+  GraphErrorBoundary,
+  GraphView,
+  useLineageStore,
+} from '@pondpilot/flowscope-react';
+import { searchLineageForInsights } from '@/lib/analysis-cache';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 export interface InsightsGraphViewProps {
-  /** 原始血缘分析结果 */
-  result: AnalyzeResult | null;
-  /** 聚焦节点 ID */
   focusNodeId?: string;
-  /** 聚焦完成回调 */
   onFocusApplied?: () => void;
-  /** 附加 className */
   className?: string;
 }
 
-/**
- * 数据洞察图视图
- *
- * 功能与关系图（GraphView）完全一致：搜索、布局切换、展开/折叠、
- * 高亮路径、缩略图、导出等全部保留。
- *
- * 区别仅在于数据：通过 data-mapper 将「脚本→表」关系映射为
- * GraphView 可渲染的「表→字段」结构（脚本=table节点，表=column节点）。
- *
- * 实现原理：
- * 1. 挂载时捕获原始 result，转换为洞察格式
- * 2. 注入主 store（GraphView 从 store 读取，所有功能自然继承）
- * 3. 卸载时还原原始 result
- *
- * 反馈循环防护：
- * - 使用 useState 初始化器确保转换只执行一次
- * - 使用 useRef 捕获挂载时的原始 result
- * - isInsightsResult() 防止重复转换
- */
 export function InsightsGraphView({
-  result,
   focusNodeId,
   onFocusApplied,
   className,
 }: InsightsGraphViewProps): JSX.Element {
-  const { setResult: setLineageResult } = useLineageActions();
+  const setResult = useLineageStore((state) => state.setResult);
+  const setViewMode = useLineageStore((state) => state.setViewMode);
+  const toggleShowScriptTables = useLineageStore(
+    (state) => state.toggleShowScriptTables,
+  );
+  const currentShowTables = useLineageStore((state) => state.showScriptTables);
+  const storeResult = useLineageStore((state) => state.result);
 
-  // 捕获挂载时的原始 result（防止反馈循环）
-  const originalResultRef = useRef<AnalyzeResult | null>(null);
-  if (originalResultRef.current === null && result !== null && !isInsightsResult(result)) {
-    originalResultRef.current = result;
+  const [searchTerm, setSearchTerm] = useState('');
+  const [hasSearched, setHasSearched] = useState(false);
+  const [searchResult, setSearchResult] = useState<AnalyzeResult | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  // Capture the original tableLevelResult once (for filtering on search).
+  // Reads from store subscription; saves to ref on first non-null value.
+  const originalResult = useRef<AnalyzeResult | null>(null);
+  const captured = useRef(false);
+  const toggledShowTables = useRef(false);
+
+  if (!captured.current && storeResult) {
+    originalResult.current = storeResult;
+    captured.current = true;
   }
 
-  // 数据转换：只在首次渲染时执行一次
-  const [conversion] = useState(() => {
-    const source = originalResultRef.current ?? result;
-    if (!source || isInsightsResult(source)) return null;
-    return convertToInsightsGraph(source);
-  });
+  const handleSearch = useCallback(() => {
+    const term = searchTerm.trim();
+    if (!term) return;
 
-  // 挂载时注入转换数据，卸载时还原原始数据
-  useEffect(() => {
-    if (!conversion) return;
+    const original = originalResult.current;
+    if (!original) {
+      setSearchError('无可搜索的数据，请先加载全局血缘');
+      setHasSearched(true);
+      return;
+    }
 
-    setLineageResult(conversion.result);
+    setSearchError(null);
+    setHasSearched(true);
 
-    return () => {
-      if (originalResultRef.current) {
-        setLineageResult(originalResultRef.current);
+    try {
+      const filtered = searchLineageForInsights(original, term);
+      setSearchResult(filtered);
+
+      // Only manipulate the store when user actually searches
+      setViewMode('script');
+      if (!currentShowTables) {
+        toggledShowTables.current = true;
+        toggleShowScriptTables();
       }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      setResult(filtered);
+    } catch (err) {
+      console.error('[InsightsGraphView] Search failed:', err);
+      setSearchError(err instanceof Error ? err.message : '搜索失败');
+    }
+  }, [
+    searchTerm,
+    setResult,
+    setViewMode,
+    toggleShowScriptTables,
+    currentShowTables,
+  ]);
 
-  // 渲染 GraphView（完全复用，所有功能保留）
+  const handleClear = useCallback(() => {
+    setSearchTerm('');
+    setHasSearched(false);
+    setSearchResult(null);
+    setSearchError(null);
+    setResult(null);
+  }, [setResult]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') handleSearch();
+    },
+    [handleSearch],
+  );
+
+  const showGraph = hasSearched && searchResult && !searchError;
+
   return (
-    <div className={className}>
-      <GraphErrorBoundary>
-        <GraphView
-          className="h-full w-full"
-          focusNodeId={focusNodeId}
-          onFocusApplied={onFocusApplied}
-        />
-      </GraphErrorBoundary>
+    <div className={`flex min-w-0 flex-1 flex-col ${className ?? ''}`}>
+      {/* Search toolbar */}
+      <div className="flex items-center gap-2 border-b border-border bg-muted/10 px-4 py-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-8 pr-8"
+            placeholder="搜索脚本名或表名..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+          {searchTerm && (
+            <button
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              onClick={() => setSearchTerm('')}
+              tabIndex={-1}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-8 gap-1.5 text-xs"
+          onClick={handleSearch}
+          disabled={!searchTerm.trim()}
+        >
+          <Search className="h-3.5 w-3.5" />
+          搜索
+        </Button>
+        {hasSearched && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={handleClear}
+          >
+            <X className="h-3.5 w-3.5" />
+            清除
+          </Button>
+        )}
+      </div>
+
+      {/* Content area */}
+      <div className="relative min-h-0 flex-1">
+        {/* Empty / initial state */}
+        {!showGraph && (
+          <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+            <div className="rounded-full bg-muted p-4">
+              <Database className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <div>
+              <h3 className="text-base font-medium">数据洞察</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                输入脚本名或表名，探索数据血缘关系
+              </p>
+            </div>
+            {hasSearched && !searchError && !searchResult && (
+              <p className="text-sm text-muted-foreground">
+                未找到匹配的结果，请尝试其他关键词
+              </p>
+            )}
+            {searchError && (
+              <p className="text-sm text-destructive">{searchError}</p>
+            )}
+          </div>
+        )}
+
+        {/* Graph */}
+        {showGraph && (
+          <GraphErrorBoundary>
+            <GraphView
+              className="h-full w-full"
+              focusNodeId={focusNodeId}
+              onFocusApplied={onFocusApplied}
+            />
+          </GraphErrorBoundary>
+        )}
+      </div>
     </div>
   );
 }

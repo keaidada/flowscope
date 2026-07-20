@@ -367,7 +367,8 @@ impl<'a> Analyzer<'a> {
         create: &sqlparser::ast::CreateTable,
         statement_index: usize,
     ) {
-        let canonical = self.normalize_table_name(&create.name.to_string());
+        // Honor `USE <schema>;` so bare target names get the default schema prefix.
+        let canonical = self.canonicalize_table_reference(&create.name.to_string()).canonical;
 
         if create.query.is_none() {
             let (column_schemas, table_constraints) =
@@ -390,7 +391,8 @@ impl<'a> Analyzer<'a> {
 
     /// Handles CREATE VIEW statements during DDL pre-collection.
     fn precollect_create_view(&mut self, name: &sqlparser::ast::ObjectName) {
-        let canonical = self.normalize_table_name(&name.to_string());
+        // Honor `USE <schema>;` so bare view names get the default schema prefix.
+        let canonical = self.canonicalize_table_reference(&name.to_string()).canonical;
         self.schema.mark_table_known(&canonical);
     }
 }

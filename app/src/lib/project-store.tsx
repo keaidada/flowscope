@@ -290,8 +290,8 @@ const scheduleBackendProjectSync = (projects: Project[]) => {
           schema_sql: p.schemaSQL,
           selected_file_ids: JSON.stringify(p.selectedFileIds),
           active_file_id: p.activeFileId,
-          created_at: 0,
-          updated_at: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         })
         .catch((e) => console.error('Failed to sync project to backend:', e));
     }

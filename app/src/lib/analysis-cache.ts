@@ -49,7 +49,7 @@ export async function writeBatchFileResults(
     file_path: fp,
     content_hash: contentHash || 'no_hash',
     result_json: '',
-    updated_at: Date.now(),
+    updated_at: new Date().toISOString(),
   })));
 
   // Also store the full result once, keyed by hash
@@ -66,7 +66,7 @@ export async function writeFileResult(
   await serverDb.saveProjectFileResults(projectId, [{
     file_path: filePath,
     content_hash: contentHash || 'no_hash',
-    updated_at: Date.now(),
+    updated_at: new Date().toISOString(),
   }]);
 
   const cacheKey = `result:${projectId}:hash:${contentHash || 'no_hash'}`;
@@ -164,18 +164,39 @@ async function writeLineageDataViaServer(
       }
     }
 
+    // Collect every node ID that exists in this statement (table/view/cte + column).
+    // Used to drop orphan edges/columns whose owning endpoint is missing, which
+    // can happen when analyzer's qualified-column fallback resolves a CTE owner
+    // via `relation_node_id` (table_* prefix) while the CTE node itself uses a
+    // `cte_*`-prefixed ID. Filtering at write-time keeps the persisted graph
+    // referentially intact without churning analyzer internals.
+    const allNodeIds = new Set<string>();
+    for (const n of stmt.nodes) allNodeIds.add(n.id);
+
+    // Track node IDs that actually get persisted (table/view/cte nodes are
+    // always persisted; columns are persisted only if their parent exists).
+    // Edges must reference only persisted endpoints, otherwise the DB will
+    // contain edges whose endpoints aren't in lineage_nodes/lineage_columns.
+    const persistedNodeIds = new Set<string>();
+
     for (const node of stmt.nodes) {
       if (node.type === 'column') {
+        const parent = ownershipMap.get(node.id) ?? null;
+        // Drop columns whose declared parent isn't actually present in this
+        // statement — writing them would create dangling ownership edges.
+        if (parent !== null && !allNodeIds.has(parent)) continue;
+        persistedNodeIds.add(node.id);
         columns.push({
           column_id: node.id,
           label: node.label,
           qualified_name: node.qualifiedName ?? null,
-          parent_node_id: ownershipMap.get(node.id) ?? null,
+          parent_node_id: parent,
           expression: node.expression ?? null,
           statement_index: stmt.statementIndex,
           file_path: fp,
         });
       } else {
+        persistedNodeIds.add(node.id);
         nodes.push({
           node_id: node.id,
           node_type: node.type,
@@ -189,6 +210,10 @@ async function writeLineageDataViaServer(
     }
 
     for (const edge of stmt.edges) {
+      // Skip edges that point at non-existent OR non-persisted nodes.
+      // Using `persistedNodeIds` (not `allNodeIds`) ensures we don't write
+      // edges that reference columns filtered out above.
+      if (!persistedNodeIds.has(edge.from) || !persistedNodeIds.has(edge.to)) continue;
       edges.push({
         edge_id: edge.id,
         from_id: edge.from,
@@ -489,6 +514,107 @@ export async function readGlobalLineageFromTables(
   }
 }
 
+// ── 数据洞察搜索 ────────────────────────────────────────────────
+
+/**
+ * 在已加载的 AnalyzeResult 中搜索脚本和表。
+ * 匹配 sourceName（脚本名）、label（表名）、qualifiedName（全限定名）。
+ * 从匹配节点出发沿 data_flow 边 BFS 上下游扩散找到关联表。
+ * 纯内存操作，不依赖后端 API。
+ */
+export function searchLineageForInsights(
+  result: AnalyzeResult,
+  searchTerm: string
+): AnalyzeResult | null {
+  const term = searchTerm.trim().toLowerCase();
+  if (!term) return null;
+
+  // 收集所有匹配的节点 ID（按 label / qualifiedName / sourceName）
+  const matchedNodeIds = new Set<string>();
+  const matchedSourceNames = new Set<string>();
+
+  for (const stmt of result.statements) {
+    if (stmt.sourceName && stmt.sourceName.toLowerCase().includes(term)) {
+      matchedSourceNames.add(stmt.sourceName);
+      for (const node of stmt.nodes) {
+        matchedNodeIds.add(node.id);
+      }
+    }
+    for (const node of stmt.nodes) {
+      if (
+        node.label.toLowerCase().includes(term) ||
+        (node.qualifiedName && node.qualifiedName.toLowerCase().includes(term))
+      ) {
+        matchedNodeIds.add(node.id);
+      }
+    }
+  }
+
+  if (matchedNodeIds.size === 0 && matchedSourceNames.size === 0) return null;
+
+  // 构建全量 data_flow 邻接表（跨语句）
+  const adjFrom = new Map<string, string[]>();
+  const adjTo = new Map<string, string[]>();
+  for (const stmt of result.statements) {
+    for (const edge of stmt.edges) {
+      if (edge.type !== 'data_flow') continue;
+      if (!adjFrom.has(edge.from)) adjFrom.set(edge.from, []);
+      adjFrom.get(edge.from)!.push(edge.to);
+      if (!adjTo.has(edge.to)) adjTo.set(edge.to, []);
+      adjTo.get(edge.to)!.push(edge.from);
+    }
+  }
+
+  // BFS 从匹配节点出发上下游扩散
+  const reachableIds = new Set<string>();
+  const queue = [...matchedNodeIds];
+  for (const id of queue) {
+    if (reachableIds.has(id)) continue;
+    reachableIds.add(id);
+    for (const next of adjFrom.get(id) || []) {
+      if (!reachableIds.has(next)) queue.push(next);
+    }
+    for (const prev of adjTo.get(id) || []) {
+      if (!reachableIds.has(prev)) queue.push(prev);
+    }
+  }
+
+  // 过滤 statements：只保留包含 reachable 节点或匹配 sourceName 的语句
+  const filteredStatements = result.statements
+    .filter((stmt) => {
+      if (matchedSourceNames.has(stmt.sourceName ?? '')) return true;
+      return stmt.nodes.some((n) => reachableIds.has(n.id));
+    })
+    .map((stmt) => ({
+      ...stmt,
+      edges: stmt.edges.filter(
+        (e) => reachableIds.has(e.from) && reachableIds.has(e.to),
+      ),
+    }));
+
+  if (filteredStatements.length === 0) return null;
+
+  const tableCount = filteredStatements.reduce(
+    (sum, s) => sum + s.nodes.length,
+    0,
+  );
+
+  return {
+    statements: filteredStatements,
+    globalLineage: { nodes: [], edges: [] },
+    issues: [],
+    summary: {
+      statementCount: filteredStatements.length,
+      tableCount,
+      columnCount: 0,
+      joinCount: 0,
+      complexityScore: 0,
+      issueCount: { errors: 0, warnings: 0, infos: 0 },
+      hasErrors: false,
+    },
+  };
+}
+
 export async function clearProjectLineage(_projectId: string): Promise<void> {
   // Data is cleared per-file on re-analyze; full project clear not needed
 }
@@ -521,16 +647,57 @@ export async function writeTableFlows(
 
 export async function writeTableMetadata(
   projectId: string,
-  result: AnalyzeResult
+  result: AnalyzeResult,
+  dialect?: string,
 ): Promise<void> {
   if (!result.resolvedSchema?.tables?.length) return;
 
+  // For dialects where physical tables always live under a database/schema
+  // (Hive, BigQuery, Snowflake, ...), an "implied + non-temporary + no
+  // catalog/schema" entry is almost certainly a CTE / derived-table residue
+  // from merged multi-file analysis (a small number of CTAS targets lose
+  // their `temporary` flag in that path). Drop them so the persisted
+  // `table_metadata` only contains real physical tables.
+  //
+  // For dialects with an implicit default schema (Postgres `public`, SQLite,
+  // generic) we keep these entries because bare names are legitimate.
+  const STRICT_SCHEMA_DIALECTS = new Set([
+    'hive',
+    'bigquery',
+    'snowflake',
+    'databricks',
+    'spark',
+    'trino',
+    'presto',
+  ]);
+  const isStrict = dialect ? STRICT_SCHEMA_DIALECTS.has(dialect.toLowerCase()) : false;
+
   const tables: serverDb.TableMetadataRow[] = [];
   const columns: serverDb.ColumnMetadataRow[] = [];
-  const now = Date.now();
+  const now = new Date().toISOString();
   let tableSeqId = 0;
 
   for (const t of result.resolvedSchema.tables) {
+    // Skip temporary tables (e.g. Hive's CREATE TEMPORARY TABLE A/B/C/D ...).
+    // These are session-scoped, non-persistent relations and don't belong in
+    // the physical table_metadata catalog. The lineage layer already surfaces
+    // them as `NodeType::Cte`, so filtering them here keeps the metadata table
+    // focused on real tables/views (which is what schema catalog consumers
+    // expect).
+    if (t.temporary) continue;
+
+    // For strict-schema dialects, also drop implied homeless tables
+    // (CTE/derived residues from merged analysis that lost their temporary flag).
+    if (
+      isStrict &&
+      !t.temporary &&
+      (t.catalog ?? '') === '' &&
+      (t.schema ?? '') === '' &&
+      t.origin !== 'imported'
+    ) {
+      continue;
+    }
+
     tableSeqId++;
     const tableId = tableSeqId;
     tables.push({

@@ -15,8 +15,8 @@ export async function saveProjectFiles(projectId: string, files: ProjectFile[]):
     content: f.content,
     language: f.language,
     size: f.size || new TextEncoder().encode(f.content).length,
-    created_at: Date.now(),
-    updated_at: Date.now(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   })));
 }
 

@@ -697,14 +697,30 @@ impl<'a> Analyzer<'a> {
                 if let Some(canonical) = ctx.table_aliases.get(q) {
                     Some(canonical.clone())
                 } else if ctx.cte_definitions.contains_key(q) {
-                    // CTE reference
+                    // CTE reference (case-sensitive hit)
                     Some(q.to_string())
-                } else if ctx.subquery_aliases.contains(q) {
-                    // Subquery alias - no canonical name
-                    None
                 } else {
-                    // Treat as table name
-                    Some(self.canonicalize_table_reference(q).canonical)
+                    // CTE reference (case-insensitive fallback).
+                    // Dialects like Hive are case-insensitive for identifiers,
+                    // so `with A1 as (...) ... from a1` should still resolve.
+                    // We normalize the qualifier and try matching against
+                    // cte_definitions keys with the same normalization.
+                    let normalized_q = self.normalize_identifier(q);
+                    let hit = ctx
+                        .cte_definitions
+                        .keys()
+                        .find(|k| self.normalize_identifier(k) == normalized_q);
+                    if let Some(actual_key) = hit {
+                        return Some(actual_key.clone());
+                    }
+
+                    if ctx.subquery_aliases.contains(q) {
+                        // Subquery alias - no canonical name
+                        None
+                    } else {
+                        // Treat as table name
+                        Some(self.canonicalize_table_reference(q).canonical)
+                    }
                 }
             }
             None => None,

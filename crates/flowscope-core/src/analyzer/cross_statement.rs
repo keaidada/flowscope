@@ -80,6 +80,14 @@ pub(crate) struct CrossStatementTracker {
     ///
     /// Used to determine node type (view vs table) for ID generation.
     pub(crate) produced_views: HashSet<String>,
+    /// Canonical names that were produced via CREATE TEMPORARY TABLE
+    /// (including CTAS with `temporary` flag).
+    ///
+    /// These are session-scoped, non-persistent relations. They keep the
+    /// `table_` ID prefix (so cross-statement edges resolve consistently
+    /// with their CREATE statement), but are surfaced with `NodeType::Cte`
+    /// so that physical table lineage (`is_table_or_view()`) excludes them.
+    pub(crate) produced_temporary_tables: HashSet<String>,
     /// Maps table canonical name -> list of statement indices that consume it.
     ///
     /// A single table can be consumed by multiple statements.
@@ -100,6 +108,7 @@ impl CrossStatementTracker {
         Self {
             produced_tables: HashMap::new(),
             produced_views: HashSet::new(),
+            produced_temporary_tables: HashSet::new(),
             consumed_tables: HashMap::new(),
             all_relations: HashSet::new(),
             all_ctes: HashSet::new(),
@@ -122,6 +131,24 @@ impl CrossStatementTracker {
     /// This also calls `record_produced` internally.
     pub(crate) fn record_view_produced(&mut self, canonical: &str, statement_index: usize) {
         self.produced_views.insert(canonical.to_string());
+        self.record_produced(canonical, statement_index);
+    }
+
+    /// Records that a *temporary* table was produced by a statement
+    /// (`CREATE TEMPORARY TABLE` / `CREATE TEMPORARY TABLE AS SELECT`).
+    ///
+    /// Temporary tables are tracked separately so that `relation_identity`
+    /// surfaces them as `NodeType::Cte` (statement/relation-like, but not
+    /// a persistent physical table). They still use the `table_` ID prefix
+    /// so cross-statement references within the same script resolve to the
+    /// same node ID as the CREATE statement.
+    pub(crate) fn record_temporary_produced(
+        &mut self,
+        canonical: &str,
+        statement_index: usize,
+    ) {
+        self.produced_temporary_tables
+            .insert(canonical.to_string());
         self.record_produced(canonical, statement_index);
     }
 
@@ -166,20 +193,28 @@ impl CrossStatementTracker {
 
     /// Removes a table from tracking (for DROP statements).
     ///
-    /// This removes the table from both `produced_tables` and `produced_views`.
+    /// This removes the table from `produced_tables`, `produced_views`, and
+    /// `produced_temporary_tables`.
     /// Note: Does not remove from `all_relations` as the table was still referenced.
     pub(crate) fn remove(&mut self, canonical: &str) {
         self.produced_tables.remove(canonical);
         self.produced_views.remove(canonical);
+        self.produced_temporary_tables.remove(canonical);
     }
 
-    /// Returns the correct node ID and type for a relation (view vs table).
+    /// Returns the correct node ID and type for a relation (view / temporary / table).
     ///
-    /// Views get IDs prefixed with "view_", tables get "table_".
-    /// This ensures consistent node identification across the lineage graph.
+    /// - Views → `NodeType::View` with `view_`-prefixed ID.
+    /// - Temporary tables → `NodeType::Cte` with `table_`-prefixed ID (so cross-
+    ///   statement references within a script resolve consistently, but they
+    ///   are excluded from `is_table_or_view()` filters used by physical
+    ///   table-level lineage).
+    /// - Persistent tables → `NodeType::Table` with `table_`-prefixed ID.
     pub(crate) fn relation_identity(&self, canonical: &str) -> (Arc<str>, NodeType) {
         if self.produced_views.contains(canonical) {
             (generate_node_id("view", canonical), NodeType::View)
+        } else if self.produced_temporary_tables.contains(canonical) {
+            (generate_node_id("table", canonical), NodeType::Cte)
         } else {
             (generate_node_id("table", canonical), NodeType::Table)
         }
@@ -216,6 +251,8 @@ impl CrossStatementTracker {
         let instance_key = format!("{canonical}::{alias}::scope_{scope_id}");
         if self.produced_views.contains(canonical) {
             (generate_node_id("view", &instance_key), NodeType::View)
+        } else if self.produced_temporary_tables.contains(canonical) {
+            (generate_node_id("table", &instance_key), NodeType::Cte)
         } else {
             (generate_node_id("table", &instance_key), NodeType::Table)
         }

@@ -9,12 +9,467 @@ use std::sync::Mutex;
 use rusqlite::{Connection, params};
 use serde::{Serialize, Deserialize};
 
+/// Current schema version.
+///
+/// v0: original — time fields (`created_at`, `updated_at`, `last_accessed_at`)
+///     stored as `INTEGER` Unix millisecond timestamps.
+/// v1: time fields stored as `TEXT` RFC3339 / ISO 8601 strings (human-readable).
+const SCHEMA_VERSION: i32 = 1;
+
 /// Open (or create) the database file at the given path.
 pub fn open_db(path: &Path) -> Result<Mutex<Connection>, rusqlite::Error> {
     let conn = Connection::open(path)?;
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cache_size = -200000; PRAGMA temp_store = MEMORY; PRAGMA wal_autocheckpoint = 1000;")?;
+    migrate(&conn)?;
     create_tables(&conn)?;
     Ok(Mutex::new(conn))
+}
+
+/// Run any pending schema migrations based on `PRAGMA user_version`.
+///
+/// Each migration step is responsible for upgrading from version N to N+1.
+/// After all steps complete, `PRAGMA user_version = SCHEMA_VERSION` is set.
+///
+/// v0 → v1: convert time fields from INTEGER (Unix ms) to TEXT (RFC3339).
+/// SQLite cannot ALTER COLUMN type, so each affected table is rebuilt via
+/// `CREATE TABLE _new` + `INSERT ... SELECT` (non-time columns preserved,
+/// time columns reset to `''`) + `DROP` + `RENAME`. Old time values are
+/// discarded per design decision.
+fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let current: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+
+    if current < 1 {
+        migrate_v0_to_v1(conn)?;
+    }
+
+    // Future migrations: if current < 2 { migrate_v1_to_v2(conn)?; } ...
+
+    if current != SCHEMA_VERSION {
+        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+    }
+    Ok(())
+}
+
+/// v0 → v1: rebuild every table that has time fields so the columns become
+/// TEXT. Non-time data is preserved; existing time values are discarded
+/// (reset to empty string).
+///
+/// For each table we use the SQLite-recommended 12-step pattern:
+///   1. BEGIN
+///   2. CREATE TABLE __tmp AS SELECT (non-time cols, '' AS <time col>) FROM old
+///   3. DROP TABLE old
+///   4. CREATE TABLE old (... new schema with TEXT time cols ...)
+///   5. INSERT INTO old SELECT * FROM __tmp
+///   6. DROP TABLE __tmp
+///   7. recreate indexes
+///   8. COMMIT
+///
+/// We skip tables that don't exist yet (fresh DBs) so this is idempotent.
+fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
+    // (table_name, all_columns_in_order, time_columns_set)
+    // For each table, we re-create preserving all columns except time ones,
+    // which are replaced with ''.
+    let rebuilds: &[(&str, &[&str], &[&str])] = &[
+        // project_files
+        (
+            "project_files",
+            &[
+                "id", "project_id", "name", "path", "content", "language",
+                "size", "created_at", "updated_at", "status",
+            ],
+            &["created_at", "updated_at"],
+        ),
+        // schema_files
+        (
+            "schema_files",
+            &[
+                "id", "project_id", "name", "path", "content", "size",
+                "created_at", "updated_at", "status",
+            ],
+            &["created_at", "updated_at"],
+        ),
+        // analysis_cache
+        (
+            "analysis_cache",
+            &[
+                "id", "cache_key", "result_json", "size_bytes",
+                "created_at", "updated_at", "last_accessed_at", "status",
+            ],
+            &["created_at", "updated_at", "last_accessed_at"],
+        ),
+        // project_file_results
+        (
+            "project_file_results",
+            &[
+                "id", "project_id", "file_path", "result_json",
+                "content_hash", "size_bytes", "created_at", "updated_at", "status",
+            ],
+            &["created_at", "updated_at"],
+        ),
+        // lineage_nodes
+        (
+            "lineage_nodes",
+            &[
+                "id", "project_id", "file_path", "node_id", "node_type",
+                "label", "qualified_name", "statement_index",
+                "resolution_source", "created_at", "updated_at", "status",
+            ],
+            &["created_at", "updated_at"],
+        ),
+        // lineage_columns
+        (
+            "lineage_columns",
+            &[
+                "id", "project_id", "file_path", "column_id", "label",
+                "qualified_name", "parent_node_id", "expression",
+                "statement_index", "created_at", "updated_at", "status",
+            ],
+            &["created_at", "updated_at"],
+        ),
+        // lineage_edges
+        (
+            "lineage_edges",
+            &[
+                "id", "project_id", "file_path", "edge_id", "from_id",
+                "to_id", "edge_type", "expression", "statement_index",
+                "created_at", "updated_at", "status",
+            ],
+            &["created_at", "updated_at"],
+        ),
+        // table_metadata
+        (
+            "table_metadata",
+            &[
+                "id", "project_id", "catalog", "schema_name", "table_name",
+                "table_type", "origin", "temporary", "partition_keys",
+                "cluster_keys", "file_format", "location", "properties_json",
+                "owner", "comment", "row_count", "size_bytes",
+                "created_at", "updated_at", "status",
+            ],
+            &["created_at", "updated_at"],
+        ),
+        // column_metadata
+        (
+            "column_metadata",
+            &[
+                "id", "project_id", "table_id", "column_name", "ordinal",
+                "data_type", "is_nullable", "is_primary_key", "is_partition",
+                "default_value", "comment", "created_at", "updated_at", "status",
+            ],
+            &["created_at", "updated_at"],
+        ),
+        // projects
+        (
+            "projects",
+            &[
+                "id", "name", "dialect", "run_mode", "template_mode",
+                "schema_sql", "selected_file_ids", "active_file_id",
+                "created_at", "updated_at",
+            ],
+            &["created_at", "updated_at"],
+        ),
+        // view_states
+        (
+            "view_states",
+            &["id", "project_id", "state_json", "created_at", "updated_at"],
+            &["created_at", "updated_at"],
+        ),
+        // table_level_edges
+        (
+            "table_level_edges",
+            &["id", "project_id", "from_table", "to_table", "script", "created_at"],
+            &["created_at"],
+        ),
+    ];
+
+    for (table, all_cols, time_cols) in rebuilds {
+        // Skip if the table doesn't exist (fresh DB — create_tables will make it).
+        let exists: i64 = conn.query_row(
+            &format!("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{table}'"),
+            [],
+            |row| row.get(0),
+        )?;
+        if exists == 0 {
+            continue;
+        }
+
+        // Check whether any time column is still INTEGER (needs rebuild).
+        // If all time columns are already TEXT, the table was already migrated
+        // (e.g. by a partial run) and we skip it.
+        let mut needs_rebuild = false;
+        let col_types: Vec<(String, String)> = conn
+            .prepare(&format!("PRAGMA table_info({table})"))?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            })?
+            .filter_map(Result::ok)
+            .collect();
+        for (name, ty) in &col_types {
+            if time_cols.contains(&name.as_str()) && ty.eq_ignore_ascii_case("integer") {
+                needs_rebuild = true;
+                break;
+            }
+        }
+        if !needs_rebuild {
+            continue;
+        }
+
+        eprintln!("[migrate] rebuilding table '{table}' for TEXT time columns...");
+
+        // Build SELECT list with time cols replaced by ''.
+        let select_cols: Vec<String> = all_cols
+            .iter()
+            .map(|c| {
+                if time_cols.contains(c) {
+                    format!("'' AS {c}")
+                } else {
+                    (*c).to_string()
+                }
+            })
+            .collect();
+        let col_list = all_cols.join(", ");
+
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(&format!(
+            "CREATE TABLE __tmp_{table} AS SELECT {select} FROM {table};\n\
+             DROP TABLE {table};",
+            select = select_cols.join(", "),
+        ))?;
+
+        // Recreate the table with the new (TEXT time) schema.
+        let create_sql = create_table_sql_for(table);
+        tx.execute_batch(create_sql)?;
+
+        // Copy data back.
+        tx.execute_batch(&format!(
+            "INSERT INTO {table} ({col_list}) SELECT {col_list} FROM __tmp_{table};\n\
+             DROP TABLE __tmp_{table};",
+        ))?;
+
+        // Recreate indexes for this table.
+        for idx_sql in indexes_for(table) {
+            tx.execute_batch(idx_sql)?;
+        }
+
+        tx.commit()?;
+        eprintln!("[migrate] table '{table}' rebuilt successfully.");
+    }
+
+    Ok(())
+}
+
+/// Returns the `CREATE TABLE` statement for the given table with the current
+/// (v1) schema — time columns as `TEXT`.
+fn create_table_sql_for(table: &str) -> &'static str {
+    match table {
+        "project_files" => "
+            CREATE TABLE project_files (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT    NOT NULL,
+                name       TEXT    NOT NULL,
+                path       TEXT    NOT NULL,
+                content    TEXT    NOT NULL DEFAULT '',
+                language   TEXT    NOT NULL DEFAULT 'sql',
+                size       INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT    NOT NULL DEFAULT '',
+                updated_at TEXT    NOT NULL DEFAULT '',
+                status     INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(project_id, path)
+            );",
+        "schema_files" => "
+            CREATE TABLE schema_files (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT    NOT NULL,
+                name       TEXT    NOT NULL,
+                path       TEXT    NOT NULL,
+                content    TEXT    NOT NULL DEFAULT '',
+                size       INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT    NOT NULL DEFAULT '',
+                updated_at TEXT    NOT NULL DEFAULT '',
+                status     INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(project_id, path)
+            );",
+        "analysis_cache" => "
+            CREATE TABLE analysis_cache (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_key        TEXT    NOT NULL UNIQUE,
+                result_json      TEXT    NOT NULL,
+                size_bytes       INTEGER NOT NULL,
+                created_at       TEXT    NOT NULL DEFAULT '',
+                updated_at       TEXT    NOT NULL DEFAULT '',
+                last_accessed_at TEXT    NOT NULL DEFAULT '',
+                status           INTEGER NOT NULL DEFAULT 1
+            );",
+        "project_file_results" => "
+            CREATE TABLE project_file_results (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id   TEXT    NOT NULL,
+                file_path    TEXT    NOT NULL,
+                result_json  TEXT    NOT NULL,
+                content_hash TEXT    NOT NULL,
+                size_bytes   INTEGER NOT NULL DEFAULT 0,
+                created_at   TEXT    NOT NULL DEFAULT '',
+                updated_at   TEXT    NOT NULL DEFAULT '',
+                status       INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(project_id, file_path)
+            );",
+        "lineage_nodes" => "
+            CREATE TABLE lineage_nodes (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id        TEXT    NOT NULL,
+                file_path         TEXT    NOT NULL,
+                node_id           TEXT    NOT NULL,
+                node_type         TEXT    NOT NULL,
+                label             TEXT    NOT NULL,
+                qualified_name    TEXT,
+                statement_index   INTEGER NOT NULL,
+                resolution_source TEXT,
+                created_at        TEXT    NOT NULL DEFAULT '',
+                updated_at        TEXT    NOT NULL DEFAULT '',
+                status            INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(project_id, file_path, node_id)
+            );",
+        "lineage_columns" => "
+            CREATE TABLE lineage_columns (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id      TEXT    NOT NULL,
+                file_path       TEXT    NOT NULL,
+                column_id       TEXT    NOT NULL,
+                label           TEXT    NOT NULL,
+                qualified_name  TEXT,
+                parent_node_id  TEXT,
+                expression      TEXT,
+                statement_index INTEGER NOT NULL,
+                created_at      TEXT    NOT NULL DEFAULT '',
+                updated_at      TEXT    NOT NULL DEFAULT '',
+                status          INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(project_id, file_path, column_id)
+            );",
+        "lineage_edges" => "
+            CREATE TABLE lineage_edges (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id      TEXT    NOT NULL,
+                file_path       TEXT    NOT NULL,
+                edge_id         TEXT    NOT NULL,
+                from_id         TEXT    NOT NULL,
+                to_id           TEXT    NOT NULL,
+                edge_type       TEXT    NOT NULL,
+                expression      TEXT,
+                statement_index INTEGER,
+                created_at      TEXT    NOT NULL DEFAULT '',
+                updated_at      TEXT    NOT NULL DEFAULT '',
+                status          INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(project_id, file_path, edge_id)
+            );",
+        "table_metadata" => "
+            CREATE TABLE table_metadata (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id      TEXT    NOT NULL,
+                catalog         TEXT    NOT NULL DEFAULT '',
+                schema_name     TEXT    NOT NULL DEFAULT '',
+                table_name      TEXT    NOT NULL,
+                table_type      TEXT    NOT NULL DEFAULT 'table',
+                origin          TEXT    NOT NULL DEFAULT 'unknown',
+                temporary       INTEGER NOT NULL DEFAULT 0,
+                partition_keys  TEXT    NOT NULL DEFAULT '',
+                cluster_keys    TEXT    NOT NULL DEFAULT '',
+                file_format     TEXT    NOT NULL DEFAULT '',
+                location        TEXT    NOT NULL DEFAULT '',
+                properties_json TEXT    NOT NULL DEFAULT '{}',
+                owner           TEXT    NOT NULL DEFAULT '',
+                comment         TEXT    NOT NULL DEFAULT '',
+                row_count       INTEGER NOT NULL DEFAULT -1,
+                size_bytes      INTEGER NOT NULL DEFAULT -1,
+                created_at      TEXT    NOT NULL DEFAULT '',
+                updated_at      TEXT    NOT NULL DEFAULT '',
+                status          INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(project_id, catalog, schema_name, table_name)
+            );",
+        "column_metadata" => "
+            CREATE TABLE column_metadata (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id      TEXT    NOT NULL,
+                table_id        INTEGER NOT NULL,
+                column_name     TEXT    NOT NULL,
+                ordinal         INTEGER NOT NULL DEFAULT 0,
+                data_type       TEXT    NOT NULL DEFAULT '',
+                is_nullable     INTEGER NOT NULL DEFAULT 1,
+                is_primary_key  INTEGER NOT NULL DEFAULT 0,
+                is_partition    INTEGER NOT NULL DEFAULT 0,
+                default_value   TEXT,
+                comment         TEXT    NOT NULL DEFAULT '',
+                created_at      TEXT    NOT NULL DEFAULT '',
+                updated_at      TEXT    NOT NULL DEFAULT '',
+                status          INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(project_id, table_id, column_name),
+                FOREIGN KEY(table_id) REFERENCES table_metadata(id) ON DELETE CASCADE
+            );",
+        "projects" => "
+            CREATE TABLE projects (
+                id                TEXT PRIMARY KEY,
+                name              TEXT    NOT NULL,
+                dialect           TEXT    NOT NULL DEFAULT 'generic',
+                run_mode          TEXT    NOT NULL DEFAULT 'current',
+                template_mode     TEXT    NOT NULL DEFAULT 'raw',
+                schema_sql        TEXT    NOT NULL DEFAULT '',
+                selected_file_ids TEXT    NOT NULL DEFAULT '[]',
+                active_file_id    TEXT,
+                created_at        TEXT    NOT NULL DEFAULT '',
+                updated_at        TEXT    NOT NULL DEFAULT ''
+            );",
+        "view_states" => "
+            CREATE TABLE view_states (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id  TEXT    NOT NULL UNIQUE,
+                state_json  TEXT    NOT NULL,
+                created_at  TEXT    NOT NULL DEFAULT '',
+                updated_at  TEXT    NOT NULL DEFAULT ''
+            );",
+        "table_level_edges" => "
+            CREATE TABLE table_level_edges (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id  TEXT    NOT NULL,
+                from_table  TEXT    NOT NULL,
+                to_table    TEXT    NOT NULL,
+                script      TEXT    NOT NULL DEFAULT '',
+                created_at  TEXT    NOT NULL DEFAULT '',
+                UNIQUE(project_id, from_table, to_table, script)
+            );",
+        _ => panic!("create_table_sql_for: unknown table '{table}'"),
+    }
+}
+
+/// Returns the `CREATE INDEX` statements that belong to a given table.
+/// Used to recreate indexes after a table rebuild during migration.
+fn indexes_for(table: &str) -> &'static [&'static str] {
+    match table {
+        "lineage_nodes" => &[
+            "CREATE INDEX IF NOT EXISTS idx_lineage_nodes_project ON lineage_nodes(project_id);",
+            "CREATE INDEX IF NOT EXISTS idx_lineage_nodes_node ON lineage_nodes(project_id, node_id);",
+            "CREATE INDEX IF NOT EXISTS idx_lineage_nodes_type ON lineage_nodes(project_id, node_type);",
+        ],
+        "lineage_columns" => &[
+            "CREATE INDEX IF NOT EXISTS idx_lineage_columns_project ON lineage_columns(project_id);",
+        ],
+        "lineage_edges" => &[
+            "CREATE INDEX IF NOT EXISTS idx_lineage_edges_project ON lineage_edges(project_id);",
+            "CREATE INDEX IF NOT EXISTS idx_lineage_edges_from ON lineage_edges(project_id, from_id);",
+            "CREATE INDEX IF NOT EXISTS idx_lineage_edges_to ON lineage_edges(project_id, to_id);",
+        ],
+        "project_file_results" => &[
+            "CREATE INDEX IF NOT EXISTS idx_project_file_results_project ON project_file_results(project_id);",
+        ],
+        "table_metadata" => &[
+            "CREATE INDEX IF NOT EXISTS idx_table_metadata_project ON table_metadata(project_id);",
+        ],
+        "column_metadata" => &[
+            "CREATE INDEX IF NOT EXISTS idx_column_metadata_table ON column_metadata(table_id);",
+        ],
+        "table_level_edges" => &[
+            "CREATE INDEX IF NOT EXISTS idx_table_level_edges_project ON table_level_edges(project_id);",
+        ],
+        _ => &[],
+    }
 }
 
 fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -28,8 +483,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             content    TEXT    NOT NULL DEFAULT '',
             language   TEXT    NOT NULL DEFAULT 'sql',
             size       INTEGER NOT NULL DEFAULT 0,
-            created_at INTEGER NOT NULL DEFAULT 0,
-            updated_at INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT    NOT NULL DEFAULT '',
+            updated_at TEXT    NOT NULL DEFAULT '',
             status     INTEGER NOT NULL DEFAULT 1,
             UNIQUE(project_id, path)
         );
@@ -41,8 +496,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             path       TEXT    NOT NULL,
             content    TEXT    NOT NULL DEFAULT '',
             size       INTEGER NOT NULL DEFAULT 0,
-            created_at INTEGER NOT NULL DEFAULT 0,
-            updated_at INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT    NOT NULL DEFAULT '',
+            updated_at TEXT    NOT NULL DEFAULT '',
             status     INTEGER NOT NULL DEFAULT 1,
             UNIQUE(project_id, path)
         );
@@ -52,9 +507,9 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             cache_key        TEXT    NOT NULL UNIQUE,
             result_json      TEXT    NOT NULL,
             size_bytes       INTEGER NOT NULL,
-            created_at       INTEGER NOT NULL DEFAULT 0,
-            updated_at       INTEGER NOT NULL DEFAULT 0,
-            last_accessed_at INTEGER NOT NULL DEFAULT 0,
+            created_at       TEXT    NOT NULL DEFAULT '',
+            updated_at       TEXT    NOT NULL DEFAULT '',
+            last_accessed_at TEXT    NOT NULL DEFAULT '',
             status           INTEGER NOT NULL DEFAULT 1
         );
 
@@ -65,8 +520,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             result_json  TEXT    NOT NULL,
             content_hash TEXT    NOT NULL,
             size_bytes   INTEGER NOT NULL DEFAULT 0,
-            created_at   INTEGER NOT NULL DEFAULT 0,
-            updated_at   INTEGER NOT NULL DEFAULT 0,
+            created_at   TEXT    NOT NULL DEFAULT '',
+            updated_at   TEXT    NOT NULL DEFAULT '',
             status       INTEGER NOT NULL DEFAULT 1,
             UNIQUE(project_id, file_path)
         );
@@ -81,8 +536,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             qualified_name    TEXT,
             statement_index   INTEGER NOT NULL,
             resolution_source TEXT,
-            created_at        INTEGER NOT NULL DEFAULT 0,
-            updated_at        INTEGER NOT NULL DEFAULT 0,
+            created_at        TEXT    NOT NULL DEFAULT '',
+            updated_at        TEXT    NOT NULL DEFAULT '',
             status            INTEGER NOT NULL DEFAULT 1,
             UNIQUE(project_id, file_path, node_id)
         );
@@ -97,8 +552,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             parent_node_id  TEXT,
             expression      TEXT,
             statement_index INTEGER NOT NULL,
-            created_at      INTEGER NOT NULL DEFAULT 0,
-            updated_at      INTEGER NOT NULL DEFAULT 0,
+            created_at      TEXT    NOT NULL DEFAULT '',
+            updated_at      TEXT    NOT NULL DEFAULT '',
             status          INTEGER NOT NULL DEFAULT 1,
             UNIQUE(project_id, file_path, column_id)
         );
@@ -113,8 +568,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             edge_type       TEXT    NOT NULL,
             expression      TEXT,
             statement_index INTEGER,
-            created_at      INTEGER NOT NULL DEFAULT 0,
-            updated_at      INTEGER NOT NULL DEFAULT 0,
+            created_at      TEXT    NOT NULL DEFAULT '',
+            updated_at      TEXT    NOT NULL DEFAULT '',
             status          INTEGER NOT NULL DEFAULT 1,
             UNIQUE(project_id, file_path, edge_id)
         );
@@ -137,8 +592,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             comment         TEXT    NOT NULL DEFAULT '',
             row_count       INTEGER NOT NULL DEFAULT -1,
             size_bytes      INTEGER NOT NULL DEFAULT -1,
-            created_at      INTEGER NOT NULL DEFAULT 0,
-            updated_at      INTEGER NOT NULL DEFAULT 0,
+            created_at      TEXT    NOT NULL DEFAULT '',
+            updated_at      TEXT    NOT NULL DEFAULT '',
             status          INTEGER NOT NULL DEFAULT 1,
             UNIQUE(project_id, catalog, schema_name, table_name)
         );
@@ -155,8 +610,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             is_partition    INTEGER NOT NULL DEFAULT 0,
             default_value   TEXT,
             comment         TEXT    NOT NULL DEFAULT '',
-            created_at      INTEGER NOT NULL DEFAULT 0,
-            updated_at      INTEGER NOT NULL DEFAULT 0,
+            created_at      TEXT    NOT NULL DEFAULT '',
+            updated_at      TEXT    NOT NULL DEFAULT '',
             status          INTEGER NOT NULL DEFAULT 1,
             UNIQUE(project_id, table_id, column_name),
             FOREIGN KEY(table_id) REFERENCES table_metadata(id) ON DELETE CASCADE
@@ -171,16 +626,16 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             schema_sql        TEXT    NOT NULL DEFAULT '',
             selected_file_ids TEXT    NOT NULL DEFAULT '[]',
             active_file_id    TEXT,
-            created_at        INTEGER NOT NULL DEFAULT 0,
-            updated_at        INTEGER NOT NULL DEFAULT 0
+            created_at        TEXT    NOT NULL DEFAULT '',
+            updated_at        TEXT    NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS view_states (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id  TEXT    NOT NULL UNIQUE,
             state_json  TEXT    NOT NULL,
-            created_at  INTEGER NOT NULL DEFAULT 0,
-            updated_at  INTEGER NOT NULL DEFAULT 0
+            created_at  TEXT    NOT NULL DEFAULT '',
+            updated_at  TEXT    NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS table_level_edges (
@@ -189,7 +644,7 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             from_table  TEXT    NOT NULL,
             to_table    TEXT    NOT NULL,
             script      TEXT    NOT NULL DEFAULT '',
-            created_at  INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT    NOT NULL DEFAULT '',
             UNIQUE(project_id, from_table, to_table, script)
         );
         CREATE INDEX IF NOT EXISTS idx_table_level_edges_project ON table_level_edges(project_id);
@@ -217,8 +672,8 @@ pub struct ProjectFileRow {
     pub content: String,
     pub language: String,
     pub size: i64,
-    pub created_at: i64,
-    pub updated_at: i64,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 pub fn save_project_files(
@@ -284,8 +739,8 @@ pub struct ProjectRow {
     pub schema_sql: String,
     pub selected_file_ids: String,
     pub active_file_id: Option<String>,
-    pub created_at: i64,
-    pub updated_at: i64,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 pub fn save_project(conn: &Connection, p: &ProjectRow) -> Result<(), rusqlite::Error> {
@@ -329,9 +784,10 @@ pub fn save_view_state(
     project_id: &str,
     state_json: &str,
 ) -> Result<(), rusqlite::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "INSERT OR REPLACE INTO view_states (project_id, state_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-        params![project_id, state_json, 0, 0],
+        params![project_id, state_json, now, now],
     )?;
     Ok(())
 }
@@ -401,7 +857,7 @@ pub fn save_table_level_edges(
     use rusqlite::{params_from_iter, ToSql};
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM table_level_edges WHERE project_id = ?1", params![project_id])?;
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = chrono::Utc::now().to_rfc3339();
     const CHUNK: usize = 500;
     let row_ph = "(?,?,?,?,?)";
     for chunk in edges.chunks(CHUNK) {
@@ -439,8 +895,8 @@ pub struct SchemaFileRow {
     pub path: String,
     pub content: String,
     pub size: i64,
-    pub created_at: i64,
-    pub updated_at: i64,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 pub fn save_schema_files(
@@ -495,7 +951,7 @@ pub fn get_cache(
     if let Some(row) = rows.next() {
         conn.execute(
             "UPDATE analysis_cache SET last_accessed_at = ?1 WHERE cache_key = ?2",
-            params![chrono::Utc::now().timestamp_millis(), cache_key],
+            params![chrono::Utc::now().to_rfc3339(), cache_key],
         )?;
         Ok(Some(row?))
     } else {
@@ -508,7 +964,7 @@ pub fn set_cache(
     cache_key: &str,
     result_json: &str,
 ) -> Result<(), rusqlite::Error> {
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "INSERT OR REPLACE INTO analysis_cache (cache_key, result_json, size_bytes, created_at, updated_at, last_accessed_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
         params![cache_key, result_json, result_json.len() as i64, now, now, now],
@@ -535,7 +991,7 @@ pub fn set_file_result(
     result_json: &str,
     content_hash: &str,
 ) -> Result<(), rusqlite::Error> {
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "INSERT OR REPLACE INTO project_file_results (project_id, file_path, result_json, content_hash, size_bytes, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
         params![project_id, file_path, result_json, content_hash, result_json.len() as i64, now, now],
@@ -642,7 +1098,7 @@ pub fn save_lineage_batch(
         }
     }
 
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = chrono::Utc::now().to_rfc3339();
     const CHUNK: usize = 500; // 500 行 × 10 params = 5000,SQLite 3.32+ MAX_VARIABLE=32766 安全
     let row10 = "(?,?,?,?,?,?,?,?,?,?)";
 
@@ -847,8 +1303,8 @@ pub struct TableMetadataRow {
     pub comment: String,
     pub row_count: i64,
     pub size_bytes: i64,
-    pub created_at: i64,
-    pub updated_at: i64,
+    pub created_at: String,
+    pub updated_at: String,
     pub status: i32,
 }
 
@@ -865,8 +1321,8 @@ pub struct ColumnMetadataRow {
     pub is_partition: bool,
     pub default_value: Option<String>,
     pub comment: String,
-    pub created_at: i64,
-    pub updated_at: i64,
+    pub created_at: String,
+    pub updated_at: String,
     pub status: i32,
 }
 
@@ -877,6 +1333,22 @@ pub fn save_table_metadata(
     columns: &[ColumnMetadataRow],
 ) -> Result<(), rusqlite::Error> {
     let tx = conn.unchecked_transaction()?;
+
+    // Replace semantics: clear this project's existing metadata before writing
+    // the fresh set. The frontend `writeTableMetadata` now filters out
+    // temporary tables, so re-analysis must be able to physically evict stale
+    // rows (e.g. previously-captured `a/b/c/d` temp-table metadata) rather
+    // than leave them behind as orphans. Doing DELETE+INSERT per project_id
+    // is safe because callers always pass the full resolved schema for one
+    // project at a time.
+    tx.execute(
+        "DELETE FROM column_metadata WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM table_metadata WHERE project_id = ?1",
+        params![project_id],
+    )?;
 
     // Upsert each table by (project_id, catalog, schema_name, table_name)
     let mut insert_table = tx.prepare(

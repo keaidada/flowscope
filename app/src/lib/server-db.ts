@@ -14,8 +14,8 @@ interface ProjectFile {
   content: string;
   language: string;
   size: number;
-  created_at: number;
-  updated_at: number;
+  created_at: string;
+  updated_at: string;
 }
 
 interface SchemaFile {
@@ -23,8 +23,8 @@ interface SchemaFile {
   path: string;
   content: string;
   size: number;
-  created_at: number;
-  updated_at: number;
+  created_at: string;
+  updated_at: string;
 }
 
 interface FileResult {
@@ -97,8 +97,8 @@ export interface ProjectMeta {
   schema_sql: string;
   selected_file_ids: string;
   active_file_id: string | null;
-  created_at: number;
-  updated_at: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export async function loadProjects(): Promise<ProjectMeta[]> {
@@ -183,7 +183,7 @@ export async function setFileResult(
 export interface ProjectFileResultRow {
   file_path: string;
   content_hash: string;
-  updated_at: number;
+  updated_at: string;
 }
 export async function saveProjectFileResults(
   projectId: string,
@@ -201,7 +201,7 @@ export async function loadProjectFileResults(
   return resp.files.map(f => ({
     file_path: f.filePath,
     content_hash: f.contentHash || '',
-    updated_at: 0,
+    updated_at: '',
   }));
 }
 
@@ -274,8 +274,8 @@ export interface TableMetadataRow {
   comment: string;
   row_count: number;
   size_bytes: number;
-  created_at: number;
-  updated_at: number;
+  created_at: string;
+  updated_at: string;
   status: number;
 }
 
@@ -291,8 +291,8 @@ export interface ColumnMetadataRow {
   is_partition: boolean;
   default_value: string | null;
   comment: string;
-  created_at: number;
-  updated_at: number;
+  created_at: string;
+  updated_at: string;
   status: number;
 }
 

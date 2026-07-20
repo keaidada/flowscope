@@ -121,19 +121,40 @@ function testBasicConversion(): void {
     `跨脚本 data_flow 边数应为 2，实际 ${stats.dataFlowEdgeCount}`
   );
 
-  // 节点数 = 脚本节点 + 表实例节点
+  // 节点在 statement.nodes 中（不在 globalLineage 中，避免 OOM）
   assert(
-    result.globalLineage.nodes.length === 6,
-    `总节点数应为 6，实际 ${result.globalLineage.nodes.length}`
+    result.statements[0].nodes.length === 6,
+    `合成 statement 的 nodes 数应为 6，实际 ${result.statements[0].nodes.length}`
   );
 
   // 检查脚本节点类型为 'table'
-  const scriptNodes = result.globalLineage.nodes.filter((n) => n.type === 'table');
+  const scriptNodes = result.statements[0].nodes.filter((n) => n.type === 'table');
   assert(scriptNodes.length === 2, `脚本节点（type=table）应为 2，实际 ${scriptNodes.length}`);
 
   // 检查表实例节点类型为 'column'
-  const tableNodes = result.globalLineage.nodes.filter((n) => n.type === 'column');
+  const tableNodes = result.statements[0].nodes.filter((n) => n.type === 'column');
   assert(tableNodes.length === 4, `表实例节点（type=column）应为 4，实际 ${tableNodes.length}`);
+
+  // GraphView 守卫需要至少一条 statement
+  assert(result.statements.length === 1, `statements 长度应为 1，实际 ${result.statements.length}`);
+  assert(
+    result.summary.statementCount === 1,
+    `summary.statementCount 应为 1，实际 ${result.summary.statementCount}`
+  );
+  // globalLineage 应为空（避免 worker postMessage 时 structured clone 重复复制导致 OOM）
+  assert(
+    result.globalLineage.nodes.length === 0,
+    `globalLineage.nodes 应为空（避免 OOM），实际 ${result.globalLineage.nodes.length}`
+  );
+  assert(
+    result.globalLineage.edges.length === 0,
+    `globalLineage.edges 应为空（避免 OOM），实际 ${result.globalLineage.edges.length}`
+  );
+  // resolvedSchema 不应被复制（可能巨大）
+  assert(
+    result.resolvedSchema === undefined,
+    `resolvedSchema 应为 undefined，实际 ${result.resolvedSchema}`
+  );
 
   console.log('统计信息:', JSON.stringify(stats, null, 2));
 }

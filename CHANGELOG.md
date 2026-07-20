@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+#### Storage (flowscope-cli / serve mode)
+- **Time fields now stored as RFC3339 strings.** All time columns
+  (`created_at`, `updated_at`, `last_accessed_at`) across the 12 SQLite
+  tables changed from `INTEGER NOT NULL DEFAULT 0` (Unix-ms) to
+  `TEXT NOT NULL DEFAULT ''` (RFC3339 / ISO 8601). The CLI ships with a
+  v0→v1 migration that rebuilds affected tables; non-time data is preserved.
+  See `docs/plans/completed/2026-07-19-data-quality-fixes.md` §1.
+
+#### Lineage Engine (flowscope-core)
+- **`CREATE TEMPORARY TABLE` targets are now surfaced as `NodeType::Cte`**
+  instead of `NodeType::Table`. Their `node_id` keeps the `table_` prefix
+  so cross-statement edges still resolve, but they no longer pollute
+  physical-table-level lineage (`is_table_or_view()` returns false).
+  Affects Hive / Postgres `CREATE TEMP TABLE` and similar.
+- **DDL targets now honor `USE <schema>;`.** `CREATE TABLE`, `CREATE VIEW`,
+  `INSERT INTO`, `ALTER TABLE`, `RENAME`, `DROP`, and DDL pre-collection
+  call `canonicalize_table_reference` instead of `normalize_table_name`,
+  so bare target names get the default schema/catalog prefix.
+- **`resolve_table_alias` is now case-insensitive** when matching
+  `cte_definitions`, fixing orphan edges when SQL references CTE names
+  with different casing (e.g. `with A1 as … from a1.x`).
+
+#### Storage Layer (analysis-cache.ts)
+- `writeLineageDataViaServer` filters orphan edges and columns at write
+  time (defense in depth against analyzer edge cases).
+- `writeTableMetadata` skips temporary tables and, for strict-schema
+  dialects (Hive, BigQuery, Snowflake, …), also skips implied homeless
+  entries (CTE / derived-table residues from merged multi-file analysis).
+- `save_table_metadata` now uses DELETE+INSERT semantics per `project_id`
+  (was upsert-only, which left stale rows behind when the new resolved
+  schema no longer contained them).
+
+### Fixed
+
+- Time fields appearing as 13-digit Unix-ms integers in DB viewers.
+- Single-letter / short-name temp tables (`a`, `b`, `c`, `d`, `a1`, …)
+  appearing in `lineage_nodes` with `node_type='table'` and in
+  `table_metadata`.
+- `lineage_nodes.qualified_name` missing the `default_schema.` prefix
+  after `USE <schema>;` for DDL target tables.
+- 20 orphan `lineage_edges` whose `from_id` referenced table nodes that
+  were never persisted to the same `file_path`.
+- Stale rows in `table_metadata` surviving re-analysis when the new
+  resolved schema no longer contained them.
+
 ## [0.6.0] - 2026-03-22
 
 ### Added
