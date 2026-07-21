@@ -296,6 +296,34 @@ Use a single repo tag for each release (`vX.Y.Z`) and align Rust workspace + npm
 - The demo app (`app/`) and VS Code webview (`vscode/webview-ui/`) currently define no tests.
 - For full CI parity, `just check` runs formatting checks, lint, typecheck, and schema checks.
 
+## Data Insights (数据洞察)
+
+### Architecture
+- **独立 store**: `InsightsGraphView` uses `createLineageStore()` + `<LineageStoreProvider>` to isolate state from relationship graph
+- **自定义 ScriptNode**: `InsightsScriptNode.tsx` (app-local) injected via `customNodeTypes` prop on GraphView
+- **自定义 Edge**: `TableEdge.tsx` bypasses React Flow Handle system, uses `useInternalNode` for position calculation
+- **搜索**: `searchLineageForInsights(projectId, term, upstreamDepth, downstreamDepth)` — queries `lineage_nodes` + `table_level_edges` directly
+- **高亮**: `highlightState.ts` shared module — directional highlighting (read row click → highlight upstream writer; write row click → highlight downstream readers)
+
+### Key Decisions
+- **不要修改 `packages/react/` 来影响数据洞察** — use `customNodeTypes`/`customEdgeTypes` props on GraphView
+- **表级连线**: React Flow v12 Handle system cannot support multiple handles per side per node. TableEdge component calculates positions manually from `useInternalNode().positionAbsolute` + node data.
+- **`table_level_edges`**: maintained by `writeTableLevelEdges(projectId)` — pure table-level, from=data_flow edge's from→read, to→write
+- **全局血缘加速**: `buildGlobalLineageFromNodes` queries only `lineage_nodes` (1.1MB) instead of full 19.8MB AnalyzeResult
+- **DB schema v3**: `file_name` + `dir_path` on all file_path-bearing tables; `script_name` + `dir_path` on `table_level_edges`
+- **@xyflow/react 12.11.2**
+
+### Layout Tuning
+- Row height (ROW): 22px = 3px padding + 16px text + 3px padding
+- readY: 94 + i*22, writeY: 128 + max(reads,1)*22 + i*22
+- Collapsed height: 50px (via `_expandedTables: false`)
+- Expanded height: 55 + reads_section + gap(13) + writes_section
+- Adaptive spacing: collapsed ELK 80/40 Dagre 60/80; expanded ELK 200/100 Dagre 100/150
+
+### Global Lineage View
+- Uses `buildGlobalLineageFromNodes` (fast, 1.1MB) instead of loading full 19.8MB AnalyzeResult
+- `repopulateTableLevelEdges` triggered on first open for sparse data
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
