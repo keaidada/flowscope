@@ -1020,6 +1020,11 @@ export function buildScriptLevelGraph(
   const scriptMap = groupStatementsByScript(statements);
   const scriptNodes = createScriptNodes(scriptMap, selectedNodeId, searchTerm);
 
-  const edges = buildDirectScriptGraph(scriptMap, false);
-  return { nodes: scriptNodes, edges };
+  if (showTables) {
+    const edges = buildDirectScriptGraph(scriptMap, true);
+    return { nodes: scriptNodes, edges };
+  } else {
+    const edges = buildDirectScriptGraph(scriptMap, false);
+    return { nodes: scriptNodes, edges };
+  }
 }

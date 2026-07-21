@@ -1097,13 +1097,15 @@ function buildScriptLevelGraph(
   statements: StatementLineageWithSource[],
   selectedNodeId: string | null,
   searchTerm: string,
-  _showTables: boolean
+  showTables: boolean
 ): { nodes: SerializedFlowNode[]; edges: SerializedFlowEdge[] } {
   const scriptMap = groupStatementsByScript(statements);
   const scriptNodes = createScriptNodes(scriptMap, selectedNodeId, searchTerm);
 
-  // 统一用节点级 Handle 保证边始终可见
-  const edges = buildDirectScriptGraph(scriptMap, false);
+  // 展开模式用表级 Handle，收起用节点级
+  const edges = showTables
+    ? buildDirectScriptGraph(scriptMap, true)
+    : buildDirectScriptGraph(scriptMap, false);
   return { nodes: scriptNodes, edges };
 }
 
