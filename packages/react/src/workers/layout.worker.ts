@@ -33,6 +33,7 @@ export interface WorkerNodeData {
   id: string;
   columnCount: number;
   filterCount: number;
+  tableCount: number;
   isCollapsed: boolean;
 }
 
@@ -83,6 +84,11 @@ function calculateNodeHeight(node: WorkerNodeData): number {
 
   if (node.filterCount > 0) {
     height += NODE_HEIGHT_FILTERS_BASE + node.filterCount * NODE_HEIGHT_PER_FILTER;
+  }
+
+  // Script node expanded tables
+  if (node.tableCount > 0) {
+    height += node.tableCount * 20 + 28; // 20px per row + 28px headers
   }
 
   return height;

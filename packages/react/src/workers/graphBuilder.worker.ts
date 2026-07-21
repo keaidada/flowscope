@@ -71,6 +71,8 @@ export interface SerializedScriptNodeData extends Record<string, unknown> {
   sourceName: string;
   tablesRead: string[];
   tablesWritten: string[];
+  tableNamesRead: string[];
+  tableNamesWritten: string[];
   statementCount: number;
   isSelected: boolean;
   isHighlighted: boolean;
@@ -998,12 +1000,11 @@ function createScriptNodes(
   const nodes: SerializedFlowNode[] = [];
 
   scriptMap.forEach((stmts, sourceName) => {
-    const { reads, writes } = getScriptIO(stmts);
+    const { reads, writes, readQualified, writeQualified } = getScriptIO(stmts);
     const isHighlighted = !!(
       lowerCaseSearchTerm && sourceName.toLowerCase().includes(lowerCaseSearchTerm)
     );
 
-    // Display only the filename, not the full path
     const sep = Math.max(sourceName.lastIndexOf('/'), sourceName.lastIndexOf('\\'));
     const shortLabel = sep >= 0 ? sourceName.substring(sep + 1) : sourceName;
 
@@ -1016,6 +1017,8 @@ function createScriptNodes(
         sourceName,
         tablesRead: Array.from(reads),
         tablesWritten: Array.from(writes),
+        tableNamesRead: Array.from(readQualified),
+        tableNamesWritten: Array.from(writeQualified),
         statementCount: stmts.length,
         isSelected: `script:${sourceName}` === selectedNodeId,
         isHighlighted,
@@ -1024,87 +1027,11 @@ function createScriptNodes(
   });
 
   return nodes;
+
 }
-
-function buildHybridGraph(
-  scriptMap: Map<string, StatementLineageWithSource[]>,
-  selectedNodeId: string | null,
-  searchTerm: string
-): { nodes: SerializedFlowNode[]; edges: SerializedFlowEdge[] } {
-  const lowerCaseSearchTerm = searchTerm.toLowerCase();
-  const nodes: SerializedFlowNode[] = [];
-  const edges: SerializedFlowEdge[] = [];
-  const uniqueTables = new Map<string, { label: string; sourceName?: string }>();
-
-  scriptMap.forEach((stmts) => {
-    const { readQualified, writeQualified } = getScriptIO(stmts);
-
-    stmts.forEach((stmt) => {
-      const createdRelationIds = getCreatedRelationNodeIds(stmt);
-      stmt.nodes.forEach((node) => {
-        if (node.type === 'table' || node.type === 'view') {
-          const qName = node.qualifiedName || node.label;
-          const isWritten =
-            stmt.edges.some((e) => e.to === node.id && e.type === 'data_flow') ||
-            createdRelationIds.has(node.id);
-
-          if (isWritten) {
-            uniqueTables.set(qName, { label: node.label, sourceName: stmt.sourceName });
-          } else if (!uniqueTables.has(qName)) {
-            uniqueTables.set(qName, { label: node.label });
-          }
-        }
-      });
-    });
-
-    const sourceId = `script:${stmts[0].sourceName || 'unknown'}`;
-
-    writeQualified.forEach((qName) => {
-      edges.push({
-        id: `${sourceId}->table:${qName}`,
-        source: sourceId,
-        target: `table:${qName}`,
-        type: 'animated',
-        data: { type: 'data_flow' },
-      });
-    });
-
-    readQualified.forEach((qName) => {
-      edges.push({
-        id: `table:${qName}->${sourceId}`,
-        source: `table:${qName}`,
-        target: sourceId,
-        type: 'animated',
-        data: { type: 'data_flow' },
-      });
-    });
-  });
-
-  uniqueTables.forEach((info, qName) => {
-    const isHighlighted = !!(
-      lowerCaseSearchTerm && info.label.toLowerCase().includes(lowerCaseSearchTerm)
-    );
-    nodes.push({
-      id: `table:${qName}`,
-      type: 'simpleTableNode',
-      position: { x: 0, y: 0 },
-      data: {
-        label: info.label,
-        nodeType: 'table',
-        columns: [],
-        isSelected: `table:${qName}` === selectedNodeId,
-        isHighlighted,
-        isCollapsed: false,
-        sourceName: info.sourceName,
-      } as SerializedTableNodeData,
-    });
-  });
-
-  return { nodes, edges };
-}
-
 function buildDirectScriptGraph(
-  scriptMap: Map<string, StatementLineageWithSource[]>
+  scriptMap: Map<string, StatementLineageWithSource[]>,
+  useTableHandles: boolean = false
 ): SerializedFlowEdge[] {
   const edges: SerializedFlowEdge[] = [];
   const edgeSet = new Set<string>();
@@ -1117,28 +1044,47 @@ function buildDirectScriptGraph(
 
       const { readQualified: consumerReads } = getScriptIO(consumerStmts);
 
-      const sharedTables: string[] = [];
-      producerWrites.forEach((table) => {
-        if (consumerReads.has(table)) {
-          const simpleName = table.split('.').pop() || table;
-          sharedTables.push(simpleName);
-        }
-      });
-
-      if (sharedTables.length > 0) {
-        const edgeId = `${producerScript}->${consumerScript}`;
-        if (!edgeSet.has(edgeId)) {
-          edgeSet.add(edgeId);
-          const maxTables = UI_CONSTANTS.MAX_EDGE_LABEL_TABLES;
-          edges.push({
-            id: edgeId,
-            source: `script:${producerScript}`,
-            target: `script:${consumerScript}`,
-            type: 'animated',
-            label:
-              sharedTables.slice(0, maxTables).join(', ') +
-              (sharedTables.length > maxTables ? '...' : ''),
-          });
+      if (useTableHandles) {
+        // 每张共享表一条边，带 sourceHandle/targetHandle
+        producerWrites.forEach((table) => {
+          if (consumerReads.has(table)) {
+            const edgeId = `${producerScript}->${consumerScript}:${table}`;
+            if (!edgeSet.has(edgeId)) {
+              edgeSet.add(edgeId);
+              edges.push({
+                id: edgeId,
+                source: `script:${producerScript}`,
+                target: `script:${consumerScript}`,
+                sourceHandle: `w:${table}`,
+                targetHandle: `r:${table}`,
+                type: 'animated',
+              });
+            }
+          }
+        });
+      } else {
+        // 原始逻辑：聚合为一条边
+        const sharedTables: string[] = [];
+        producerWrites.forEach((table) => {
+          if (consumerReads.has(table)) {
+            sharedTables.push(table.split('.').pop() || table);
+          }
+        });
+        if (sharedTables.length > 0) {
+          const edgeId = `${producerScript}->${consumerScript}`;
+          if (!edgeSet.has(edgeId)) {
+            edgeSet.add(edgeId);
+            const maxTables = UI_CONSTANTS.MAX_EDGE_LABEL_TABLES;
+            edges.push({
+              id: edgeId,
+              source: `script:${producerScript}`,
+              target: `script:${consumerScript}`,
+              type: 'animated',
+              label:
+                sharedTables.slice(0, maxTables).join(', ') +
+                (sharedTables.length > maxTables ? '...' : ''),
+            });
+          }
         }
       }
     });
@@ -1157,17 +1103,10 @@ function buildScriptLevelGraph(
   const scriptNodes = createScriptNodes(scriptMap, selectedNodeId, searchTerm);
 
   if (showTables) {
-    const { nodes: tableNodes, edges: tableEdges } = buildHybridGraph(
-      scriptMap,
-      selectedNodeId,
-      searchTerm
-    );
-    return {
-      nodes: [...scriptNodes, ...tableNodes],
-      edges: tableEdges,
-    };
+    const edges = buildDirectScriptGraph(scriptMap, true);
+    return { nodes: scriptNodes, edges };
   } else {
-    const edges = buildDirectScriptGraph(scriptMap);
+    const edges = buildDirectScriptGraph(scriptMap, false);
     return {
       nodes: scriptNodes,
       edges,

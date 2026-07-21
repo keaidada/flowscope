@@ -345,6 +345,8 @@ export function GraphView({
   onViewportChange,
   fitViewTrigger,
   namespaceFilter,
+  customNodeTypes,
+  scriptOnly,
 }: GraphViewProps): JSX.Element {
   const { t } = useTranslation();
   const { state, actions } = useLineage();
@@ -1021,7 +1023,7 @@ export function GraphView({
         onNodeClick={handleNodeClick}
         onEdgeClick={handleEdgeClick}
         onPaneClick={handlePaneClick}
-        nodeTypes={nodeTypes}
+        nodeTypes={customNodeTypes ? { ...nodeTypes, ...customNodeTypes } : nodeTypes}
         edgeTypes={edgeTypes}
         fitView={!initialViewport}
         minZoom={0.1}
@@ -1038,8 +1040,8 @@ export function GraphView({
         <Background />
         <Controls />
         <Panel position="top-left" className="flex gap-3 items-start">
-          <ViewModeSelector />
-          {viewMode === 'script' && (
+          {!scriptOnly && <ViewModeSelector />}
+          {(viewMode === 'script' || scriptOnly) && (
             <ToolbarToggleButton
               isActive={showScriptTables}
               onClick={actions.toggleShowScriptTables}

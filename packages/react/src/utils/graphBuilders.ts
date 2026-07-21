@@ -832,20 +832,25 @@ function createScriptNodes(
   const nodes: FlowNode[] = [];
 
   scriptMap.forEach((stmts, sourceName) => {
-    const { reads, writes } = getScriptIO(stmts);
+    const { reads, writes, readQualified, writeQualified } = getScriptIO(stmts);
     const isHighlighted = !!(
       lowerCaseSearchTerm && sourceName.toLowerCase().includes(lowerCaseSearchTerm)
     );
+
+    const sep = Math.max(sourceName.lastIndexOf('/'), sourceName.lastIndexOf('\\'));
+    const shortLabel = sep >= 0 ? sourceName.substring(sep + 1) : sourceName;
 
     nodes.push({
       id: `script:${sourceName}`,
       type: 'scriptNode',
       position: { x: 0, y: 0 },
       data: {
-        label: sourceName,
+        label: shortLabel,
         sourceName,
         tablesRead: Array.from(reads),
         tablesWritten: Array.from(writes),
+        tableNamesRead: Array.from(readQualified),
+        tableNamesWritten: Array.from(writeQualified),
         statementCount: stmts.length,
         isSelected: `script:${sourceName}` === selectedNodeId,
         isHighlighted,
@@ -944,7 +949,7 @@ function buildHybridGraph(
 /**
  * Build direct script-to-script graph
  */
-function buildDirectScriptGraph(scriptMap: Map<string, StatementLineageWithSource[]>): FlowEdge[] {
+function buildDirectScriptGraph(scriptMap: Map<string, StatementLineageWithSource[]>, useTableHandles: boolean = false): FlowEdge[] {
   const edges: FlowEdge[] = [];
   const edgeSet = new Set<string>();
 
@@ -956,29 +961,45 @@ function buildDirectScriptGraph(scriptMap: Map<string, StatementLineageWithSourc
 
       const { readQualified: consumerReads } = getScriptIO(consumerStmts);
 
-      // Find intersection
-      const sharedTables: string[] = [];
-      producerWrites.forEach((table) => {
-        if (consumerReads.has(table)) {
-          const simpleName = table.split('.').pop() || table;
-          sharedTables.push(simpleName);
-        }
-      });
-
-      if (sharedTables.length > 0) {
-        const edgeId = `${producerScript}->${consumerScript}`;
-        if (!edgeSet.has(edgeId)) {
-          edgeSet.add(edgeId);
-          const maxTables = UI_CONSTANTS.MAX_EDGE_LABEL_TABLES;
-          edges.push({
-            id: edgeId,
-            source: `script:${producerScript}`,
-            target: `script:${consumerScript}`,
-            type: 'animated',
-            label:
-              sharedTables.slice(0, maxTables).join(', ') +
-              (sharedTables.length > maxTables ? '...' : ''),
-          });
+      if (useTableHandles) {
+        producerWrites.forEach((table) => {
+          if (consumerReads.has(table)) {
+            const edgeId = `${producerScript}->${consumerScript}:${table}`;
+            if (!edgeSet.has(edgeId)) {
+              edgeSet.add(edgeId);
+              edges.push({
+                id: edgeId,
+                source: `script:${producerScript}`,
+                target: `script:${consumerScript}`,
+                sourceHandle: `w:${table}`,
+                targetHandle: `r:${table}`,
+                type: 'animated',
+              });
+            }
+          }
+        });
+      } else {
+        const sharedTables: string[] = [];
+        producerWrites.forEach((table) => {
+          if (consumerReads.has(table)) {
+            sharedTables.push(table.split('.').pop() || table);
+          }
+        });
+        if (sharedTables.length > 0) {
+          const edgeId = `${producerScript}->${consumerScript}`;
+          if (!edgeSet.has(edgeId)) {
+            edgeSet.add(edgeId);
+            const maxTables = UI_CONSTANTS.MAX_EDGE_LABEL_TABLES;
+            edges.push({
+              id: edgeId,
+              source: `script:${producerScript}`,
+              target: `script:${consumerScript}`,
+              type: 'animated',
+              label:
+                sharedTables.slice(0, maxTables).join(', ') +
+                (sharedTables.length > maxTables ? '...' : ''),
+            });
+          }
         }
       }
     });
@@ -1000,20 +1021,10 @@ export function buildScriptLevelGraph(
   const scriptNodes = createScriptNodes(scriptMap, selectedNodeId, searchTerm);
 
   if (showTables) {
-    const { nodes: tableNodes, edges: tableEdges } = buildHybridGraph(
-      scriptMap,
-      selectedNodeId,
-      searchTerm
-    );
-    return {
-      nodes: [...scriptNodes, ...tableNodes],
-      edges: tableEdges,
-    };
+    const edges = buildDirectScriptGraph(scriptMap, true);
+    return { nodes: scriptNodes, edges };
   } else {
-    const edges = buildDirectScriptGraph(scriptMap);
-    return {
-      nodes: scriptNodes,
-      edges,
-    };
+    const edges = buildDirectScriptGraph(scriptMap, false);
+    return { nodes: scriptNodes, edges };
   }
 }

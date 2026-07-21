@@ -715,7 +715,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             // 预计算表级血缘(穿透 CTE)物化到 table_level_edges,供导出快速读取
             try {
               const { writeTableLevelEdges } = await import('@/lib/analysis-cache');
-              await writeTableLevelEdges(activeProjectId, result);
+              await writeTableLevelEdges(activeProjectId);
             } catch (err) {
               console.error('[useAnalysis] writeTableLevelEdges failed', err);
             }

@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { Share2, Github, Settings, Network, Trash2, Download, Bug, Loader2 } from 'lucide-react';
+import { Share2, Github, Settings, Network, Trash2, Bug, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useLineageActions, useLineageState } from '@pondpilot/flowscope-react';
@@ -42,8 +42,7 @@ import type { GlobalShortcut } from '@/hooks';
 import { useThemeStore, type Theme } from '@/lib/theme-store';
 import { useViewStateStore } from '@/lib/view-state-store';
 import { useBackend } from '@/lib/backend-context';
-import { readAllFileResults, clearProjectLineage } from '@/lib/analysis-cache';
-import { mergeAnalyzeResults, buildTableLevelLineage, extractTableComments } from '@/lib/merge-results';
+import { clearProjectLineage, buildGlobalLineageFromNodes, repopulateTableLevelEdges } from '@/lib/analysis-cache';
 
 interface WorkspaceProps {
   backendReady: boolean;
@@ -138,48 +137,21 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
     try {
       const startTime = performance.now();
-      const fileResults = await readAllFileResults(activeProjectId);
-      if (fileResults.length === 0) {
+      // 只查 lineage_nodes（1.1MB, ~0.04s），跳过 19.8MB 完整 AnalyzeResult
+      const tableLevelResult = await buildGlobalLineageFromNodes(activeProjectId);
+      if (!tableLevelResult) {
         toast.info(t('analysis.emptyState.runAnalysis'));
         setGlobalLineageLoading(false);
         return;
       }
-      console.log(`[GlobalLineage] Loaded ${fileResults.length} files in ${(performance.now() - startTime).toFixed(0)}ms`);
-
-      // 缓存各文件结果，供跳转时直接使用
-      const resultMap = new Map<string, AnalyzeResult>();
-      for (const fr of fileResults) {
-        resultMap.set(fr.filePath, fr.result);
-      }
-      globalFileResultsRef.current = resultMap;
-
-      // 去重：如果所有文件指向同一个 result 对象（runMode=all），只需处理一次
-      const uniqueResults = [...new Set(fileResults.map((r) => r.result))];
-      console.log(`[GlobalLineage] ${uniqueResults.length} unique results from ${fileResults.length} files`);
-
-      const mergeStart = performance.now();
-      const merged = uniqueResults.length === 1
-        ? uniqueResults[0]
-        : mergeAnalyzeResults(fileResults.map((r) => r.result));
-      if (!merged) {
-        toast.info(t('analysis.emptyState.runAnalysis'));
-        setGlobalLineageLoading(false);
-        return;
-      }
-      // 从文件内容提取中文注释
-      const fileContents = new Map<string, string>();
-      if (currentProject?.files) {
-        for (const f of currentProject.files) {
-          if (f.content) fileContents.set(f.path || f.name, f.content);
-        }
-      }
-      const tableComments = extractTableComments(fileContents);
-
-      // 提取表级血缘（只保留源表→目标表），与 schema 视图一致
-      const tableLevelResult = buildTableLevelLineage(merged, tableComments);
-      console.log(`[GlobalLineage] Merge + build in ${(performance.now() - mergeStart).toFixed(0)}ms, tables=${tableLevelResult.statements.reduce((s, st) => s + st.nodes.length, 0)}`);
+      console.log(`[GlobalLineage] Built from lineage_nodes in ${(performance.now() - startTime).toFixed(0)}ms, tables=${tableLevelResult.summary.tableCount}, edges=${tableLevelResult.globalLineage?.edges?.length ?? 0}`);
       setLineageResult(tableLevelResult);
       setGlobalLineageLoading(false);
+
+      // 后台填充 table_level_edges（数据洞察依赖此表），不阻塞 UI
+      repopulateTableLevelEdges(activeProjectId).then(
+        (n) => console.log(`[GlobalLineage] Table-level edges repopulated: ${n}`),
+      ).catch((e) => console.warn('[GlobalLineage] table_level_edges repop failed, will retry next open:', e));
     } catch (error) {
       console.error('[Workspace] Failed to load global lineage:', error);
       toast.error('Failed to load global lineage');
@@ -259,11 +231,6 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalLineageOpen, viewMode]);
-
-  // 导出 SQLite 数据库文件 — now managed by Rust backend, file is at flowscope.db
-  const handleExportLineage = useCallback(() => {
-    toast.info('SQLite DB is at flowscope.db next to the CLI binary.');
-  }, []);
 
   // Theme cycling for keyboard shortcut
   const { theme, setTheme } = useThemeStore();
@@ -603,28 +570,6 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
             <Network className="h-3.5 w-3.5" />
             {t('app.globalLineage')}
           </Button>
-          {globalLineageOpen && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 text-xs"
-              onClick={handleExportLineage}
-              title="导出血缘数据"
-            >
-              <Download className="h-3.5 w-3.5" />
-            </Button>
-          )}
-          {globalLineageOpen && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 text-xs text-destructive hover:text-destructive"
-              onClick={handleClearGlobalLineage}
-              title="清理全局血缘缓存"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          )}
         </div>
 
         {/* Header Actions */}

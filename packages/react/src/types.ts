@@ -1,4 +1,5 @@
 import type { RefObject } from 'react';
+import type { NodeProps } from '@xyflow/react';
 import type {
   AnalyzeResult,
   Node,
@@ -243,6 +244,10 @@ export interface GraphViewProps {
   fitViewTrigger?: number;
   /** Namespace filter - when provided, only shows nodes matching the filter */
   namespaceFilter?: NamespaceFilter;
+  /** Custom node type components to override defaults (e.g. for insights mode) */
+  customNodeTypes?: Record<string, React.ComponentType<NodeProps>>;
+  /** When true, replaces ViewModeSelector with a showScriptTables toggle */
+  scriptOnly?: boolean;
 }
 
 /**
@@ -309,10 +314,14 @@ export interface ScriptNodeData extends Record<string, unknown> {
   label: string;
   /** Source name (file path or identifier) */
   sourceName: string;
-  /** Tables read by this script */
+  /** Tables read by this script (short labels) */
   tablesRead: string[];
-  /** Tables written by this script */
+  /** Tables written by this script (short labels) */
   tablesWritten: string[];
+  /** Tables read by this script (qualified names) */
+  tableNamesRead: string[];
+  /** Tables written by this script (qualified names) */
+  tableNamesWritten: string[];
   /** Number of statements in this script */
   statementCount: number;
   /** Whether this node is currently selected */

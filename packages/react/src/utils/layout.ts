@@ -178,6 +178,15 @@ function calculateNodeHeight(data: NodeData | undefined): number {
     height += NODE_HEIGHT_FILTERS_BASE + filterCount * NODE_HEIGHT_PER_FILTER;
   }
 
+  // Script node expanded tables
+  const d = data as Record<string, unknown>;
+  const readLen = Array.isArray(d.tablesRead) ? d.tablesRead.length : 0;
+  const writeLen = Array.isArray(d.tablesWritten) ? d.tablesWritten.length : 0;
+  const totalTables = readLen + writeLen;
+  if (totalTables > 0) {
+    height += totalTables * 20 + 28;
+  }
+
   return height;
 }
 
@@ -244,8 +253,8 @@ async function layoutWithElk<N extends NodeData, E extends Record<string, unknow
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': elkDirection,
-      'elk.layered.spacing.nodeNodeBetweenLayers': '150',
-      'elk.spacing.nodeNode': '80',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '220',
+      'elk.spacing.nodeNode': '120',
       'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
       'elk.edgeRouting': 'ORTHOGONAL',
     },

@@ -74,12 +74,18 @@ function getWorker(): Worker {
  * Convert React Flow nodes to serializable worker format.
  */
 function nodesToWorkerFormat<N extends NodeData>(nodes: Node<N>[]): WorkerNodeData[] {
-  return nodes.map((node) => ({
-    id: node.id,
-    columnCount: node.data?.columns?.length ?? 0,
-    filterCount: node.data?.filters?.length ?? 0,
-    isCollapsed: node.data?.isCollapsed ?? false,
-  }));
+  return nodes.map((node) => {
+    const d = (node.data ?? {}) as Record<string, unknown>;
+    const readLen = Array.isArray(d.tablesRead) ? d.tablesRead.length : 0;
+    const writeLen = Array.isArray(d.tablesWritten) ? d.tablesWritten.length : 0;
+    return {
+      id: node.id,
+      columnCount: d.columns ? (d.columns as Array<unknown>).length : 0,
+      filterCount: d.filters ? (d.filters as Array<unknown>).length : 0,
+      tableCount: readLen + writeLen,
+      isCollapsed: d.isCollapsed === true,
+    };
+  });
 }
 
 /**

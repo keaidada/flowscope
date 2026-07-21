@@ -14,7 +14,7 @@ use serde::{Serialize, Deserialize};
 /// v0: original — time fields (`created_at`, `updated_at`, `last_accessed_at`)
 ///     stored as `INTEGER` Unix millisecond timestamps.
 /// v1: time fields stored as `TEXT` RFC3339 / ISO 8601 strings (human-readable).
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 /// Open (or create) the database file at the given path.
 pub fn open_db(path: &Path) -> Result<Mutex<Connection>, rusqlite::Error> {
@@ -46,7 +46,11 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         migrate_v1_to_v2(conn)?;
     }
 
-    // Future migrations: if current < 3 { migrate_v2_to_v3(conn)?; } ...
+    if current < 3 {
+        migrate_v2_to_v3(conn)?;
+    }
+
+    // Future migrations: if current < 4 { migrate_v3_to_v4(conn)?; } ...
 
     if current != SCHEMA_VERSION {
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
@@ -331,6 +335,58 @@ fn migrate_v1_to_v2(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// v2 → v3: add `script_name` and `dir_path` columns to `table_level_edges`.
+fn migrate_v2_to_v3(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let table = "table_level_edges";
+    let exists: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{table}'"),
+        [], |row| row.get(0),
+    )?;
+    if exists == 0 { return Ok(()); }
+
+    let cols: Vec<String> = conn
+        .prepare(&format!("PRAGMA table_info({table})"))?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .collect();
+
+    if !cols.iter().any(|c| c == "script_name") {
+        eprintln!("[migrate v2→v3] adding script_name, dir_path to '{table}'...");
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN script_name TEXT NOT NULL DEFAULT '';\n\
+             ALTER TABLE {table} ADD COLUMN dir_path TEXT NOT NULL DEFAULT '';"
+        ))?;
+    }
+
+    let empty_count: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM {table} WHERE script_name = ''"),
+        [], |row| row.get(0),
+    )?;
+
+    if empty_count > 0 {
+        eprintln!("[migrate v2→v3] backfilling {empty_count} rows in '{table}'...");
+        let rows: Vec<(i64, String)> = conn
+            .prepare(&format!("SELECT rowid, script FROM {table} WHERE script_name = ''"))?
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
+            .filter_map(Result::ok)
+            .collect();
+
+        let tx = conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                &format!("UPDATE {table} SET script_name = ?1, dir_path = ?2 WHERE rowid = ?3")
+            )?;
+            for (rowid, script) in &rows {
+                let (sn, dp) = split_file_path(script);
+                stmt.execute(params![sn, dp, rowid])?;
+            }
+        }
+        tx.commit()?;
+        eprintln!("[migrate v2→v3] '{table}' done.");
+    }
+    Ok(())
+}
+
 /// Split a file_path into (file_name, dir_path).
 /// Handles both `/` and `\` separators.
 /// Example: "etl/SUM_公共汇总库/B10.HQL" → ("B10.HQL", "etl/SUM_公共汇总库")
@@ -524,6 +580,8 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 from_table  TEXT    NOT NULL,
                 to_table    TEXT    NOT NULL,
                 script      TEXT    NOT NULL DEFAULT '',
+                script_name TEXT    NOT NULL DEFAULT '',
+                dir_path    TEXT    NOT NULL DEFAULT '',
                 created_at  TEXT    NOT NULL DEFAULT '',
                 UNIQUE(project_id, from_table, to_table, script)
             );",
@@ -744,6 +802,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             from_table  TEXT    NOT NULL,
             to_table    TEXT    NOT NULL,
             script      TEXT    NOT NULL DEFAULT '',
+            script_name TEXT    NOT NULL DEFAULT '',
+            dir_path    TEXT    NOT NULL DEFAULT '',
             created_at  TEXT    NOT NULL DEFAULT '',
             UNIQUE(project_id, from_table, to_table, script)
         );
@@ -956,24 +1016,36 @@ pub fn save_table_level_edges(
 ) -> Result<(), rusqlite::Error> {
     use rusqlite::{params_from_iter, ToSql};
     let tx = conn.unchecked_transaction()?;
-    tx.execute("DELETE FROM table_level_edges WHERE project_id = ?1", params![project_id])?;
+    // Only delete edges for the scripts we're updating, not the whole project
+    let scripts: std::collections::HashSet<&str> = edges.iter().map(|(_, _, s)| s.as_str()).collect();
+    if !scripts.is_empty() {
+        let placeholders: Vec<String> = (0..scripts.len()).map(|_| "?".to_string()).collect();
+        let sql = format!("DELETE FROM table_level_edges WHERE project_id = ?1 AND script IN ({})", placeholders.join(","));
+        let mut params: Vec<&dyn ToSql> = vec![&project_id];
+        for s in &scripts { params.push(s); }
+        tx.execute(&sql, params_from_iter(params))?;
+    }
     let now = chrono::Utc::now().to_rfc3339();
     const CHUNK: usize = 500;
-    let row_ph = "(?,?,?,?,?)";
+    let row_ph = "(?,?,?,?,?,?,?)";
     for chunk in edges.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO table_level_edges (project_id, from_table, to_table, script, created_at) VALUES {}",
+            "INSERT OR REPLACE INTO table_level_edges (project_id, from_table, to_table, script, script_name, dir_path, created_at) VALUES {}",
             (0..chunk.len()).map(|_| row_ph).collect::<Vec<_>>().join(",")
         );
-        let mut p: Vec<&dyn ToSql> = Vec::with_capacity(chunk.len() * 5);
+        let mut p: Vec<std::boxed::Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 7);
         for (from, to, script) in chunk {
-            p.push(&project_id);
-            p.push(from);
-            p.push(to);
-            p.push(script);
-            p.push(&now);
+            let (sn, dp) = split_file_path(script);
+            p.push(Box::new(project_id.to_string()));
+            p.push(Box::new(from.clone()));
+            p.push(Box::new(to.clone()));
+            p.push(Box::new(script.clone()));
+            p.push(Box::new(sn));
+            p.push(Box::new(dp));
+            p.push(Box::new(now.clone()));
         }
-        tx.execute(&sql, params_from_iter(p))?;
+        let p_refs: Vec<&dyn ToSql> = p.iter().map(|b| b.as_ref()).collect();
+        tx.execute(&sql, params_from_iter(p_refs))?;
     }
     tx.commit()?;
     Ok(())

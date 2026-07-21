@@ -236,35 +236,63 @@ export async function writeLineageData(
   await writeLineageDataViaServer(projectId, result);
 }
 
-/** 预计算表级血缘(穿透 CTE 的物理表 table→table),物化到后端 table_level_edges。
- *  from/to 用全名(catalog.schema.name),script 取源表所在脚本的 sourceName。 */
-export async function writeTableLevelEdges(
-  projectId: string,
-  result: AnalyzeResult,
-): Promise<void> {
-  const { buildTableLevelLineage } = await import('./merge-results');
-  const tableLevel = buildTableLevelLineage(result, new Map());
-  // 全名 catalog.schema.name
-  const nodeFull = new Map<string, string>();
-  for (const n of tableLevel.globalLineage.nodes) {
-    const cn = (n as { canonicalName?: { catalog?: string; schema?: string; name: string } }).canonicalName;
-    const full = cn ? [cn.catalog, cn.schema, cn.name].filter(Boolean).join('.') : n.label;
-    nodeFull.set(n.id, full);
-  }
-  // statementIndex → sourceName(脚本名)
-  const stmtSource = new Map<number, string>();
-  result.statements.forEach((s, i) => stmtSource.set(i, s.sourceName ?? ''));
-  const edges: Array<[string, string, string]> = [];
-  for (const edge of tableLevel.globalLineage.edges) {
-    if (edge.type === 'data_flow') {
-      const fromNode = tableLevel.globalLineage.nodes.find((n) => n.id === edge.from);
-      const ref = fromNode?.statementRefs?.[0];
-      const script = ref ? (stmtSource.get(ref.statementIndex) ?? '') : '';
-      edges.push([nodeFull.get(edge.from) ?? edge.from, nodeFull.get(edge.to) ?? edge.to, script]);
+/**
+ * 从 lineage_nodes + lineage_edges 计算 table_level_edges。
+ * 逻辑：遍历 data_flow 边的 from/to 端点，from=READ, to=WRITE。
+ * 每个脚本内：READ 表 → WRITE 表 作为一条边。
+ * 纯表级，不涉及字段/CTE 解析。
+ */
+export async function writeTableLevelEdges(projectId: string): Promise<void> {
+  const [rawNodes, rawEdges] = await Promise.all([
+    serverDb.getLineageNodes(projectId),
+    serverDb.getLineageEdges(projectId),
+  ]);
+
+  const nidToQn = new Map<string, string>();
+  for (const n of rawNodes) {
+    if (n.node_type === 'table' || n.node_type === 'view') {
+      nidToQn.set(n.node_id, (n.qualified_name ?? n.label).toLowerCase());
     }
   }
-  await serverDb.saveTableLevelEdges(projectId, edges);
+  const tableIds = new Set(nidToQn.keys());
+
+  const scriptReads = new Map<string, Set<string>>();
+  const scriptWrites = new Map<string, Set<string>>();
+
+  for (const e of rawEdges) {
+    if (e.edge_type !== 'data_flow') continue;
+    const script = e.file_path;
+    if (tableIds.has(e.from_id)) {
+      if (!scriptReads.has(script)) scriptReads.set(script, new Set());
+      scriptReads.get(script)!.add(nidToQn.get(e.from_id)!);
+    }
+    if (tableIds.has(e.to_id)) {
+      if (!scriptWrites.has(script)) scriptWrites.set(script, new Set());
+      scriptWrites.get(script)!.add(nidToQn.get(e.to_id)!);
+    }
+  }
+
+  const edges: Array<[string, string, string]> = [];
+  for (const [script, reads] of scriptReads) {
+    const writes = scriptWrites.get(script);
+    if (!writes || writes.size === 0) continue;
+    for (const fromQn of reads) {
+      for (const toQn of writes) {
+        if (fromQn !== toQn) {
+          edges.push([fromQn, toQn, script]);
+        }
+      }
+    }
+  }
+
+  if (edges.length > 0) {
+    await serverDb.saveTableLevelEdges(projectId, edges);
+  }
 }
+
+/**
+ * 一次性重建 table_level_edges（全局血缘打开时触发）
+ */
 
 // ── 结构化表查询 ──────────────────────────────────────────────────
 
@@ -364,7 +392,135 @@ export async function queryLineageEdges(
   }));
 }
 
-// ── 全局血缘重建 ─────────────────────────────────────────────────
+// ── 全局血缘重建（只用 lineage_nodes，不查 edges/columns）─────────
+
+/**
+ * 从完整的 AnalyzeResult 重新填充 table_level_edges。
+ * 一次性操作，数据洞察的搜索精度依赖此表。
+ */
+export async function repopulateTableLevelEdges(
+  projectId: string,
+): Promise<number> {
+  await writeTableLevelEdges(projectId);
+  const result = await serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>);
+  return result.length;
+}
+
+/**
+ * 只从 lineage_nodes 表构建全局血缘。
+ * 用 resolution_source='implied' 区分读写方向。
+ * 每个脚本内：READ 表 → WRITE 表 作为 data_flow 边。
+ * 极快（1.1MB 查询 vs 19.8MB 完整 AnalyzeResult）。
+ */
+export async function buildGlobalLineageFromNodes(
+  projectId: string,
+): Promise<AnalyzeResult | null> {
+  const rawNodes = await serverDb.getLineageNodes(projectId);
+  const tableNodes = rawNodes.filter(
+    (n) => n.node_type === 'table' || n.node_type === 'view',
+  );
+  if (tableNodes.length === 0) return null;
+
+  // 去重：qualified_name → 统一 nodeId
+  const qnameToNodeId = new Map<string, string>();
+  const qnameToLabel = new Map<string, string>();
+  let idx = 0;
+  for (const n of tableNodes) {
+    const qn = (n.qualified_name ?? n.label).toLowerCase();
+    if (!qnameToNodeId.has(qn)) {
+      qnameToNodeId.set(qn, `gt_${idx++}`);
+      qnameToLabel.set(qn, n.label);
+    }
+  }
+
+  // 按脚本分组：reads / writes
+  const scriptMap = new Map<string, { reads: Set<string>; writes: Set<string> }>();
+  for (const n of tableNodes) {
+    const script = n.file_path;
+    const qn = (n.qualified_name ?? n.label).toLowerCase();
+    if (!scriptMap.has(script)) scriptMap.set(script, { reads: new Set(), writes: new Set() });
+    const isWrite = n.resolution_source === 'implied';
+    if (isWrite) scriptMap.get(script)!.writes.add(qn);
+    else scriptMap.get(script)!.reads.add(qn);
+  }
+
+  // 构建 statements + edges
+  const edgeSet = new Set<string>();
+  const allEdges: Edge[] = [];
+  let edgeIdx = 0;
+  const statements: StatementLineage[] = [];
+  let stmtIdx = 0;
+
+  for (const [script, { reads, writes }] of scriptMap) {
+    const stmtNodes: Node[] = [];
+    const stmtEdges: Edge[] = [];
+    const seen = new Set<string>();
+
+    for (const qn of [...reads, ...writes]) {
+      const nodeId = qnameToNodeId.get(qn)!;
+      if (seen.has(nodeId)) continue;
+      seen.add(nodeId);
+      stmtNodes.push({
+        id: nodeId,
+        type: 'table',
+        label: qnameToLabel.get(qn)!,
+        qualifiedName: qn,
+      });
+    }
+
+    // READ → WRITE 边
+    for (const fromQn of reads) {
+      for (const toQn of writes) {
+        const fromId = qnameToNodeId.get(fromQn)!;
+        const toId = qnameToNodeId.get(toQn)!;
+        if (fromId === toId) continue;
+        const key = `${fromId}->${toId}`;
+        if (edgeSet.has(key)) continue;
+        edgeSet.add(key);
+        const edge: Edge = { id: `ge_${edgeIdx++}`, from: fromId, to: toId, type: 'data_flow' };
+        allEdges.push(edge);
+        stmtEdges.push(edge);
+      }
+    }
+
+    if (stmtNodes.length > 0) {
+      statements.push({
+        statementIndex: stmtIdx++,
+        statementType: 'GLOBAL',
+        sourceName: script,
+        nodes: stmtNodes,
+        edges: stmtEdges,
+        joinCount: 0,
+        complexityScore: 0,
+      });
+    }
+  }
+
+  const globalNodes = [...qnameToNodeId.entries()].map(([qn, id]) => ({
+    id,
+    type: 'table' as const,
+    label: qnameToLabel.get(qn)!,
+    canonicalName: { name: qn },
+    statementRefs: [],
+  }));
+
+  return {
+    statements,
+    globalLineage: { nodes: globalNodes, edges: allEdges },
+    issues: [],
+    summary: {
+      statementCount: statements.length,
+      tableCount: qnameToNodeId.size,
+      columnCount: 0,
+      joinCount: 0,
+      complexityScore: 0,
+      issueCount: { errors: 0, warnings: 0, infos: 0 },
+      hasErrors: false,
+    },
+  };
+}
+
+// ── 旧版全局血缘重建（查 nodes + columns + edges，较慢）────────────
 
 export async function readGlobalLineageFromTables(
   projectId: string
@@ -556,48 +712,45 @@ function filterOrphanScripts(
   return result;
 }
 
-/**
- * 从数据库 lineage_nodes 表查询数据洞察。
- * 只查 lineage_nodes（不查 lineage_edges），用 resolution_source 判断读写方向。
- * resolution_source='implied' → 写入表(产出)，其他 → 读取表(源)。
- */
 export async function searchLineageForInsights(
   projectId: string,
   searchTerm: string,
-  maxDepth: number = 1,
+  upstreamDepth: number = 1,
+  downstreamDepth: number = 1,
 ): Promise<AnalyzeResult | null> {
   const term = searchTerm.trim().toLowerCase();
   if (!term) return null;
 
-  // ── 1. 查 lineage_nodes（只取 table/view）──────────────────
-  const rawNodes = await serverDb.getLineageNodes(projectId);
+  // ── 1. 查 lineage_nodes + table_level_edges ──────────────
+  const [rawNodes, tleEdges] = await Promise.all([
+    serverDb.getLineageNodes(projectId),
+    serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>),
+  ]);
+
   const rawTableNodes = rawNodes.filter(
     (n) => n.node_type === 'table' || n.node_type === 'view',
   );
 
-  // ── 2. 按脚本分组，区分 READ / WRITE ─────────────────────
-  // implied → WRITE, 其他 → READ
-  const scriptWrites = new Map<string, Set<string>>(); // script → qNames written
-  const scriptReads = new Map<string, Set<string>>();  // script → qNames read
+  // ── 2. 从 table_level_edges 构建 reads/writes ────────────
+  // edge = [from_table, to_table, script], 方向精确不用启发式
+  const scriptWrites = new Map<string, Set<string>>();
+  const scriptReads = new Map<string, Set<string>>();
   const qnameWriters = new Map<string, Set<string>>();
   const qnameReaders = new Map<string, Set<string>>();
 
-  for (const n of rawTableNodes) {
-    const script = n.file_path;
-    const qn = (n.qualified_name ?? n.label).toLowerCase();
-    const isWrite = n.resolution_source === 'implied';
+  for (const [fromTable, toTable, script] of tleEdges) {
+    const fromQ = fromTable.toLowerCase();
+    const toQ = toTable.toLowerCase();
 
-    if (isWrite) {
-      if (!scriptWrites.has(script)) scriptWrites.set(script, new Set());
-      scriptWrites.get(script)!.add(qn);
-      if (!qnameWriters.has(qn)) qnameWriters.set(qn, new Set());
-      qnameWriters.get(qn)!.add(script);
-    } else {
-      if (!scriptReads.has(script)) scriptReads.set(script, new Set());
-      scriptReads.get(script)!.add(qn);
-      if (!qnameReaders.has(qn)) qnameReaders.set(qn, new Set());
-      qnameReaders.get(qn)!.add(script);
-    }
+    if (!scriptReads.has(script)) scriptReads.set(script, new Set());
+    scriptReads.get(script)!.add(fromQ);
+    if (!qnameReaders.has(fromQ)) qnameReaders.set(fromQ, new Set());
+    qnameReaders.get(fromQ)!.add(script);
+
+    if (!scriptWrites.has(script)) scriptWrites.set(script, new Set());
+    scriptWrites.get(script)!.add(toQ);
+    if (!qnameWriters.has(toQ)) qnameWriters.set(toQ, new Set());
+    qnameWriters.get(toQ)!.add(script);
   }
 
   // ── 3. 脚本级有向边 ──────────────────────────────────
@@ -617,44 +770,64 @@ export async function searchLineageForInsights(
 
   // ── 4. 匹配搜索词 ────────────────────────────────────
   const matchedScripts = new Set<string>();
+
+  // 收集每个脚本的 file_name（用于搜索匹配）
+  const scriptFileName = new Map<string, string>();
   for (const n of rawTableNodes) {
-    if (
-      n.file_path.toLowerCase().includes(term) ||
-      (n.file_name ?? '').toLowerCase().includes(term) ||
-      n.label.toLowerCase().includes(term) ||
-      (n.qualified_name ?? '').toLowerCase().includes(term)
-    ) {
-      const qn = (n.qualified_name ?? n.label).toLowerCase();
-      for (const s of qnameReaders.get(qn) ?? []) matchedScripts.add(s);
-      for (const s of qnameWriters.get(qn) ?? []) matchedScripts.add(s);
+    if (!scriptFileName.has(n.file_path)) {
+      scriptFileName.set(n.file_path, n.file_name ?? '');
+    }
+  }
+
+  for (const [script, fn] of scriptFileName) {
+    const fp = script.toLowerCase();
+    const fnLower = fn.toLowerCase();
+    if (fp.includes(term) || fnLower.includes(term)) {
+      matchedScripts.add(script);
+      continue;
+    }
+    // 表名匹配
+    const reads = scriptReads.get(script) ?? new Set();
+    const writes = scriptWrites.get(script) ?? new Set();
+    for (const qn of [...reads, ...writes]) {
+      if (qn.includes(term)) {
+        matchedScripts.add(script);
+        break;
+      }
     }
   }
   if (matchedScripts.size === 0) return null;
+  if (upstreamDepth === 0 && downstreamDepth === 0) return null;
 
-  // ── 5. 脚本级有向 BFS ────────────────────────────────
+  // ── 5. 脚本级有向 BFS（上游/下游各自独立深度）────────────
   const upstreamScripts = new Set<string>();
-  const upQ: Array<[string, number]> = [];
-  for (const s of matchedScripts) upQ.push([s, 0]);
-  for (let i = 0; i < upQ.length; i++) {
-    const [s, d] = upQ[i];
-    if (upstreamScripts.has(s)) continue;
-    upstreamScripts.add(s);
-    if (d >= maxDepth) continue;
-    for (const prev of scriptUp.get(s) ?? []) {
-      if (!upstreamScripts.has(prev)) upQ.push([prev, d + 1]);
+  const downstreamScripts = new Set<string>();
+
+  if (upstreamDepth > 0) {
+    const upQ: Array<[string, number]> = [];
+    for (const s of matchedScripts) upQ.push([s, 0]);
+    for (let i = 0; i < upQ.length; i++) {
+      const [s, d] = upQ[i];
+      if (upstreamScripts.has(s)) continue;
+      upstreamScripts.add(s);
+      if (d >= upstreamDepth) continue;
+      for (const prev of scriptUp.get(s) ?? []) {
+        if (!upstreamScripts.has(prev)) upQ.push([prev, d + 1]);
+      }
     }
   }
 
-  const downstreamScripts = new Set<string>();
-  const dnQ: Array<[string, number]> = [];
-  for (const s of matchedScripts) dnQ.push([s, 0]);
-  for (let i = 0; i < dnQ.length; i++) {
-    const [s, d] = dnQ[i];
-    if (downstreamScripts.has(s)) continue;
-    downstreamScripts.add(s);
-    if (d >= maxDepth) continue;
-    for (const next of scriptDown.get(s) ?? []) {
-      if (!downstreamScripts.has(next)) dnQ.push([next, d + 1]);
+  if (downstreamDepth > 0) {
+    const dnQ: Array<[string, number]> = [];
+    for (const s of matchedScripts) dnQ.push([s, 0]);
+    for (let i = 0; i < dnQ.length; i++) {
+      const [s, d] = dnQ[i];
+      if (downstreamScripts.has(s)) continue;
+      downstreamScripts.add(s);
+      if (d >= downstreamDepth) continue;
+      for (const next of scriptDown.get(s) ?? []) {
+        if (!downstreamScripts.has(next)) dnQ.push([next, d + 1]);
+      }
     }
   }
 
@@ -674,12 +847,13 @@ export async function searchLineageForInsights(
   );
 
   // ── 7. 构建 AnalyzeResult ────────────────────────────
-  // 按脚本分组节点，用 metadata.isCreated 标记写入表
+  // 按脚本分组节点，用 table_level_edges 标记写入表
   const scriptNodeMap = new Map<string, Node[]>();
   for (const n of rawTableNodes) {
     if (!reachableScripts.has(n.file_path)) continue;
     if (!scriptNodeMap.has(n.file_path)) scriptNodeMap.set(n.file_path, []);
-    const isWrite = n.resolution_source === 'implied';
+    const qn = (n.qualified_name ?? n.label).toLowerCase();
+    const isWrite = (scriptWrites.get(n.file_path) ?? new Set()).has(qn);
     scriptNodeMap.get(n.file_path)!.push({
       id: n.node_id,
       type: n.node_type as 'table' | 'view',
