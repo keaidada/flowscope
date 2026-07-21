@@ -40,8 +40,9 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
   }, [showScriptTables]);
 
   const active = selected || isSelected;
-  const readY = (i: number) => 95 + i * 22;
-  const writeY = (i: number) => 95 + Math.max(reads.length, 1) * 22 + 34 + i * 22;
+  const ROW = 22;
+  const readY = (i: number) => 94 + i * ROW;
+  const writeY = (i: number) => 128 + Math.max(reads.length, 1) * ROW + i * ROW;
 
 
   return (
@@ -49,7 +50,7 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
       backgroundColor: isHighlighted ? c.interactive.related : s.bg,
       borderColor: active ? c.interactive.selection : isHighlighted ? c.interactive.selection : s.border,
       boxShadow: active ? `0 0 0 2px ${c.interactive.selectionRing}` : isHighlighted ? `0 0 0 2px ${c.interactive.selectionRing}` : undefined,
-    }} className="min-w-[240px] max-w-[380px] rounded-lg border-2 shadow-xs transition-all duration-200">
+    }} className="min-w-[240px] rounded-lg border-2 shadow-xs transition-all duration-200">
 
       {!expanded && (
         <>
@@ -103,8 +104,9 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
                     style={{ color: isHL ? c.interactive.selection : s.textSecondary, backgroundColor: isHL ? c.interactive.hover : 'transparent', fontWeight: isHL ? 600 : 400, padding: '3px 6px' }}
                     onClick={(e) => { e.stopPropagation(); toggleHighlight(t, 'read', sourceName); }} title={t}>
                     <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.success }} />
-                    <span className="truncate flex-1">{t}</span>
+                    <span className="break-all flex-1">{t}</span>
                     {isHL && <span className="text-[10px] font-semibold px-1 rounded shrink-0 ml-1" style={{ backgroundColor: `${c.accent}20`, color: c.accent }}>关联</span>}
+                  <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(t); }} className="shrink-0 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 ml-1" title="复制"><Copy className="h-3 w-3" style={{ color: s.textSecondary }} /></button>
                   </div>
                 );
               })}
@@ -120,8 +122,9 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
                     style={{ color: isHL ? c.interactive.selection : s.textSecondary, backgroundColor: isHL ? c.interactive.hover : 'transparent', fontWeight: isHL ? 600 : 400, padding: '3px 6px' }}
                     onClick={(e) => { e.stopPropagation(); toggleHighlight(t, 'write', sourceName); }} title={t}>
                     <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.info }} />
-                    <span className="truncate flex-1">{t}</span>
+                    <span className="break-all flex-1">{t}</span>
                     {isHL && <span className="text-[10px] font-semibold px-1 rounded shrink-0 ml-1" style={{ backgroundColor: `${c.accent}20`, color: c.accent }}>关联</span>}
+                  <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(t); }} className="shrink-0 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 ml-1" title="复制"><Copy className="h-3 w-3" style={{ color: s.textSecondary }} /></button>
                   </div>
                 );
               })}

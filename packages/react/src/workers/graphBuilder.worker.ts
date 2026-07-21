@@ -1096,11 +1096,14 @@ function buildScriptLevelGraph(
   statements: StatementLineageWithSource[],
   selectedNodeId: string | null,
   searchTerm: string,
-  _showTables: boolean
+  showTables: boolean
 ): { nodes: SerializedFlowNode[]; edges: SerializedFlowEdge[] } {
   const scriptMap = groupStatementsByScript(statements);
   const scriptNodes = createScriptNodes(scriptMap, selectedNodeId, searchTerm);
-  const showTables = _showTables;
+  // 给节点标记是否展开，布局用
+  for (const n of scriptNodes) {
+    n.data = { ...n.data, _expandedTables: showTables };
+  }
   const edges = showTables
     ? buildDirectScriptGraph(scriptMap, true)
     : buildDirectScriptGraph(scriptMap, false);

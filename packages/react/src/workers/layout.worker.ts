@@ -34,6 +34,8 @@ export interface WorkerNodeData {
   columnCount: number;
   filterCount: number;
   tableCount: number;
+  readCount: number;
+  writeCount: number;
   isCollapsed: boolean;
 }
 
@@ -86,9 +88,13 @@ function calculateNodeHeight(node: WorkerNodeData): number {
     height += NODE_HEIGHT_FILTERS_BASE + node.filterCount * NODE_HEIGHT_PER_FILTER;
   }
 
+  // Script node expanded tables — via node data stored by buildScriptLevelGraph
   // Script node expanded tables
-  if (node.tableCount > 0) {
-    height += node.tableCount * 24 + 40;
+  if (node.tableCount > 0 && !node.isCollapsed) {
+    const rs = node.readCount > 0 ? 24 + node.readCount * 18 : 0;
+    const ws = node.writeCount > 0 ? 24 + node.writeCount * 18 : 0;
+    const gap = (node.readCount > 0 && node.writeCount > 0) ? 13 : 0;
+    height = 55 + rs + gap + ws;
   }
 
   return height;

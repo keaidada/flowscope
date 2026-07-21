@@ -14,8 +14,6 @@ import {
   NODE_HEIGHT_PER_COLUMN,
   NODE_HEIGHT_FILTERS_BASE,
   NODE_HEIGHT_PER_FILTER,
-  DAGRE_NODESEP_LR,
-  DAGRE_RANKSEP_LR,
   DAGRE_EDGESEP,
   DAGRE_MARGIN_X,
   DAGRE_MARGIN_Y,
@@ -178,13 +176,16 @@ function calculateNodeHeight(data: NodeData | undefined): number {
     height += NODE_HEIGHT_FILTERS_BASE + filterCount * NODE_HEIGHT_PER_FILTER;
   }
 
-  // Script node expanded tables
+  // Script node expanded tables — only when _expandedTables is true
   const d = data as Record<string, unknown>;
-  const readLen = Array.isArray(d.tablesRead) ? d.tablesRead.length : 0;
-  const writeLen = Array.isArray(d.tablesWritten) ? d.tablesWritten.length : 0;
-  const totalTables = readLen + writeLen;
-  if (totalTables > 0) {
-    height += totalTables * 24 + 40;
+  if (d._expandedTables) {
+    const reads = Array.isArray(d.tableNamesRead) ? d.tableNamesRead.length : 0;
+    const writes = Array.isArray(d.tableNamesWritten) ? d.tableNamesWritten.length : 0;
+    // Header 52 + reads section + gap + writes section
+    const rs = reads > 0 ? 24 + reads * 22 : 0;
+    const ws = writes > 0 ? 24 + writes * 22 : 0;
+    const gap = (reads > 0 && writes > 0) ? 13 : 0;
+    height = 55 + rs + gap + ws;
   }
 
   return height;
@@ -201,10 +202,14 @@ function layoutWithDagre<N extends NodeData, E extends Record<string, unknown>>(
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
 
+  const hasExpanded = nodes.some(n => (n.data as Record<string, unknown>)?._expandedTables === true);
+  const nodesep = hasExpanded ? 100 : 60;
+  const ranksep = hasExpanded ? 150 : 80;
+
   dagreGraph.setGraph({
     rankdir: direction,
-    nodesep: DAGRE_NODESEP_LR,
-    ranksep: DAGRE_RANKSEP_LR,
+    nodesep,
+    ranksep,
     edgesep: DAGRE_EDGESEP,
     marginx: DAGRE_MARGIN_X,
     marginy: DAGRE_MARGIN_Y,
@@ -248,13 +253,18 @@ async function layoutWithElk<N extends NodeData, E extends Record<string, unknow
 ): Promise<{ nodes: Node<N>[]; edges: Edge<E>[] }> {
   const elkDirection = direction === 'LR' ? 'RIGHT' : 'DOWN';
 
+  // 自适应间距：展开时宽松，收起时紧凑
+  const hasExpanded = nodes.some(n => (n.data as Record<string, unknown>)?._expandedTables === true);
+  const betweenLayers = hasExpanded ? '200' : '80';
+  const nodeNode = hasExpanded ? '100' : '40';
+
   const graph = {
     id: 'root',
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': elkDirection,
-      'elk.layered.spacing.nodeNodeBetweenLayers': '220',
-      'elk.spacing.nodeNode': '120',
+      'elk.layered.spacing.nodeNodeBetweenLayers': betweenLayers,
+      'elk.spacing.nodeNode': nodeNode,
       'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
       'elk.edgeRouting': 'ORTHOGONAL',
     },

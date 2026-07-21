@@ -83,7 +83,9 @@ function nodesToWorkerFormat<N extends NodeData>(nodes: Node<N>[]): WorkerNodeDa
       columnCount: d.columns ? (d.columns as Array<unknown>).length : 0,
       filterCount: d.filters ? (d.filters as Array<unknown>).length : 0,
       tableCount: readLen + writeLen,
-      isCollapsed: d.isCollapsed === true,
+      readCount: readLen,
+      writeCount: writeLen,
+      isCollapsed: d.isCollapsed === true || d._expandedTables === false,
     };
   });
 }

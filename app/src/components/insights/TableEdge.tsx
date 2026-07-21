@@ -6,8 +6,8 @@ import { useState, useEffect } from 'react';
 const ROW = 22;
 
 function rowY(idx: number, readsLen: number, isWrite: boolean): number {
-  if (isWrite) return 95 + Math.max(readsLen, 1) * ROW + 34 + idx * ROW;
-  return 95 + idx * ROW;
+  if (isWrite) return 128 + Math.max(readsLen, 1) * ROW + idx * ROW;
+  return 94 + idx * ROW;
 }
 
 export function TableEdge({ id, source, target, data, markerEnd }: EdgeProps) {

@@ -11,8 +11,8 @@ export const NODE_HEIGHT_FILTERS_BASE = 30; // Header + padding for filters sect
 export const NODE_HEIGHT_PER_FILTER = 17; // Each filter line
 
 // Dagre layout settings
-export const DAGRE_NODESEP_LR = 140;
-export const DAGRE_RANKSEP_LR = 200;
+export const DAGRE_NODESEP_LR = 80;
+export const DAGRE_RANKSEP_LR = 120;
 export const DAGRE_EDGESEP = 50;
 export const DAGRE_MARGIN_X = 40;
 export const DAGRE_MARGIN_Y = 40;
