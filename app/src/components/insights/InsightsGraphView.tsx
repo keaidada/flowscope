@@ -1,14 +1,17 @@
 import { useCallback, useRef, useState, type JSX } from 'react';
-import { Search, X, Database } from 'lucide-react';
+import { Search, X, Database, Layers, Loader2 } from 'lucide-react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import {
   GraphErrorBoundary,
   GraphView,
   useLineageStore,
 } from '@pondpilot/flowscope-react';
+import { useProject } from '@/lib/project-store';
 import { searchLineageForInsights } from '@/lib/analysis-cache';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+
+const DEPTH_OPTIONS = [1, 2, 3] as const;
 
 export interface InsightsGraphViewProps {
   focusNodeId?: string;
@@ -21,66 +24,60 @@ export function InsightsGraphView({
   onFocusApplied,
   className,
 }: InsightsGraphViewProps): JSX.Element {
+  const { activeProjectId } = useProject();
   const setResult = useLineageStore((state) => state.setResult);
   const setViewMode = useLineageStore((state) => state.setViewMode);
-  const toggleShowScriptTables = useLineageStore(
-    (state) => state.toggleShowScriptTables,
-  );
-  const currentShowTables = useLineageStore((state) => state.showScriptTables);
   const storeResult = useLineageStore((state) => state.result);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [searchResult, setSearchResult] = useState<AnalyzeResult | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [depth, setDepth] = useState<number>(1);
 
-  // Capture the original tableLevelResult once (for filtering on search).
-  // Reads from store subscription; saves to ref on first non-null value.
+  // Capture the original tableLevelResult for restoring on unmount.
   const originalResult = useRef<AnalyzeResult | null>(null);
   const captured = useRef(false);
-  const toggledShowTables = useRef(false);
-
   if (!captured.current && storeResult) {
     originalResult.current = storeResult;
     captured.current = true;
   }
 
-  const handleSearch = useCallback(() => {
-    const term = searchTerm.trim();
-    if (!term) return;
+  const runSearch = useCallback(
+    async (searchDepth: number) => {
+      const term = searchTerm.trim();
+      if (!term || !activeProjectId) return;
 
-    const original = originalResult.current;
-    if (!original) {
-      setSearchError('无可搜索的数据，请先加载全局血缘');
+      setIsSearching(true);
+      setSearchError(null);
       setHasSearched(true);
-      return;
-    }
 
-    setSearchError(null);
-    setHasSearched(true);
-
-    try {
-      const filtered = searchLineageForInsights(original, term);
-      setSearchResult(filtered);
-
-      // Only manipulate the store when user actually searches
-      setViewMode('script');
-      if (!currentShowTables) {
-        toggledShowTables.current = true;
-        toggleShowScriptTables();
+      try {
+        const filtered = await searchLineageForInsights(activeProjectId, term, searchDepth);
+        setSearchResult(filtered);
+        setViewMode('script');
+        setResult(filtered);
+      } catch (err) {
+        console.error('[InsightsGraphView] Search failed:', err);
+        setSearchError(err instanceof Error ? err.message : '搜索失败');
+      } finally {
+        setIsSearching(false);
       }
-      setResult(filtered);
-    } catch (err) {
-      console.error('[InsightsGraphView] Search failed:', err);
-      setSearchError(err instanceof Error ? err.message : '搜索失败');
+    },
+    [searchTerm, activeProjectId, setResult, setViewMode],
+  );
+
+  const handleSearch = useCallback(() => { runSearch(depth); }, [runSearch, depth]);
+
+  // Re-run search when depth changes (if already searched)
+  const prevDepth = useRef(depth);
+  if (prevDepth.current !== depth) {
+    prevDepth.current = depth;
+    if (hasSearched && searchTerm.trim() && activeProjectId) {
+      runSearch(depth);
     }
-  }, [
-    searchTerm,
-    setResult,
-    setViewMode,
-    toggleShowScriptTables,
-    currentShowTables,
-  ]);
+  }
 
   const handleClear = useCallback(() => {
     setSearchTerm('');
@@ -122,14 +119,37 @@ export function InsightsGraphView({
             </button>
           )}
         </div>
+
+        {/* Depth selector */}
+        <div className="flex items-center gap-1 rounded-md border bg-background p-0.5">
+          <Layers className="ml-1 h-3 w-3 text-muted-foreground" />
+          {DEPTH_OPTIONS.map((d) => (
+            <button
+              key={d}
+              onClick={() => setDepth(d)}
+              className={`flex h-6 w-7 items-center justify-center rounded text-xs font-medium transition-colors ${
+                depth === d
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+
         <Button
           variant="secondary"
           size="sm"
           className="h-8 gap-1.5 text-xs"
           onClick={handleSearch}
-          disabled={!searchTerm.trim()}
+          disabled={!searchTerm.trim() || isSearching}
         >
-          <Search className="h-3.5 w-3.5" />
+          {isSearching ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Search className="h-3.5 w-3.5" />
+          )}
           搜索
         </Button>
         {hasSearched && (

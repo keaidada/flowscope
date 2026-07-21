@@ -14,7 +14,7 @@ use serde::{Serialize, Deserialize};
 /// v0: original — time fields (`created_at`, `updated_at`, `last_accessed_at`)
 ///     stored as `INTEGER` Unix millisecond timestamps.
 /// v1: time fields stored as `TEXT` RFC3339 / ISO 8601 strings (human-readable).
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 /// Open (or create) the database file at the given path.
 pub fn open_db(path: &Path) -> Result<Mutex<Connection>, rusqlite::Error> {
@@ -42,7 +42,11 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         migrate_v0_to_v1(conn)?;
     }
 
-    // Future migrations: if current < 2 { migrate_v1_to_v2(conn)?; } ...
+    if current < 2 {
+        migrate_v1_to_v2(conn)?;
+    }
+
+    // Future migrations: if current < 3 { migrate_v2_to_v3(conn)?; } ...
 
     if current != SCHEMA_VERSION {
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
@@ -258,6 +262,86 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// v1 → v2: add `file_name` and `dir_path` columns to all tables that have
+/// `file_path`. Existing rows are backfilled from `file_path`.
+fn migrate_v1_to_v2(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let tables = ["lineage_nodes", "lineage_columns", "lineage_edges", "project_file_results"];
+
+    for table in &tables {
+        // Check if the table exists
+        let exists: i64 = conn.query_row(
+            &format!("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{table}'"),
+            [],
+            |row| row.get(0),
+        )?;
+        if exists == 0 {
+            continue;
+        }
+
+        // Check columns
+        let cols: Vec<String> = conn
+            .prepare(&format!("PRAGMA table_info({table})"))?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(Result::ok)
+            .collect();
+
+        if !cols.iter().any(|c| c == "file_path") {
+            continue;
+        }
+
+        // Add columns if missing
+        if !cols.iter().any(|c| c == "file_name") {
+            eprintln!("[migrate v1→v2] adding file_name, dir_path to '{table}'...");
+            conn.execute_batch(&format!(
+                "ALTER TABLE {table} ADD COLUMN file_name TEXT NOT NULL DEFAULT '';\n\
+                 ALTER TABLE {table} ADD COLUMN dir_path TEXT NOT NULL DEFAULT '';"
+            ))?;
+        }
+
+        // Always backfill rows where file_name is empty
+        let empty_count: i64 = conn.query_row(
+            &format!("SELECT COUNT(*) FROM {table} WHERE file_name = ''"),
+            [],
+            |row| row.get(0),
+        )?;
+
+        if empty_count > 0 {
+            eprintln!("[migrate v1→v2] backfilling {empty_count} rows in '{table}'...");
+            let rows: Vec<(i64, String)> = conn
+                .prepare(&format!("SELECT rowid, file_path FROM {table} WHERE file_name = ''"))?
+                .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
+                .filter_map(Result::ok)
+                .collect();
+
+            let tx = conn.unchecked_transaction()?;
+            {
+                let mut stmt = tx.prepare(
+                    &format!("UPDATE {table} SET file_name = ?1, dir_path = ?2 WHERE rowid = ?3")
+                )?;
+                for (rowid, fp) in &rows {
+                    let (fn_, dp) = split_file_path(fp);
+                    stmt.execute(params![fn_, dp, rowid])?;
+                }
+            }
+            tx.commit()?;
+            eprintln!("[migrate v1→v2] '{table}' done.");
+        }
+    }
+
+    Ok(())
+}
+
+/// Split a file_path into (file_name, dir_path).
+/// Handles both `/` and `\` separators.
+/// Example: "etl/SUM_公共汇总库/B10.HQL" → ("B10.HQL", "etl/SUM_公共汇总库")
+fn split_file_path(file_path: &str) -> (String, String) {
+    let pos = file_path.rfind(|c| c == '/' || c == '\\');
+    match pos {
+        Some(i) => (file_path[i + 1..].to_string(), file_path[..i].to_string()),
+        None => (file_path.to_string(), String::new()),
+    }
+}
+
 /// Returns the `CREATE TABLE` statement for the given table with the current
 /// (v1) schema — time columns as `TEXT`.
 fn create_table_sql_for(table: &str) -> &'static str {
@@ -305,6 +389,8 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id   TEXT    NOT NULL,
                 file_path    TEXT    NOT NULL,
+                file_name    TEXT    NOT NULL DEFAULT '',
+                dir_path     TEXT    NOT NULL DEFAULT '',
                 result_json  TEXT    NOT NULL,
                 content_hash TEXT    NOT NULL,
                 size_bytes   INTEGER NOT NULL DEFAULT 0,
@@ -318,6 +404,8 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id        TEXT    NOT NULL,
                 file_path         TEXT    NOT NULL,
+                file_name         TEXT    NOT NULL DEFAULT '',
+                dir_path          TEXT    NOT NULL DEFAULT '',
                 node_id           TEXT    NOT NULL,
                 node_type         TEXT    NOT NULL,
                 label             TEXT    NOT NULL,
@@ -334,6 +422,8 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id      TEXT    NOT NULL,
                 file_path       TEXT    NOT NULL,
+                file_name       TEXT    NOT NULL DEFAULT '',
+                dir_path        TEXT    NOT NULL DEFAULT '',
                 column_id       TEXT    NOT NULL,
                 label           TEXT    NOT NULL,
                 qualified_name  TEXT,
@@ -350,6 +440,8 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id      TEXT    NOT NULL,
                 file_path       TEXT    NOT NULL,
+                file_name       TEXT    NOT NULL DEFAULT '',
+                dir_path        TEXT    NOT NULL DEFAULT '',
                 edge_id         TEXT    NOT NULL,
                 from_id         TEXT    NOT NULL,
                 to_id           TEXT    NOT NULL,
@@ -517,6 +609,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id   TEXT    NOT NULL,
             file_path    TEXT    NOT NULL,
+            file_name    TEXT    NOT NULL DEFAULT '',
+            dir_path     TEXT    NOT NULL DEFAULT '',
             result_json  TEXT    NOT NULL,
             content_hash TEXT    NOT NULL,
             size_bytes   INTEGER NOT NULL DEFAULT 0,
@@ -530,6 +624,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id        TEXT    NOT NULL,
             file_path         TEXT    NOT NULL,
+            file_name         TEXT    NOT NULL DEFAULT '',
+            dir_path          TEXT    NOT NULL DEFAULT '',
             node_id           TEXT    NOT NULL,
             node_type         TEXT    NOT NULL,
             label             TEXT    NOT NULL,
@@ -546,6 +642,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id      TEXT    NOT NULL,
             file_path       TEXT    NOT NULL,
+            file_name       TEXT    NOT NULL DEFAULT '',
+            dir_path        TEXT    NOT NULL DEFAULT '',
             column_id       TEXT    NOT NULL,
             label           TEXT    NOT NULL,
             qualified_name  TEXT,
@@ -562,6 +660,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id      TEXT    NOT NULL,
             file_path       TEXT    NOT NULL,
+            file_name       TEXT    NOT NULL DEFAULT '',
+            dir_path        TEXT    NOT NULL DEFAULT '',
             edge_id         TEXT    NOT NULL,
             from_id         TEXT    NOT NULL,
             to_id           TEXT    NOT NULL,
@@ -992,9 +1092,10 @@ pub fn set_file_result(
     content_hash: &str,
 ) -> Result<(), rusqlite::Error> {
     let now = chrono::Utc::now().to_rfc3339();
+    let (file_name, dir_path) = split_file_path(file_path);
     conn.execute(
-        "INSERT OR REPLACE INTO project_file_results (project_id, file_path, result_json, content_hash, size_bytes, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
-        params![project_id, file_path, result_json, content_hash, result_json.len() as i64, now, now],
+        "INSERT OR REPLACE INTO project_file_results (project_id, file_path, file_name, dir_path, result_json, content_hash, size_bytes, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
+        params![project_id, file_path, file_name, dir_path, result_json, content_hash, result_json.len() as i64, now, now],
     )?;
     Ok(())
 }
@@ -1020,12 +1121,18 @@ pub fn get_file_result(
 pub fn get_file_results(
     conn: &Connection,
     project_id: &str,
-) -> Result<Vec<(String, String, String)>, rusqlite::Error> {
+) -> Result<Vec<(String, String, String, String, String)>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT file_path, result_json, content_hash FROM project_file_results WHERE project_id = ?1"
+        "SELECT file_path, result_json, content_hash, file_name, dir_path FROM project_file_results WHERE project_id = ?1"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        Ok((
+            row.get::<_, String>(0)?,  // file_path
+            row.get::<_, String>(1)?,  // result_json
+            row.get::<_, String>(2)?,  // content_hash
+            row.get::<_, String>(3)?,  // file_name
+            row.get::<_, String>(4)?,  // dir_path
+        ))
     })?;
     rows.collect()
 }
@@ -1041,6 +1148,10 @@ pub struct LineageNodeRow {
     pub statement_index: i64,
     pub resolution_source: Option<String>,
     pub file_path: String,
+    #[serde(default)]
+    pub file_name: String,
+    #[serde(default)]
+    pub dir_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1052,6 +1163,10 @@ pub struct LineageColumnRow {
     pub expression: Option<String>,
     pub statement_index: i64,
     pub file_path: String,
+    #[serde(default)]
+    pub file_name: String,
+    #[serde(default)]
+    pub dir_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1063,6 +1178,10 @@ pub struct LineageEdgeRow {
     pub expression: Option<String>,
     pub statement_index: Option<i64>,
     pub file_path: String,
+    #[serde(default)]
+    pub file_name: String,
+    #[serde(default)]
+    pub dir_path: String,
 }
 
 pub fn save_lineage_batch(
@@ -1099,73 +1218,85 @@ pub fn save_lineage_batch(
     }
 
     let now = chrono::Utc::now().to_rfc3339();
-    const CHUNK: usize = 500; // 500 行 × 10 params = 5000,SQLite 3.32+ MAX_VARIABLE=32766 安全
-    let row10 = "(?,?,?,?,?,?,?,?,?,?)";
+    const CHUNK: usize = 500;
+    let row12 = "(?,?,?,?,?,?,?,?,?,?,?,?)";
 
-    // nodes (10 cols)
+    // nodes (12 cols: +file_name, +dir_path)
     for chunk in nodes.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO lineage_nodes (project_id, file_path, node_id, node_type, label, qualified_name, statement_index, resolution_source, created_at, updated_at) VALUES {}",
-            (0..chunk.len()).map(|_| row10).collect::<Vec<_>>().join(",")
+            "INSERT OR REPLACE INTO lineage_nodes (project_id, file_path, file_name, dir_path, node_id, node_type, label, qualified_name, statement_index, resolution_source, created_at, updated_at) VALUES {}",
+            (0..chunk.len()).map(|_| row12).collect::<Vec<_>>().join(",")
         );
-        let mut p: Vec<&dyn ToSql> = Vec::with_capacity(chunk.len() * 10);
+        let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 12);
         for n in chunk {
-            p.push(&project_id);
-            p.push(&n.file_path);
-            p.push(&n.node_id);
-            p.push(&n.node_type);
-            p.push(&n.label);
-            p.push(&n.qualified_name);
-            p.push(&n.statement_index);
-            p.push(&n.resolution_source);
-            p.push(&now);
-            p.push(&now);
+            let (fn_, dp) = split_file_path(&n.file_path);
+            p.push(Box::new(project_id.to_string()));
+            p.push(Box::new(n.file_path.clone()));
+            p.push(Box::new(fn_));
+            p.push(Box::new(dp));
+            p.push(Box::new(n.node_id.clone()));
+            p.push(Box::new(n.node_type.clone()));
+            p.push(Box::new(n.label.clone()));
+            p.push(Box::new(n.qualified_name.clone()));
+            p.push(Box::new(n.statement_index));
+            p.push(Box::new(n.resolution_source.clone()));
+            p.push(Box::new(now.clone()));
+            p.push(Box::new(now.clone()));
         }
-        tx.execute(&sql, params_from_iter(p))?;
+        let p_refs: Vec<&dyn ToSql> = p.iter().map(|b| b.as_ref()).collect();
+        tx.execute(&sql, params_from_iter(p_refs))?;
     }
 
-    // columns (10 cols)
+    // columns (12 cols: +file_name, +dir_path)
     for chunk in columns.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO lineage_columns (project_id, file_path, column_id, label, qualified_name, parent_node_id, expression, statement_index, created_at, updated_at) VALUES {}",
-            (0..chunk.len()).map(|_| row10).collect::<Vec<_>>().join(",")
+            "INSERT OR REPLACE INTO lineage_columns (project_id, file_path, file_name, dir_path, column_id, label, qualified_name, parent_node_id, expression, statement_index, created_at, updated_at) VALUES {}",
+            (0..chunk.len()).map(|_| row12).collect::<Vec<_>>().join(",")
         );
-        let mut p: Vec<&dyn ToSql> = Vec::with_capacity(chunk.len() * 10);
+        let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 12);
         for c in chunk {
-            p.push(&project_id);
-            p.push(&c.file_path);
-            p.push(&c.column_id);
-            p.push(&c.label);
-            p.push(&c.qualified_name);
-            p.push(&c.parent_node_id);
-            p.push(&c.expression);
-            p.push(&c.statement_index);
-            p.push(&now);
-            p.push(&now);
+            let (fn_, dp) = split_file_path(&c.file_path);
+            p.push(Box::new(project_id.to_string()));
+            p.push(Box::new(c.file_path.clone()));
+            p.push(Box::new(fn_));
+            p.push(Box::new(dp));
+            p.push(Box::new(c.column_id.clone()));
+            p.push(Box::new(c.label.clone()));
+            p.push(Box::new(c.qualified_name.clone()));
+            p.push(Box::new(c.parent_node_id.clone()));
+            p.push(Box::new(c.expression.clone()));
+            p.push(Box::new(c.statement_index));
+            p.push(Box::new(now.clone()));
+            p.push(Box::new(now.clone()));
         }
-        tx.execute(&sql, params_from_iter(p))?;
+        let p_refs: Vec<&dyn ToSql> = p.iter().map(|b| b.as_ref()).collect();
+        tx.execute(&sql, params_from_iter(p_refs))?;
     }
 
-    // edges (10 cols)
+    // edges (12 cols: +file_name, +dir_path)
     for chunk in edges.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO lineage_edges (project_id, file_path, edge_id, from_id, to_id, edge_type, expression, statement_index, created_at, updated_at) VALUES {}",
-            (0..chunk.len()).map(|_| row10).collect::<Vec<_>>().join(",")
+            "INSERT OR REPLACE INTO lineage_edges (project_id, file_path, file_name, dir_path, edge_id, from_id, to_id, edge_type, expression, statement_index, created_at, updated_at) VALUES {}",
+            (0..chunk.len()).map(|_| row12).collect::<Vec<_>>().join(",")
         );
-        let mut p: Vec<&dyn ToSql> = Vec::with_capacity(chunk.len() * 10);
+        let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 12);
         for e in chunk {
-            p.push(&project_id);
-            p.push(&e.file_path);
-            p.push(&e.edge_id);
-            p.push(&e.from_id);
-            p.push(&e.to_id);
-            p.push(&e.edge_type);
-            p.push(&e.expression);
-            p.push(&e.statement_index);
-            p.push(&now);
-            p.push(&now);
+            let (fn_, dp) = split_file_path(&e.file_path);
+            p.push(Box::new(project_id.to_string()));
+            p.push(Box::new(e.file_path.clone()));
+            p.push(Box::new(fn_));
+            p.push(Box::new(dp));
+            p.push(Box::new(e.edge_id.clone()));
+            p.push(Box::new(e.from_id.clone()));
+            p.push(Box::new(e.to_id.clone()));
+            p.push(Box::new(e.edge_type.clone()));
+            p.push(Box::new(e.expression.clone()));
+            p.push(Box::new(e.statement_index));
+            p.push(Box::new(now.clone()));
+            p.push(Box::new(now.clone()));
         }
-        tx.execute(&sql, params_from_iter(p))?;
+        let p_refs: Vec<&dyn ToSql> = p.iter().map(|b| b.as_ref()).collect();
+        tx.execute(&sql, params_from_iter(p_refs))?;
     }
 
     tx.commit()?;
@@ -1179,12 +1310,12 @@ pub fn load_lineage_nodes(
 ) -> Result<Vec<LineageNodeRow>, rusqlite::Error> {
     let (sql, params_vec) = if let Some(fp) = file_path {
         (
-            "SELECT node_id, node_type, label, qualified_name, statement_index, resolution_source, file_path FROM lineage_nodes WHERE project_id = ?1 AND file_path = ?2",
+            "SELECT node_id, node_type, label, qualified_name, statement_index, resolution_source, file_path, file_name, dir_path FROM lineage_nodes WHERE project_id = ?1 AND file_path = ?2",
             vec![project_id.to_string(), fp.to_string()],
         )
     } else {
         (
-            "SELECT node_id, node_type, label, qualified_name, statement_index, resolution_source, file_path FROM lineage_nodes WHERE project_id = ?1",
+            "SELECT node_id, node_type, label, qualified_name, statement_index, resolution_source, file_path, file_name, dir_path FROM lineage_nodes WHERE project_id = ?1",
             vec![project_id.to_string()],
         )
     };
@@ -1199,6 +1330,8 @@ pub fn load_lineage_nodes(
             statement_index: row.get(4)?,
             resolution_source: row.get(5)?,
             file_path: row.get(6)?,
+            file_name: row.get(7)?,
+            dir_path: row.get(8)?,
         })
     })?;
     rows.collect()
@@ -1211,12 +1344,12 @@ pub fn load_lineage_columns(
 ) -> Result<Vec<LineageColumnRow>, rusqlite::Error> {
     let (sql, params_vec) = if let Some(fp) = file_path {
         (
-            "SELECT column_id, label, qualified_name, parent_node_id, expression, statement_index, file_path FROM lineage_columns WHERE project_id = ?1 AND file_path = ?2",
+            "SELECT column_id, label, qualified_name, parent_node_id, expression, statement_index, file_path, file_name, dir_path FROM lineage_columns WHERE project_id = ?1 AND file_path = ?2",
             vec![project_id.to_string(), fp.to_string()],
         )
     } else {
         (
-            "SELECT column_id, label, qualified_name, parent_node_id, expression, statement_index, file_path FROM lineage_columns WHERE project_id = ?1",
+            "SELECT column_id, label, qualified_name, parent_node_id, expression, statement_index, file_path, file_name, dir_path FROM lineage_columns WHERE project_id = ?1",
             vec![project_id.to_string()],
         )
     };
@@ -1231,6 +1364,8 @@ pub fn load_lineage_columns(
             expression: row.get(4)?,
             statement_index: row.get(5)?,
             file_path: row.get(6)?,
+            file_name: row.get(7)?,
+            dir_path: row.get(8)?,
         })
     })?;
     rows.collect()
@@ -1243,12 +1378,12 @@ pub fn load_lineage_edges(
 ) -> Result<Vec<LineageEdgeRow>, rusqlite::Error> {
     let (sql, params_vec) = if let Some(fp) = file_path {
         (
-            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path FROM lineage_edges WHERE project_id = ?1 AND file_path = ?2",
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND file_path = ?2",
             vec![project_id.to_string(), fp.to_string()],
         )
     } else {
         (
-            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path FROM lineage_edges WHERE project_id = ?1",
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1",
             vec![project_id.to_string()],
         )
     };
@@ -1263,6 +1398,8 @@ pub fn load_lineage_edges(
             expression: row.get(4)?,
             statement_index: row.get(5)?,
             file_path: row.get(6)?,
+            file_name: row.get(7)?,
+            dir_path: row.get(8)?,
         })
     })?;
     rows.collect()

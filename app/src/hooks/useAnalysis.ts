@@ -13,7 +13,7 @@ import { buildScopedSchemaSQL } from '@/lib/scoped-schema';
 import { AnalysisErrorCode, isAnalysisError } from '@/types';
 import type { AnalysisState, AnalysisContext, FileValidationResult } from '@/types';
 import { loadSchemaFiles } from '@/lib/schema-storage';
-import { writeBatchFileResults, readFileResult, writeSchemaData, writeHierarchyData } from '@/lib/analysis-cache';
+import { writeBatchFileResults, writeSchemaData, writeHierarchyData } from '@/lib/analysis-cache';
 import i18n from '@/i18n';
 
 // Maximum retry attempts for file sync errors to prevent infinite loops
@@ -452,68 +452,9 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     mergeResultStatus,
   ]);
 
-  // 从 SQLite project_file_results 恢复已分析文件的结果。
-  // 当文件切换时，尝试从持久化的单文件结果恢复。
-  useEffect(() => {
-    if (!activeProjectId || !currentProject?.activeFileId) return;
-
-    const activeFile = currentProject.files.find((f) => f.id === currentProject.activeFileId);
-    if (!activeFile) return;
-    const isCurrentFileMode = currentProject.runMode === 'current';
-
-    let cancelled = false;
-
-    readFileResult(activeProjectId, activeFile.path).then((result) => {
-      if (cancelled) return;
-      if (!result) {
-        if (isCurrentFileMode) {
-          startTransition(() => {
-            setLineageResult(null);
-          });
-          mergeResultStatus(null);
-        }
-        return;
-      }
-
-      console.log(`[useAnalysis] SQLite file cache HIT: ${activeFile.path}`);
-      startTransition(() => {
-        setLineageResult(result);
-      });
-      storeResult(activeProjectId, result, hideCTEs);
-      mergeResultStatus({
-        origin: 'cache',
-        source: 'sqlite',
-        restoredAt: Date.now(),
-        persistedAt: null,
-      });
-
-      // 同步 SQL 预览
-      if (activeFile.content) {
-        setLineageSql(activeFile.content);
-      }
-
-      const restoreToastKey = `sqlite:${activeProjectId}:${activeFile.path}`;
-      if (lastRestoreToastKeyRef.current !== restoreToastKey) {
-        toast.success(i18n.t('analysis.restoredPersistentResult'), {
-          description: activeFile.path,
-          duration: 2200,
-        });
-        lastRestoreToastKeyRef.current = restoreToastKey;
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeProjectId,
-    currentProject?.activeFileId,
-    currentProject?.files,
-    currentProject?.runMode,
-    hideCTEs,
-    storeResult,
-    mergeResultStatus,
-  ]);
+  // NOTE: 第三层 SQLite 恢复已移除（大数据量时每次刷新拉 10-50MB JSON 会卡）。
+  // 如需恢复，取消注释下方的 useEffect。
+  // 刷新后只保留内存/IndexedDB 缓存，不再从 SQLite 拉完整 AnalyzeResult。
 
   const runAnalysis = useCallback(
     async (

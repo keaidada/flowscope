@@ -1028,8 +1028,8 @@ async fn get_file_results_api(
     let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let results = store::get_file_results(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let list: Vec<serde_json::Value> = results.into_iter().map(|(fp, json, hash)| {
-        serde_json::json!({ "filePath": fp, "resultJson": json, "contentHash": hash })
+    let list: Vec<serde_json::Value> = results.into_iter().map(|(fp, json, hash, fn_, dp)| {
+        serde_json::json!({ "filePath": fp, "resultJson": json, "contentHash": hash, "fileName": fn_, "dirPath": dp })
     }).collect();
     Ok(Json(serde_json::json!({ "files": list })).into_response())
 }

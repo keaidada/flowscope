@@ -41,6 +41,8 @@ export interface LineageNodeRow {
   statement_index: number;
   resolution_source: string | null;
   file_path: string;
+  file_name?: string;
+  dir_path?: string;
 }
 
 export interface LineageColumnRow {
@@ -51,6 +53,8 @@ export interface LineageColumnRow {
   expression: string | null;
   statement_index: number;
   file_path: string;
+  file_name?: string;
+  dir_path?: string;
 }
 
 export interface LineageEdgeRow {
@@ -61,6 +65,8 @@ export interface LineageEdgeRow {
   expression: string | null;
   statement_index: number | null;
   file_path: string;
+  file_name?: string;
+  dir_path?: string;
 }
 
 async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -184,6 +190,8 @@ export interface ProjectFileResultRow {
   file_path: string;
   content_hash: string;
   updated_at: string;
+  file_name?: string;
+  dir_path?: string;
 }
 export async function saveProjectFileResults(
   projectId: string,
@@ -197,11 +205,13 @@ export async function saveProjectFileResults(
 export async function loadProjectFileResults(
   projectId: string
 ): Promise<ProjectFileResultRow[]> {
-  const resp = await api<{ files: FileResult[] }>('GET', `/file-results?projectId=${encodeURIComponent(projectId)}`);
+  const resp = await api<{ files: Array<{ filePath: string; contentHash: string; fileName?: string; dirPath?: string }> }>('GET', `/file-results?projectId=${encodeURIComponent(projectId)}`);
   return resp.files.map(f => ({
     file_path: f.filePath,
     content_hash: f.contentHash || '',
     updated_at: '',
+    file_name: f.fileName,
+    dir_path: f.dirPath,
   }));
 }
 

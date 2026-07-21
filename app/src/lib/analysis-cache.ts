@@ -274,6 +274,8 @@ export interface LineageNodeRow {
   label: string;
   qualifiedName: string | null;
   filePath: string;
+  fileName?: string;
+  dirPath?: string;
   statementIndex: number;
 }
 
@@ -284,6 +286,8 @@ export interface LineageColumnRow {
   parentNodeId: string | null;
   expression: string | null;
   filePath: string;
+  fileName?: string;
+  dirPath?: string;
   statementIndex: number;
 }
 
@@ -294,6 +298,8 @@ export interface LineageEdgeRow {
   edgeType: string;
   expression: string | null;
   filePath: string;
+  fileName?: string;
+  dirPath?: string;
   statementIndex: number | null;
 }
 
@@ -312,6 +318,8 @@ export async function queryLineageNodes(
     label: n.label,
     qualifiedName: n.qualified_name,
     filePath: n.file_path,
+    fileName: n.file_name,
+    dirPath: n.dir_path,
     statementIndex: n.statement_index,
   }));
 }
@@ -332,6 +340,8 @@ export async function queryLineageColumns(
     parentNodeId: c.parent_node_id,
     expression: c.expression,
     filePath: c.file_path,
+    fileName: c.file_name,
+    dirPath: c.dir_path,
     statementIndex: c.statement_index,
   }));
 }
@@ -348,6 +358,8 @@ export async function queryLineageEdges(
     edgeType: e.edge_type,
     expression: e.expression,
     filePath: e.file_path,
+    fileName: e.file_name,
+    dirPath: e.dir_path,
     statementIndex: e.statement_index,
   }));
 }
@@ -517,95 +529,191 @@ export async function readGlobalLineageFromTables(
 // ── 数据洞察搜索 ────────────────────────────────────────────────
 
 /**
- * 在已加载的 AnalyzeResult 中搜索脚本和表。
- * 匹配 sourceName（脚本名）、label（表名）、qualifiedName（全限定名）。
- * 从匹配节点出发沿 data_flow 边 BFS 上下游扩散找到关联表。
- * 纯内存操作，不依赖后端 API。
+ * 过滤掉在结果集中没有可见边的孤立脚本。
+ * 用 qualifiedName 匹配（与 GraphView 的 getScriptIO/buildDirectScriptGraph 一致）。
  */
-export function searchLineageForInsights(
-  result: AnalyzeResult,
-  searchTerm: string
-): AnalyzeResult | null {
+function filterOrphanScripts(
+  scripts: Set<string>,
+  scriptReads: Map<string, Set<string>>,
+  scriptWrites: Map<string, Set<string>>,
+  qnameReaders: Map<string, Set<string>>,
+  qnameWriters: Map<string, Set<string>>,
+): Set<string> {
+  const result = new Set<string>();
+  for (const script of scripts) {
+    const reads = scriptReads.get(script) ?? new Set();
+    const writes = scriptWrites.get(script) ?? new Set();
+    let hasEdge = false;
+    for (const qn of [...reads, ...writes]) {
+      const connected = [...(qnameReaders.get(qn) ?? []), ...(qnameWriters.get(qn) ?? [])];
+      if (connected.some((s) => s !== script && scripts.has(s))) {
+        hasEdge = true;
+        break;
+      }
+    }
+    if (hasEdge) result.add(script);
+  }
+  return result;
+}
+
+/**
+ * 从数据库 lineage_nodes 表查询数据洞察。
+ * 只查 lineage_nodes（不查 lineage_edges），用 resolution_source 判断读写方向。
+ * resolution_source='implied' → 写入表(产出)，其他 → 读取表(源)。
+ */
+export async function searchLineageForInsights(
+  projectId: string,
+  searchTerm: string,
+  maxDepth: number = 1,
+): Promise<AnalyzeResult | null> {
   const term = searchTerm.trim().toLowerCase();
   if (!term) return null;
 
-  // 收集所有匹配的节点 ID（按 label / qualifiedName / sourceName）
-  const matchedNodeIds = new Set<string>();
-  const matchedSourceNames = new Set<string>();
-
-  for (const stmt of result.statements) {
-    if (stmt.sourceName && stmt.sourceName.toLowerCase().includes(term)) {
-      matchedSourceNames.add(stmt.sourceName);
-      for (const node of stmt.nodes) {
-        matchedNodeIds.add(node.id);
-      }
-    }
-    for (const node of stmt.nodes) {
-      if (
-        node.label.toLowerCase().includes(term) ||
-        (node.qualifiedName && node.qualifiedName.toLowerCase().includes(term))
-      ) {
-        matchedNodeIds.add(node.id);
-      }
-    }
-  }
-
-  if (matchedNodeIds.size === 0 && matchedSourceNames.size === 0) return null;
-
-  // 构建全量 data_flow 邻接表（跨语句）
-  const adjFrom = new Map<string, string[]>();
-  const adjTo = new Map<string, string[]>();
-  for (const stmt of result.statements) {
-    for (const edge of stmt.edges) {
-      if (edge.type !== 'data_flow') continue;
-      if (!adjFrom.has(edge.from)) adjFrom.set(edge.from, []);
-      adjFrom.get(edge.from)!.push(edge.to);
-      if (!adjTo.has(edge.to)) adjTo.set(edge.to, []);
-      adjTo.get(edge.to)!.push(edge.from);
-    }
-  }
-
-  // BFS 从匹配节点出发上下游扩散
-  const reachableIds = new Set<string>();
-  const queue = [...matchedNodeIds];
-  for (const id of queue) {
-    if (reachableIds.has(id)) continue;
-    reachableIds.add(id);
-    for (const next of adjFrom.get(id) || []) {
-      if (!reachableIds.has(next)) queue.push(next);
-    }
-    for (const prev of adjTo.get(id) || []) {
-      if (!reachableIds.has(prev)) queue.push(prev);
-    }
-  }
-
-  // 过滤 statements：只保留包含 reachable 节点或匹配 sourceName 的语句
-  const filteredStatements = result.statements
-    .filter((stmt) => {
-      if (matchedSourceNames.has(stmt.sourceName ?? '')) return true;
-      return stmt.nodes.some((n) => reachableIds.has(n.id));
-    })
-    .map((stmt) => ({
-      ...stmt,
-      edges: stmt.edges.filter(
-        (e) => reachableIds.has(e.from) && reachableIds.has(e.to),
-      ),
-    }));
-
-  if (filteredStatements.length === 0) return null;
-
-  const tableCount = filteredStatements.reduce(
-    (sum, s) => sum + s.nodes.length,
-    0,
+  // ── 1. 查 lineage_nodes（只取 table/view）──────────────────
+  const rawNodes = await serverDb.getLineageNodes(projectId);
+  const rawTableNodes = rawNodes.filter(
+    (n) => n.node_type === 'table' || n.node_type === 'view',
   );
 
+  // ── 2. 按脚本分组，区分 READ / WRITE ─────────────────────
+  // implied → WRITE, 其他 → READ
+  const scriptWrites = new Map<string, Set<string>>(); // script → qNames written
+  const scriptReads = new Map<string, Set<string>>();  // script → qNames read
+  const qnameWriters = new Map<string, Set<string>>();
+  const qnameReaders = new Map<string, Set<string>>();
+
+  for (const n of rawTableNodes) {
+    const script = n.file_path;
+    const qn = (n.qualified_name ?? n.label).toLowerCase();
+    const isWrite = n.resolution_source === 'implied';
+
+    if (isWrite) {
+      if (!scriptWrites.has(script)) scriptWrites.set(script, new Set());
+      scriptWrites.get(script)!.add(qn);
+      if (!qnameWriters.has(qn)) qnameWriters.set(qn, new Set());
+      qnameWriters.get(qn)!.add(script);
+    } else {
+      if (!scriptReads.has(script)) scriptReads.set(script, new Set());
+      scriptReads.get(script)!.add(qn);
+      if (!qnameReaders.has(qn)) qnameReaders.set(qn, new Set());
+      qnameReaders.get(qn)!.add(script);
+    }
+  }
+
+  // ── 3. 脚本级有向边 ──────────────────────────────────
+  const scriptDown = new Map<string, Set<string>>(); // writer → {readers}
+  const scriptUp = new Map<string, Set<string>>();   // reader → {writers}
+  for (const [script, reads] of scriptReads) {
+    for (const qname of reads) {
+      for (const writer of qnameWriters.get(qname) ?? []) {
+        if (writer === script) continue;
+        if (!scriptDown.has(writer)) scriptDown.set(writer, new Set());
+        scriptDown.get(writer)!.add(script);
+        if (!scriptUp.has(script)) scriptUp.set(script, new Set());
+        scriptUp.get(script)!.add(writer);
+      }
+    }
+  }
+
+  // ── 4. 匹配搜索词 ────────────────────────────────────
+  const matchedScripts = new Set<string>();
+  for (const n of rawTableNodes) {
+    if (
+      n.file_path.toLowerCase().includes(term) ||
+      (n.file_name ?? '').toLowerCase().includes(term) ||
+      n.label.toLowerCase().includes(term) ||
+      (n.qualified_name ?? '').toLowerCase().includes(term)
+    ) {
+      const qn = (n.qualified_name ?? n.label).toLowerCase();
+      for (const s of qnameReaders.get(qn) ?? []) matchedScripts.add(s);
+      for (const s of qnameWriters.get(qn) ?? []) matchedScripts.add(s);
+    }
+  }
+  if (matchedScripts.size === 0) return null;
+
+  // ── 5. 脚本级有向 BFS ────────────────────────────────
+  const upstreamScripts = new Set<string>();
+  const upQ: Array<[string, number]> = [];
+  for (const s of matchedScripts) upQ.push([s, 0]);
+  for (let i = 0; i < upQ.length; i++) {
+    const [s, d] = upQ[i];
+    if (upstreamScripts.has(s)) continue;
+    upstreamScripts.add(s);
+    if (d >= maxDepth) continue;
+    for (const prev of scriptUp.get(s) ?? []) {
+      if (!upstreamScripts.has(prev)) upQ.push([prev, d + 1]);
+    }
+  }
+
+  const downstreamScripts = new Set<string>();
+  const dnQ: Array<[string, number]> = [];
+  for (const s of matchedScripts) dnQ.push([s, 0]);
+  for (let i = 0; i < dnQ.length; i++) {
+    const [s, d] = dnQ[i];
+    if (downstreamScripts.has(s)) continue;
+    downstreamScripts.add(s);
+    if (d >= maxDepth) continue;
+    for (const next of scriptDown.get(s) ?? []) {
+      if (!downstreamScripts.has(next)) dnQ.push([next, d + 1]);
+    }
+  }
+
+  let reachableScripts = new Set([
+    ...matchedScripts,
+    ...upstreamScripts,
+    ...downstreamScripts,
+  ]);
+
+  // ── 6. 过滤孤立脚本 ────────────────────────────────────
+  reachableScripts = filterOrphanScripts(
+    reachableScripts,
+    scriptReads,
+    scriptWrites,
+    qnameReaders,
+    qnameWriters,
+  );
+
+  // ── 7. 构建 AnalyzeResult ────────────────────────────
+  // 按脚本分组节点，用 metadata.isCreated 标记写入表
+  const scriptNodeMap = new Map<string, Node[]>();
+  for (const n of rawTableNodes) {
+    if (!reachableScripts.has(n.file_path)) continue;
+    if (!scriptNodeMap.has(n.file_path)) scriptNodeMap.set(n.file_path, []);
+    const isWrite = n.resolution_source === 'implied';
+    scriptNodeMap.get(n.file_path)!.push({
+      id: n.node_id,
+      type: n.node_type as 'table' | 'view',
+      label: n.label,
+      qualifiedName: n.qualified_name ?? undefined,
+      ...(isWrite ? { metadata: { isCreated: true } } : {}),
+    });
+  }
+
+  const statements: StatementLineage[] = [];
+  let stmtIdx = 0;
+  for (const script of reachableScripts) {
+    const nodes = scriptNodeMap.get(script) ?? [];
+    if (nodes.length === 0) continue;
+    statements.push({
+      statementIndex: stmtIdx++,
+      statementType: 'SELECT',
+      sourceName: script,
+      nodes,
+      edges: [],
+      joinCount: 0,
+      complexityScore: 0,
+    });
+  }
+
+  if (statements.length === 0) return null;
+
   return {
-    statements: filteredStatements,
+    statements,
     globalLineage: { nodes: [], edges: [] },
     issues: [],
     summary: {
-      statementCount: filteredStatements.length,
-      tableCount,
+      statementCount: statements.length,
+      tableCount: statements.reduce((s, st) => s + st.nodes.length, 0),
       columnCount: 0,
       joinCount: 0,
       complexityScore: 0,

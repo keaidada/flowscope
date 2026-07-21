@@ -1003,12 +1003,16 @@ function createScriptNodes(
       lowerCaseSearchTerm && sourceName.toLowerCase().includes(lowerCaseSearchTerm)
     );
 
+    // Display only the filename, not the full path
+    const sep = Math.max(sourceName.lastIndexOf('/'), sourceName.lastIndexOf('\\'));
+    const shortLabel = sep >= 0 ? sourceName.substring(sep + 1) : sourceName;
+
     nodes.push({
       id: `script:${sourceName}`,
       type: 'scriptNode',
       position: { x: 0, y: 0 },
       data: {
-        label: sourceName,
+        label: shortLabel,
         sourceName,
         tablesRead: Array.from(reads),
         tablesWritten: Array.from(writes),
