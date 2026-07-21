@@ -971,9 +971,9 @@ function buildDirectScriptGraph(scriptMap: Map<string, StatementLineageWithSourc
                 id: edgeId,
                 source: `script:${producerScript}`,
                 target: `script:${consumerScript}`,
-                sourceHandle: `w:${table}`,
-                targetHandle: `r:${table}`,
                 type: 'animated',
+                targetHandle: `r:${table}`,
+                data: { table },
               });
             }
           }
@@ -1019,12 +1019,8 @@ export function buildScriptLevelGraph(
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
   const scriptMap = groupStatementsByScript(statements);
   const scriptNodes = createScriptNodes(scriptMap, selectedNodeId, searchTerm);
-
-  if (showTables) {
-    const edges = buildDirectScriptGraph(scriptMap, true);
-    return { nodes: scriptNodes, edges };
-  } else {
-    const edges = buildDirectScriptGraph(scriptMap, false);
-    return { nodes: scriptNodes, edges };
-  }
+  const edges = showTables
+    ? buildDirectScriptGraph(scriptMap, true)
+    : buildDirectScriptGraph(scriptMap, false);
+  return { nodes: scriptNodes, edges };
 }

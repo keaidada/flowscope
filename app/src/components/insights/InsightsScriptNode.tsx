@@ -1,18 +1,17 @@
-import { useCallback, useRef, useState, type JSX } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { FileCode, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { useLineageStore, useColors } from '@pondpilot/flowscope-react';
 import type { ScriptNodeData } from '@pondpilot/flowscope-react';
+import { shouldHighlightRow, toggleHighlight, onHighlightChange } from './highlightState';
 
-const ROW = 20;
-const HDR = 52;
-
-function InsightsScriptNodeComponent({ data, selected }: NodeProps): JSX.Element {
+function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
   const c = useColors();
   const s = c.nodes.script;
-  const { label, tableNamesRead, tableNamesWritten, isSelected, isHighlighted } = data as ScriptNodeData;
+  const { label, sourceName, tableNamesRead, tableNamesWritten, isSelected, isHighlighted } = data as ScriptNodeData;
   const reads = tableNamesRead ?? [];
   const writes = tableNamesWritten ?? [];
+  const updateNodeInternals = useUpdateNodeInternals();
 
   const [copied, setCopied] = useState(false);
   const showScriptTables = useLineageStore((state) => state.showScriptTables);
@@ -20,6 +19,15 @@ function InsightsScriptNodeComponent({ data, selected }: NodeProps): JSX.Element
   const prev = useRef(showScriptTables);
   if (prev.current !== showScriptTables) { if (local !== null) setLocal(null); prev.current = showScriptTables; }
   const expanded = local ?? showScriptTables;
+
+  // 订阅高亮
+  const [, force] = useState(0);
+  const inited = useRef(false);
+  if (!inited.current) { inited.current = true; onHighlightChange(() => force((n) => n + 1)); }
+
+  useEffect(() => {
+    requestAnimationFrame(() => updateNodeInternals(id as string));
+  }, [id, expanded, reads.length, writes.length, updateNodeInternals]);
 
   const handleCopy = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -32,9 +40,9 @@ function InsightsScriptNodeComponent({ data, selected }: NodeProps): JSX.Element
   }, [showScriptTables]);
 
   const active = selected || isSelected;
-  // Y offsets matching visual CSS layout
-  const readY = (i: number) => 89 + i * ROW;
-  const writeY = (i: number) => 89 + Math.max(reads.length, 1) * ROW + 32 + i * ROW;
+  const readY = (i: number) => 95 + i * 22;
+  const writeY = (i: number) => 95 + Math.max(reads.length, 1) * 22 + 34 + i * 22;
+
 
   return (
     <div style={{
@@ -43,26 +51,27 @@ function InsightsScriptNodeComponent({ data, selected }: NodeProps): JSX.Element
       boxShadow: active ? `0 0 0 2px ${c.interactive.selectionRing}` : isHighlighted ? `0 0 0 2px ${c.interactive.selectionRing}` : undefined,
     }} className="min-w-[240px] max-w-[380px] rounded-lg border-2 shadow-xs transition-all duration-200">
 
-      {/* Node-level defaults: 仅收起模式 */}
-      {!showScriptTables && (
+      {!expanded && (
         <>
-          <Handle type="target" position={Position.Left} className="bg-transparent! border-none!" style={{ top: HDR / 2 }} />
-          <Handle type="source" position={Position.Right} className="bg-transparent! border-none!" style={{ top: HDR / 2 }} />
+          <Handle type="target" position={Position.Left} className="bg-transparent! border-none!" style={{ top: '26px' }} />
+          <Handle type="source" position={Position.Right} className="bg-transparent! border-none!" style={{ top: '26px' }} />
         </>
       )}
 
-      {/* 表级 Handle: 始终渲染，展开模式生效 */}
-      {reads.map((t, i) => (
-        <Handle key={`rh-${i}`} id={`r:${t}`} type="target" position={Position.Left}
-          style={{ opacity: 0.6, width: 8, height: 8, top: readY(i), left: -4, border: '2px solid #22c55e', background: '#22c55e', borderRadius: '50%' }} />
-      ))}
-      {writes.map((t, i) => (
-        <Handle key={`wh-${i}`} id={`w:${t}`} type="source" position={Position.Right}
-          style={{ opacity: 0.6, width: 8, height: 8, top: writeY(i), right: -4, border: '2px solid #3b82f6', background: '#3b82f6', borderRadius: '50%' }} />
-      ))}
+      {expanded && (
+        <>
+          {reads.map((t, i) => (
+            <Handle key={`rh-${i}`} id={`r:${t}`} type="target" position={Position.Left}
+              style={{ top: readY(i), width: 6, height: 6, left: -3, border: '2px solid #22c55e', background: '#22c55e', borderRadius: '50%' }} />
+          ))}
+          {writes.map((t, i) => (
+            <Handle key={`wh-${i}`} id={`w:${t}`} type="source" position={Position.Right}
+              style={{ top: writeY(i), width: 6, height: 6, right: -3, border: '2px solid #3b82f6', background: '#3b82f6', borderRadius: '50%' }} />
+          ))}
+        </>
+      )}
 
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3" style={{ height: HDR, boxSizing: 'border-box' }}>
+      <div className="flex items-center gap-2 px-3 py-2.5">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded" style={{ backgroundColor: s.headerBg, color: s.accent }}>
           <FileCode className="h-4 w-4" strokeWidth={1.5} />
         </div>
@@ -77,35 +86,45 @@ function InsightsScriptNodeComponent({ data, selected }: NodeProps): JSX.Element
             <span>入 {reads.length}</span><span>出 {writes.length}</span>
           </div>
         </div>
-        <button onClick={toggle}
-          className="shrink-0 p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors">
+        <button onClick={toggle} className="shrink-0 p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors">
           {expanded ? <ChevronUp className="h-4 w-4" style={{ color: s.textSecondary }} /> : <ChevronDown className="h-4 w-4" style={{ color: s.textSecondary }} />}
         </button>
       </div>
 
-      {/* Expanded table rows */}
       {expanded && (
         <div className="border-t max-h-[300px] overflow-y-auto" style={{ borderColor: s.border }}>
           {reads.length > 0 && (
             <div className="px-2 py-1.5">
               <div className="text-xs font-semibold mb-1 px-1" style={{ color: c.status.success }}>输入 ({reads.length})</div>
-              {reads.map((t) => (
-                <div key={t} className="text-xs flex items-center rounded py-0.5 px-1.5" style={{ color: s.textSecondary }}>
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.success }} />
-                  <span className="truncate" title={t}>{t}</span>
-                </div>
-              ))}
+              {reads.map((t) => {
+                const isHL = shouldHighlightRow(t, 'read', sourceName);
+                return (
+                  <div key={t} className="text-xs flex items-center cursor-pointer rounded transition-colors"
+                    style={{ color: isHL ? c.interactive.selection : s.textSecondary, backgroundColor: isHL ? c.interactive.hover : 'transparent', fontWeight: isHL ? 600 : 400, padding: '3px 6px' }}
+                    onClick={(e) => { e.stopPropagation(); toggleHighlight(t, 'read', sourceName); }} title={t}>
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.success }} />
+                    <span className="truncate flex-1">{t}</span>
+                    {isHL && <span className="text-[10px] font-semibold px-1 rounded shrink-0 ml-1" style={{ backgroundColor: `${c.accent}20`, color: c.accent }}>关联</span>}
+                  </div>
+                );
+              })}
             </div>
           )}
           {writes.length > 0 && (
             <div className="px-2 py-1.5 border-t" style={{ borderColor: `${s.border}44` }}>
               <div className="text-xs font-semibold mb-1 px-1" style={{ color: c.status.info }}>输出 ({writes.length})</div>
-              {writes.map((t) => (
-                <div key={t} className="text-xs flex items-center rounded py-0.5 px-1.5" style={{ color: s.textSecondary }}>
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.info }} />
-                  <span className="truncate" title={t}>{t}</span>
-                </div>
-              ))}
+              {writes.map((t) => {
+                const isHL = shouldHighlightRow(t, 'write', sourceName);
+                return (
+                  <div key={t} className="text-xs flex items-center cursor-pointer rounded transition-colors"
+                    style={{ color: isHL ? c.interactive.selection : s.textSecondary, backgroundColor: isHL ? c.interactive.hover : 'transparent', fontWeight: isHL ? 600 : 400, padding: '3px 6px' }}
+                    onClick={(e) => { e.stopPropagation(); toggleHighlight(t, 'write', sourceName); }} title={t}>
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.info }} />
+                    <span className="truncate flex-1">{t}</span>
+                    {isHL && <span className="text-[10px] font-semibold px-1 rounded shrink-0 ml-1" style={{ backgroundColor: `${c.accent}20`, color: c.accent }}>关联</span>}
+                  </div>
+                );
+              })}
             </div>
           )}
           {reads.length === 0 && writes.length === 0 && (

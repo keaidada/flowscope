@@ -88,7 +88,7 @@ function calculateNodeHeight(node: WorkerNodeData): number {
 
   // Script node expanded tables
   if (node.tableCount > 0) {
-    height += node.tableCount * 20 + 28; // 20px per row + 28px headers
+    height += node.tableCount * 24 + 40;
   }
 
   return height;

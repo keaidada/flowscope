@@ -346,6 +346,7 @@ export function GraphView({
   fitViewTrigger,
   namespaceFilter,
   customNodeTypes,
+  customEdgeTypes,
   scriptOnly,
 }: GraphViewProps): JSX.Element {
   const { t } = useTranslation();
@@ -1024,7 +1025,7 @@ export function GraphView({
         onEdgeClick={handleEdgeClick}
         onPaneClick={handlePaneClick}
         nodeTypes={customNodeTypes ? { ...nodeTypes, ...customNodeTypes } : nodeTypes}
-        edgeTypes={edgeTypes}
+        edgeTypes={customEdgeTypes ? { ...edgeTypes, ...customEdgeTypes } : edgeTypes}
         fitView={!initialViewport}
         minZoom={0.1}
         maxZoom={2}

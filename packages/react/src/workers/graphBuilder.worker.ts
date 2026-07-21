@@ -1045,7 +1045,7 @@ function buildDirectScriptGraph(
       const { readQualified: consumerReads } = getScriptIO(consumerStmts);
 
       if (useTableHandles) {
-        // 每张共享表一条边，带 sourceHandle/targetHandle
+        // 每张共享表一条边，带表名在 data 中
         producerWrites.forEach((table) => {
           if (consumerReads.has(table)) {
             const edgeId = `${producerScript}->${consumerScript}:${table}`;
@@ -1055,9 +1055,8 @@ function buildDirectScriptGraph(
                 id: edgeId,
                 source: `script:${producerScript}`,
                 target: `script:${consumerScript}`,
-                sourceHandle: `w:${table}`,
-                targetHandle: `r:${table}`,
                 type: 'animated',
+                data: { table },
               });
             }
           }
@@ -1097,15 +1096,18 @@ function buildScriptLevelGraph(
   statements: StatementLineageWithSource[],
   selectedNodeId: string | null,
   searchTerm: string,
-  showTables: boolean
+  _showTables: boolean
 ): { nodes: SerializedFlowNode[]; edges: SerializedFlowEdge[] } {
   const scriptMap = groupStatementsByScript(statements);
   const scriptNodes = createScriptNodes(scriptMap, selectedNodeId, searchTerm);
-
-  // 展开模式用表级 Handle，收起用节点级
+  const showTables = _showTables;
   const edges = showTables
     ? buildDirectScriptGraph(scriptMap, true)
     : buildDirectScriptGraph(scriptMap, false);
+  if (showTables && edges.length > 0) {
+    const names = edges.slice(0, 5).map(e => `${(e as any).sourceHandle ?? '-'}→${(e as any).targetHandle ?? '-'}`);
+    console.log(`[GraphBuilder] tableEdges:${edges.length}`, names);
+  }
   return { nodes: scriptNodes, edges };
 }
 

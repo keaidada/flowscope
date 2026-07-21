@@ -11,6 +11,7 @@ import { searchLineageForInsights } from '@/lib/analysis-cache';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { InsightsScriptNode } from './InsightsScriptNode';
+import { TableEdge } from './TableEdge';
 
 function DepthControl({
   label, icon: Icon, value, onChange,
@@ -150,6 +151,7 @@ export function InsightsGraphView({
                 focusNodeId={focusNodeId}
                 onFocusApplied={onFocusApplied}
                 customNodeTypes={{ scriptNode: InsightsScriptNode }}
+                customEdgeTypes={{ animated: TableEdge }}
                 scriptOnly
               />
             </GraphErrorBoundary>

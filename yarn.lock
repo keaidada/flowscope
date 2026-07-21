@@ -2010,6 +2010,15 @@
     loupe "^3.1.4"
     tinyrainbow "^2.0.0"
 
+"@xyflow/react@12.11.2":
+  version "12.11.2"
+  resolved "https://registry.yarnpkg.com/@xyflow/react/-/react-12.11.2.tgz#1c492c7ed6544a33fec8014862e9e662ac20084e"
+  integrity sha512-eLAlDWJfWnQEhJwGMjlWdAXO9eYllKpliUmPQlAmOLxz6mExXuzMVDUKLMquixgkrtmMFFtug3jGKmYYld12cA==
+  dependencies:
+    "@xyflow/system" "0.0.79"
+    classcat "^5.0.3"
+    zustand "^4.4.0"
+
 "@xyflow/react@^12.10.0":
   version "12.10.0"
   resolved "https://registry.npmjs.org/@xyflow/react/-/react-12.10.0.tgz"
@@ -2023,6 +2032,21 @@
   version "0.0.74"
   resolved "https://registry.npmjs.org/@xyflow/system/-/system-0.0.74.tgz"
   integrity sha512-7v7B/PkiVrkdZzSbL+inGAo6tkR/WQHHG0/jhSvLQToCsfa8YubOGmBYd1s08tpKpihdHDZFwzQZeR69QSBb4Q==
+  dependencies:
+    "@types/d3-drag" "^3.0.7"
+    "@types/d3-interpolate" "^3.0.4"
+    "@types/d3-selection" "^3.0.10"
+    "@types/d3-transition" "^3.0.8"
+    "@types/d3-zoom" "^3.0.8"
+    d3-drag "^3.0.0"
+    d3-interpolate "^3.0.1"
+    d3-selection "^3.0.0"
+    d3-zoom "^3.0.0"
+
+"@xyflow/system@0.0.79":
+  version "0.0.79"
+  resolved "https://registry.yarnpkg.com/@xyflow/system/-/system-0.0.79.tgz#3459a0b365776f4a579df54962e42e201567c192"
+  integrity sha512-czLyOh91NF0hIzbNzwi8I6GlqG23BHh2435OddfI6uiaLH3xdrdygO93gqgH1Bv9mhy8XPFQJOBn1FTq4LvEWA==
   dependencies:
     "@types/d3-drag" "^3.0.7"
     "@types/d3-interpolate" "^3.0.4"

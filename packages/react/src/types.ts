@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import type { NodeProps } from '@xyflow/react';
+import type { NodeProps, EdgeProps } from '@xyflow/react';
 import type {
   AnalyzeResult,
   Node,
@@ -246,6 +246,8 @@ export interface GraphViewProps {
   namespaceFilter?: NamespaceFilter;
   /** Custom node type components to override defaults (e.g. for insights mode) */
   customNodeTypes?: Record<string, React.ComponentType<NodeProps>>;
+  /** Custom edge type components to override defaults */
+  customEdgeTypes?: Record<string, React.ComponentType<EdgeProps>>;
   /** When true, replaces ViewModeSelector with a showScriptTables toggle */
   scriptOnly?: boolean;
 }

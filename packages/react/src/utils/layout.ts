@@ -184,7 +184,7 @@ function calculateNodeHeight(data: NodeData | undefined): number {
   const writeLen = Array.isArray(d.tablesWritten) ? d.tablesWritten.length : 0;
   const totalTables = readLen + writeLen;
   if (totalTables > 0) {
-    height += totalTables * 20 + 28;
+    height += totalTables * 24 + 40;
   }
 
   return height;
