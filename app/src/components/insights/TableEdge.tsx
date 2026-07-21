@@ -1,21 +1,15 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, Position, type EdgeProps, useInternalNode } from '@xyflow/react';
 import type { ScriptNodeData } from '@pondpilot/flowscope-react';
-import { getHighlightedTable, onHighlightChange } from './highlightState';
+import { shouldHighlightEdge, onHighlightChange } from './highlightState';
 import { useState, useEffect } from 'react';
 
 const ROW = 22;
 
 function rowY(idx: number, readsLen: number, isWrite: boolean): number {
-  if (isWrite) {
-    return 95 + Math.max(readsLen, 1) * ROW + 34 + idx * ROW;
-  }
+  if (isWrite) return 95 + Math.max(readsLen, 1) * ROW + 34 + idx * ROW;
   return 95 + idx * ROW;
 }
 
-/**
- * 数据洞察边：完全不用 React Flow 传的 sourceX/Y（Handle bug 时会错误回退到节点中心）。
- * 自己用 useInternalNode 拿到真实宽高计算连接点。
- */
 export function TableEdge({ id, source, target, data, markerEnd }: EdgeProps) {
   const [, force] = useState(0);
   useEffect(() => { onHighlightChange(() => force(n => n + 1)); }, []);
@@ -29,7 +23,6 @@ export function TableEdge({ id, source, target, data, markerEnd }: EdgeProps) {
   const si = (sd?.tableNamesWritten ?? []).indexOf(tn ?? '');
   const ti = (td?.tableNamesRead ?? []).indexOf(tn ?? '');
 
-  // 用 internal node 的真实位置（避免 React Flow Handle bug 的错误回退位置）
   const sx = (src?.internals?.positionAbsolute?.x ?? 0) + (src?.measured?.width ?? 240);
   const sy = (src?.internals?.positionAbsolute?.y ?? 0) + (si >= 0 ? rowY(si, (sd?.tableNamesRead ?? []).length, true) : 26);
   const tx = tgt?.internals?.positionAbsolute?.x ?? 0;
@@ -41,8 +34,12 @@ export function TableEdge({ id, source, target, data, markerEnd }: EdgeProps) {
     curvature: 0.25,
   });
   const sn = tn?.split('.').pop() ?? '';
-  const hl = getHighlightedTable();
-  const isHL = hl === tn;
+
+  // 方向性高亮：读行 → 只高亮连到自己（target）的写者边；写行 → 只高亮自己（source）连出的读者边
+  const srcScript = sd?.sourceName ?? '';
+  const tgtScript = td?.sourceName ?? '';
+  const isHL = shouldHighlightEdge(tn ?? '', srcScript, tgtScript);
+
   const strokeColor = isHL ? '#f59e0b' : '#b1b1b7';
   const strokeW = isHL ? 3 : 1.5;
 
