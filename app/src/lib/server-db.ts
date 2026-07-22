@@ -92,6 +92,108 @@ export async function saveProjectFiles(projectId: string, files: ProjectFile[]):
   await api<void>('POST', '/project-files', { project_id: projectId, files });
 }
 
+// ── file metadata (no content) ────────────────────────────────────────
+
+export interface ProjectFileMeta {
+  name: string;
+  path: string;
+  dir_id: string;
+  language: string;
+  size: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function loadFilesMeta(projectId: string): Promise<ProjectFileMeta[]> {
+  return api<ProjectFileMeta[]>('GET', `/files-meta?projectId=${encodeURIComponent(projectId)}`);
+}
+
+// ── single file content ───────────────────────────────────────────────
+
+export async function loadFileContent(projectId: string, filePath: string): Promise<string | null> {
+  const resp = await api<{ content: string | null }>(
+    'GET',
+    `/file-content?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}`
+  );
+  return resp.content;
+}
+
+export async function loadFileContentsBatch(
+  projectId: string,
+  paths: string[]
+): Promise<Map<string, string>> {
+  // Fetch content for each path individually but in parallel batches of 50
+  const BATCH = 50;
+  const result = new Map<string, string>();
+  for (let i = 0; i < paths.length; i += BATCH) {
+    const batch = paths.slice(i, i + BATCH);
+    const responses = await Promise.all(
+      batch.map(async (p) => {
+        const content = await loadFileContent(projectId, p);
+        return [p, content ?? ''] as const;
+      })
+    );
+    for (const [p, c] of responses) {
+      result.set(p, c);
+    }
+  }
+  return result;
+}
+
+// ── incremental upsert / delete / rename ──────────────────────────────
+
+export async function upsertProjectFiles(projectId: string, files: ProjectFile[]): Promise<void> {
+  await api<void>('POST', '/file-upsert-batch', {
+    project_id: projectId,
+    files: files.map((f) => ({
+      name: f.name,
+      path: f.path,
+      content: f.content,
+      language: f.language,
+      size: f.size || new TextEncoder().encode(f.content).length,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })),
+  });
+}
+
+export async function deleteProjectFilesByPaths(projectId: string, paths: string[]): Promise<void> {
+  await api<void>('POST', '/file-delete-batch', { projectId, paths });
+}
+
+export async function renameProjectFile(
+  projectId: string,
+  oldPath: string,
+  newPath: string,
+  newName: string,
+  isFolder: boolean
+): Promise<void> {
+  await api<void>('POST', '/file-rename', {
+    projectId,
+    oldPath,
+    newPath,
+    newName,
+    isFolder,
+  });
+}
+
+// ── directories ───────────────────────────────────────────────────────
+
+export interface ProjectDirectory {
+  id: string;
+  project_id: string;
+  parent_id: string;
+  name: string;
+  path: string;
+  level: number;
+  file_count: number;
+  child_count: number;
+}
+
+export async function loadDirectories(projectId: string): Promise<ProjectDirectory[]> {
+  return api<ProjectDirectory[]>('GET', `/directories?projectId=${encodeURIComponent(projectId)}`);
+}
+
 // ── projects ───────────────────────────────────────────────────────────
 
 export interface ProjectMeta {

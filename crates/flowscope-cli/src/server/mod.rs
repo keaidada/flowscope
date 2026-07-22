@@ -8,6 +8,7 @@ mod assets;
 pub mod state;
 pub mod store;
 mod watcher;
+mod openapi;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -16,8 +17,13 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
+use axum::extract::Query;
+use axum::http::HeaderMap;
+use axum::response::Html;
+use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
+use utoipa::OpenApi;
 
 pub use state::{AppState, ServerConfig};
 
@@ -81,6 +87,65 @@ pub async fn run_server(config: ServerConfig) -> Result<()> {
 /// at 10KB average, matching MAX_TOTAL_FILES.
 const MAX_REQUEST_BODY_SIZE: usize = 100 * 1024 * 1024;
 
+/// Cached OpenAPI spec, built once at startup.
+static OPENAPI_JSON: std::sync::LazyLock<serde_json::Value> = std::sync::LazyLock::new(|| {
+    let spec = openapi::ApiDoc::openapi();
+    serde_json::to_value(&spec).unwrap_or_default()
+});
+
+#[derive(Deserialize)]
+struct LangQuery {
+    lang: Option<String>,
+}
+
+async fn openapi_json() -> axum::Json<serde_json::Value> {
+    axum::Json(OPENAPI_JSON.clone())
+}
+
+async fn scalar_docs(
+    Query(q): Query<LangQuery>,
+    headers: HeaderMap,
+) -> Html<String> {
+    let lang = q.lang.or_else(|| {
+        headers
+            .get("accept-language")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split(',').next())
+            .map(|v| v.split('-').next().unwrap_or(v).to_lowercase())
+    });
+
+    let (locale, html_lang, title) = match lang.as_deref() {
+        Some("zh") => ("zh-CN", "zh-CN", "FlowScope API 文档"),
+        _ => ("en", "en", "FlowScope API Documentation"),
+    };
+
+    Html(scalar_html(locale, html_lang, title))
+}
+
+fn scalar_html(locale: &str, html_lang: &str, title: &str) -> String {
+    format!(r#"<!doctype html>
+<html lang="{html_lang}">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <style>
+        html {{ box-sizing: border-box; overflow: hidden; }}
+        *, *:before, *:after {{ box-sizing: inherit; }}
+        body {{ margin: 0; height: 100vh; }}
+    </style>
+</head>
+<body>
+    <script
+        id="api-reference"
+        data-url="/api/openapi.json"
+        data-configuration='{{"localization":{{"locale":"{locale}"}}}}'>
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1"></script>
+</body>
+</html>"#)
+}
+
 /// Build the main router with all routes.
 pub fn build_router(state: Arc<AppState>, port: u16, db_only: bool) -> Router {
     // Restrict CORS to same-origin to prevent cross-site requests from reading local files.
@@ -104,7 +169,9 @@ pub fn build_router(state: Arc<AppState>, port: u16, db_only: bool) -> Router {
         .allow_headers([axum::http::header::CONTENT_TYPE]);
 
     let router = Router::new()
-        .nest("/api", api::api_routes());
+        .nest("/api", api::api_routes())
+        .route("/api/openapi.json", axum::routing::get(openapi_json))
+        .route("/api/docs", axum::routing::get(scalar_docs));
 
     // Only serve static assets in full serve mode (not db-only)
     let router = if db_only {

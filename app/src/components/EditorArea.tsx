@@ -1,11 +1,11 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from 'react';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, FileX } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { SqlView, useLineageState } from '@pondpilot/flowscope-react';
 import { cn } from '@/lib/utils';
 import { useProject } from '@/lib/project-store';
-import { saveProjectFiles } from '@/lib/file-storage';
+import { upsertProjectFiles } from '@/lib/file-storage';
 import { useThemeStore, resolveTheme } from '@/lib/theme-store';
 import { useDebounce, useFileNavigation, useGlobalShortcuts } from '@/hooks';
 import type { GlobalShortcut } from '@/hooks';
@@ -63,6 +63,8 @@ export function EditorArea({
     setProjectDialect,
     setTemplateMode,
     filesLoaded,
+    loadFileContent,
+    isContentLoaded,
   } = useProject();
 
   const theme = useThemeStore((state) => state.theme);
@@ -71,6 +73,17 @@ export function EditorArea({
 
   const activeFile = currentProject?.files.find((f) => f.id === currentProject.activeFileId);
   const editorContainerRef = useRef<HTMLDivElement>(null);
+
+  // Lazy content loading: fetch file content when user opens it
+  const [contentLoading, setContentLoading] = useState(false);
+  useEffect(() => {
+    if (!activeFile || isContentLoaded(activeFile.id)) {
+      setContentLoading(false);
+      return;
+    }
+    setContentLoading(true);
+    loadFileContent(activeFile.id).finally(() => setContentLoading(false));
+  }, [activeFile?.id, isContentLoaded, loadFileContent]);
 
   // Track previous values to detect changes (null means initial mount)
   const previousSchema = useRef<string | null>(null);
@@ -204,15 +217,21 @@ export function EditorArea({
 
   const handleSave = useCallback(() => {
     if (currentProject && currentProject.files.length > 0) {
-      saveProjectFiles(currentProject.id, currentProject.files)
-        .then(() => toast.success(t('editor.saved')))
-        .catch((err) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error('[EditorArea] Save failed:', msg);
-          toast.error(`${t('editor.saveFailed')}: ${msg}`);
-        });
+      // Only save files that have content loaded (avoid overwriting DB with empty content)
+      const saveableFiles = currentProject.files.filter(
+        (f) => isContentLoaded(f.id) || f.content.length > 0
+      );
+      if (saveableFiles.length > 0) {
+        upsertProjectFiles(currentProject.id, saveableFiles)
+          .then(() => toast.success(t('editor.saved')))
+          .catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error('[EditorArea] Save failed:', msg);
+            toast.error(`${t('editor.saveFailed')}: ${msg}`);
+          });
+      }
     }
-  }, [currentProject, t]);
+  }, [currentProject, t, isContentLoaded]);
 
   const handleAnalyze = useCallback(() => {
     if (activeFile) {
@@ -286,7 +305,35 @@ export function EditorArea({
 
   useGlobalShortcuts(analysisShortcuts);
 
-  if (!currentProject || !activeFile) {
+  if (!currentProject) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5">
+        <Loader2 className="h-6 w-6 animate-spin opacity-50" />
+      </div>
+    );
+  }
+
+  // Read-only project (Server Files) with no files — show empty state instead of spinner
+  if (!activeFile && isReadOnly) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5">
+        <FileX className="h-8 w-8 opacity-40 mb-2" />
+        <p className="text-sm font-medium">{t('editor.noServerFiles')}</p>
+        <p className="text-xs mt-1 opacity-70">{t('editor.noServerFilesDesc')}</p>
+      </div>
+    );
+  }
+
+  // Show loading spinner while file content is being fetched
+  if (activeFile && contentLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5">
+        <Loader2 className="h-6 w-6 animate-spin opacity-50" />
+      </div>
+    );
+  }
+
+  if (!activeFile) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5">
         <Loader2 className="h-6 w-6 animate-spin opacity-50" />

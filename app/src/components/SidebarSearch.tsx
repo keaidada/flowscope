@@ -8,6 +8,7 @@ import {
   Folder,
   ChevronDown,
   ChevronRight,
+  Loader2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useProject } from '@/lib/project-store';
@@ -113,7 +114,7 @@ function searchInFiles(
 
 export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSearchProps) {
   const { t } = useTranslation();
-  const { currentProject, selectFile, activeProjectId } = useProject();
+  const { currentProject, selectFile, activeProjectId, ensureFilesContent, isContentLoaded } = useProject();
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -123,6 +124,27 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const tooltipRef = useRef<HTMLDivElement>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [contentLoading, setContentLoading] = useState(false);
+  const contentLoadTriggered = useRef(false);
+
+  // Auto-trigger content loading when user searches and files aren't loaded
+  useEffect(() => {
+    if (searchMode !== 'files' || !currentProject || !deferredQuery.trim()) return;
+    if (contentLoadTriggered.current) return;
+    const unloaded = currentProject.files.filter((f) => !isContentLoaded(f.id));
+    if (unloaded.length > 0) {
+      contentLoadTriggered.current = true;
+      setContentLoading(true);
+      ensureFilesContent(currentProject.files.map((f) => f.id)).finally(() => {
+        setContentLoading(false);
+      });
+    }
+  }, [deferredQuery, searchMode, currentProject, ensureFilesContent, isContentLoaded]);
+
+  // Reset trigger when project changes
+  useEffect(() => {
+    contentLoadTriggered.current = false;
+  }, [activeProjectId]);
 
   // Load schema files when switching to schema mode or project changes
   useEffect(() => {
@@ -131,11 +153,12 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
     }
   }, [searchMode, activeProjectId]);
 
-  // File search results
+  // File search results — only search files with content loaded
   const fileResults = useMemo((): SearchMatch[] => {
     if (searchMode !== 'files' || !currentProject) return [];
-    return searchInFiles(currentProject.files, deferredQuery, caseSensitive);
-  }, [currentProject, deferredQuery, caseSensitive, searchMode]);
+    const searchableFiles = currentProject.files.filter((f) => isContentLoaded(f.id));
+    return searchInFiles(searchableFiles, deferredQuery, caseSensitive);
+  }, [currentProject, deferredQuery, caseSensitive, searchMode, isContentLoaded]);
 
   // Schema search results
   const schemaResults = useMemo((): SearchMatch[] => {
@@ -381,6 +404,14 @@ export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSear
 
       {/* Results */}
       <div className="flex-1 overflow-y-auto">
+        {/* Content loading indicator */}
+        {contentLoading && (
+          <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin inline mr-1" />
+            {t('search.loadingContent', '正在加载文件内容...')}
+          </div>
+        )}
+
         {/* Schema mode: empty hint */}
         {searchMode === 'schema' && schemaFiles.length === 0 && !query && (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">

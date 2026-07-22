@@ -15,6 +15,7 @@ use axum::{
 };
 use flowscope_core::{self, AnalyzeRequest as CoreAnalyzeRequest, Dialect};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::{AppState, state::MergeSession};
@@ -40,6 +41,12 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         // Persistence endpoints
         .route("/db/project-files", get(get_project_files))
         .route("/db/project-files", post(save_project_files_api))
+        .route("/db/files-meta", get(get_files_meta))
+        .route("/db/file-content", get(get_file_content))
+        .route("/db/file-upsert-batch", post(upsert_files_api))
+        .route("/db/file-delete-batch", post(delete_files_api))
+        .route("/db/file-rename", post(rename_file_api))
+        .route("/db/directories", get(get_directories))
         .route("/db/schema-files", get(get_schema_files))
         .route("/db/schema-files", post(save_schema_files_api))
         .route("/db/cache", get(get_cache_api))
@@ -68,14 +75,14 @@ pub fn api_routes() -> Router<Arc<AppState>> {
 
 // === Request/Response types ===
 
-#[derive(Serialize)]
-struct HealthResponse {
+#[derive(Serialize, ToSchema)]
+pub(crate) struct HealthResponse {
     status: &'static str,
     version: &'static str,
 }
 
 #[derive(Deserialize)]
-struct AnalyzeRequest {
+pub(crate) struct AnalyzeRequest {
     sql: String,
     #[serde(default)]
     files: Option<Vec<flowscope_core::FileSource>>,
@@ -89,20 +96,20 @@ struct AnalyzeRequest {
     template_mode: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct CompletionRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct CompletionRequest {
     sql: String,
     #[serde(alias = "position")]
     cursor_offset: usize,
 }
 
-#[derive(Deserialize)]
-struct SplitRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SplitRequest {
     sql: String,
 }
 
-#[derive(Serialize)]
-struct ConfigResponse {
+#[derive(Serialize, ToSchema)]
+pub(crate) struct ConfigResponse {
     dialect: String,
     watch_dirs: Vec<String>,
     has_schema: bool,
@@ -111,19 +118,19 @@ struct ConfigResponse {
 }
 
 #[derive(Deserialize)]
-struct ExportRequest {
+pub(crate) struct ExportRequest {
     sql: String,
     #[serde(default)]
     files: Option<Vec<flowscope_core::FileSource>>,
 }
 
-#[derive(Serialize)]
-struct ProjectExportStartResponse {
+#[derive(Serialize, ToSchema)]
+pub(crate) struct ProjectExportStartResponse {
     session_id: String,
 }
 
 #[derive(Deserialize)]
-struct ProjectExportFinishRequest {
+pub(crate) struct ProjectExportFinishRequest {
     format: String,
     #[serde(default)]
     sheets: Option<Vec<flowscope_export::ExportSheet>>,
@@ -131,8 +138,8 @@ struct ProjectExportFinishRequest {
     compact: bool,
 }
 
-#[derive(Deserialize)]
-struct LintFixRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct LintFixRequest {
     sql: String,
     #[serde(default, alias = "include_unsafe_fixes")]
     unsafe_fixes: bool,
@@ -144,8 +151,8 @@ struct LintFixRequest {
     rule_configs: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Serialize)]
-struct LintFixResponse {
+#[derive(Serialize, ToSchema)]
+pub(crate) struct LintFixResponse {
     sql: String,
     changed: bool,
     fix_counts: LintFixCountsResponse,
@@ -154,13 +161,13 @@ struct LintFixResponse {
     skipped_counts: LintFixSkippedCountsResponse,
 }
 
-#[derive(Serialize)]
-struct LintFixCountsResponse {
+#[derive(Serialize, ToSchema)]
+pub(crate) struct LintFixCountsResponse {
     total: usize,
 }
 
-#[derive(Serialize)]
-struct LintFixSkippedCountsResponse {
+#[derive(Serialize, ToSchema)]
+pub(crate) struct LintFixSkippedCountsResponse {
     unsafe_skipped: usize,
     protected_range_blocked: usize,
     overlap_conflict_blocked: usize,
@@ -171,7 +178,15 @@ struct LintFixSkippedCountsResponse {
 // === Handlers ===
 
 /// GET /api/health - Health check with version
-async fn health() -> Json<HealthResponse> {
+#[utoipa::path(
+    get,
+    path = "/api/health",
+    tag = "Core",
+    responses(
+        (status = 200, description = "Server health status", body = HealthResponse)
+    )
+)]
+pub(crate) async fn health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
@@ -179,7 +194,17 @@ async fn health() -> Json<HealthResponse> {
 }
 
 /// POST /api/analyze - Run lineage analysis
-async fn analyze(
+#[utoipa::path(
+    post,
+    path = "/api/analyze",
+    tag = "Core",
+    request_body(content_type = "application/json"),
+    responses(
+        (status = 200, description = "Analysis result JSON"),
+        (status = 500, description = "Analysis error")
+    )
+)]
+pub(crate) async fn analyze(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<AnalyzeRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -225,7 +250,16 @@ async fn analyze(
 }
 
 /// POST /api/completion - Get code completion items
-async fn completion(
+#[utoipa::path(
+    post,
+    path = "/api/completion",
+    tag = "Core",
+    responses(
+        (status = 200, description = "Completion items", body = serde_json::Value),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn completion(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CompletionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -243,7 +277,16 @@ async fn completion(
 }
 
 /// POST /api/split - Split SQL into statements
-async fn split(
+#[utoipa::path(
+    post,
+    path = "/api/split",
+    tag = "Core",
+    responses(
+        (status = 200, description = "Split result", body = Vec<String>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn split(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SplitRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -257,7 +300,17 @@ async fn split(
 }
 
 /// POST /api/lint-fix - Apply deterministic lint fixes to SQL text.
-async fn lint_fix(
+#[utoipa::path(
+    post,
+    path = "/api/lint-fix",
+    tag = "Core",
+    request_body = LintFixRequest,
+    responses(
+        (status = 200, description = "Lint fix result", body = LintFixResponse),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn lint_fix(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<LintFixRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -310,19 +363,48 @@ async fn lint_fix(
 }
 
 /// GET /api/files - List watched files with content
-async fn files(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+#[utoipa::path(
+    get,
+    path = "/api/files",
+    tag = "Core",
+    responses(
+        (status = 200, description = "List of watched files", body = Vec<serde_json::Value>)
+    )
+)]
+pub(crate) async fn files(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let files = state.files.read().await;
     Json(files.clone())
 }
 
 /// GET /api/schema - Get schema metadata
-async fn schema(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+#[utoipa::path(
+    get,
+    path = "/api/schema",
+    tag = "Core",
+    responses(
+        (status = 200, description = "Schema metadata", body = serde_json::Value)
+    )
+)]
+pub(crate) async fn schema(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let schema = state.schema.read().await;
     Json(schema.clone())
 }
 
 /// POST /api/export/:format - Export to specified format
-async fn export(
+#[utoipa::path(
+    post,
+    path = "/api/export/{format}",
+    tag = "Core",
+    params(
+        ("format" = String, Path, description = "Export format (json/mermaid/html/csv/xlsx)")
+    ),
+    request_body(content_type = "application/json"),
+    responses(
+        (status = 200, description = "Exported result", body = serde_json::Value),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn export(
     State(state): State<Arc<AppState>>,
     Path(format): Path<String>,
     Json(payload): Json<ExportRequest>,
@@ -392,7 +474,16 @@ async fn export(
 }
 
 /// POST /api/project-export/start - Create a new progressive export session.
-async fn project_export_start(
+#[utoipa::path(
+    post,
+    path = "/api/project-export/start",
+    tag = "Core",
+    responses(
+        (status = 201, description = "Session created", body = ProjectExportStartResponse),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn project_export_start(
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let session_id = {
@@ -411,7 +502,20 @@ async fn project_export_start(
 }
 
 /// POST /api/project-export/{session_id}/add - Add one AnalyzeResult to a session.
-async fn project_export_add(
+#[utoipa::path(
+    post,
+    path = "/api/project-export/{session_id}/add",
+    tag = "Core",
+    params(
+        ("session_id" = String, Path, description = "Export session ID")
+    ),
+    request_body(content_type = "application/json"),
+    responses(
+        (status = 202, description = "Result added to session", body = serde_json::Value),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn project_export_add(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
     body: Bytes,
@@ -433,7 +537,20 @@ async fn project_export_add(
 }
 
 /// POST /api/project-export/{session_id}/finish - Finalize export and return the file.
-async fn project_export_finish(
+#[utoipa::path(
+    post,
+    path = "/api/project-export/{session_id}/finish",
+    tag = "Core",
+    params(
+        ("session_id" = String, Path, description = "Export session ID")
+    ),
+    request_body(content_type = "application/json"),
+    responses(
+        (status = 200, description = "Exported file", body = serde_json::Value),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn project_export_finish(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
     Json(payload): Json<ProjectExportFinishRequest>,
@@ -505,7 +622,15 @@ fn build_project_export_response(
 }
 
 /// GET /api/config - Get server configuration
-async fn config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+#[utoipa::path(
+    get,
+    path = "/api/config",
+    tag = "Core",
+    responses(
+        (status = 200, description = "Server configuration", body = ConfigResponse)
+    )
+)]
+pub(crate) async fn config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let has_schema = state.schema.read().await.is_some();
 
     Json(ConfigResponse {
@@ -627,14 +752,14 @@ fn template_mode_to_str(mode: flowscope_core::TemplateMode) -> &'static str {
 use axum::extract::Query;
 use super::store;
 
-#[derive(Deserialize)]
-struct ProjectFilesQuery {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct ProjectFilesQuery {
     #[serde(alias = "projectId")]
     project_id: String,
 }
 
-#[derive(Deserialize)]
-struct LineageQuery {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct LineageQuery {
     #[serde(alias = "projectId")]
     project_id: String,
     #[serde(alias = "filePath")]
@@ -643,7 +768,20 @@ struct LineageQuery {
 
 // ── project_files ──────────────────────────────────────────────────────
 
-async fn get_project_files(
+/// GET /api/db/project-files - Get project files
+#[utoipa::path(
+    get,
+    path = "/api/db/project-files",
+    tag = "Files",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "Project files", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_project_files(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectFilesQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -653,14 +791,25 @@ async fn get_project_files(
     Ok(Json(files))
 }
 
-#[derive(Deserialize)]
-struct SaveProjectFilesRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SaveProjectFilesRequest {
     #[serde(alias = "projectId")]
     project_id: String,
     files: Vec<store::ProjectFileRow>,
 }
 
-async fn save_project_files_api(
+/// POST /api/db/project-files - Save project files
+#[utoipa::path(
+    post,
+    path = "/api/db/project-files",
+    tag = "Files",
+    request_body = SaveProjectFilesRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn save_project_files_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveProjectFilesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -670,9 +819,199 @@ async fn save_project_files_api(
     Ok(StatusCode::OK)
 }
 
+// ── file metadata (no content) ─────────────────────────────────────────
+
+/// GET /api/db/files-meta - Get file metadata
+#[utoipa::path(
+    get,
+    path = "/api/db/files-meta",
+    tag = "Files",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "File metadata", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_files_meta(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ProjectFilesQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let files = store::load_file_metadata(&db, &q.project_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(files))
+}
+
+// ── single file content ────────────────────────────────────────────────
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct FileContentQuery {
+    #[serde(alias = "projectId")]
+    project_id: String,
+    path: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(crate) struct FileContentResponse {
+    content: Option<String>,
+}
+
+/// GET /api/db/file-content - Get file content
+#[utoipa::path(
+    get,
+    path = "/api/db/file-content",
+    tag = "Files",
+    params(
+        ("projectId" = String, Query, description = "Project ID"),
+        ("path" = String, Query, description = "File path")
+    ),
+    responses(
+        (status = 200, description = "File content", body = FileContentResponse),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_file_content(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<FileContentQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let content = store::load_file_content(&db, &q.project_id, &q.path)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(FileContentResponse { content }))
+}
+
+// ── incremental upsert ─────────────────────────────────────────────────
+
+/// POST /api/db/file-upsert-batch - Upsert files
+#[utoipa::path(
+    post,
+    path = "/api/db/file-upsert-batch",
+    tag = "Files",
+    request_body = SaveProjectFilesRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn upsert_files_api(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<SaveProjectFilesRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    store::upsert_project_files(&db, &payload.project_id, &payload.files)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(StatusCode::OK)
+}
+
+// ── delete by paths ────────────────────────────────────────────────────
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct DeleteFilesRequest {
+    #[serde(alias = "projectId")]
+    project_id: String,
+    paths: Vec<String>,
+}
+
+/// POST /api/db/file-delete-batch - Delete files
+#[utoipa::path(
+    post,
+    path = "/api/db/file-delete-batch",
+    tag = "Files",
+    request_body = DeleteFilesRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn delete_files_api(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DeleteFilesRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    store::delete_project_files_by_paths(&db, &payload.project_id, &payload.paths)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(StatusCode::OK)
+}
+
+// ── rename ─────────────────────────────────────────────────────────────
+
+#[derive(Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RenameFileRequest {
+    project_id: String,
+    old_path: String,
+    new_path: String,
+    new_name: String,
+    #[serde(default)]
+    is_folder: bool,
+}
+
+/// POST /api/db/file-rename - Rename file
+#[utoipa::path(
+    post,
+    path = "/api/db/file-rename",
+    tag = "Files",
+    request_body = RenameFileRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn rename_file_api(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<RenameFileRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if payload.is_folder {
+        store::rename_project_folder(&db, &payload.project_id, &payload.old_path, &payload.new_path)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    } else {
+        store::rename_project_file(&db, &payload.project_id, &payload.old_path, &payload.new_path, &payload.new_name)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+    Ok(StatusCode::OK)
+}
+
+// ── directories ────────────────────────────────────────────────────────
+
+/// GET /api/db/directories - Get directories
+#[utoipa::path(
+    get,
+    path = "/api/db/directories",
+    tag = "Directories",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "Directories", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_directories(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ProjectFilesQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let dirs = store::load_directories(&db, &q.project_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(dirs))
+}
+
 // ── projects ───────────────────────────────────────────────────────────
 
-async fn get_projects(
+/// GET /api/db/projects - Get projects
+#[utoipa::path(
+    get,
+    path = "/api/db/projects",
+    tag = "Projects",
+    responses(
+        (status = 200, description = "Projects", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_projects(
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -681,12 +1020,23 @@ async fn get_projects(
     Ok(Json(projects))
 }
 
-#[derive(Deserialize)]
-struct SaveProjectRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SaveProjectRequest {
     project: store::ProjectRow,
 }
 
-async fn save_project_api(
+/// POST /api/db/projects - Save project
+#[utoipa::path(
+    post,
+    path = "/api/db/projects",
+    tag = "Projects",
+    request_body = SaveProjectRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn save_project_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveProjectRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -696,13 +1046,26 @@ async fn save_project_api(
     Ok(StatusCode::OK)
 }
 
-#[derive(Deserialize)]
-struct ProjectIdQuery {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct ProjectIdQuery {
     #[serde(alias = "projectId")]
     project_id: String,
 }
 
-async fn delete_project_api(
+/// DELETE /api/db/projects - Delete project
+#[utoipa::path(
+    delete,
+    path = "/api/db/projects",
+    tag = "Projects",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn delete_project_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectIdQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -714,7 +1077,20 @@ async fn delete_project_api(
 
 // ── view_states ─────────────────────────────────────────────────────────
 
-async fn get_view_state(
+/// GET /api/db/view-states - Get view state
+#[utoipa::path(
+    get,
+    path = "/api/db/view-states",
+    tag = "Views",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "View state", body = serde_json::Value),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_view_state(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectIdQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -724,15 +1100,26 @@ async fn get_view_state(
     Ok(Json(state_json))
 }
 
-#[derive(Deserialize)]
-struct SaveViewStateRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SaveViewStateRequest {
     #[serde(alias = "projectId")]
     project_id: String,
     #[serde(alias = "stateJson")]
     state_json: String,
 }
 
-async fn save_view_state(
+/// POST /api/db/view-states - Save view state
+#[utoipa::path(
+    post,
+    path = "/api/db/view-states",
+    tag = "Views",
+    request_body = SaveViewStateRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn save_view_state(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveViewStateRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -744,7 +1131,20 @@ async fn save_view_state(
 
 // ── table-level lineage ────────────────────────────────────────────────
 
-async fn get_table_lineage(
+/// GET /api/db/lineage/tables - Get table lineage
+#[utoipa::path(
+    get,
+    path = "/api/db/lineage/tables",
+    tag = "Lineage",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "Table lineage", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_table_lineage(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectIdQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -756,14 +1156,25 @@ async fn get_table_lineage(
 
 // ── table_level_edges (物化预计算) ─────────────────────────────────────
 
-#[derive(Deserialize)]
-struct SaveTableLevelEdgesRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SaveTableLevelEdgesRequest {
     #[serde(alias = "projectId")]
     project_id: String,
     edges: Vec<(String, String, String)>,
 }
 
-async fn save_table_level_edges_api(
+/// POST /api/db/table-level-edges - Save table level edges
+#[utoipa::path(
+    post,
+    path = "/api/db/table-level-edges",
+    tag = "Lineage",
+    request_body = SaveTableLevelEdgesRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn save_table_level_edges_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveTableLevelEdgesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -773,7 +1184,20 @@ async fn save_table_level_edges_api(
     Ok(StatusCode::OK)
 }
 
-async fn get_table_level_edges(
+/// GET /api/db/table-level-edges - Get table level edges
+#[utoipa::path(
+    get,
+    path = "/api/db/table-level-edges",
+    tag = "Lineage",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "Table level edges", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_table_level_edges(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectIdQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -785,7 +1209,20 @@ async fn get_table_level_edges(
 
 // ── schema_files ───────────────────────────────────────────────────────
 
-async fn get_schema_files(
+/// GET /api/db/schema-files - Get schema files
+#[utoipa::path(
+    get,
+    path = "/api/db/schema-files",
+    tag = "Schema",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "Schema files", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_schema_files(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectFilesQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -795,14 +1232,25 @@ async fn get_schema_files(
     Ok(Json(files))
 }
 
-#[derive(Deserialize)]
-struct SaveSchemaFilesRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SaveSchemaFilesRequest {
     #[serde(alias = "projectId")]
     project_id: String,
     files: Vec<store::SchemaFileRow>,
 }
 
-async fn save_schema_files_api(
+/// POST /api/db/schema-files - Save schema files
+#[utoipa::path(
+    post,
+    path = "/api/db/schema-files",
+    tag = "Schema",
+    request_body = SaveSchemaFilesRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn save_schema_files_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveSchemaFilesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -918,12 +1366,25 @@ fn extract_and_save_ddl_metadata(
 
 // ── analysis_cache ─────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-struct CacheQuery {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct CacheQuery {
     key: String,
 }
 
-async fn get_cache_api(
+/// GET /api/db/cache - Get cache entry
+#[utoipa::path(
+    get,
+    path = "/api/db/cache",
+    tag = "Cache",
+    params(
+        ("key" = String, Query, description = "Cache key")
+    ),
+    responses(
+        (status = 200, description = "Cache entry", body = serde_json::Value),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_cache_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<CacheQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -936,13 +1397,24 @@ async fn get_cache_api(
     }
 }
 
-#[derive(Deserialize)]
-struct SetCacheRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SetCacheRequest {
     key: String,
     result: serde_json::Value,
 }
 
-async fn set_cache_api(
+/// POST /api/db/cache - Set cache entry
+#[utoipa::path(
+    post,
+    path = "/api/db/cache",
+    tag = "Cache",
+    request_body = SetCacheRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn set_cache_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SetCacheRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -954,7 +1426,20 @@ async fn set_cache_api(
     Ok(StatusCode::OK)
 }
 
-async fn delete_cache_api(
+/// DELETE /api/db/cache - Delete cache entry
+#[utoipa::path(
+    delete,
+    path = "/api/db/cache",
+    tag = "Cache",
+    params(
+        ("key" = String, Query, description = "Cache key")
+    ),
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn delete_cache_api(
     State(state): State<Arc<AppState>>,
     Query(params): Query<CacheQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -964,7 +1449,17 @@ async fn delete_cache_api(
     Ok(StatusCode::OK)
 }
 
-async fn clear_cache_api(
+/// POST /api/db/cache/clear - Clear all cache
+#[utoipa::path(
+    post,
+    path = "/api/db/cache/clear",
+    tag = "Cache",
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn clear_cache_api(
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -975,22 +1470,33 @@ async fn clear_cache_api(
 
 // ── project_file_results ───────────────────────────────────────────────
 
-#[derive(Deserialize)]
-struct FileResultItem {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct FileResultItem {
     #[serde(alias = "filePath")]
     file_path: String,
     #[serde(alias = "contentHash")]
     content_hash: String,
 }
 
-#[derive(Deserialize)]
-struct SetFileResultsRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SetFileResultsRequest {
     #[serde(alias = "projectId")]
     project_id: String,
     rows: Vec<FileResultItem>,
 }
 
-async fn set_file_result_api(
+/// POST /api/db/file-results - Set file result
+#[utoipa::path(
+    post,
+    path = "/api/db/file-results",
+    tag = "Schema",
+    request_body = SetFileResultsRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn set_file_result_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SetFileResultsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -1002,15 +1508,29 @@ async fn set_file_result_api(
     Ok(StatusCode::OK)
 }
 
-#[derive(Deserialize)]
-struct FileResultQuery {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct FileResultQuery {
     #[serde(alias = "projectId")]
     project_id: String,
     #[serde(default, alias = "filePath")]
     file_path: Option<String>,
 }
 
-async fn get_file_result_api(
+/// GET /api/db/file-result - Get single file result
+#[utoipa::path(
+    get,
+    path = "/api/db/file-result",
+    tag = "Schema",
+    params(
+        ("projectId" = String, Query, description = "Project ID"),
+        ("filePath" = String, Query, description = "File path")
+    ),
+    responses(
+        (status = 200, description = "File result", body = serde_json::Value),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_file_result_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<FileResultQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -1030,7 +1550,20 @@ async fn get_file_result_api(
     }
 }
 
-async fn get_file_results_api(
+/// GET /api/db/file-results - Get file results
+#[utoipa::path(
+    get,
+    path = "/api/db/file-results",
+    tag = "Schema",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "File results", body = serde_json::Value),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_file_results_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectFilesQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -1045,8 +1578,8 @@ async fn get_file_results_api(
 
 // ── lineage ────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-struct SaveLineageRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SaveLineageRequest {
     #[serde(alias = "projectId")]
     project_id: String,
     nodes: Vec<store::LineageNodeRow>,
@@ -1054,7 +1587,18 @@ struct SaveLineageRequest {
     edges: Vec<store::LineageEdgeRow>,
 }
 
-async fn save_lineage_api(
+/// POST /api/db/lineage - Save lineage data
+#[utoipa::path(
+    post,
+    path = "/api/db/lineage",
+    tag = "Lineage",
+    request_body = SaveLineageRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn save_lineage_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveLineageRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -1066,15 +1610,26 @@ async fn save_lineage_api(
 
 // ── table_metadata / column_metadata ───────────────────────────────────
 
-#[derive(Deserialize)]
-struct SaveTableMetadataRequest {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SaveTableMetadataRequest {
     #[serde(alias = "projectId")]
     project_id: String,
     tables: Vec<store::TableMetadataRow>,
     columns: Vec<store::ColumnMetadataRow>,
 }
 
-async fn save_table_metadata_api(
+/// POST /api/db/table-metadata - Save table metadata
+#[utoipa::path(
+    post,
+    path = "/api/db/table-metadata",
+    tag = "Metadata",
+    request_body = SaveTableMetadataRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn save_table_metadata_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveTableMetadataRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -1084,7 +1639,20 @@ async fn save_table_metadata_api(
     Ok(StatusCode::OK)
 }
 
-async fn get_table_metadata_api(
+/// GET /api/db/table-metadata - Get table metadata
+#[utoipa::path(
+    get,
+    path = "/api/db/table-metadata",
+    tag = "Metadata",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "Table metadata", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_table_metadata_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<LineageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -1094,7 +1662,20 @@ async fn get_table_metadata_api(
     Ok(Json(tables))
 }
 
-async fn get_column_metadata_api(
+/// GET /api/db/column-metadata - Get column metadata
+#[utoipa::path(
+    get,
+    path = "/api/db/column-metadata",
+    tag = "Metadata",
+    params(
+        ("tableId" = String, Query, description = "Table ID")
+    ),
+    responses(
+        (status = 200, description = "Column metadata", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_column_metadata_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<LineageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -1104,7 +1685,20 @@ async fn get_column_metadata_api(
     Ok(Json(columns))
 }
 
-async fn get_lineage_nodes_api(
+/// GET /api/db/lineage/nodes - Get lineage nodes
+#[utoipa::path(
+    get,
+    path = "/api/db/lineage/nodes",
+    tag = "Lineage",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "Lineage nodes", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_lineage_nodes_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<LineageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -1114,7 +1708,20 @@ async fn get_lineage_nodes_api(
     Ok(Json(nodes))
 }
 
-async fn get_lineage_columns_api(
+/// GET /api/db/lineage/columns - Get lineage columns
+#[utoipa::path(
+    get,
+    path = "/api/db/lineage/columns",
+    tag = "Lineage",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "Lineage columns", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_lineage_columns_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<LineageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
@@ -1124,7 +1731,20 @@ async fn get_lineage_columns_api(
     Ok(Json(columns))
 }
 
-async fn get_lineage_edges_api(
+/// GET /api/db/lineage/edges - Get lineage edges
+#[utoipa::path(
+    get,
+    path = "/api/db/lineage/edges",
+    tag = "Lineage",
+    params(
+        ("projectId" = String, Query, description = "Project ID")
+    ),
+    responses(
+        (status = 200, description = "Lineage edges", body = Vec<serde_json::Value>),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_lineage_edges_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<LineageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {

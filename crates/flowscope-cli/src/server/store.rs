@@ -8,13 +8,14 @@ use std::sync::Mutex;
 
 use rusqlite::{Connection, params};
 use serde::{Serialize, Deserialize};
+use utoipa::ToSchema;
 
 /// Current schema version.
 ///
 /// v0: original — time fields (`created_at`, `updated_at`, `last_accessed_at`)
 ///     stored as `INTEGER` Unix millisecond timestamps.
 /// v1: time fields stored as `TEXT` RFC3339 / ISO 8601 strings (human-readable).
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 /// Open (or create) the database file at the given path.
 pub fn open_db(path: &Path) -> Result<Mutex<Connection>, rusqlite::Error> {
@@ -50,7 +51,11 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         migrate_v2_to_v3(conn)?;
     }
 
-    // Future migrations: if current < 4 { migrate_v3_to_v4(conn)?; } ...
+    if current < 4 {
+        migrate_v3_to_v4(conn)?;
+    }
+
+    // Future migrations: if current < 5 { migrate_v4_to_v5(conn)?; } ...
 
     if current != SCHEMA_VERSION {
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
@@ -387,6 +392,78 @@ fn migrate_v2_to_v3(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// v3 → v4: Add `project_directories` table and `dir_id` column to `project_files`.
+/// Backfills dir_id and directory rows from existing file paths.
+fn migrate_v3_to_v4(conn: &Connection) -> Result<(), rusqlite::Error> {
+    // 1. Create project_directories table
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS project_directories (
+            id           TEXT    NOT NULL,
+            project_id   TEXT    NOT NULL,
+            parent_id    TEXT    NOT NULL DEFAULT '',
+            name         TEXT    NOT NULL,
+            path         TEXT    NOT NULL,
+            level        INTEGER NOT NULL DEFAULT 0,
+            file_count   INTEGER NOT NULL DEFAULT 0,
+            child_count  INTEGER NOT NULL DEFAULT 0,
+            status       INTEGER NOT NULL DEFAULT 1,
+            created_at   TEXT    NOT NULL DEFAULT '',
+            updated_at   TEXT    NOT NULL DEFAULT '',
+            PRIMARY KEY (project_id, id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pd_parent ON project_directories(project_id, parent_id);",
+    )?;
+    eprintln!("[migrate v3→v4] created project_directories table");
+
+    // 2. Add dir_id column to project_files if not exists
+    let pf_cols: Vec<String> = conn
+        .prepare("PRAGMA table_info(project_files)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .collect();
+
+    if !pf_cols.iter().any(|c| c == "dir_id") {
+        conn.execute_batch("ALTER TABLE project_files ADD COLUMN dir_id TEXT NOT NULL DEFAULT '';")?;
+        eprintln!("[migrate v3→v4] added dir_id column to project_files");
+    }
+
+    // 3. Backfill dir_id in project_files
+    let empty_dir_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM project_files WHERE dir_id = ''",
+        [], |row| row.get(0),
+    )?;
+    if empty_dir_count > 0 {
+        eprintln!("[migrate v3→v4] backfilling dir_id for {empty_dir_count} files...");
+        let rows: Vec<(i64, String)> = conn
+            .prepare("SELECT rowid, path FROM project_files WHERE dir_id = ''")?
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
+            .filter_map(Result::ok)
+            .collect();
+        let tx = conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare("UPDATE project_files SET dir_id = ?1 WHERE rowid = ?2")?;
+            for (rowid, path) in &rows {
+                let (_, dir) = split_file_path(path);
+                stmt.execute(params![dir, rowid])?;
+            }
+        }
+        tx.commit()?;
+    }
+
+    // 4. Rebuild project_directories from file paths
+    let project_ids: Vec<String> = conn
+        .prepare("SELECT DISTINCT project_id FROM project_files")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .filter_map(Result::ok)
+        .collect();
+    for pid in &project_ids {
+        rebuild_directories_for_project(conn, pid)?;
+    }
+
+    eprintln!("[migrate v3→v4] done.");
+    Ok(())
+}
+
 /// Split a file_path into (file_name, dir_path).
 /// Handles both `/` and `\` separators.
 /// Example: "etl/SUM_公共汇总库/B10.HQL" → ("B10.HQL", "etl/SUM_公共汇总库")
@@ -636,7 +713,23 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             created_at TEXT    NOT NULL DEFAULT '',
             updated_at TEXT    NOT NULL DEFAULT '',
             status     INTEGER NOT NULL DEFAULT 1,
+            dir_id     TEXT    NOT NULL DEFAULT '',
             UNIQUE(project_id, path)
+        );
+
+        CREATE TABLE IF NOT EXISTS project_directories (
+            id           TEXT    NOT NULL,
+            project_id   TEXT    NOT NULL,
+            parent_id    TEXT    NOT NULL DEFAULT '',
+            name         TEXT    NOT NULL,
+            path         TEXT    NOT NULL,
+            level        INTEGER NOT NULL DEFAULT 0,
+            file_count   INTEGER NOT NULL DEFAULT 0,
+            child_count  INTEGER NOT NULL DEFAULT 0,
+            status       INTEGER NOT NULL DEFAULT 1,
+            created_at   TEXT    NOT NULL DEFAULT '',
+            updated_at   TEXT    NOT NULL DEFAULT '',
+            PRIMARY KEY (project_id, id)
         );
 
         CREATE TABLE IF NOT EXISTS schema_files (
@@ -819,13 +912,15 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_project_file_results_project ON project_file_results(project_id);
         CREATE INDEX IF NOT EXISTS idx_table_metadata_project ON table_metadata(project_id);
         CREATE INDEX IF NOT EXISTS idx_column_metadata_table ON column_metadata(table_id);
+        CREATE INDEX IF NOT EXISTS idx_pd_parent ON project_directories(project_id, parent_id);
+        CREATE INDEX IF NOT EXISTS idx_pf_dir ON project_files(project_id, dir_id);
         "
     )
 }
 
 // ── project_files ──────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ProjectFileRow {
     pub name: String,
     pub path: String,
@@ -887,9 +982,307 @@ pub fn load_project_files(
     rows.collect()
 }
 
-// ── projects ───────────────────────────────────────────────────────────
+// ── file metadata (no content) ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ProjectFileMetaRow {
+    pub name: String,
+    pub path: String,
+    pub dir_id: String,
+    pub language: String,
+    pub size: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub fn load_file_metadata(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<ProjectFileMetaRow>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT name, path, COALESCE(dir_id, ''), language, size, created_at, updated_at
+         FROM project_files WHERE project_id = ?1 ORDER BY path"
+    )?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(ProjectFileMetaRow {
+            name: row.get(0)?,
+            path: row.get(1)?,
+            dir_id: row.get(2)?,
+            language: row.get(3)?,
+            size: row.get(4)?,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+        })
+    })?;
+    rows.collect()
+}
+
+// ── single / batch file content ───────────────────────────────────────
+
+pub fn load_file_content(
+    conn: &Connection,
+    project_id: &str,
+    file_path: &str,
+) -> Result<Option<String>, rusqlite::Error> {
+    let result: Result<String, _> = conn.query_row(
+        "SELECT content FROM project_files WHERE project_id = ?1 AND path = ?2",
+        params![project_id, file_path],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(content) => Ok(Some(content)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileContentRow {
+    pub path: String,
+    pub content: String,
+}
+
+pub fn load_file_contents_batch(
+    conn: &Connection,
+    project_id: &str,
+    paths: &[String],
+) -> Result<Vec<FileContentRow>, rusqlite::Error> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders: Vec<String> = (0..paths.len()).map(|i| format!("?{}", i + 2)).collect();
+    let sql = format!(
+        "SELECT path, content FROM project_files WHERE project_id = ?1 AND path IN ({})",
+        placeholders.join(", ")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params_iter: Vec<&dyn rusqlite::ToSql> = std::iter::once(&project_id as &dyn rusqlite::ToSql)
+        .chain(paths.iter().map(|p| p as &dyn rusqlite::ToSql))
+        .collect();
+    let rows = stmt.query_map(params_iter.as_slice(), |row| {
+        Ok(FileContentRow {
+            path: row.get(0)?,
+            content: row.get(1)?,
+        })
+    })?;
+    rows.collect()
+}
+
+// ── incremental upsert (no DELETE) ────────────────────────────────────
+
+pub fn upsert_project_files(
+    conn: &Connection,
+    project_id: &str,
+    files: &[ProjectFileRow],
+) -> Result<(), rusqlite::Error> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT OR REPLACE INTO project_files (project_id, name, path, content, language, size, created_at, updated_at, dir_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        )?;
+        for f in files {
+            let (_, dir) = split_file_path(&f.path);
+            let created = if f.created_at.is_empty() { &now } else { &f.created_at };
+            let updated = if f.updated_at.is_empty() { &now } else { &f.updated_at };
+            stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, created, updated, dir])?;
+        }
+    }
+    tx.commit()?;
+    // Sync directories after upsert
+    rebuild_directories_for_project(conn, project_id)?;
+    Ok(())
+}
+
+// ── delete by paths ───────────────────────────────────────────────────
+
+pub fn delete_project_files_by_paths(
+    conn: &Connection,
+    project_id: &str,
+    paths: &[String],
+) -> Result<(), rusqlite::Error> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare("DELETE FROM project_files WHERE project_id = ?1 AND path = ?2")?;
+        for path in paths {
+            stmt.execute(params![project_id, path])?;
+        }
+    }
+    tx.commit()?;
+    rebuild_directories_for_project(conn, project_id)?;
+    Ok(())
+}
+
+// ── rename (metadata-only, no content needed) ─────────────────────────
+
+pub fn rename_project_file(
+    conn: &Connection,
+    project_id: &str,
+    old_path: &str,
+    new_path: &str,
+    new_name: &str,
+) -> Result<(), rusqlite::Error> {
+    let (_, dir) = split_file_path(new_path);
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE project_files SET path = ?1, name = ?2, dir_id = ?3, updated_at = ?4
+         WHERE project_id = ?5 AND path = ?6",
+        params![new_path, new_name, dir, now, project_id, old_path],
+    )?;
+    rebuild_directories_for_project(conn, project_id)?;
+    Ok(())
+}
+
+pub fn rename_project_folder(
+    conn: &Connection,
+    project_id: &str,
+    old_folder_path: &str,
+    new_folder_path: &str,
+) -> Result<(), rusqlite::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let prefix = format!("{old_folder_path}/");
+    // Update all files under the old folder
+    let files_to_update: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT path FROM project_files WHERE project_id = ?1 AND (path = ?2 OR path LIKE ?3)"
+        )?
+        .query_map(params![project_id, old_folder_path, format!("{prefix}%")], |row| {
+            row.get::<_, String>(0)
+        })?
+        .filter_map(|r| r.ok())
+        .map(|old_path| {
+            let new_path = if old_path == old_folder_path {
+                new_folder_path.to_string()
+            } else {
+                format!("{new_folder_path}{}", &old_path[old_folder_path.len()..])
+            };
+            (old_path, new_path)
+        })
+        .collect();
+
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "UPDATE project_files SET path = ?1, dir_id = ?2, updated_at = ?3
+             WHERE project_id = ?4 AND path = ?5"
+        )?;
+        for (old_path, new_path) in &files_to_update {
+            let (_, dir) = split_file_path(new_path);
+            stmt.execute(params![new_path, dir, now, project_id, old_path])?;
+        }
+    }
+    tx.commit()?;
+    rebuild_directories_for_project(conn, project_id)?;
+    Ok(())
+}
+
+// ── directories ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectDirectoryRow {
+    pub id: String,
+    pub project_id: String,
+    pub parent_id: String,
+    pub name: String,
+    pub path: String,
+    pub level: i64,
+    pub file_count: i64,
+    pub child_count: i64,
+}
+
+pub fn load_directories(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<ProjectDirectoryRow>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, parent_id, name, path, level, file_count, child_count
+         FROM project_directories WHERE project_id = ?1 AND status = 1 ORDER BY path"
+    )?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(ProjectDirectoryRow {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            parent_id: row.get(2)?,
+            name: row.get(3)?,
+            path: row.get(4)?,
+            level: row.get(5)?,
+            file_count: row.get(6)?,
+            child_count: row.get(7)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// Rebuild directories for a single project (called after file changes).
+fn rebuild_directories_for_project(conn: &Connection, project_id: &str) -> Result<(), rusqlite::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    conn.execute("DELETE FROM project_directories WHERE project_id = ?1", params![project_id])?;
+
+    let paths: Vec<String> = conn
+        .prepare("SELECT path FROM project_files WHERE project_id = ?1")?
+        .query_map(params![project_id], |row| row.get::<_, String>(0))?
+        .filter_map(Result::ok)
+        .collect();
+
+    let mut dir_map: std::collections::BTreeMap<String, (String, usize)> = std::collections::BTreeMap::new();
+    // dir_path → (parent_path, file_count)
+
+    for path in &paths {
+        let (_, dir) = split_file_path(path);
+        let segments: Vec<&str> = if dir.is_empty() { vec![] } else { dir.split('/').collect() };
+        let mut current_path = String::new();
+        let mut parent_path = String::new();
+        for (i, seg) in segments.iter().enumerate() {
+            if i > 0 {
+                parent_path = current_path.clone();
+                current_path.push('/');
+            }
+            current_path.push_str(seg);
+            dir_map.entry(current_path.clone()).or_insert_with(|| (parent_path.clone(), 0));
+        }
+        if !dir.is_empty() {
+            if let Some(entry) = dir_map.get_mut(&dir) {
+                entry.1 += 1;
+            }
+        }
+    }
+
+    let mut child_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (_dir_path, (parent_path, _)) in &dir_map {
+        if !parent_path.is_empty() {
+            *child_counts.entry(parent_path.clone()).or_insert(0usize) += 1;
+        }
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT OR REPLACE INTO project_directories
+             (id, project_id, parent_id, name, path, level, file_count, child_count, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?9)"
+        )?;
+        for (dir_path, (parent_path, file_count)) in &dir_map {
+            let name = dir_path.rsplit('/').next().unwrap_or(dir_path);
+            let level = if dir_path.is_empty() { 0 } else { dir_path.matches('/').count() + 1 } as i64;
+            let cc = *child_counts.get(dir_path).unwrap_or(&0) as i64;
+            stmt.execute(params![dir_path, project_id, parent_path, name, dir_path, level, *file_count as i64, cc, now])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+// ── projects ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ProjectRow {
     pub id: String,
     pub name: String,
@@ -1061,7 +1454,7 @@ pub fn load_table_level_edges(conn: &Connection, project_id: &str) -> Result<Vec
 
 // ── schema_files ───────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SchemaFileRow {
     pub name: String,
     pub path: String,
@@ -1211,7 +1604,7 @@ pub fn get_file_results(
 
 // ── lineage ────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct LineageNodeRow {
     pub node_id: String,
     pub node_type: String,
@@ -1226,7 +1619,7 @@ pub struct LineageNodeRow {
     pub dir_path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct LineageColumnRow {
     pub column_id: String,
     pub label: String,
@@ -1241,7 +1634,7 @@ pub struct LineageColumnRow {
     pub dir_path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct LineageEdgeRow {
     pub edge_id: String,
     pub from_id: String,
@@ -1493,7 +1886,7 @@ pub fn clear_lineage_for_file(
 
 // ── table_metadata / column_metadata ───────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TableMetadataRow {
     pub id: i64,
     pub project_id: String,
@@ -1517,7 +1910,7 @@ pub struct TableMetadataRow {
     pub status: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ColumnMetadataRow {
     pub id: i64,
     pub project_id: String,

@@ -20,17 +20,72 @@ export async function saveProjectFiles(projectId: string, files: ProjectFile[]):
   })));
 }
 
-/** Load all files for a project */
+/** Load all files for a project (with content) */
 export async function loadProjectFiles(projectId: string): Promise<ProjectFile[]> {
   const files = await serverDb.loadProjectFiles(projectId);
   return files.map(f => ({
-    id: f.path,  // use path as stable identifier
+    id: f.path,
     name: f.name,
     path: f.path,
     content: f.content,
     language: f.language as ProjectFile['language'],
     size: f.size,
   }));
+}
+
+/** Load file metadata only (no content — content is '') */
+export async function loadProjectFilesMeta(projectId: string): Promise<ProjectFile[]> {
+  const files = await serverDb.loadFilesMeta(projectId);
+  return files.map(f => ({
+    id: f.path,
+    name: f.name,
+    path: f.path,
+    content: '',
+    language: (f.language || 'sql') as ProjectFile['language'],
+    size: f.size,
+  }));
+}
+
+/** Load content for a single file */
+export async function loadFileContent(projectId: string, filePath: string): Promise<string | null> {
+  return serverDb.loadFileContent(projectId, filePath);
+}
+
+/** Load content for multiple files (batch) */
+export async function loadFileContentsBatch(
+  projectId: string,
+  paths: string[]
+): Promise<Map<string, string>> {
+  return serverDb.loadFileContentsBatch(projectId, paths);
+}
+
+/** Upsert files incrementally (does NOT delete other files) */
+export async function upsertProjectFiles(projectId: string, files: ProjectFile[]): Promise<void> {
+  await serverDb.upsertProjectFiles(projectId, files.map(f => ({
+    name: f.name,
+    path: f.path,
+    content: f.content,
+    language: f.language,
+    size: f.size || new TextEncoder().encode(f.content).length,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  })) as never);
+}
+
+/** Delete files by paths */
+export async function deleteProjectFilesByPaths(projectId: string, paths: string[]): Promise<void> {
+  await serverDb.deleteProjectFilesByPaths(projectId, paths);
+}
+
+/** Rename a file or folder server-side (metadata-only, no content needed) */
+export async function renameProjectFile(
+  projectId: string,
+  oldPath: string,
+  newPath: string,
+  newName: string,
+  isFolder: boolean
+): Promise<void> {
+  await serverDb.renameProjectFile(projectId, oldPath, newPath, newName, isFolder);
 }
 
 /** Delete stored files for a project */

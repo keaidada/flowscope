@@ -59,7 +59,7 @@ interface PreparedAnalysisFile {
  */
 export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions) {
   const adapter = options?.adapter;
-  const { currentProject, activeProjectId, updateFiles } = useProject();
+  const { currentProject, activeProjectId, updateFiles, ensureFilesContent } = useProject();
   const hideCTEs = useLineageStore((state) => state.hideCTEs);
   const setLineageResult = useLineageStore((state) => state.setResult);
   const setLineageSql = useLineageStore((state) => state.setSql);
@@ -343,7 +343,14 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
     const restoreCachedAnalysis = async () => {
       const activeFile = project.files.find((file) => file.id === project.activeFileId);
-      const context = await buildAnalysisContext(project, activeFile?.content, activeFile?.path);
+      // Ensure active file content is loaded for cache key computation
+      if (activeFile && activeFile.content === '' && activeFile.id) {
+        await ensureFilesContent([activeFile.id]);
+      }
+      const updatedActiveFile = activeFile?.id
+        ? currentProjectRef.current?.files.find((f) => f.id === activeFile.id) ?? activeFile
+        : activeFile;
+      const context = await buildAnalysisContext(project, updatedActiveFile?.content, updatedActiveFile?.path);
       if (cancelled || !context || context.files.length === 0) {
         return;
       }
@@ -487,6 +494,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
       try {
+        // Ensure file contents are loaded before building analysis context
         const context = await buildAnalysisContext(
           project,
           activeFileContent,
@@ -497,6 +505,33 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         if (!context) {
           setError('No project context available');
           return;
+        }
+
+        // Lazy content loading: ensure all files in context have content loaded
+        const filesNeedingContent: string[] = [];
+        for (const f of context.files) {
+          // Look up file by path (name in context = path in project files)
+          const pf = project.files.find((p) => p.path === f.name || p.id === f.name);
+          if (pf && pf.content === '') {
+            filesNeedingContent.push(pf.id);
+          }
+        }
+        if (filesNeedingContent.length > 0) {
+          await ensureFilesContent(filesNeedingContent);
+          // Rebuild context with loaded content
+          const updatedProject = currentProjectRef.current;
+          if (updatedProject) {
+            const refreshedContext = await buildAnalysisContext(
+              updatedProject,
+              activeFileContent,
+              activeFilePath,
+              runMode
+            );
+            if (refreshedContext) {
+              // Replace context.files with refreshed content
+              context.files = refreshedContext.files;
+            }
+          }
         }
 
         if (context.files.length === 0) {

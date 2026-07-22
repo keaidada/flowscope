@@ -73,7 +73,9 @@
     "analysisError": "分析错误",
     "noFileSelected": "未选择文件",
     "saved": "已保存",
-    "saveFailed": "保存失败"
+    "saveFailed": "保存失败",
+    "noServerFiles": "服务端暂无 SQL 文件",
+    "noServerFilesDesc": "请在监听目录中添加 .sql 或 .hql 文件"
   },
   "project": {
     "projects": "项目",

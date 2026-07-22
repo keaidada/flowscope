@@ -73,7 +73,9 @@
     "analysisError": "Analysis Error",
     "noFileSelected": "No file selected",
     "saved": "Saved",
-    "saveFailed": "Save failed"
+    "saveFailed": "Save failed",
+    "noServerFiles": "No SQL files on server",
+    "noServerFilesDesc": "Add .sql or .hql files to the watched directory"
   },
   "project": {
     "projects": "Projects",

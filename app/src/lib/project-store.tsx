@@ -22,7 +22,15 @@ import type { TemplateMode } from '@/types';
 import { DEFAULT_PROJECT, DEFAULT_DBT_PROJECT } from './default-projects';
 import { useBackend } from './backend-context';
 import { useBackendFiles } from '@/hooks/useBackendFiles';
-import { saveProjectFiles, loadProjectFiles, deleteProjectFiles } from './file-storage';
+import {
+  loadProjectFilesMeta,
+  loadFileContent as storageLoadFileContent,
+  loadFileContentsBatch,
+  upsertProjectFiles,
+  deleteProjectFilesByPaths,
+  renameProjectFile,
+  deleteProjectFiles,
+} from './file-storage';
 import * as serverDb from '@/lib/server-db';
 import { genId } from '@/lib/utils';
 
@@ -172,6 +180,12 @@ interface ProjectContextType {
   renameFolder: (oldFolderPath: string, newFolderName: string) => void;
   deleteFolder: (folderPath: string) => void;
   selectFile: (fileId: string) => void;
+  /** Load content for a single file on demand (lazy content loading) */
+  loadFileContent: (fileId: string) => Promise<void>;
+  /** Check if a file's content has been loaded */
+  isContentLoaded: (fileId: string) => boolean;
+  /** Ensure multiple files have content loaded (batch) */
+  ensureFilesContent: (fileIds: string[]) => Promise<void>;
 
   // Schema SQL management
   updateSchemaSQL: (projectId: string, schemaSQL: string) => void;
@@ -302,14 +316,16 @@ const scheduleBackendProjectSync = (projects: Project[]) => {
 /** Debounced IndexedDB file save — 500ms delay to avoid frequent writes */
 const fileSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-const debouncedSaveFiles = (projectId: string, files: ProjectFile[]) => {
-  const existing = fileSaveTimers.get(projectId);
+/** Debounced incremental upsert — only saves files with content loaded (no DELETE) */
+const debouncedUpsertFiles = (projectId: string, files: ProjectFile[]) => {
+  const key = `upsert-${projectId}`;
+  const existing = fileSaveTimers.get(key);
   if (existing) clearTimeout(existing);
   fileSaveTimers.set(
-    projectId,
+    key,
     setTimeout(() => {
-      fileSaveTimers.delete(projectId);
-      saveProjectFiles(projectId, files);
+      fileSaveTimers.delete(key);
+      upsertProjectFiles(projectId, files);
     }, 500)
   );
 };
@@ -446,12 +462,15 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   // Track whether IndexedDB files have been loaded (prevent overwriting on mount)
   const filesLoadedRef = useRef(false);
   const [filesLoaded, setFilesLoaded] = useState(false);
+  // Track which files have their content loaded (lazy content loading)
+  const loadedContentIds = useRef<Set<string>>(new Set());
   // Track previous file signatures per project to detect changes (id+path+content length)
   const prevFileSignaturesRef = useRef<Map<string, string>>(new Map());
 
   // Compute a lightweight signature for a project's files
+  // Uses size (not content.length) so lazy content loading doesn't trigger saves
   const computeFileSignature = (files: ProjectFile[]): string => {
-    return files.map((f) => `${f.id}:${f.path}:${f.content.length}`).join('|');
+    return files.map((f) => `${f.id}:${f.path}:${f.size ?? f.content.length ?? 0}`).join('|');
   };
 
   // 回填:localStorage 无项目时,从后端 loadProjects 恢复(换设备/清缓存)
@@ -475,15 +494,20 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     saveProjectSettingsToStorage(projects);
   }, [projects]);
 
-  // Save project files to IndexedDB — detect changes by signature, not just count
+  // Save project files to SQLite — incremental upsert (only files with content loaded)
   useEffect(() => {
     if (!filesLoadedRef.current) return;
     for (const project of projects) {
       const prevSig = prevFileSignaturesRef.current.get(project.id);
       const currentSig = computeFileSignature(project.files);
-      // Save if signature changed (covers add/delete/rename/content-length changes)
       if (prevSig !== currentSig && project.files.length > 0) {
-        debouncedSaveFiles(project.id, project.files);
+        // Only upsert files that have content loaded (avoid overwriting DB with empty content)
+        const saveableFiles = project.files.filter(
+          (f) => loadedContentIds.current.has(f.id) || f.content.length > 0
+        );
+        if (saveableFiles.length > 0) {
+          debouncedUpsertFiles(project.id, saveableFiles);
+        }
       }
     }
     // Update tracking
@@ -502,8 +526,14 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         const timer = fileSaveTimers.get(project.id);
         if (timer) {
           clearTimeout(timer);
-          fileSaveTimers.delete(project.id);
-          saveProjectFiles(project.id, project.files);
+          fileSaveTimers.delete(`upsert-${project.id}`);
+          // Only save files with content loaded
+          const saveable = project.files.filter(
+            (f) => loadedContentIds.current.has(f.id) || f.content.length > 0
+          );
+          if (saveable.length > 0) {
+            upsertProjectFiles(project.id, saveable);
+          }
         }
       }
     };
@@ -511,19 +541,19 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [projects]);
 
-  // Load files from DuckDB on mount (non-blocking)
+  // Load files from SQLite on mount — metadata only (no content) for fast project switching
   useEffect(() => {
     let cancelled = false;
     const loadFiles = async () => {
-      // Load files per-project in small batches to avoid blocking the main thread
+      // Load file metadata per-project (no content — lazy loaded on demand)
       const updatedProjects: Array<{ id: string; files: ProjectFile[] } | null> = [];
       for (const p of projects) {
         if (p.files.length > 0) {
           updatedProjects.push(null);
           continue;
         }
-        // Load files from DB
-        const files = await loadProjectFiles(p.id);
+        // Load metadata only (no content)
+        const files = await loadProjectFilesMeta(p.id);
         updatedProjects.push(files.length > 0 ? { id: p.id, files } : null);
         // Yield to main thread to allow rendering progress
         await new Promise((res) => requestAnimationFrame(res));
@@ -536,9 +566,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         files: ProjectFile[];
       }[];
 
-      // Mark loaded BEFORE setState so the save effect doesn't re-save stale data
+      // Mark loaded BEFORE state updates (ref guards save effect immediately)
       filesLoadedRef.current = true;
-      setFilesLoaded(true);
 
       // Initialize signature tracking so save effect doesn't immediately trigger
       const newSigs = new Map<string, string>();
@@ -549,9 +578,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       }
       prevFileSignaturesRef.current = newSigs;
 
-      if (projectsWithFiles.length > 0) {
-        // Use startTransition and incremental updates to avoid UI freeze when injecting many files
-        startTransition(() => {
+      // Batch filesLoaded + projects update in one transition to avoid
+      // intermediate state where filesLoaded=true but projects are still empty
+      startTransition(() => {
+        setFilesLoaded(true);
+        if (projectsWithFiles.length > 0) {
           setProjects((prev) =>
             prev.map((p) => {
               const loaded = projectsWithFiles.find((u) => u.id === p.id);
@@ -573,8 +604,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
               };
             })
           );
-        });
-      }
+        }
+      });
     };
 
     loadFiles();
@@ -818,6 +849,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       if (!activeProjectId) return;
 
       const newFileId = uuidv4();
+      // Mark as content loaded — new file's content is correct (even if empty)
+      loadedContentIds.current.add(newFileId);
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id !== activeProjectId) return p;
@@ -866,12 +899,15 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     (fileId: string, content: string) => {
       if (!activeProjectId) return;
 
+      // Mark content as loaded and update size for signature tracking
+      loadedContentIds.current.add(fileId);
+      const newSize = new TextEncoder().encode(content).length;
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id !== activeProjectId) return p;
           return {
             ...p,
-            files: p.files.map((f) => (f.id === fileId ? { ...f, content } : f)),
+            files: p.files.map((f) => (f.id === fileId ? { ...f, content, size: newSize } : f)),
           };
         })
       );
@@ -879,20 +915,96 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     [activeProjectId]
   );
 
+  // Lazy content loading: load a single file's content from DB
+  const loadFileContent = useCallback(
+    async (fileId: string) => {
+      if (loadedContentIds.current.has(fileId)) return;
+      const project = projects.find((p) => p.id === activeProjectId);
+      const file = project?.files.find((f) => f.id === fileId);
+      if (!file || !activeProjectId) return;
+
+      const content = await storageLoadFileContent(activeProjectId, file.path);
+      loadedContentIds.current.add(fileId);
+
+      if (content !== null) {
+        setProjects((prev) =>
+          prev.map((p) => {
+            if (p.id !== activeProjectId) return p;
+            return {
+              ...p,
+              files: p.files.map((f) => (f.id === fileId ? { ...f, content } : f)),
+            };
+          })
+        );
+      }
+    },
+    [activeProjectId, projects]
+  );
+
+  const isContentLoaded = useCallback((fileId: string) => {
+    return loadedContentIds.current.has(fileId);
+  }, []);
+
+  // Ensure multiple files have content loaded (batch, for analysis/search)
+  const ensureFilesContent = useCallback(
+    async (fileIds: string[]) => {
+      const unloaded = fileIds.filter((id) => !loadedContentIds.current.has(id));
+      if (unloaded.length === 0 || !activeProjectId) return;
+
+      const project = projects.find((p) => p.id === activeProjectId);
+      if (!project) return;
+
+      const paths = unloaded
+        .map((id) => project.files.find((f) => f.id === id)?.path)
+        .filter(Boolean) as string[];
+
+      const contents = await loadFileContentsBatch(activeProjectId, paths);
+
+      // Mark all as loaded
+      for (const id of unloaded) {
+        loadedContentIds.current.add(id);
+      }
+
+      // Update state with loaded content
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          return {
+            ...p,
+            files: p.files.map((f) => {
+              if (!unloaded.includes(f.id)) return f;
+              const content = contents.get(f.path) ?? '';
+              return { ...f, content };
+            }),
+          };
+        })
+      );
+    },
+    [activeProjectId, projects]
+  );
+
   const updateFiles = useCallback(
     (updates: Array<{ fileId: string; content: string }>) => {
       if (!activeProjectId || updates.length === 0) return;
 
-      const updatesMap = new Map(updates.map((update) => [update.fileId, update.content]));
+      const updatesMap = new Map(updates.map((u) => [u.fileId, u.content]));
+
+      // Mark all as content loaded
+      for (const { fileId } of updates) {
+        loadedContentIds.current.add(fileId);
+      }
 
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id !== activeProjectId) return p;
           return {
             ...p,
-            files: p.files.map((f) =>
-              updatesMap.has(f.id) ? { ...f, content: updatesMap.get(f.id) ?? f.content } : f
-            ),
+            files: p.files.map((f) => {
+              if (!updatesMap.has(f.id)) return f;
+              const content = updatesMap.get(f.id) ?? f.content;
+              const size = new TextEncoder().encode(content).length;
+              return { ...f, content, size };
+            }),
           };
         })
       );
@@ -908,6 +1020,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         const project = prev.find((p) => p.id === activeProjectId);
         if (!project) return prev;
 
+        const deletedFile = project.files.find((f) => f.id === fileId);
         const remainingFiles = project.files.filter((f) => f.id !== fileId);
         // If deleting the active file, switch to first remaining
         const currentActive = activeFileIdOverride || project.activeFileId;
@@ -915,8 +1028,13 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           setActiveFileIdOverride(remainingFiles[0]?.id || null);
         }
 
-        // Immediately persist to storage (skip debounce to avoid data loss on HMR/reload)
-        saveProjectFiles(activeProjectId, remainingFiles);
+        // Clean up content tracking
+        loadedContentIds.current.delete(fileId);
+
+        // Incremental delete by path (no full-replace)
+        if (deletedFile) {
+          deleteProjectFilesByPaths(activeProjectId, [deletedFile.path]);
+        }
 
         return prev.map((p) => {
           if (p.id !== activeProjectId) return p;
@@ -940,6 +1058,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         const project = prev.find((p) => p.id === activeProjectId);
         if (!project) return prev;
 
+        const deletedPaths = project.files
+          .filter((f) => idsSet.has(f.id))
+          .map((f) => f.path);
         const remainingFiles = project.files.filter((f) => !idsSet.has(f.id));
 
         const currentActive = activeFileIdOverride || project.activeFileId;
@@ -947,8 +1068,15 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           setActiveFileIdOverride(remainingFiles[0]?.id || null);
         }
 
-        // Immediately persist to storage (skip debounce to avoid data loss on HMR/reload)
-        saveProjectFiles(activeProjectId, remainingFiles);
+        // Clean up content tracking
+        for (const id of fileIds) {
+          loadedContentIds.current.delete(id);
+        }
+
+        // Incremental delete by paths
+        if (deletedPaths.length > 0) {
+          deleteProjectFilesByPaths(activeProjectId, deletedPaths);
+        }
 
         return prev.map((p) => {
           if (p.id !== activeProjectId) return p;
@@ -967,6 +1095,20 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     (fileId: string, newName: string) => {
       if (!activeProjectId) return;
 
+      // Capture old path for server-side rename
+      const project = projects.find((p) => p.id === activeProjectId);
+      const file = project?.files.find((f) => f.id === fileId);
+      if (!file) return;
+
+      const lastSlashIndex = file.path.lastIndexOf('/');
+      const newPath =
+        lastSlashIndex === -1
+          ? newName
+          : `${file.path.slice(0, lastSlashIndex + 1)}${newName}`;
+
+      // Server-side rename (metadata-only, preserves content in DB)
+      renameProjectFile(activeProjectId, file.path, newPath, newName, false);
+
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id !== activeProjectId) return p;
@@ -974,44 +1116,37 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             ...p,
             files: p.files.map((f) => {
               if (f.id !== fileId) return f;
-              const lastSlashIndex = f.path.lastIndexOf('/');
-              const newPath =
-                lastSlashIndex === -1
-                  ? newName
-                  : `${f.path.slice(0, lastSlashIndex + 1)}${newName}`;
-              return {
-                ...f,
-                name: newName,
-                path: newPath,
-              };
+              return { ...f, name: newName, path: newPath };
             }),
           };
         })
       );
     },
-    [activeProjectId]
+    [activeProjectId, projects]
   );
 
   const renameFolder = useCallback(
     (oldFolderPath: string, newFolderName: string) => {
       if (!activeProjectId) return;
 
+      const lastSlash = oldFolderPath.lastIndexOf('/');
+      const newFolderPath =
+        lastSlash === -1
+          ? newFolderName
+          : `${oldFolderPath.slice(0, lastSlash + 1)}${newFolderName}`;
+
+      // Server-side rename (metadata-only, preserves content in DB)
+      renameProjectFile(activeProjectId, oldFolderPath, newFolderPath, newFolderName, true);
+
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id !== activeProjectId) return p;
-          // Compute new folder path: replace last segment of oldFolderPath
-          const lastSlash = oldFolderPath.lastIndexOf('/');
-          const newFolderPath =
-            lastSlash === -1
-              ? newFolderName
-              : `${oldFolderPath.slice(0, lastSlash + 1)}${newFolderName}`;
           const prefix = `${oldFolderPath}/`;
           return {
             ...p,
             files: p.files.map((f) => {
               if (f.path === oldFolderPath || f.path.startsWith(prefix)) {
                 const newPath = newFolderPath + f.path.slice(oldFolderPath.length);
-                // Update name only if the file sits directly in this folder
                 const newName = newPath.split('/').pop() || f.name;
                 return { ...f, path: newPath, name: newName };
               }
@@ -1170,6 +1305,13 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     (newFiles: ProjectFile[]) => {
       if (!activeProjectId || newFiles.length === 0) return;
 
+      // Mark files with content as loaded
+      for (const f of newFiles) {
+        if (f.content.length > 0) {
+          loadedContentIds.current.add(f.id);
+        }
+      }
+
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id !== activeProjectId) return p;
@@ -1258,6 +1400,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     renameFolder,
     deleteFolder,
     selectFile,
+    loadFileContent,
+    isContentLoaded,
+    ensureFilesContent,
     updateSchemaSQL,
     importFiles,
     replaceWithFiles,
