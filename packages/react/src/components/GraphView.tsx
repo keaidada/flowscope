@@ -1128,8 +1128,8 @@ export function GraphView({
             <ToolbarToggleButton
               isActive={!defaultCollapsed}
               onClick={() => actions.setAllNodesCollapsed(!defaultCollapsed)}
-              ariaLabel={defaultCollapsed ? 'Expand all tables' : 'Collapse all tables'}
-              tooltip={defaultCollapsed ? 'Expand all tables' : 'Collapse all tables'}
+              ariaLabel={defaultCollapsed ? t('graph.expandAllTables') : t('graph.collapseAllTables')}
+              tooltip={defaultCollapsed ? t('graph.expandAllTables') : t('graph.collapseAllTables')}
               icon={
                 defaultCollapsed ? (
                   <Maximize2 className="size-4" strokeWidth={1.5} />
@@ -1143,8 +1143,8 @@ export function GraphView({
             <ToolbarToggleButton
               isActive={showColumnEdges}
               onClick={actions.toggleColumnEdges}
-              ariaLabel={showColumnEdges ? 'Show table connections' : 'Show column lineage'}
-              tooltip={showColumnEdges ? 'Show table connections' : 'Show column lineage'}
+              ariaLabel={showColumnEdges ? t('graph.showTableConnections') : t('graph.showColumnLineage')}
+              tooltip={showColumnEdges ? t('graph.showTableConnections') : t('graph.showColumnLineage')}
               icon={
                 showColumnEdges ? (
                   <GitBranch className="size-4" strokeWidth={1.5} />

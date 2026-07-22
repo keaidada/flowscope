@@ -793,7 +793,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                   >
                     <div className="flex h-full min-h-0 flex-col">
                       <SheetHeader className="border-b px-5 py-4">
-                        <SheetTitle>{t('app.globalLineage')}</SheetTitle>
+                        <SheetTitle>{t('app.currentLineage')}</SheetTitle>
                         <SheetDescription>{t('analysis.emptyState.runAnalysis')}</SheetDescription>
                       </SheetHeader>
                       <div className="min-h-0 flex-1">
