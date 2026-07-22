@@ -312,12 +312,17 @@ export async function writeTableLevelEdges(projectId: string): Promise<void> {
   }
   function ufUnion(a: string, b: string): void { const ra = ufFind(a), rb = ufFind(b); if (ra !== rb) ufParent.set(ra, rb); }
 
-  // Build CTE → stmtKeys map
+  // Build CTE → stmtKeys map — CTE key MUST include script path
+  // because the Rust parser reuses CTE node IDs across different files
+  // (same CTE name → same hash). Without script prefix, union-find would
+  // merge statements from different scripts, causing cross-contamination.
   const cteToStmts = new Map<string, Set<string>>();
   for (const [stmtKey, ctes] of stmtCteNodes) {
+    const script = stmtKey.split('\0')[0];
     for (const cte of ctes) {
-      if (!cteToStmts.has(cte)) cteToStmts.set(cte, new Set());
-      cteToStmts.get(cte)!.add(stmtKey);
+      const perScriptCteKey = `${script}\0${cte}`;
+      if (!cteToStmts.has(perScriptCteKey)) cteToStmts.set(perScriptCteKey, new Set());
+      cteToStmts.get(perScriptCteKey)!.add(stmtKey);
     }
   }
   // Union stmtKeys sharing a CTE
