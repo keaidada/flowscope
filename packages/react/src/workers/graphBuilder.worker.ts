@@ -962,7 +962,8 @@ function getScriptIO(stmts: StatementLineageWithSource[]) {
       if (node.type === 'table' || node.type === 'view') {
         const isWritten =
           stmt.edges.some((e) => e.to === node.id && e.type === 'data_flow') ||
-          createdRelationIds.has(node.id);
+          createdRelationIds.has(node.id) ||
+          node.metadata?.isCreated === true;
         const isReadFromEdge = stmt.edges.some((e) => e.from === node.id && e.type === 'data_flow');
         const isReadFromMeta = node.metadata?.isRead === true;
 
