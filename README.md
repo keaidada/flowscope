@@ -1,50 +1,29 @@
 # FlowScope
 
 [![CI](https://github.com/pondpilot/flowscope/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pondpilot/flowscope/actions/workflows/ci.yml)
-[![Docs](https://img.shields.io/badge/docs-available-brightgreen.svg)](docs/README.md)
 [![codecov](https://codecov.io/gh/pondpilot/flowscope/graph/badge.svg)](https://codecov.io/gh/pondpilot/flowscope)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.82+-orange.svg)](https://www.rust-lang.org)
 [![TypeScript](https://img.shields.io/badge/typescript-5.0+-blue.svg)](https://www.typescriptlang.org)
 [![WebAssembly](https://img.shields.io/badge/wasm-ready-purple.svg)](https://webassembly.org)
 [![Crates.io](https://img.shields.io/crates/v/flowscope-core.svg)](https://crates.io/crates/flowscope-core)
-[![Crates.io](https://img.shields.io/crates/v/flowscope-export.svg)](https://crates.io/crates/flowscope-export)
-[![Crates.io](https://img.shields.io/crates/v/flowscope-cli.svg)](https://crates.io/crates/flowscope-cli)
 [![npm](https://img.shields.io/npm/v/@pondpilot/flowscope-core.svg)](https://www.npmjs.com/package/@pondpilot/flowscope-core)
 
-FlowScope includes a full web application at [flowscope.pondpilot.io](https://flowscope.pondpilot.io) for interactive, multi-file SQL lineage analysis.
+FlowScope is a privacy-first SQL lineage engine built with Rust and WebAssembly. It analyzes SQL queries and produces interactive lineage graphs — all in the browser, with zero data egress.
 
-Under the hood, it is a privacy-first SQL lineage engine that runs entirely in the browser. Built with Rust and WebAssembly, it analyzes SQL queries to produce lineage graphs that describe how tables, CTEs, and columns flow through transformations.
+> **中文文档请见 [README.zh-CN.md](README.zh-CN.md)**
 
-The engine is designed for embedding into web apps, browser extensions, and developer tools that need instant lineage analysis without sending SQL to a server.
+## Try It
 
-## Getting Started
+**[flowscope.pondpilot.io](https://flowscope.pondpilot.io)** — Drag and drop SQL files or paste queries directly. No sign-up, no uploads.
 
-### Web Application
+## Quick Start
 
-The easiest way to use FlowScope is through the hosted web app — no installation required:
-
-**[flowscope.pondpilot.io](https://flowscope.pondpilot.io)**
-
-Features:
-- Drag and drop SQL files or paste queries directly
-- Interactive lineage graph with table and column-level views
-- Multi-file project support with schema DDL
-- dbt/Jinja template preprocessing for dbt models
-- Export to Mermaid, JSON, CSV, Excel, or HTML reports
-- All processing happens in your browser — your SQL never leaves your machine
-
-### Command-Line Interface
-
-For scripting and CI/CD integration, install the CLI:
+### CLI
 
 ```bash
 cargo install flowscope-cli
-```
 
-Basic usage:
-
-```bash
 # Analyze a SQL file
 flowscope query.sql
 
@@ -54,78 +33,35 @@ flowscope -d snowflake etl/*.sql
 # Generate a Mermaid diagram
 flowscope -f mermaid -v column query.sql > lineage.mmd
 
-# Export to Excel with schema awareness
-flowscope -s schema.sql -f xlsx -o report.xlsx queries/*.sql
-
-# Pipe from stdin
-cat query.sql | flowscope -d postgres
-```
-
-Output formats: `table` (default), `json`, `mermaid`, `html`, `sql`, `csv`, `xlsx`, `duckdb`
-
-### Linting
-
-FlowScope includes a SQL linter with 72 rules covering aliasing, layout, conventions, structure, and more:
-
-```bash
-# Lint SQL files
+# Lint SQL files (72 rules)
 flowscope --lint queries/*.sql
 
 # Lint and auto-fix
 flowscope --lint --fix queries/*.sql
-
-# JSON output for CI integration
-flowscope --lint -f json queries/*.sql
 ```
 
-See [CLI documentation](crates/flowscope-cli/README.md) for all lint options and rule configuration.
+Output formats: `table` (default), `json`, `mermaid`, `html`, `sql`, `csv`, `xlsx`, `duckdb`
 
-### Serve Mode (Local Web UI)
+### Serve Mode (Local Server)
 
-Run FlowScope as a local HTTP server with the full web UI embedded in a single binary:
+Run a full-featured local server with an embedded web UI and REST API:
 
 ```bash
-# Start server watching SQL directories
-flowscope --serve --watch ./sql
-
-# With database schema and custom port
-flowscope --serve --watch ./models -d postgres --metadata-url postgres://user@localhost/db --port 8080
-
-# Open browser automatically
-flowscope --serve --watch ./sql --open
+flowscope --serve --watch ./sql            # Watch SQL directories
+flowscope --serve --watch ./sql --open     # Auto-open browser
+flowscope --serve --db-only --port 3000    # REST API only (no static files)
 ```
 
-The serve mode watches directories for `.sql` file changes and provides the same interactive experience as the hosted web app, with all processing happening locally. Requires building with the `serve` feature.
+- **Web UI**: Full FlowScope app at `http://localhost:3000`
+- **REST API**: 44+ endpoints at `http://localhost:3000/api`
+- **OpenAPI docs**: Interactive docs at `http://localhost:3000/api/docs` (EN/ZH)
+- **API spec**: `http://localhost:3000/api/openapi.json`
 
-See [CLI documentation](crates/flowscope-cli/README.md) for all options.
-
-## Key Features
-
-- Client-side analysis with zero data egress
-- Multi-dialect coverage (PostgreSQL, Snowflake, BigQuery, DuckDB, Redshift, and more)
-- dbt and Jinja templating support with built-in macro stubs (`ref()`, `source()`, `var()`)
-- Table and column lineage with schema-aware wildcard expansion
-- SQL linting with 72 rules across 9 categories (aliasing, layout, convention, structure, and more)
-- Auto-fix engine with safe and unsafe fix modes
-- Structured diagnostics with spans for precise highlighting
-- Completion API for SQL authoring workflows
-- TypeScript API and optional React visualization components
-
-## Components
-
-- `app/` — the hosted web application at [flowscope.pondpilot.io](https://flowscope.pondpilot.io)
-- `crates/` — Rust engine, WASM bindings, and CLI
-- `packages/` — TypeScript API and React visualization components
-
-## TypeScript API
-
-Install the core package:
+### TypeScript / NPM
 
 ```bash
-npm install @pondpilot/flowscope-core
+npm install @pondpilot/flowscope-core @pondpilot/flowscope-react
 ```
-
-Analyze a query:
 
 ```typescript
 import { initWasm, analyzeSql } from '@pondpilot/flowscope-core';
@@ -140,64 +76,70 @@ const result = await analyzeSql({
 console.log(result.statements[0]);
 ```
 
-## Completion API
+## Features
 
-Use the completion API to provide SQL authoring hints at a cursor position. See [docs/guides/schema-metadata.md](docs/guides/schema-metadata.md) for schema setup details.
+- **Privacy First** — All analysis runs in the browser. Your SQL never leaves your machine.
+- **Multi-Dialect** — PostgreSQL, Snowflake, BigQuery, DuckDB, Redshift, and more.
+- **dbt / Jinja** — Built-in macro stubs for `ref()`, `source()`, `var()`.
+- **Table & Column Lineage** — Schema-aware wildcard expansion.
+- **SQL Linter** — 72 rules across 9 categories with auto-fix.
+- **Completion API** — SQL authoring hints at cursor position.
+- **Export** — Mermaid, JSON, CSV, Excel, DuckDB SQL, HTML reports.
+- **React Components** — Interactive lineage graphs, matrix view, schema view.
+- **VS Code Extension** — In-editor lineage and linting.
+- **i18n** — English and Simplified Chinese.
 
-```typescript
-import {
-  charOffsetToByteOffset,
-  completionItems,
-  initWasm,
-} from '@pondpilot/flowscope-core';
+## Project Structure
 
-await initWasm();
-
-const sql = 'SELECT * FROM analytics.';
-const cursorOffset = charOffsetToByteOffset(sql, sql.length);
-
-const result = await completionItems({
-  sql,
-  dialect: 'postgres',
-  cursorOffset,
-  schema: {
-    defaultSchema: 'analytics',
-    tables: [{ name: 'orders', columns: [{ name: 'order_id' }, { name: 'total' }] }],
-  },
-});
-
-console.log(result.items.slice(0, 5));
 ```
-
-## Visualization
-
-For interactive lineage graphs, add the React package and render the `LineageExplorer` component. See [docs/guides/quickstart.md](docs/guides/quickstart.md) for a full walkthrough.
-
-```bash
-npm install @pondpilot/flowscope-react
+├── crates/                  Rust workspace
+│   ├── flowscope-core/      Core lineage engine
+│   ├── flowscope-wasm/      WASM bindings
+│   ├── flowscope-cli/       CLI + serve mode (embedded web UI + REST API)
+│   └── flowscope-export/    Export helpers (Mermaid, HTML, CSV, XLSX, DuckDB)
+├── packages/                NPM workspace
+│   ├── core/                @pondpilot/flowscope-core (TypeScript + WASM)
+│   └── react/               @pondpilot/flowscope-react (React components)
+├── app/                     Demo web application (Vite + React)
+├── vscode/                  VS Code extension
+└── docs/                    Documentation
 ```
 
 ## Documentation
 
-- [docs/README.md](docs/README.md) — documentation map and reference index
-- [docs/guides/quickstart.md](docs/guides/quickstart.md) — TypeScript quickstart guide
-- [docs/guides/schema-metadata.md](docs/guides/schema-metadata.md) — schema metadata setup
-- [docs/dialect-coverage.md](docs/dialect-coverage.md) — dialect and statement coverage
-- [crates/flowscope-cli/README.md](crates/flowscope-cli/README.md) — CLI usage and examples
-- [docs/linter-architecture.md](docs/linter-architecture.md) — linter engine design and rule families
-- [docs/workspace-structure.md](docs/workspace-structure.md) — monorepo layout and build entry points
+- [Quickstart Guide](docs/guides/quickstart.md) — TypeScript setup and first analysis
+- [Schema Metadata](docs/guides/schema-metadata.md) — Schema configuration for completion
+- [CLI Documentation](crates/flowscope-cli/README.md) — Usage, linting, serve mode
+- [Dialect Coverage](docs/dialect-coverage.md) — Supported dialects and statements
+- [Workspace Structure](docs/workspace-structure.md) — Build targets and commands
 
 ## Development
 
-FlowScope uses `just` for common tasks. Run `just build`, `just test`, or `just dev`, and see [docs/workspace-structure.md](docs/workspace-structure.md) for the full command list.
+```bash
+# Prerequisites: Rust 1.82+, Node.js 18+, Yarn, wasm-pack
 
-## Contributing
+yarn install                       # Install Node dependencies
+just build                         # Build everything (WASM + TypeScript)
+just dev                           # Start Vite dev server
+just test                          # Run all tests
+just cli -- <args>                 # Run CLI in debug mode
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing expectations, and contribution guidelines.
+# Full dev environment
+just build-wasm-dev                # Build WASM (fast, no optimization)
+just build-ts                      # Build TypeScript packages
+cargo build -p flowscope-cli --features serve  # Build CLI with serve
+
+# Lint, format, typecheck
+just check
+just fmt
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full setup and guidelines.
 
 ## License
 
-The core engine and packages are released under Apache-2.0. See [LICENSE](LICENSE) for details. The `app/` directory uses the O'Saasy License; see [app/LICENSE](app/LICENSE).
+- Core engine and packages: [Apache-2.0](LICENSE)
+- `app/` directory: [O'Saasy License](app/LICENSE)
 
 ---
 
