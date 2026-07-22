@@ -187,13 +187,29 @@ function calculateNodeHeight(data: NodeData | undefined): number {
   // Script node expanded tables — only when _expandedTables is true
   const d = data as Record<string, unknown>;
   if (d._expandedTables) {
-    const reads = Array.isArray(d.tableNamesRead) ? d.tableNamesRead.length : 0;
-    const writes = Array.isArray(d.tableNamesWritten) ? d.tableNamesWritten.length : 0;
-    // Header 52 + reads section + gap + writes section
-    const rs = reads > 0 ? 24 + reads * 22 : 0;
-    const ws = writes > 0 ? 24 + writes * 22 : 0;
-    const gap = (reads > 0 && writes > 0) ? 13 : 0;
-    height = 55 + rs + gap + ws;
+    // Check for outputGroups (multi-output grouping)
+    const og = Array.isArray(d.outputGroups) ? d.outputGroups as Array<{ inputs: unknown[]; outputs: unknown[] }> : undefined;
+    if (og && og.length > 1) {
+      // Grouped layout: sum group heights + dividers
+      let h = 55;
+      for (let gi = 0; gi < og.length; gi++) {
+        const g = og[gi];
+        const inp = Array.isArray(g.inputs) ? g.inputs.length : 0;
+        const out = Array.isArray(g.outputs) ? g.outputs.length : 0;
+        h += 24 + inp * 22;
+        if (inp > 0 && out > 0) h += 13;
+        h += 24 + out * 22;
+        if (gi < og.length - 1) h += 10;
+      }
+      height = h;
+    } else {
+      const reads = Array.isArray(d.tableNamesRead) ? d.tableNamesRead.length : 0;
+      const writes = Array.isArray(d.tableNamesWritten) ? d.tableNamesWritten.length : 0;
+      const rs = reads > 0 ? 24 + reads * 22 : 0;
+      const ws = writes > 0 ? 24 + writes * 22 : 0;
+      const gap = (reads > 0 && writes > 0) ? 13 : 0;
+      height = 55 + rs + gap + ws;
+    }
   }
 
   return height;

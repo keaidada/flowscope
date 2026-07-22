@@ -242,6 +242,14 @@ export async function writeLineageData(
  * 每个脚本内：READ 表 → WRITE 表 作为一条边。
  * 纯表级，不涉及字段/CTE 解析。
  */
+// ── Script groups cache (computed once by writeTableLevelEdges, read by getOutputGroups) ──
+const _groupsCache = new Map<string, Map<string, OutputGroup[]>>();
+
+interface OutputGroup {
+  inputs: string[];
+  outputs: string[];
+}
+
 export async function writeTableLevelEdges(projectId: string): Promise<void> {
   const [rawNodes, rawEdges] = await Promise.all([
     serverDb.getLineageNodes(projectId),
@@ -256,30 +264,99 @@ export async function writeTableLevelEdges(projectId: string): Promise<void> {
   }
   const tableIds = new Set(nidToQn.keys());
 
-  const scriptReads = new Map<string, Set<string>>();
-  const scriptWrites = new Map<string, Set<string>>();
+  // Group data_flow edges by (script, statement_index)
+  const stmtReads = new Map<string, Set<string>>();
+  const stmtWrites = new Map<string, Set<string>>();
+  // Track CTE nodes per statement for CTE-chain merging
+  const stmtCteNodes = new Map<string, Set<string>>();
+  const allStmtKeys = new Set<string>();
 
   for (const e of rawEdges) {
     if (e.edge_type !== 'data_flow') continue;
-    const script = e.file_path;
+    if (e.statement_index == null) continue;
+    const stmtKey = `${e.file_path}\0${e.statement_index}`;
+    allStmtKeys.add(stmtKey);
     if (tableIds.has(e.from_id)) {
-      if (!scriptReads.has(script)) scriptReads.set(script, new Set());
-      scriptReads.get(script)!.add(nidToQn.get(e.from_id)!);
+      const qn = nidToQn.get(e.from_id);
+      if (qn) {
+        if (!stmtReads.has(stmtKey)) stmtReads.set(stmtKey, new Set());
+        stmtReads.get(stmtKey)!.add(qn);
+      }
     }
     if (tableIds.has(e.to_id)) {
-      if (!scriptWrites.has(script)) scriptWrites.set(script, new Set());
-      scriptWrites.get(script)!.add(nidToQn.get(e.to_id)!);
+      const qn = nidToQn.get(e.to_id);
+      if (qn) {
+        if (!stmtWrites.has(stmtKey)) stmtWrites.set(stmtKey, new Set());
+        stmtWrites.get(stmtKey)!.add(qn);
+      }
     }
+    // Track CTE/intermediate endpoints for union-find merging
+    // CTE nodes may have IDs starting with 'table_' but are NOT in tableIds (node_type='cte')
+    // Exclude column_* endpoints — they are column-level edges, not CTEs
+    if (!stmtCteNodes.has(stmtKey)) stmtCteNodes.set(stmtKey, new Set());
+    if (!tableIds.has(e.from_id) && !e.from_id.startsWith('column_')) stmtCteNodes.get(stmtKey)!.add(e.from_id);
+    if (!tableIds.has(e.to_id) && !e.to_id.startsWith('column_')) stmtCteNodes.get(stmtKey)!.add(e.to_id);
   }
 
+  // ── CTE-chain merge: union statements that share CTE nodes ──────────────
+  // The parser may split a WITH...INSERT into multiple statement_index values.
+  // Union-find merges them so reads in one sub-statement connect to writes in another.
+  const ufParent = new Map<string, string>();
+  function ufFind(x: string): string {
+    if (!ufParent.has(x)) ufParent.set(x, x);
+    let root = x;
+    while (ufParent.get(root)! !== root) root = ufParent.get(root)!;
+    let cur = x;
+    while (ufParent.get(cur)! !== root) { const n = ufParent.get(cur)!; ufParent.set(cur, root); cur = n; }
+    return root;
+  }
+  function ufUnion(a: string, b: string): void { const ra = ufFind(a), rb = ufFind(b); if (ra !== rb) ufParent.set(ra, rb); }
+
+  // Build CTE → stmtKeys map
+  const cteToStmts = new Map<string, Set<string>>();
+  for (const [stmtKey, ctes] of stmtCteNodes) {
+    for (const cte of ctes) {
+      if (!cteToStmts.has(cte)) cteToStmts.set(cte, new Set());
+      cteToStmts.get(cte)!.add(stmtKey);
+    }
+  }
+  // Union stmtKeys sharing a CTE
+  for (const stmts of cteToStmts.values()) {
+    const arr = [...stmts];
+    for (let i = 1; i < arr.length; i++) ufUnion(arr[0], arr[i]);
+  }
+
+  // Merge reads/writes by union representative
+  const mergedReads = new Map<string, Set<string>>();
+  const mergedWrites = new Map<string, Set<string>>();
+  for (const stmtKey of allStmtKeys) {
+    const root = ufFind(stmtKey);
+    if (!mergedReads.has(root)) { mergedReads.set(root, new Set()); mergedWrites.set(root, new Set()); }
+    for (const r of stmtReads.get(stmtKey) ?? []) mergedReads.get(root)!.add(r);
+    for (const w of stmtWrites.get(stmtKey) ?? []) mergedWrites.get(root)!.add(w);
+  }
+
+  // Cross-product reads × writes WITHIN each merged group
+  const mergedScript = new Map<string, string>();
+  for (const stmtKey of allStmtKeys) {
+    const root = ufFind(stmtKey);
+    mergedScript.set(root, stmtKey.split('\0')[0]);
+  }
+
+  const edgeSet = new Set<string>();
   const edges: Array<[string, string, string]> = [];
-  for (const [script, reads] of scriptReads) {
-    const writes = scriptWrites.get(script);
+  for (const [root, reads] of mergedReads) {
+    const writes = mergedWrites.get(root);
     if (!writes || writes.size === 0) continue;
+    const script = mergedScript.get(root)!;
     for (const fromQn of reads) {
       for (const toQn of writes) {
         if (fromQn !== toQn) {
-          edges.push([fromQn, toQn, script]);
+          const dedup = `${fromQn}\0${toQn}\0${script}`;
+          if (!edgeSet.has(dedup)) {
+            edgeSet.add(dedup);
+            edges.push([fromQn, toQn, script]);
+          }
         }
       }
     }
@@ -288,6 +365,17 @@ export async function writeTableLevelEdges(projectId: string): Promise<void> {
   if (edges.length > 0) {
     await serverDb.saveTableLevelEdges(projectId, edges);
   }
+
+  // ── Cache per-script groups for getOutputGroups to reuse ──────────────
+  const groupsByScript = new Map<string, OutputGroup[]>();
+  for (const [root, reads] of mergedReads) {
+    const writes = mergedWrites.get(root);
+    if (!writes || writes.size === 0) continue;
+    const script = mergedScript.get(root)!;
+    if (!groupsByScript.has(script)) groupsByScript.set(script, []);
+    groupsByScript.get(script)!.push({ inputs: [...reads], outputs: [...writes] });
+  }
+  _groupsCache.set(projectId, groupsByScript);
 }
 
 /**
@@ -433,30 +521,46 @@ export async function buildGlobalLineageFromNodes(
     }
   }
 
-  // 按脚本分组：reads / writes
-  const scriptMap = new Map<string, { reads: Set<string>; writes: Set<string> }>();
+  // 按 (脚本, statement_index) 分组：reads / writes — 尊重 per-statement 边界
+  const stmtMap = new Map<string, { script: string; reads: Set<string>; writes: Set<string> }>();
   for (const n of tableNodes) {
     const script = n.file_path;
+    const stmtKey = `${script}\0${n.statement_index}`;
     const qn = (n.qualified_name ?? n.label).toLowerCase();
-    if (!scriptMap.has(script)) scriptMap.set(script, { reads: new Set(), writes: new Set() });
+    if (!stmtMap.has(stmtKey)) stmtMap.set(stmtKey, { script, reads: new Set(), writes: new Set() });
     const isWrite = n.resolution_source === 'implied';
-    if (isWrite) scriptMap.get(script)!.writes.add(qn);
-    else scriptMap.get(script)!.reads.add(qn);
+    if (isWrite) stmtMap.get(stmtKey)!.writes.add(qn);
+    else stmtMap.get(stmtKey)!.reads.add(qn);
   }
 
-  // 构建 statements + edges
+  // 构建 statements + edges — 每条 statement 独立 cross-product
   const edgeSet = new Set<string>();
   const allEdges: Edge[] = [];
   let edgeIdx = 0;
   const statements: StatementLineage[] = [];
   let stmtIdx = 0;
 
-  for (const [script, { reads, writes }] of scriptMap) {
+  // 按 script 分组 statement 的 edges 和 nodes
+  const scriptStmts = new Map<string, Array<{ reads: Set<string>; writes: Set<string> }>>();
+  for (const { script, reads, writes } of stmtMap.values()) {
+    if (!scriptStmts.has(script)) scriptStmts.set(script, []);
+    scriptStmts.get(script)!.push({ reads, writes });
+  }
+
+  for (const [script, stmtList] of scriptStmts) {
+    // 合并该脚本所有 statement 的 reads/writes 用于节点展示
+    const scriptReads = new Set<string>();
+    const scriptWrites = new Set<string>();
+    for (const { reads, writes } of stmtList) {
+      for (const r of reads) scriptReads.add(r);
+      for (const w of writes) scriptWrites.add(w);
+    }
+
     const stmtNodes: Node[] = [];
     const stmtEdges: Edge[] = [];
     const seen = new Set<string>();
 
-    for (const qn of [...reads, ...writes]) {
+    for (const qn of [...scriptReads, ...scriptWrites]) {
       const nodeId = qnameToNodeId.get(qn)!;
       if (seen.has(nodeId)) continue;
       seen.add(nodeId);
@@ -468,18 +572,20 @@ export async function buildGlobalLineageFromNodes(
       });
     }
 
-    // READ → WRITE 边
-    for (const fromQn of reads) {
-      for (const toQn of writes) {
-        const fromId = qnameToNodeId.get(fromQn)!;
-        const toId = qnameToNodeId.get(toQn)!;
-        if (fromId === toId) continue;
-        const key = `${fromId}->${toId}`;
-        if (edgeSet.has(key)) continue;
-        edgeSet.add(key);
-        const edge: Edge = { id: `ge_${edgeIdx++}`, from: fromId, to: toId, type: 'data_flow' };
-        allEdges.push(edge);
-        stmtEdges.push(edge);
+    // READ → WRITE 边：per-statement cross-product，然后 dedup
+    for (const { reads, writes } of stmtList) {
+      for (const fromQn of reads) {
+        for (const toQn of writes) {
+          const fromId = qnameToNodeId.get(fromQn)!;
+          const toId = qnameToNodeId.get(toQn)!;
+          if (fromId === toId) continue;
+          const key = `${fromId}->${toId}`;
+          if (edgeSet.has(key)) continue;
+          edgeSet.add(key);
+          const edge: Edge = { id: `ge_${edgeIdx++}`, from: fromId, to: toId, type: 'data_flow' };
+          allEdges.push(edge);
+          stmtEdges.push(edge);
+        }
       }
     }
 
@@ -686,8 +792,16 @@ export async function readGlobalLineageFromTables(
 
 /**
  * 过滤掉在结果集中没有可见边的孤立脚本。
- * 用 qualifiedName 匹配（与 GraphView 的 getScriptIO/buildDirectScriptGraph 一致）。
+ * 用 qualifiedName 匹配（与 GraphView 的 getScriptIO/buildDirectScriptGraph 一致） */
+
+/**
+ * Get per-statement output groups for a script.
+ * Reads from the cache populated by writeTableLevelEdges — no recomputation needed.
  */
+function getOutputGroups(script: string, projectId: string): OutputGroup[] {
+  return _groupsCache.get(projectId)?.get(script) ?? [];
+}
+
 function filterOrphanScripts(
   scripts: Set<string>,
   scriptReads: Map<string, Set<string>>,
@@ -712,6 +826,17 @@ function filterOrphanScripts(
   return result;
 }
 
+const _tleEnsured = new Set<string>();
+async function _ensureTableLevelEdges(projectId: string): Promise<void> {
+  if (_tleEnsured.has(projectId)) return;
+  _tleEnsured.add(projectId);
+  try {
+    await writeTableLevelEdges(projectId);
+  } catch {
+    // non-fatal: will use whatever data exists
+  }
+}
+
 export async function searchLineageForInsights(
   projectId: string,
   searchTerm: string,
@@ -721,7 +846,10 @@ export async function searchLineageForInsights(
   const term = searchTerm.trim().toLowerCase();
   if (!term) return null;
 
-  // ── 1. 查 lineage_nodes + table_level_edges ──────────────
+  // ── 0. 确保 table_level_edges 是 per-statement 正确数据 ────────────
+  await _ensureTableLevelEdges(projectId);
+
+  // ── 1. 查 lineage_nodes + table_level_edges ──────────
   const [rawNodes, tleEdges] = await Promise.all([
     serverDb.getLineageNodes(projectId),
     serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>),
@@ -910,18 +1038,34 @@ export async function searchLineageForInsights(
 
   // ── 7. 构建 AnalyzeResult ────────────────────────────
   // 按脚本分组节点，用 table_level_edges 标记写入表
+  const nodeIdToQn = new Map<string, string>();
+  for (const n of rawTableNodes) {
+    nodeIdToQn.set(n.node_id, (n.qualified_name ?? n.label).toLowerCase());
+  }
+
   const scriptNodeMap = new Map<string, Node[]>();
+  const scriptOutputGroups = new Map<string, OutputGroup[]>();
+
   for (const n of rawTableNodes) {
     if (!reachableScripts.has(n.file_path)) continue;
-    if (!scriptNodeMap.has(n.file_path)) scriptNodeMap.set(n.file_path, []);
+    if (!scriptNodeMap.has(n.file_path)) {
+      scriptNodeMap.set(n.file_path, []);
+      // Read cached groups (computed by writeTableLevelEdges via _ensureTableLevelEdges)
+      const groups = getOutputGroups(n.file_path, projectId);
+      scriptOutputGroups.set(n.file_path, groups);
+    }
     const qn = (n.qualified_name ?? n.label).toLowerCase();
     const isWrite = (scriptWrites.get(n.file_path) ?? new Set()).has(qn);
+    const isRead = (scriptReads.get(n.file_path) ?? new Set()).has(qn);
     scriptNodeMap.get(n.file_path)!.push({
       id: n.node_id,
       type: n.node_type as 'table' | 'view',
       label: n.label,
       qualifiedName: n.qualified_name ?? undefined,
-      ...(isWrite ? { metadata: { isCreated: true } } : {}),
+      metadata: {
+        ...(isWrite ? { isCreated: true } : {}),
+        ...(isRead ? { isRead: true } : {}),
+      },
     });
   }
 
@@ -930,6 +1074,15 @@ export async function searchLineageForInsights(
   for (const script of reachableScripts) {
     const nodes = scriptNodeMap.get(script) ?? [];
     if (nodes.length === 0) continue;
+    const groups = scriptOutputGroups.get(script) ?? [];
+    // Attach outputGroups to the first node's metadata
+    if (nodes.length > 0 && groups.length > 0) {
+      const firstNode = nodes[0];
+      firstNode.metadata = {
+        ...(firstNode.metadata ?? {}),
+        outputGroups: groups,
+      };
+    }
     statements.push({
       statementIndex: stmtIdx++,
       statementType: 'SELECT',

@@ -76,6 +76,7 @@ export interface SerializedScriptNodeData extends Record<string, unknown> {
   statementCount: number;
   isSelected: boolean;
   isHighlighted: boolean;
+  outputGroups?: Array<{ inputs: string[]; outputs: string[] }>;
 }
 
 /**
@@ -962,13 +963,14 @@ function getScriptIO(stmts: StatementLineageWithSource[]) {
         const isWritten =
           stmt.edges.some((e) => e.to === node.id && e.type === 'data_flow') ||
           createdRelationIds.has(node.id);
-        const isRead = stmt.edges.some((e) => e.from === node.id && e.type === 'data_flow');
+        const isReadFromEdge = stmt.edges.some((e) => e.from === node.id && e.type === 'data_flow');
+        const isReadFromMeta = node.metadata?.isRead === true;
 
         if (isWritten) {
           writes.add(node.label);
           writeQualified.add(node.qualifiedName || node.label);
         }
-        if (isRead || (!isWritten && !isRead)) {
+        if (isReadFromEdge || isReadFromMeta || (!isWritten && !isReadFromEdge)) {
           reads.add(node.label);
           readQualified.add(node.qualifiedName || node.label);
         }
@@ -1005,6 +1007,19 @@ function createScriptNodes(
       lowerCaseSearchTerm && sourceName.toLowerCase().includes(lowerCaseSearchTerm)
     );
 
+    // Extract outputGroups from first node's metadata (set by searchLineageForInsights)
+    let outputGroups: Array<{ inputs: string[]; outputs: string[] }> | undefined;
+    for (const stmt of stmts) {
+      for (const node of stmt.nodes) {
+        const og = (node.metadata as Record<string, unknown> | undefined)?.outputGroups;
+        if (Array.isArray(og)) {
+          outputGroups = og as Array<{ inputs: string[]; outputs: string[] }>;
+          break;
+        }
+      }
+      if (outputGroups) break;
+    }
+
     const sep = Math.max(sourceName.lastIndexOf('/'), sourceName.lastIndexOf('\\'));
     const shortLabel = sep >= 0 ? sourceName.substring(sep + 1) : sourceName;
 
@@ -1022,6 +1037,7 @@ function createScriptNodes(
         statementCount: stmts.length,
         isSelected: `script:${sourceName}` === selectedNodeId,
         isHighlighted,
+        outputGroups,
       } as SerializedScriptNodeData,
     });
   });

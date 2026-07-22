@@ -311,6 +311,13 @@ export interface LineageExplorerProps {
 /**
  * Data structure for script/file nodes in the graph visualization (script-level view).
  */
+export interface OutputGroup {
+  /** Qualified names of input tables for this group */
+  inputs: string[];
+  /** Qualified names of output tables for this group */
+  outputs: string[];
+}
+
 export interface ScriptNodeData extends Record<string, unknown> {
   /** Display name of the script or file */
   label: string;
@@ -330,6 +337,8 @@ export interface ScriptNodeData extends Record<string, unknown> {
   isSelected: boolean;
   /** Whether this node matches the current search term */
   isHighlighted: boolean;
+  /** Per-statement output groups for multi-output scripts */
+  outputGroups?: OutputGroup[];
 }
 
 /**

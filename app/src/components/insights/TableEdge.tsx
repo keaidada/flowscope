@@ -1,14 +1,9 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, Position, type EdgeProps, useInternalNode } from '@xyflow/react';
 import type { ScriptNodeData } from '@pondpilot/flowscope-react';
 import { shouldHighlightEdge, onHighlightChange } from './highlightState';
-import { useState, useEffect } from 'react';
-
-const ROW = 22;
-
-function rowY(idx: number, readsLen: number, isWrite: boolean): number {
-  if (isWrite) return 128 + Math.max(readsLen, 1) * ROW + idx * ROW;
-  return 94 + idx * ROW;
-}
+import { computeScriptNodeLayout } from './scriptNodeLayout';
+import { getHandleY } from './handlePositionCache';
+import { useState, useEffect, useMemo } from 'react';
 
 export function TableEdge({ id, source, target, data, markerEnd }: EdgeProps) {
   const [, force] = useState(0);
@@ -20,13 +15,26 @@ export function TableEdge({ id, source, target, data, markerEnd }: EdgeProps) {
   const sd = src?.data as ScriptNodeData | undefined;
   const td = tgt?.data as ScriptNodeData | undefined;
 
-  const si = (sd?.tableNamesWritten ?? []).indexOf(tn ?? '');
-  const ti = (td?.tableNamesRead ?? []).indexOf(tn ?? '');
+  // Compute layouts as fallback when DOM measurement isn't available yet
+  const srcLayout = useMemo(() => {
+    if (!sd) return null;
+    const og = (sd as Record<string, unknown>).outputGroups as ScriptNodeData['outputGroups'] | undefined;
+    return computeScriptNodeLayout(og, sd.tableNamesRead ?? [], sd.tableNamesWritten ?? []);
+  }, [sd]);
 
+  const tgtLayout = useMemo(() => {
+    if (!td) return null;
+    const og = (td as Record<string, unknown>).outputGroups as ScriptNodeData['outputGroups'] | undefined;
+    return computeScriptNodeLayout(og, td.tableNamesRead ?? [], td.tableNamesWritten ?? []);
+  }, [td]);
+
+  // Use DOM-measured positions from cache, fall back to computed layout
   const sx = (src?.internals?.positionAbsolute?.x ?? 0) + (src?.measured?.width ?? 240);
-  const sy = (src?.internals?.positionAbsolute?.y ?? 0) + (si >= 0 ? rowY(si, (sd?.tableNamesRead ?? []).length, true) : 26);
+  const sy = getHandleY(source, 'w', tn ?? '') ?? srcLayout?.writeHandleY.get(tn ?? '') ?? 26;
+  const syAbs = (src?.internals?.positionAbsolute?.y ?? 0) + sy;
   const tx = tgt?.internals?.positionAbsolute?.x ?? 0;
-  const ty = (tgt?.internals?.positionAbsolute?.y ?? 0) + (ti >= 0 ? rowY(ti, 0, false) : 26);
+  const ty = getHandleY(target, 'r', tn ?? '') ?? tgtLayout?.readHandleY.get(tn ?? '') ?? 26;
+  const tyAbs = (tgt?.internals?.positionAbsolute?.y ?? 0) + ty;
 
   // Parallel edge offset: spread curvature based on index among edges between the same pair
   const d = (data ?? {}) as Record<string, unknown>;
@@ -37,7 +45,7 @@ export function TableEdge({ id, source, target, data, markerEnd }: EdgeProps) {
     : 0.25;
 
   const [ep, lx, ly] = getBezierPath({
-    sourceX: sx, sourceY: sy, targetX: tx, targetY: ty,
+    sourceX: sx, sourceY: syAbs, targetX: tx, targetY: tyAbs,
     sourcePosition: Position.Right, targetPosition: Position.Left,
     curvature,
   });

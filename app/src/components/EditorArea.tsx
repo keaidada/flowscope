@@ -62,6 +62,7 @@ export function EditorArea({
     isReadOnly,
     setProjectDialect,
     setTemplateMode,
+    filesLoaded,
   } = useProject();
 
   const theme = useThemeStore((state) => state.theme);
@@ -114,10 +115,10 @@ export function EditorArea({
       return;
     }
 
-    if (currentProject && currentProject.files.length === 0) {
+    if (currentProject && filesLoaded && currentProject.files.length === 0) {
       createFile(DEFAULT_FILE_NAMES.SCRATCHPAD);
     }
-  }, [currentProject, createFile, isReadOnly]);
+  }, [currentProject, createFile, isReadOnly, filesLoaded]);
 
   // Focus the editor when active file changes (e.g., new file created)
   useEffect(() => {

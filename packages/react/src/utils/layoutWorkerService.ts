@@ -78,6 +78,25 @@ function nodesToWorkerFormat<N extends NodeData>(nodes: Node<N>[]): WorkerNodeDa
     const d = (node.data ?? {}) as Record<string, unknown>;
     const readLen = Array.isArray(d.tablesRead) ? d.tablesRead.length : 0;
     const writeLen = Array.isArray(d.tablesWritten) ? d.tablesWritten.length : 0;
+
+    // Compute estimated height for grouped script nodes
+    let estimatedHeight: number | undefined = typeof d._measuredHeight === 'number' ? d._measuredHeight : undefined;
+    if (!estimatedHeight && d._expandedTables === true) {
+      const og = Array.isArray(d.outputGroups) ? d.outputGroups as Array<{ inputs: unknown[]; outputs: unknown[] }> : undefined;
+      if (og && og.length > 1) {
+        let h = 55;
+        for (let gi = 0; gi < og.length; gi++) {
+          const inp = Array.isArray(og[gi].inputs) ? og[gi].inputs.length : 0;
+          const out = Array.isArray(og[gi].outputs) ? og[gi].outputs.length : 0;
+          h += 24 + inp * 22;
+          if (inp > 0 && out > 0) h += 13;
+          h += 24 + out * 22;
+          if (gi < og.length - 1) h += 10;
+        }
+        estimatedHeight = h;
+      }
+    }
+
     return {
       id: node.id,
       columnCount: d.columns ? (d.columns as Array<unknown>).length : 0,
@@ -88,7 +107,7 @@ function nodesToWorkerFormat<N extends NodeData>(nodes: Node<N>[]): WorkerNodeDa
       isCollapsed: d.isCollapsed === true || d._expandedTables === false,
       expandedTables: d._expandedTables === true,
       nodeType: node.type ?? '',
-      measuredHeight: typeof d._measuredHeight === 'number' ? d._measuredHeight : undefined,
+      measuredHeight: estimatedHeight,
     };
   });
 }

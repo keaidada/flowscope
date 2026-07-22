@@ -1,16 +1,35 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { FileCode, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { useLineageStore, useColors } from '@pondpilot/flowscope-react';
 import type { ScriptNodeData } from '@pondpilot/flowscope-react';
 import { shouldHighlightRow, toggleHighlight, onHighlightChange } from './highlightState';
+import { computeScriptNodeLayout } from './scriptNodeLayout';
+import { getHandleY, setHandleY, clearNodeHandleY } from './handlePositionCache';
+
+/**
+ * Walk offsetTop chain from `el` up to `container`, returning cumulative offset.
+ * With position:relative on the node root, el.offsetParent === container,
+ * so el.offsetTop already gives the correct value (no walking needed).
+ */
+function rowOffsetTop(el: HTMLElement, container: HTMLElement): number {
+  // Fast path: container is the direct offsetParent
+  if (el.offsetParent === container) return el.offsetTop;
+  // Fallback: walk the chain
+  let top = 0;
+  let cur: HTMLElement | null = el;
+  while (cur && cur !== container) {
+    top += cur.offsetTop;
+    cur = cur.offsetParent as HTMLElement | null;
+  }
+  return top;
+}
 
 function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
   const c = useColors();
   const s = c.nodes.script;
   const { label, sourceName, tableNamesRead, tableNamesWritten, isSelected, isHighlighted } = data as ScriptNodeData;
-  const reads = tableNamesRead ?? [];
-  const writes = tableNamesWritten ?? [];
+  const outputGroups = (data as Record<string, unknown>).outputGroups as ScriptNodeData['outputGroups'] | undefined;
   const updateNodeInternals = useUpdateNodeInternals();
 
   const [copied, setCopied] = useState(false);
@@ -25,9 +44,76 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
   const inited = useRef(false);
   if (!inited.current) { inited.current = true; onHighlightChange(() => force((n) => n + 1)); }
 
+  const reads = tableNamesRead ?? [];
+  const writes = tableNamesWritten ?? [];
+
+  // Compute layout (fallback / initial estimate)
+  const layout = useMemo(
+    () => computeScriptNodeLayout(outputGroups, reads, writes),
+    [outputGroups, reads, writes],
+  );
+
+  // ── DOM measurement: use offsetTop chain (immune to zoom/pan transforms) ──
+  const nodeRef = useRef<HTMLDivElement>(null);
+  const [, setMeasuredY] = useState(false);
+
+  // Re-measure when expanded toggle or table lists change
+  const readsKey = reads.join(',');
+  const writesKey = writes.join(',');
+  const groupsKey = outputGroups?.map(g => `${g.inputs.join('|')}:${g.outputs.join('|')}`).join(';') ?? '';
+
+  const measure = useCallback(() => {
+    if (!expanded || !nodeRef.current) return;
+    const nodeEl = nodeRef.current;
+    let changed = false;
+
+    for (const rowEl of nodeEl.querySelectorAll<HTMLElement>('[data-read-qname],[data-write-qname]')) {
+      const rq = rowEl.getAttribute('data-read-qname');
+      const wq = rowEl.getAttribute('data-write-qname');
+      const qname = rq ?? wq;
+      const type = rq ? 'r' : 'w';
+      if (!qname) continue;
+      // With position:relative on node root, offsetTop is correct and immune to transforms
+      const y = Math.round(rowOffsetTop(rowEl, nodeEl) + rowEl.offsetHeight / 2);
+      const old = getHandleY(id as string, type, qname);
+      if (old !== y) {
+        setHandleY(id as string, type, qname, y);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      setMeasuredY(true);
+      requestAnimationFrame(() => updateNodeInternals(id as string));
+    }
+  }, [expanded, id, updateNodeInternals]);
+
+  // Double-RAF: first frame lays out the DOM, second frame measures after settle
+  useLayoutEffect(() => {
+    if (!expanded) return;
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => measure());
+    });
+    return () => cancelAnimationFrame(raf1);
+  }, [expanded, readsKey, writesKey, groupsKey, measure]);
+
+  // Re-measure on resize (content height changes, scrollbar appears, etc.)
   useEffect(() => {
+    if (!expanded || !nodeRef.current) return;
+    const ro = new ResizeObserver(() => { measure(); });
+    ro.observe(nodeRef.current);
+    return () => ro.disconnect();
+  }, [expanded, measure]);
+
+  // Clear cache on collapse or unmount
+  useEffect(() => {
+    if (!expanded) clearNodeHandleY(id as string);
+  }, [expanded, id]);
+
+  useEffect(() => {
+    if (!expanded) return;
     requestAnimationFrame(() => updateNodeInternals(id as string));
-  }, [id, expanded, reads.length, writes.length, updateNodeInternals]);
+  }, [id, expanded, layout, updateNodeInternals]);
 
   const handleCopy = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -40,13 +126,11 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
   }, [showScriptTables]);
 
   const active = selected || isSelected;
-  const ROW = 22;
-  const readY = (i: number) => 94 + i * ROW;
-  const writeY = (i: number) => 128 + Math.max(reads.length, 1) * ROW + i * ROW;
-
+  const isGrouped = !!(outputGroups && outputGroups.length > 1);
 
   return (
-    <div style={{
+    <div ref={nodeRef} style={{
+      position: 'relative',
       backgroundColor: isHighlighted ? c.interactive.related : s.bg,
       borderColor: active ? c.interactive.selection : isHighlighted ? c.interactive.selection : s.border,
       boxShadow: active ? `0 0 0 2px ${c.interactive.selectionRing}` : isHighlighted ? `0 0 0 2px ${c.interactive.selectionRing}` : undefined,
@@ -61,14 +145,20 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
 
       {expanded && (
         <>
-          {reads.map((t, i) => (
-            <Handle key={`rh-${i}`} id={`r:${t}`} type="target" position={Position.Left}
-              style={{ top: readY(i), width: 6, height: 6, left: -3, border: '2px solid #22c55e', background: '#22c55e', borderRadius: '50%' }} />
-          ))}
-          {writes.map((t, i) => (
-            <Handle key={`wh-${i}`} id={`w:${t}`} type="source" position={Position.Right}
-              style={{ top: writeY(i), width: 6, height: 6, right: -3, border: '2px solid #3b82f6', background: '#3b82f6', borderRadius: '50%' }} />
-          ))}
+          {reads.map((t) => {
+            const y = getHandleY(id as string, 'r', t) ?? layout.readHandleY.get(t);
+            return y != null ? (
+              <Handle key={`rh-${t}`} id={`r:${t}`} type="target" position={Position.Left}
+                style={{ top: y, width: 6, height: 6, left: -3, border: '2px solid #22c55e', background: '#22c55e', borderRadius: '50%' }} />
+            ) : null;
+          })}
+          {writes.map((t) => {
+            const y = getHandleY(id as string, 'w', t) ?? layout.writeHandleY.get(t);
+            return y != null ? (
+              <Handle key={`wh-${t}`} id={`w:${t}`} type="source" position={Position.Right}
+                style={{ top: y, width: 6, height: 6, right: -3, border: '2px solid #3b82f6', background: '#3b82f6', borderRadius: '50%' }} />
+            ) : null;
+          })}
         </>
       )}
 
@@ -93,42 +183,22 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
       </div>
 
       {expanded && (
-        <div className="border-t max-h-[300px] overflow-y-auto" style={{ borderColor: s.border }}>
-          {reads.length > 0 && (
-            <div className="px-2 py-1.5">
-              <div className="text-xs font-semibold mb-1 px-1" style={{ color: c.status.success }}>输入 ({reads.length})</div>
-              {reads.map((t) => {
-                const isHL = shouldHighlightRow(t, 'read', sourceName);
-                return (
-                  <div key={t} className="text-xs flex items-center cursor-pointer rounded transition-colors"
-                    style={{ color: isHL ? c.interactive.selection : s.textSecondary, backgroundColor: isHL ? c.interactive.hover : 'transparent', fontWeight: isHL ? 600 : 400, padding: '3px 6px' }}
-                    onClick={(e) => { e.stopPropagation(); toggleHighlight(t, 'read', sourceName); }} title={t}>
-                    <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.success }} />
-                    <span className="break-all flex-1">{t}</span>
-                    {isHL && <span className="text-[10px] font-semibold px-1 rounded shrink-0 ml-1" style={{ backgroundColor: `${c.accent}20`, color: c.accent }}>关联</span>}
-                  <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(t); }} className="shrink-0 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 ml-1" title="复制"><Copy className="h-3 w-3" style={{ color: s.textSecondary }} /></button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {writes.length > 0 && (
-            <div className="px-2 py-1.5 border-t" style={{ borderColor: `${s.border}44` }}>
-              <div className="text-xs font-semibold mb-1 px-1" style={{ color: c.status.info }}>输出 ({writes.length})</div>
-              {writes.map((t) => {
-                const isHL = shouldHighlightRow(t, 'write', sourceName);
-                return (
-                  <div key={t} className="text-xs flex items-center cursor-pointer rounded transition-colors"
-                    style={{ color: isHL ? c.interactive.selection : s.textSecondary, backgroundColor: isHL ? c.interactive.hover : 'transparent', fontWeight: isHL ? 600 : 400, padding: '3px 6px' }}
-                    onClick={(e) => { e.stopPropagation(); toggleHighlight(t, 'write', sourceName); }} title={t}>
-                    <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.info }} />
-                    <span className="break-all flex-1">{t}</span>
-                    {isHL && <span className="text-[10px] font-semibold px-1 rounded shrink-0 ml-1" style={{ backgroundColor: `${c.accent}20`, color: c.accent }}>关联</span>}
-                  <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(t); }} className="shrink-0 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 ml-1" title="复制"><Copy className="h-3 w-3" style={{ color: s.textSecondary }} /></button>
-                  </div>
-                );
-              })}
-            </div>
+        <div className="border-t max-h-[400px] overflow-y-auto" style={{ borderColor: s.border }}>
+          {isGrouped ? (
+            <GroupedTables
+              groups={layout.groups}
+              sourceName={sourceName}
+              c={c}
+              s={s}
+            />
+          ) : (
+            <FlatTables
+              reads={reads}
+              writes={writes}
+              sourceName={sourceName}
+              c={c}
+              s={s}
+            />
           )}
           {reads.length === 0 && writes.length === 0 && (
             <div className="px-3 py-2 text-xs italic" style={{ color: s.textSecondary }}>无表依赖</div>
@@ -136,6 +206,114 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
         </div>
       )}
     </div>
+  );
+}
+
+interface TableListProps {
+  reads: string[];
+  writes: string[];
+  sourceName: string;
+  c: ReturnType<typeof useColors>;
+  s: ReturnType<typeof useColors>['nodes']['script'];
+}
+
+function FlatTables({ reads, writes, sourceName, c, s }: TableListProps) {
+  return (
+    <>
+      {reads.length > 0 && (
+        <div className="px-2 py-1.5">
+          <div className="text-xs font-semibold mb-1 px-1" style={{ color: c.status.success }}>输入 ({reads.length})</div>
+          {reads.map((t) => {
+            const isHL = shouldHighlightRow(t, 'read', sourceName);
+            return (
+              <div key={t} data-read-qname={t} className="text-xs flex items-center cursor-pointer rounded transition-colors"
+                style={{ color: isHL ? c.interactive.selection : s.textSecondary, backgroundColor: isHL ? c.interactive.hover : 'transparent', fontWeight: isHL ? 600 : 400, padding: '3px 6px' }}
+                onClick={(e) => { e.stopPropagation(); toggleHighlight(t, 'read', sourceName); }} title={t}>
+                <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.success }} />
+                <span className="break-all flex-1">{t}</span>
+                {isHL && <span className="text-[10px] font-semibold px-1 rounded shrink-0 ml-1" style={{ backgroundColor: `${c.accent}20`, color: c.accent }}>关联</span>}
+                <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(t); }} className="shrink-0 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 ml-1" title="复制"><Copy className="h-3 w-3" style={{ color: s.textSecondary }} /></button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {writes.length > 0 && (
+        <div className="px-2 py-1.5 border-t" style={{ borderColor: `${s.border}44` }}>
+          <div className="text-xs font-semibold mb-1 px-1" style={{ color: c.status.info }}>输出 ({writes.length})</div>
+          {writes.map((t) => {
+            const isHL = shouldHighlightRow(t, 'write', sourceName);
+            return (
+              <div key={t} data-write-qname={t} className="text-xs flex items-center cursor-pointer rounded transition-colors"
+                style={{ color: isHL ? c.interactive.selection : s.textSecondary, backgroundColor: isHL ? c.interactive.hover : 'transparent', fontWeight: isHL ? 600 : 400, padding: '3px 6px' }}
+                onClick={(e) => { e.stopPropagation(); toggleHighlight(t, 'write', sourceName); }} title={t}>
+                <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.info }} />
+                <span className="break-all flex-1">{t}</span>
+                {isHL && <span className="text-[10px] font-semibold px-1 rounded shrink-0 ml-1" style={{ backgroundColor: `${c.accent}20`, color: c.accent }}>关联</span>}
+                <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(t); }} className="shrink-0 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 ml-1" title="复制"><Copy className="h-3 w-3" style={{ color: s.textSecondary }} /></button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+interface GroupedTablesProps {
+  groups: Array<{ inputs: Array<{ qname: string; y: number }>; outputs: Array<{ qname: string; y: number }>; startY: number }>;
+  sourceName: string;
+  c: ReturnType<typeof useColors>;
+  s: ReturnType<typeof useColors>['nodes']['script'];
+}
+
+function GroupedTables({ groups, sourceName, c, s }: GroupedTablesProps) {
+  return (
+    <>
+      {groups.map((group, gi) => (
+        <div key={gi}>
+          {gi > 0 && (
+            <div className="border-t my-0.5" style={{ borderColor: `${s.border}88` }} />
+          )}
+          {group.inputs.length > 0 && (
+            <div className="px-2 py-1.5">
+              <div className="text-xs font-semibold mb-1 px-1" style={{ color: c.status.success }}>输入 ({group.inputs.length})</div>
+              {group.inputs.map(({ qname: t }) => {
+                const isHL = shouldHighlightRow(t, 'read', sourceName);
+                return (
+                  <div key={t} data-read-qname={t} className="text-xs flex items-center cursor-pointer rounded transition-colors"
+                    style={{ color: isHL ? c.interactive.selection : s.textSecondary, backgroundColor: isHL ? c.interactive.hover : 'transparent', fontWeight: isHL ? 600 : 400, padding: '3px 6px' }}
+                    onClick={(e) => { e.stopPropagation(); toggleHighlight(t, 'read', sourceName); }} title={t}>
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.success }} />
+                    <span className="break-all flex-1">{t}</span>
+                    {isHL && <span className="text-[10px] font-semibold px-1 rounded shrink-0 ml-1" style={{ backgroundColor: `${c.accent}20`, color: c.accent }}>关联</span>}
+                    <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(t); }} className="shrink-0 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 ml-1" title="复制"><Copy className="h-3 w-3" style={{ color: s.textSecondary }} /></button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {group.outputs.length > 0 && (
+            <div className="px-2 py-1.5">
+              <div className="text-xs font-semibold mb-1 px-1" style={{ color: c.status.info }}>输出 ({group.outputs.length})</div>
+              {group.outputs.map(({ qname: t }) => {
+                const isHL = shouldHighlightRow(t, 'write', sourceName);
+                return (
+                  <div key={t} data-write-qname={t} className="text-xs flex items-center cursor-pointer rounded transition-colors"
+                    style={{ color: isHL ? c.interactive.selection : s.textSecondary, backgroundColor: isHL ? c.interactive.hover : 'transparent', fontWeight: isHL ? 600 : 400, padding: '3px 6px' }}
+                    onClick={(e) => { e.stopPropagation(); toggleHighlight(t, 'write', sourceName); }} title={t}>
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ backgroundColor: c.status.info }} />
+                    <span className="break-all flex-1">{t}</span>
+                    {isHL && <span className="text-[10px] font-semibold px-1 rounded shrink-0 ml-1" style={{ backgroundColor: `${c.accent}20`, color: c.accent }}>关联</span>}
+                    <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(t); }} className="shrink-0 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 ml-1" title="复制"><Copy className="h-3 w-3" style={{ color: s.textSecondary }} /></button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ))}
+    </>
   );
 }
 

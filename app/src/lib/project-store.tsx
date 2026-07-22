@@ -151,6 +151,7 @@ interface ProjectContextType {
   projects: Project[];
   activeProjectId: string | null;
   currentProject: Project | null;
+  filesLoaded: boolean;
   createProject: (name: string) => void;
   deleteProject: (id: string) => void;
   renameProject: (id: string, newName: string) => void;
@@ -444,6 +445,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   // Track whether IndexedDB files have been loaded (prevent overwriting on mount)
   const filesLoadedRef = useRef(false);
+  const [filesLoaded, setFilesLoaded] = useState(false);
   // Track previous file signatures per project to detect changes (id+path+content length)
   const prevFileSignaturesRef = useRef<Map<string, string>>(new Map());
 
@@ -536,6 +538,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
       // Mark loaded BEFORE setState so the save effect doesn't re-save stale data
       filesLoadedRef.current = true;
+      setFilesLoaded(true);
 
       // Initialize signature tracking so save effect doesn't immediately trigger
       const newSigs = new Map<string, string>();
@@ -1236,6 +1239,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     projects: effectiveProjects,
     activeProjectId: effectiveActiveProjectId,
     currentProject,
+    filesLoaded,
     createProject,
     deleteProject,
     renameProject,

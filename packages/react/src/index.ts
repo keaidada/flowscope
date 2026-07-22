@@ -56,6 +56,7 @@ export type {
   LineageExplorerProps,
   TableNodeData,
   ScriptNodeData,
+  OutputGroup,
   ColumnNodeData,
   ColumnNodeInfo,
 } from './types';
