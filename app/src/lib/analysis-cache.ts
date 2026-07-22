@@ -256,10 +256,13 @@ export async function writeTableLevelEdges(projectId: string): Promise<void> {
     serverDb.getLineageEdges(projectId),
   ]);
 
+  // node_id is UNIQUE per (project_id, file_path), NOT globally unique.
+  // Same CTE name in different files → same hash node_id.
+  // Key by (file_path, node_id) to prevent cross-file contamination.
   const nidToQn = new Map<string, string>();
   for (const n of rawNodes) {
     if (n.node_type === 'table' || n.node_type === 'view') {
-      nidToQn.set(n.node_id, (n.qualified_name ?? n.label).toLowerCase());
+      nidToQn.set(`${n.file_path}\0${n.node_id}`, (n.qualified_name ?? n.label).toLowerCase());
     }
   }
   const tableIds = new Set(nidToQn.keys());
@@ -275,27 +278,28 @@ export async function writeTableLevelEdges(projectId: string): Promise<void> {
     if (e.edge_type !== 'data_flow') continue;
     if (e.statement_index == null) continue;
     const stmtKey = `${e.file_path}\0${e.statement_index}`;
+    const fromKey = `${e.file_path}\0${e.from_id}`;
+    const toKey = `${e.file_path}\0${e.to_id}`;
     allStmtKeys.add(stmtKey);
-    if (tableIds.has(e.from_id)) {
-      const qn = nidToQn.get(e.from_id);
+    if (tableIds.has(fromKey)) {
+      const qn = nidToQn.get(fromKey);
       if (qn) {
         if (!stmtReads.has(stmtKey)) stmtReads.set(stmtKey, new Set());
         stmtReads.get(stmtKey)!.add(qn);
       }
     }
-    if (tableIds.has(e.to_id)) {
-      const qn = nidToQn.get(e.to_id);
+    if (tableIds.has(toKey)) {
+      const qn = nidToQn.get(toKey);
       if (qn) {
         if (!stmtWrites.has(stmtKey)) stmtWrites.set(stmtKey, new Set());
         stmtWrites.get(stmtKey)!.add(qn);
       }
     }
     // Track CTE/intermediate endpoints for union-find merging
-    // CTE nodes may have IDs starting with 'table_' but are NOT in tableIds (node_type='cte')
-    // Exclude column_* endpoints — they are column-level edges, not CTEs
+    // CTE = endpoint NOT in tableIds (scoped) AND not a column
     if (!stmtCteNodes.has(stmtKey)) stmtCteNodes.set(stmtKey, new Set());
-    if (!tableIds.has(e.from_id) && !e.from_id.startsWith('column_')) stmtCteNodes.get(stmtKey)!.add(e.from_id);
-    if (!tableIds.has(e.to_id) && !e.to_id.startsWith('column_')) stmtCteNodes.get(stmtKey)!.add(e.to_id);
+    if (!tableIds.has(fromKey) && !e.from_id.startsWith('column_')) stmtCteNodes.get(stmtKey)!.add(e.from_id);
+    if (!tableIds.has(toKey) && !e.to_id.startsWith('column_')) stmtCteNodes.get(stmtKey)!.add(e.to_id);
   }
 
   // ── CTE-chain merge: union statements that share CTE nodes ──────────────
