@@ -1061,12 +1061,39 @@ export async function searchLineageForInsights(
       id: n.node_id,
       type: n.node_type as 'table' | 'view',
       label: n.label,
-      qualifiedName: n.qualified_name ?? undefined,
+      qualifiedName: qn,
       metadata: {
         ...(isWrite ? { isCreated: true } : {}),
         ...(isRead ? { isRead: true } : {}),
       },
     });
+  }
+
+  // ── Patch: 补齐 table_level_edges 中有但 lineage_nodes 中缺失的表 ──
+  // 跨文件引用时，lineage_nodes 可能没有 B10 的 s01_lvplay_usr 节点，
+  // 但 table_level_edges 正确记录了 B10 reads s01_lvplay_usr。
+  // 不补齐 → getScriptIO 找不到该表 → 不生成边 → 脚本显示为孤立节点。
+  for (const script of reachableScripts) {
+    const nodes = scriptNodeMap.get(script);
+    if (!nodes) continue;
+    const existingQn = new Set(nodes.map((n) => (n.qualifiedName ?? n.label).toLowerCase()));
+    const rds = scriptReads.get(script) ?? new Set<string>();
+    const wrs = scriptWrites.get(script) ?? new Set<string>();
+    for (const qn of [...rds, ...wrs]) {
+      if (!existingQn.has(qn)) {
+        existingQn.add(qn);
+        nodes.push({
+          id: `syn:${qn}`,
+          type: 'table',
+          label: qn.split('.').pop() ?? qn,
+          qualifiedName: qn,
+          metadata: {
+            ...(wrs.has(qn) ? { isCreated: true } : {}),
+            ...(rds.has(qn) ? { isRead: true } : {}),
+          },
+        });
+      }
+    }
   }
 
   const statements: StatementLineage[] = [];
