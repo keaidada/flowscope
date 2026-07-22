@@ -475,6 +475,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
       setAnalyzing(true);
       setError(null);
+      let analyzedFileNames: string[] = [];
       setLoadingContext({
         fileName: requestedFileName,
         runMode,
@@ -524,6 +525,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         }
 
         console.log(context.description);
+        analyzedFileNames = context.files.map((f: { name: string; path?: string }) => f.path ?? f.name);
 
         let shouldBuildPreview = context.files.length <= ANALYSIS_SQL_PREVIEW_LIMITS.MAX_FILES;
         let totalChars = 0;
@@ -774,8 +776,12 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         if (analysisRequestRef.current !== requestId) {
           return;
         }
-        setError(error instanceof Error ? error.message : 'Analysis failed');
-        console.error(error);
+        const errorMsg = error instanceof Error ? error.message : 'Analysis failed';
+        setError(errorMsg);
+        console.error('[useAnalysis] Analysis failed:', errorMsg);
+        if (analyzedFileNames.length > 0) {
+          console.error('[useAnalysis] Files being analyzed when failure occurred:', analyzedFileNames);
+        }
       } finally {
         if (analysisRequestRef.current === requestId) {
           setAnalyzing(false);

@@ -599,6 +599,11 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
     while i < bytes.len() {
         let c = bytes[i];
         if !in_string && !in_line_comment && !in_block_comment {
+            // Skip multi-byte UTF-8 characters to avoid mid-character slicing panic
+            if c >= 0x80 {
+                i += if c >= 0xF0 { 4 } else if c >= 0xE0 { 3 } else { 2 };
+                continue;
+            }
             if c == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' { in_line_comment = true; i += 2; continue; }
             if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' { in_block_comment = true; i += 2; continue; }
             if c == b'\'' || c == b'"' || c == b'`' { in_string = true; string_char = c; }

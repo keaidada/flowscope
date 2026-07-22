@@ -211,8 +211,17 @@ async fn analyze(
         template_config,
     };
 
-    let result = flowscope_core::analyze(&request);
-    Ok(Json(result))
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| flowscope_core::analyze(&request)));
+    match result {
+        Ok(r) => Ok(Json(r)),
+        Err(panic_err) => {
+            let msg = if let Some(s) = panic_err.downcast_ref::<&str>() { s.to_string() }
+                else if let Some(s) = panic_err.downcast_ref::<String>() { s.clone() }
+                else { "unknown panic".to_string() };
+            eprintln!("flowscope: analyze panicked: {msg}");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Analysis panic: {msg}")))
+        }
+    }
 }
 
 /// POST /api/completion - Get code completion items
