@@ -9,6 +9,7 @@
 import dagre from 'dagre';
 import {
   NODE_WIDTH,
+  SCRIPT_NODE_WIDTH,
   NODE_HEIGHT_BASE,
   NODE_HEIGHT_PER_COLUMN,
   NODE_HEIGHT_FILTERS_BASE,
@@ -37,6 +38,9 @@ export interface WorkerNodeData {
   readCount: number;
   writeCount: number;
   isCollapsed: boolean;
+  expandedTables: boolean;
+  nodeType: string;
+  measuredHeight?: number;
 }
 
 /**
@@ -74,6 +78,11 @@ export interface LayoutResponse {
  * Calculate the height of a node based on its content.
  */
 function calculateNodeHeight(node: WorkerNodeData): number {
+  // Layer 3: use measured height if available
+  if (node.measuredHeight && node.measuredHeight > 0) {
+    return node.measuredHeight;
+  }
+
   if (node.isCollapsed) {
     return NODE_HEIGHT_BASE;
   }
@@ -91,8 +100,8 @@ function calculateNodeHeight(node: WorkerNodeData): number {
   // Script node expanded tables — via node data stored by buildScriptLevelGraph
   // Script node expanded tables
   if (node.tableCount > 0 && !node.isCollapsed) {
-    const rs = node.readCount > 0 ? 24 + node.readCount * 18 : 0;
-    const ws = node.writeCount > 0 ? 24 + node.writeCount * 18 : 0;
+    const rs = node.readCount > 0 ? 24 + node.readCount * 22 : 0;
+    const ws = node.writeCount > 0 ? 24 + node.writeCount * 22 : 0;
     const gap = (node.readCount > 0 && node.writeCount > 0) ? 13 : 0;
     height = 55 + rs + gap + ws;
   }
@@ -111,10 +120,14 @@ function computeDagreLayout(
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
 
+  const hasExpanded = nodes.some(n => n.expandedTables);
+  const nodesep = hasExpanded ? 120 : DAGRE_NODESEP_LR;
+  const ranksep = hasExpanded ? 250 : DAGRE_RANKSEP_LR;
+
   dagreGraph.setGraph({
     rankdir: direction,
-    nodesep: DAGRE_NODESEP_LR,
-    ranksep: DAGRE_RANKSEP_LR,
+    nodesep,
+    ranksep,
     edgesep: DAGRE_EDGESEP,
     marginx: DAGRE_MARGIN_X,
     marginy: DAGRE_MARGIN_Y,
@@ -122,7 +135,8 @@ function computeDagreLayout(
 
   for (const node of nodes) {
     const height = calculateNodeHeight(node);
-    dagreGraph.setNode(node.id, { width: NODE_WIDTH, height });
+    const width = node.nodeType === 'scriptNode' ? SCRIPT_NODE_WIDTH : NODE_WIDTH;
+    dagreGraph.setNode(node.id, { width, height });
   }
 
   for (const edge of edges) {

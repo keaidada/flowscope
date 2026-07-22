@@ -86,6 +86,9 @@ function nodesToWorkerFormat<N extends NodeData>(nodes: Node<N>[]): WorkerNodeDa
       readCount: readLen,
       writeCount: writeLen,
       isCollapsed: d.isCollapsed === true || d._expandedTables === false,
+      expandedTables: d._expandedTables === true,
+      nodeType: node.type ?? '',
+      measuredHeight: typeof d._measuredHeight === 'number' ? d._measuredHeight : undefined,
     };
   });
 }

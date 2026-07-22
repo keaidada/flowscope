@@ -353,6 +353,7 @@ export function GraphView({
   const { state, actions } = useLineage();
   const setLayoutMetrics = useLineageStore((store) => store.setLayoutMetrics);
   const setGraphMetrics = useLineageStore((store) => store.setGraphMetrics);
+  const isLayouting = useLineageStore((store) => store.isLayouting);
   const setIsLayouting = useLineageStore((store) => store.setIsLayouting);
   const setIsBuilding = useLineageStore((store) => store.setIsBuilding);
   const {
@@ -425,6 +426,11 @@ export function GraphView({
     edges: [],
   });
   const [buildDurationMs, setBuildDurationMs] = useState<number | null>(null);
+
+  // Layer 3: DOM measurement feedback for accurate node dimensions
+  const [dimensionVersion, setDimensionVersion] = useState(0);
+  const measuredDimsRef = useRef<Map<string, number>>(new Map());
+  const relayoutDoneRef = useRef<string | null>(null);
 
   // Counter for unique build request IDs (avoids StrictMode timing confusion)
   const buildIdCounterRef = useRef(0);
@@ -730,8 +736,18 @@ export function GraphView({
     queueMicrotask(() => {
       if (cancelled) return;
 
+      // Layer 3: Inject measured heights from previous render into layout input
+      const measuredDims = measuredDimsRef.current;
+      const enrichedNodes = measuredDims.size > 0
+        ? layoutNodes.map((n) => {
+            const mh = measuredDims.get(n.id);
+            if (!mh) return n;
+            return { ...n, data: { ...n.data, _measuredHeight: mh } };
+          })
+        : layoutNodes;
+
       // Use worker-based layout for both algorithms to keep UI responsive
-      getLayoutedElementsInWorker(layoutNodes, layoutEdges, direction, effectiveLayoutAlgorithm)
+      getLayoutedElementsInWorker(enrichedNodes, layoutEdges, direction, effectiveLayoutAlgorithm)
         .then(({ nodes, edges }) => {
           if (GRAPH_DEBUG) console.timeEnd('[Layout] Worker layout total');
           if (!cancelled) {
@@ -799,6 +815,7 @@ export function GraphView({
     showScriptTables,
     viewMode,
     analysisResult,
+    dimensionVersion,
     setNodes,
     setEdges,
     setLayoutMetrics,
@@ -921,6 +938,55 @@ export function GraphView({
     lastAppliedCollapseStates.current = newCollapseStates;
     if (GRAPH_DEBUG) console.timeEnd('[Layout] Stage 2: apply layout positions');
   }, [layoutedNodes, layoutedEdges, renderNodeDataById, renderEdgeById, setNodes, setEdges]);
+
+  // Layer 3: DOM measurement feedback — after layout + render, measure real node heights.
+  // If they differ significantly from estimates, trigger ONE re-layout with corrected dimensions.
+  useEffect(() => {
+    if (nodes.length === 0 || isLayouting || layoutedNodes.length === 0) return;
+
+    const resultKey = analysisResult
+      ? `${analysisResult.summary.statementCount}-${analysisResult.summary.tableCount}`
+      : 'empty';
+    // Only do measurement correction once per result set
+    if (relayoutDoneRef.current === resultKey) return;
+
+    const timer = setTimeout(() => {
+      let changed = false;
+      const dims = new Map<string, number>();
+      for (const node of nodes) {
+        const h = node.measured?.height;
+        if (!h || h <= 0) continue;
+        dims.set(node.id, h);
+        // Compare with the height we passed to layout (stored in layoutedNodes)
+        const layouted = layoutedNodes.find((n) => n.id === node.id);
+        if (layouted) {
+          const d = layouted.data as Record<string, unknown>;
+          const d0 = layouted.data as Record<string, unknown>;
+          const expanded = d0._expandedTables === true;
+          if (expanded) {
+            const reads = Array.isArray(d.tableNamesRead) ? d.tableNamesRead.length : 0;
+            const writes = Array.isArray(d.tableNamesWritten) ? d.tableNamesWritten.length : 0;
+            const rs = reads > 0 ? 24 + reads * 22 : 0;
+            const ws = writes > 0 ? 24 + writes * 22 : 0;
+            const gap = reads > 0 && writes > 0 ? 13 : 0;
+            const estimated = 55 + rs + gap + ws;
+            if (Math.abs(h - estimated) > 15) {
+              changed = true;
+            }
+          }
+        }
+      }
+      if (changed && dims.size > 0) {
+        measuredDimsRef.current = dims;
+        relayoutDoneRef.current = resultKey;
+        setDimensionVersion((v) => v + 1);
+      } else {
+        relayoutDoneRef.current = resultKey;
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [nodes, isLayouting, layoutedNodes, analysisResult]);
 
   const internalGraphRef = useRef<HTMLDivElement>(null);
   const finalRef = graphContainerRef || internalGraphRef;

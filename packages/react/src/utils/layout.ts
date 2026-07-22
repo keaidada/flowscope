@@ -10,6 +10,7 @@ import {
 import { LAYOUT_DEBUG } from './debug';
 import {
   NODE_WIDTH,
+  SCRIPT_NODE_WIDTH,
   NODE_HEIGHT_BASE,
   NODE_HEIGHT_PER_COLUMN,
   NODE_HEIGHT_FILTERS_BASE,
@@ -157,6 +158,13 @@ export function getFastLayoutedNodes<N extends NodeData>(
 function calculateNodeHeight(data: NodeData | undefined): number {
   if (!data) return NODE_HEIGHT_BASE;
 
+  // Layer 3: use measured height if available
+  const d0 = data as Record<string, unknown>;
+  const measuredH = d0._measuredHeight;
+  if (typeof measuredH === 'number' && measuredH > 0) {
+    return measuredH;
+  }
+
   // If collapsed, only show header
   if (data.isCollapsed) {
     return NODE_HEIGHT_BASE;
@@ -192,6 +200,18 @@ function calculateNodeHeight(data: NodeData | undefined): number {
 }
 
 /**
+ * Determine node width based on its type.
+ * Script nodes are wider (240px) than table nodes (200px).
+ */
+function getNodeWidth(data: NodeData | undefined): number {
+  const d = data as Record<string, unknown> | undefined;
+  if (d && (d._expandedTables !== undefined || d.tableNamesRead !== undefined || d.tableNamesWritten !== undefined)) {
+    return SCRIPT_NODE_WIDTH;
+  }
+  return NODE_WIDTH;
+}
+
+/**
  * Arranges nodes using the Dagre algorithm (synchronous)
  */
 function layoutWithDagre<N extends NodeData, E extends Record<string, unknown>>(
@@ -203,8 +223,8 @@ function layoutWithDagre<N extends NodeData, E extends Record<string, unknown>>(
   dagreGraph.setDefaultEdgeLabel(() => ({}));
 
   const hasExpanded = nodes.some(n => (n.data as Record<string, unknown>)?._expandedTables === true);
-  const nodesep = hasExpanded ? 100 : 60;
-  const ranksep = hasExpanded ? 150 : 80;
+  const nodesep = hasExpanded ? 120 : 80;
+  const ranksep = hasExpanded ? 250 : 120;
 
   dagreGraph.setGraph({
     rankdir: direction,
@@ -217,7 +237,8 @@ function layoutWithDagre<N extends NodeData, E extends Record<string, unknown>>(
 
   nodes.forEach((node) => {
     const height = calculateNodeHeight(node.data);
-    dagreGraph.setNode(node.id, { width: NODE_WIDTH, height });
+    const width = getNodeWidth(node.data);
+    dagreGraph.setNode(node.id, { width, height });
   });
 
   edges.forEach((edge) => {
@@ -231,10 +252,11 @@ function layoutWithDagre<N extends NodeData, E extends Record<string, unknown>>(
     if (!nodeWithPosition) return node;
 
     const height = calculateNodeHeight(node.data);
+    const width = getNodeWidth(node.data);
     return {
       ...node,
       position: {
-        x: nodeWithPosition.x - NODE_WIDTH / 2,
+        x: nodeWithPosition.x - width / 2,
         y: nodeWithPosition.y - height / 2,
       },
     };
@@ -255,8 +277,8 @@ async function layoutWithElk<N extends NodeData, E extends Record<string, unknow
 
   // 自适应间距：展开时宽松，收起时紧凑
   const hasExpanded = nodes.some(n => (n.data as Record<string, unknown>)?._expandedTables === true);
-  const betweenLayers = hasExpanded ? '200' : '80';
-  const nodeNode = hasExpanded ? '100' : '40';
+  const betweenLayers = hasExpanded ? '300' : '120';
+  const nodeNode = hasExpanded ? '120' : '50';
 
   const graph = {
     id: 'root',
@@ -270,9 +292,10 @@ async function layoutWithElk<N extends NodeData, E extends Record<string, unknow
     },
     children: nodes.map((node) => {
       const height = calculateNodeHeight(node.data);
+      const width = getNodeWidth(node.data);
       return {
         id: node.id,
-        width: NODE_WIDTH,
+        width,
         height,
       };
     }),

@@ -799,34 +799,96 @@ export async function searchLineageForInsights(
   if (matchedScripts.size === 0) return null;
   if (upstreamDepth === 0 && downstreamDepth === 0) return null;
 
-  // ── 5. 脚本级有向 BFS（上游/下游各自独立深度）────────────
-  const upstreamScripts = new Set<string>();
-  const downstreamScripts = new Set<string>();
-
-  if (upstreamDepth > 0) {
-    const upQ: Array<[string, number]> = [];
-    for (const s of matchedScripts) upQ.push([s, 0]);
-    for (let i = 0; i < upQ.length; i++) {
-      const [s, d] = upQ[i];
-      if (upstreamScripts.has(s)) continue;
-      upstreamScripts.add(s);
-      if (d >= upstreamDepth) continue;
-      for (const prev of scriptUp.get(s) ?? []) {
-        if (!upstreamScripts.has(prev)) upQ.push([prev, d + 1]);
-      }
+  // ── 4.5 收集匹配搜索词的表名 ────────────────────────────
+  const matchedQNames = new Set<string>();
+  for (const [script] of scriptFileName) {
+    const reads = scriptReads.get(script) ?? new Set();
+    const writes = scriptWrites.get(script) ?? new Set();
+    for (const qn of [...reads, ...writes]) {
+      if (qn.includes(term)) matchedQNames.add(qn);
     }
   }
 
-  if (downstreamDepth > 0) {
-    const dnQ: Array<[string, number]> = [];
-    for (const s of matchedScripts) dnQ.push([s, 0]);
-    for (let i = 0; i < dnQ.length; i++) {
-      const [s, d] = dnQ[i];
-      if (downstreamScripts.has(s)) continue;
-      downstreamScripts.add(s);
-      if (d >= downstreamDepth) continue;
-      for (const next of scriptDown.get(s) ?? []) {
-        if (!downstreamScripts.has(next)) dnQ.push([next, d + 1]);
+  // ── 5. 表感知 BFS（上游/下游各自独立深度）────────────────
+  const upstreamScripts = new Set<string>();
+  const downstreamScripts = new Set<string>();
+
+  if (matchedQNames.size > 0) {
+    // 表感知 BFS：第一跳只经过匹配表
+    if (upstreamDepth > 0) {
+      for (const s of matchedScripts) {
+        for (const qn of scriptReads.get(s) ?? []) {
+          if (!matchedQNames.has(qn)) continue;
+          for (const writer of qnameWriters.get(qn) ?? []) {
+            if (writer !== s) upstreamScripts.add(writer);
+          }
+        }
+      }
+      if (upstreamDepth >= 2 && upstreamScripts.size > 0) {
+        const q: Array<[string, number]> = [...upstreamScripts].map(s => [s, 1] as [string, number]);
+        for (let i = 0; i < q.length; i++) {
+          const [s, d] = q[i];
+          if (d >= upstreamDepth) continue;
+          for (const prev of scriptUp.get(s) ?? []) {
+            if (!upstreamScripts.has(prev) && !matchedScripts.has(prev)) {
+              upstreamScripts.add(prev);
+              q.push([prev, d + 1]);
+            }
+          }
+        }
+      }
+    }
+
+    if (downstreamDepth > 0) {
+      for (const s of matchedScripts) {
+        for (const qn of scriptWrites.get(s) ?? []) {
+          if (!matchedQNames.has(qn)) continue;
+          for (const reader of qnameReaders.get(qn) ?? []) {
+            if (reader !== s) downstreamScripts.add(reader);
+          }
+        }
+      }
+      if (downstreamDepth >= 2 && downstreamScripts.size > 0) {
+        const q: Array<[string, number]> = [...downstreamScripts].map(s => [s, 1] as [string, number]);
+        for (let i = 0; i < q.length; i++) {
+          const [s, d] = q[i];
+          if (d >= downstreamDepth) continue;
+          for (const next of scriptDown.get(s) ?? []) {
+            if (!downstreamScripts.has(next) && !matchedScripts.has(next)) {
+              downstreamScripts.add(next);
+              q.push([next, d + 1]);
+            }
+          }
+        }
+      }
+    }
+  } else {
+    // 仅匹配脚本名（无匹配表名）：退化为全量图 BFS
+    if (upstreamDepth > 0) {
+      const upQ: Array<[string, number]> = [];
+      for (const s of matchedScripts) upQ.push([s, 0]);
+      for (let i = 0; i < upQ.length; i++) {
+        const [s, d] = upQ[i];
+        if (upstreamScripts.has(s)) continue;
+        upstreamScripts.add(s);
+        if (d >= upstreamDepth) continue;
+        for (const prev of scriptUp.get(s) ?? []) {
+          if (!upstreamScripts.has(prev)) upQ.push([prev, d + 1]);
+        }
+      }
+    }
+
+    if (downstreamDepth > 0) {
+      const dnQ: Array<[string, number]> = [];
+      for (const s of matchedScripts) dnQ.push([s, 0]);
+      for (let i = 0; i < dnQ.length; i++) {
+        const [s, d] = dnQ[i];
+        if (downstreamScripts.has(s)) continue;
+        downstreamScripts.add(s);
+        if (d >= downstreamDepth) continue;
+        for (const next of scriptDown.get(s) ?? []) {
+          if (!downstreamScripts.has(next)) dnQ.push([next, d + 1]);
+        }
       }
     }
   }

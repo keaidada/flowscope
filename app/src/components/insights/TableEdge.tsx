@@ -28,10 +28,18 @@ export function TableEdge({ id, source, target, data, markerEnd }: EdgeProps) {
   const tx = tgt?.internals?.positionAbsolute?.x ?? 0;
   const ty = (tgt?.internals?.positionAbsolute?.y ?? 0) + (ti >= 0 ? rowY(ti, 0, false) : 26);
 
+  // Parallel edge offset: spread curvature based on index among edges between the same pair
+  const d = (data ?? {}) as Record<string, unknown>;
+  const parallelIndex = typeof d._parallelIndex === 'number' ? d._parallelIndex : 0;
+  const parallelTotal = typeof d._parallelTotal === 'number' ? d._parallelTotal : 1;
+  const curvature = parallelTotal > 1
+    ? 0.15 + (parallelIndex / (parallelTotal - 1)) * 0.3
+    : 0.25;
+
   const [ep, lx, ly] = getBezierPath({
     sourceX: sx, sourceY: sy, targetX: tx, targetY: ty,
     sourcePosition: Position.Right, targetPosition: Position.Left,
-    curvature: 0.25,
+    curvature,
   });
   const sn = tn?.split('.').pop() ?? '';
 
@@ -43,12 +51,17 @@ export function TableEdge({ id, source, target, data, markerEnd }: EdgeProps) {
   const strokeColor = isHL ? '#f59e0b' : '#b1b1b7';
   const strokeW = isHL ? 3 : 1.5;
 
+  // Label Y offset: stagger labels for parallel edges
+  const labelYOffset = parallelTotal > 1
+    ? (parallelIndex - (parallelTotal - 1) / 2) * 14
+    : 0;
+
   return (
     <>
-      <BaseEdge id={id} path={ep} markerEnd={markerEnd} style={{ stroke: strokeColor, strokeWidth: strokeW }} />
+      <BaseEdge id={id} path={ep} markerEnd={markerEnd} style={{ stroke: strokeColor, strokeWidth: strokeW, animation: 'none' }} />
       <EdgeLabelRenderer>
         <div className="absolute text-[10px] px-1 py-0.5 rounded border" style={{
-          transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)`,
+          transform: `translate(-50%,-50%) translate(${lx}px,${ly + labelYOffset}px)`,
           backgroundColor: isHL ? '#fef3c7' : 'rgba(255,255,255,0.8)',
           color: isHL ? '#92400e' : '',
           borderColor: isHL ? '#f59e0b' : '',

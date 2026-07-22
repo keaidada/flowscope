@@ -1045,7 +1045,8 @@ function buildDirectScriptGraph(
       const { readQualified: consumerReads } = getScriptIO(consumerStmts);
 
       if (useTableHandles) {
-        // 每张共享表一条边，带表名在 data 中
+        // 每张共享表一条边，带表名和并行索引在 data 中
+        let parallelIdx = 0;
         producerWrites.forEach((table) => {
           if (consumerReads.has(table)) {
             const edgeId = `${producerScript}->${consumerScript}:${table}`;
@@ -1056,8 +1057,9 @@ function buildDirectScriptGraph(
                 source: `script:${producerScript}`,
                 target: `script:${consumerScript}`,
                 type: 'animated',
-                data: { table },
+                data: { table, _parallelIndex: parallelIdx, _parallelTotal: 0 },
               });
+              parallelIdx++;
             }
           }
         });
@@ -1088,6 +1090,20 @@ function buildDirectScriptGraph(
       }
     });
   });
+
+  // Fill in _parallelTotal for parallel edges between the same node pair
+  const pairCounts = new Map<string, number>();
+  for (const e of edges) {
+    const key = `${e.source}->${e.target}`;
+    pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1);
+  }
+  for (const e of edges) {
+    const key = `${e.source}->${e.target}`;
+    const d = e.data as Record<string, unknown> | undefined;
+    if (d && d._parallelIndex !== undefined) {
+      d._parallelTotal = pairCounts.get(key) ?? 1;
+    }
+  }
 
   return edges;
 }
