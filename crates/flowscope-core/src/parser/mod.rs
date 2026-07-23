@@ -635,7 +635,10 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
     let body = &sql[body_start..body_end];
     if body.trim().is_empty() { return None; }
 
-    let statements = split_sql_statements(body);
+    // Uncomment block-commented code: /* ... */ → inner content
+    let body_uncommented = strip_block_comments(body);
+
+    let statements = split_sql_statements(&body_uncommented);
     let mut out = String::with_capacity(body.len());
     let mut has_any = false;
     for stmt in &statements {
@@ -846,6 +849,51 @@ fn extract_sql_from_set_stmt(s: &str) -> Option<String> {
     let upper = inner.to_uppercase();
     let first_word = upper.split_whitespace().next()?;
     matches!(first_word, "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN").then_some(inner)
+}
+
+/// Remove /* ... */ markers, keeping the inner content.
+fn strip_block_comments(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut in_s = false;
+    let mut in_d = false;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if !in_s && !in_d {
+            if c == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+                let mut j = i + 2;
+                while j < bytes.len() && bytes[j] != b'\n' { j += 1; }
+                out.push_str(&s[i..j]);
+                i = j;
+                continue;
+            }
+            if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                // Skip /*, keep content until */
+                i += 2;
+                loop {
+                    if i + 1 >= bytes.len() { break; }
+                    if bytes[i] == b'*' && bytes[i + 1] == b'/' { i += 2; break; }
+                    out.push(bytes[i] as char);
+                    i += 1;
+                }
+                continue;
+            }
+            if c == b'\'' { in_s = true; }
+            else if c == b'"' { in_d = true; }
+        } else {
+            if in_s && c == b'\'' {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\'' { out.push(c as char); out.push(bytes[i+1] as char); i += 2; continue; }
+                in_s = false;
+            } else if in_d && c == b'"' {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'"' { out.push(c as char); out.push(bytes[i+1] as char); i += 2; continue; }
+                in_d = false;
+            }
+        }
+        out.push(c as char);
+        i += 1;
+    }
+    out
 }
 
 fn split_sql_statements(body: &str) -> Vec<String> {
@@ -1535,31 +1583,33 @@ END;"#;
 
     #[test]
     fn test_bigquery_procedure_from_actual_file() {
-        let path = "/tmp/fnc_test_di.sql";
-        let sql = match std::fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(_) => { eprintln!("Cannot read file, skipping"); return; }
-        };
-        if sql.trim().is_empty() { eprintln!("File empty, skipping"); return; }
+        let paths = ["/tmp/fnc_stg_all_balances_wrk.sql", "/tmp/fnc_test_di.sql"];
+        for path in paths {
+            let sql = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(_) => { eprintln!("Cannot read {path}, skipping"); continue; }
+            };
+            if sql.trim().is_empty() { eprintln!("{path} empty, skipping"); continue; }
 
-        let sanitized = sanitize_bigquery_procedure(&sql);
-        match &sanitized {
-            Some(body) => {
-                println!("SANITIZED LENGTH: {}", body.len());
-                println!("SANITIZED:\n---\n{}\n---", body);
-                let generic = GenericDialect {};
-                match Parser::parse_sql(&generic, body) {
-                    Ok(stmts) => println!("Parsed {} statements", stmts.len()),
-                    Err(e) => println!("Parse failed: {:?}", e),
+            let sanitized = sanitize_bigquery_procedure(&sql);
+            match &sanitized {
+                Some(body) => {
+                    println!("=== {path} ===");
+                    println!("SANITIZED LENGTH: {}", body.len());
+                    println!("SANITIZED:\n---\n{}\n---", body);
+                    let generic = GenericDialect {};
+                    match Parser::parse_sql(&generic, body) {
+                        Ok(stmts) => println!("Parsed {} statements", stmts.len()),
+                        Err(e) => println!("Parse failed: {:?}", e),
+                    }
                 }
+                None => println!("sanitize_bigquery_procedure({path}) returned None"),
             }
-            None => println!("sanitize_bigquery_procedure returned None"),
-        }
-        // End-to-end: test parse_sql_with_dialect_output
-        for dialect in [Dialect::Bigquery, Dialect::Generic] {
-            match parse_sql_with_dialect_output(&sql, dialect) {
-                Ok(o) => println!("parse_sql_with_dialect_output({dialect:?}) OK: {} stmts, fallback={}", o.statements.len(), o.parser_fallback_used),
-                Err(e) => println!("parse_sql_with_dialect_output({dialect:?}) FAILED: {e:?}"),
+            for dialect in [Dialect::Bigquery, Dialect::Generic] {
+                match parse_sql_with_dialect_output(&sql, dialect) {
+                    Ok(o) => println!("parse_sql_with_dialect_output({dialect:?}) OK: {} stmts, fallback={}", o.statements.len(), o.parser_fallback_used),
+                    Err(e) => println!("parse_sql_with_dialect_output({dialect:?}) FAILED: {e:?}"),
+                }
             }
         }
     }
