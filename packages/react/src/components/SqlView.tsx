@@ -220,7 +220,7 @@ export function SqlView({
     return () => document.removeEventListener('mousedown', handler, true);
   }, []);
 
-  // 搜索面板标签国际化
+  // 搜索面板标签国际化（只改文本节点，不动复选框等 input）
   useEffect(() => {
     if (!searchLabels) return;
     const root = document.querySelector('.flowscope-codemirror .cm-editor') as HTMLElement | null
@@ -231,10 +231,18 @@ export function SqlView({
       const panel = root.querySelector('.cm-panel.cm-search');
       if (!panel) return;
       for (const [orig, trans] of entries) {
-        panel.querySelectorAll('label, .cm-button, .cm-search button, [class*=button], .cm-search .cm-textfield-name').forEach((el) => {
-          if (el.textContent?.trim() === orig) {
-            el.textContent = trans;
+        panel.querySelectorAll('label, .cm-button, .cm-search button').forEach((el) => {
+          // 只改最后一个文本节点（复选框后跟的文本），不动子 input
+          const textNodes: Text[] = [];
+          el.childNodes.forEach(n => { if (n.nodeType === Node.TEXT_NODE) textNodes.push(n as Text); });
+          const lastText = textNodes[textNodes.length - 1];
+          if (lastText && lastText.textContent?.trim() === orig) {
+            lastText.textContent = ' ' + trans;
           }
+        });
+        // 也匹配纯文本标签（无子元素的 label）
+        panel.querySelectorAll('.cm-search label:not(:has(*))').forEach((el) => {
+          if (el.textContent?.trim() === orig) el.textContent = trans;
         });
       }
     });
