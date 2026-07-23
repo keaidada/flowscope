@@ -200,14 +200,21 @@ export function SqlView({
 
   // 点击编辑器外部或弹窗/下拉框时关闭搜索面板
   useEffect(() => {
-    const view = editorRef.current?.view;
-    if (!view) return;
+    let view = editorRef.current?.view;
+    // view 未初始化时通过 .cm-editor 兜底
+    let editorDom = view?.dom ?? document.querySelector<HTMLElement>('.flowscope-codemirror .cm-editor');
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
-      const editorDom = view.dom;
+      if (!editorDom) {
+        // 重试获取 editorDom
+        editorDom = editorRef.current?.view?.dom ?? document.querySelector<HTMLElement>('.flowscope-codemirror .cm-editor');
+        if (!editorDom) return;
+      }
       if (editorDom.contains(target)) return;
       if ((target as HTMLElement).closest('.cm-panel.cm-search')) return;
-      closeSearchPanel(view);
+      const v = editorRef.current?.view ?? view;
+      if (!v) return;
+      closeSearchPanel(v);
     };
     document.addEventListener('mousedown', handler, true);
     return () => document.removeEventListener('mousedown', handler, true);
