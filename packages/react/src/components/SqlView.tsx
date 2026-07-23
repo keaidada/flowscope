@@ -198,26 +198,20 @@ export function SqlView({
     }
   }, [highlightedSpan, issueHighlights, isControlled]);
 
-  // 点击编辑器外部或弹窗/下拉框时关闭搜索面板
+  // 点击编辑器外部时关闭搜索面板
   useEffect(() => {
-    let view = editorRef.current?.view;
-    // view 未初始化时通过 .cm-editor 兜底
-    let editorDom = view?.dom ?? document.querySelector<HTMLElement>('.flowscope-codemirror .cm-editor');
     const handler = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (!editorDom) {
-        // 重试获取 editorDom
-        editorDom = editorRef.current?.view?.dom ?? document.querySelector<HTMLElement>('.flowscope-codemirror .cm-editor');
-        if (!editorDom) return;
-      }
-      if (editorDom.contains(target)) return;
-      if ((target as HTMLElement).closest('.cm-panel.cm-search')) return;
-      const v = editorRef.current?.view ?? view;
-      if (!v) return;
-      closeSearchPanel(v);
+      const view = editorRef.current?.view;
+      if (!view) return;
+      const ed = view.dom;
+      if (!ed) return;
+      // 点击编辑器内部 → 不关闭
+      if (ed.contains(e.target as Node)) return;
+      // 外部 → 关闭
+      closeSearchPanel(view);
     };
-    document.addEventListener('mousedown', handler, true);
-    return () => document.removeEventListener('mousedown', handler, true);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
   }, []);
 
   // 搜索面板标签国际化（只改文本节点，不动复选框等 input）
