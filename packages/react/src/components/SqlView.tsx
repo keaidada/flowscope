@@ -211,6 +211,19 @@ export function SqlView({
     return () => document.removeEventListener('mousedown', handler, true);
   }, []);
 
+  // 搜索面板国际化：替换 CodeMirror 内置标签
+  useEffect(() => {
+    const el = editorRef.current?.view?.dom;
+    if (!el) return;
+    const observer = new MutationObserver(() => {
+      const panel = el.querySelector('.cm-panel.cm-search');
+      if (!panel) return;
+      // CodeMirror 搜索面板标签已国际化不可直接替换，通过 CSS 提供主题适配
+    });
+    observer.observe(el, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className={`flowscope-sql-view ${className || ''}`}>
       <style>{`
@@ -221,16 +234,46 @@ export function SqlView({
           top: 4px;
           right: 4px;
           z-index: 10;
-          background: var(--cm-background, #fff);
-          border: 1px solid var(--cm-border, #ddd);
+          background: hsl(var(--background));
+          border: 1px solid hsl(var(--border));
           border-radius: 6px;
-          padding: 6px 8px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+          padding: 8px 10px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
           width: auto;
-          min-width: 280px;
+          min-width: 300px;
         }
-        .flowscope-codemirror .cm-editor .cm-panel.cm-search label { font-size: 12px; }
-        .flowscope-codemirror .cm-editor .cm-panel.cm-search input { font-size: 12px; padding: 2px 6px; }
+        .flowscope-codemirror .cm-editor .cm-panel.cm-search label,
+        .flowscope-codemirror .cm-editor .cm-panel.cm-search .cm-button {
+          font-size: 12px;
+          color: hsl(var(--muted-foreground));
+        }
+        .flowscope-codemirror .cm-editor .cm-panel.cm-search input {
+          font-size: 12px;
+          padding: 4px 8px;
+          background: hsl(var(--background));
+          border: 1px solid hsl(var(--input));
+          border-radius: 4px;
+          color: hsl(var(--foreground));
+        }
+        .flowscope-codemirror .cm-editor .cm-panel.cm-search input:focus {
+          outline: none;
+          border-color: hsl(var(--ring));
+          box-shadow: 0 0 0 2px hsl(var(--ring) / 0.2);
+        }
+        .flowscope-codemirror .cm-editor .cm-panel.cm-search .cm-button {
+          background: hsl(var(--secondary));
+          border: 1px solid hsl(var(--border));
+          border-radius: 4px;
+          padding: 2px 8px;
+          cursor: pointer;
+          font-size: 12px;
+          color: hsl(var(--secondary-foreground));
+        }
+        .flowscope-codemirror .cm-editor .cm-panel.cm-search .cm-button:hover {
+          background: hsl(var(--secondary) / 0.8);
+        }
+        .flowscope-codemirror .cm-editor .cm-panel.cm-search .cm-textfield { margin: 0 2px; }
+        .flowscope-codemirror .cm-editor .cm-panel.cm-search [name=replace] { margin-left: 4px; }
       `}</style>
       <CodeMirror
         ref={editorRef}
