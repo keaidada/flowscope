@@ -462,6 +462,7 @@ async function _writeTableLevelEdgesInternal(
   for (const [root, reads] of mergedReads) {
     const writes = mergedWrites.get(root);
     if (!writes || writes.size === 0) continue;
+    if (reads.size === 0) continue;
     const script = mergedScript.get(root)!;
     if (!groupsByScript.has(script)) groupsByScript.set(script, []);
     groupsByScript.get(script)!.push({ inputs: [...reads], outputs: [...writes] });
