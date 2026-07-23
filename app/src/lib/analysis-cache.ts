@@ -863,14 +863,59 @@ function filterOrphanScripts(
   return result;
 }
 
+/**
+ * 修复：从 analysis_cache 读取结果，补写入 lineage_nodes/edges 中缺失的脚本。
+ * 场景：writeBatchFileResults 成功但 writeLineageData 失败（如缓存命中的二次分析跳过了写入）。
+ */
+async function _repairMissingLineageData(projectId: string): Promise<void> {
+  const allNodes = await serverDb.getLineageNodes(projectId);
+  const lineagePaths = new Set<string>();
+  for (const n of allNodes) lineagePaths.add(n.file_path);
+
+  const fileResultPaths = await readFileResultPaths(projectId);
+  const missing: string[] = [];
+  for (const fp of fileResultPaths) {
+    if (!lineagePaths.has(fp)) missing.push(fp);
+  }
+  if (missing.length === 0) return;
+
+  let repaired = 0;
+  for (const fp of missing) {
+    const result = await readFileResult(projectId, fp);
+    if (!result || !result.statements?.length) continue;
+    try {
+      await writeLineageData(projectId, result);
+      repaired++;
+    } catch {
+      // skip individual failures
+    }
+  }
+  if (repaired > 0) {
+    // Rebuild TLE after repair
+    try { await writeTableLevelEdges(projectId); } catch { /* non-fatal */ }
+  }
+}
+
 const _tleEnsured = new Set<string>();
+const _repairedSet = new Set<string>();
 async function _ensureTableLevelEdges(projectId: string): Promise<void> {
-  if (_tleEnsured.has(projectId)) return;
-  _tleEnsured.add(projectId);
-  try {
-    await writeTableLevelEdges(projectId);
-  } catch {
-    // non-fatal: will use whatever data exists
+  if (!_tleEnsured.has(projectId)) {
+    _tleEnsured.add(projectId);
+    try {
+      await writeTableLevelEdges(projectId);
+    } catch {
+      // non-fatal: will use whatever data exists
+    }
+  }
+
+  // ── 修复：file_results 有记录但 lineage_nodes 缺失的脚本 ──
+  if (!_repairedSet.has(projectId)) {
+    _repairedSet.add(projectId);
+    try {
+      await _repairMissingLineageData(projectId);
+    } catch {
+      // non-fatal
+    }
   }
 }
 
