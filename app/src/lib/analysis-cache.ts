@@ -1057,15 +1057,9 @@ export async function searchLineageForInsights(
   // ── 0. 确保 table_level_edges 是 per-statement 正确数据 ────────────
   await _ensureTableLevelEdges(projectId);
 
-  // ── 1. 查 lineage_nodes + table_level_edges ──────────
-  const [rawNodes, tleEdges] = await Promise.all([
-    getOrLoadNodes(projectId),
-    serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>),
-  ]);
-
-  const rawTableNodes = rawNodes.filter(
-    (n) => n.node_type === 'table' || n.node_type === 'view',
-  );
+  // ── 1. 只加载轻量数据做匹配：table_level_edges ──
+  const tleEdges = await serverDb.loadTableLevelEdges(projectId)
+    .catch(() => [] as Array<[string, string, string]>);
 
   // ── 2. 从 table_level_edges 构建 reads/writes ────────────
   // edge = [from_table, to_table, script], 方向精确不用启发式
@@ -1107,12 +1101,11 @@ export async function searchLineageForInsights(
   // ── 4. 匹配搜索词 ────────────────────────────────────
   const matchedScripts = new Set<string>();
 
-  // 收集每个脚本的 file_name（用于搜索匹配）
+  // 从 file_results 获取脚本名用于匹配（轻量，不加载 lineage_nodes）
+  const fileResultRows = await serverDb.loadProjectFileResults(projectId);
   const scriptFileName = new Map<string, string>();
-  for (const n of rawTableNodes) {
-    if (!scriptFileName.has(n.file_path)) {
-      scriptFileName.set(n.file_path, n.file_name ?? '');
-    }
+  for (const r of fileResultRows) {
+    if (r.file_path && r.file_name) scriptFileName.set(r.file_path, r.file_name);
   }
 
   for (const [script, fn] of scriptFileName) {
@@ -1246,37 +1239,45 @@ export async function searchLineageForInsights(
   );
 
   // ── 7. 构建 AnalyzeResult ────────────────────────────
-  // 按脚本分组节点，用 table_level_edges 标记写入表
+  // 只加载 reachable 脚本的 lineage_nodes，不加载全量
   const nodeIdToQn = new Map<string, string>();
-  for (const n of rawTableNodes) {
-    nodeIdToQn.set(n.node_id, (n.qualified_name ?? n.label).toLowerCase());
-  }
-
   const scriptNodeMap = new Map<string, Node[]>();
   const scriptOutputGroups = new Map<string, OutputGroup[]>();
 
-  for (const n of rawTableNodes) {
-    if (!reachableScripts.has(n.file_path)) continue;
-    if (!scriptNodeMap.has(n.file_path)) {
-      scriptNodeMap.set(n.file_path, []);
-      // Read cached groups (computed by writeTableLevelEdges via _ensureTableLevelEdges)
-      const groups = getOutputGroups(n.file_path, projectId);
-      scriptOutputGroups.set(n.file_path, groups);
-    }
-    const qn = (n.qualified_name ?? n.label).toLowerCase();
-    const isWrite = (scriptWrites.get(n.file_path) ?? new Set()).has(qn);
-    const isRead = (scriptReads.get(n.file_path) ?? new Set()).has(qn);
-    scriptNodeMap.get(n.file_path)!.push({
-      id: n.node_id,
-      type: n.node_type as 'table' | 'view',
-      label: n.label,
-      qualifiedName: qn,
-      metadata: {
-        ...(isWrite ? { isCreated: true } : {}),
-        ...(isRead ? { isRead: true } : {}),
-      },
-    });
+  const loadTasks: Promise<void>[] = [];
+  const loadedPaths = new Set<string>();
+  for (const script of reachableScripts) {
+    if (loadedPaths.has(script)) continue;
+    loadedPaths.add(script);
+    loadTasks.push(
+      serverDb.getLineageNodes(projectId, script).then(nodes => {
+        for (const n of nodes) {
+          if (n.node_type !== 'table' && n.node_type !== 'view') continue;
+          const qn = (n.qualified_name ?? n.label).toLowerCase();
+          nodeIdToQn.set(n.node_id, qn);
+          // First script hit: init groups
+          if (!scriptNodeMap.has(script)) {
+            scriptNodeMap.set(script, []);
+            const groups = getOutputGroups(script, projectId);
+            scriptOutputGroups.set(script, groups);
+          }
+          const isWrite = (scriptWrites.get(script) ?? new Set()).has(qn);
+          const isRead = (scriptReads.get(script) ?? new Set()).has(qn);
+          scriptNodeMap.get(script)!.push({
+            id: n.node_id,
+            type: n.node_type as 'table' | 'view',
+            label: n.label,
+            qualifiedName: qn,
+            metadata: {
+              ...(isWrite ? { isCreated: true } : {}),
+              ...(isRead ? { isRead: true } : {}),
+            },
+          });
+        }
+      }).catch(() => {}),
+    );
   }
+  await Promise.all(loadTasks);
 
   // ── Patch: 补齐 table_level_edges 中有但 lineage_nodes 中缺失的表 ──
   // 跨文件引用时，lineage_nodes 可能没有 B10 的 s01_lvplay_usr 节点，
