@@ -198,38 +198,40 @@ export function SqlView({
     }
   }, [highlightedSpan, issueHighlights, isControlled]);
 
-  // 点击编辑器外部时关闭搜索面板
+  // 点击编辑器外部或弹窗/下拉框时关闭搜索面板
   useEffect(() => {
-    const el = editorRef.current?.view?.dom;
-    if (!el) return;
+    const view = editorRef.current?.view;
+    if (!view) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (!el.contains(target) && !(target as HTMLElement).closest('.cm-panel.cm-search')) {
-        closeSearchPanel(editorRef.current!.view!);
-      }
+      const editorDom = view.dom;
+      if (editorDom.contains(target)) return;
+      if ((target as HTMLElement).closest('.cm-panel.cm-search')) return;
+      closeSearchPanel(view);
     };
-    document.addEventListener('mousedown', handler, true);
+    document.addEventListener('mousedown', handler, { capture: true, passive: true });
     return () => document.removeEventListener('mousedown', handler, true);
   }, []);
 
   // 搜索面板标签国际化
   useEffect(() => {
     if (!searchLabels) return;
-    const el = editorRef.current?.view?.dom;
-    if (!el) return;
+    const root = document.querySelector('.flowscope-codemirror .cm-editor') as HTMLElement | null
+      ?? editorRef.current?.view?.dom as HTMLElement | null;
+    if (!root) return;
     const entries = Object.entries(searchLabels);
     const observer = new MutationObserver(() => {
-      const panel = el.querySelector('.cm-panel.cm-search');
+      const panel = root.querySelector('.cm-panel.cm-search');
       if (!panel) return;
       for (const [orig, trans] of entries) {
-        panel.querySelectorAll('label, .cm-button, .cm-search button, [class*=button]').forEach((el) => {
+        panel.querySelectorAll('label, .cm-button, .cm-search button, [class*=button], .cm-search .cm-textfield-name').forEach((el) => {
           if (el.textContent?.trim() === orig) {
             el.textContent = trans;
           }
         });
       }
     });
-    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    observer.observe(root, { childList: true, subtree: true, characterData: true });
     return () => observer.disconnect();
   }, [searchLabels]);
 
