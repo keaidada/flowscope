@@ -1066,6 +1066,8 @@ function buildDirectScriptGraph(
         // 每张共享表一条边，带表名和并行索引在 data 中
         let parallelIdx = 0;
         producerWrites.forEach((table) => {
+          // 跳过无 schema 前缀的临时表（如 tmp_f_subs），只连接有完整限定名的表
+          if (!table.includes('.')) return;
           if (consumerReads.has(table)) {
             // 去重：同脚本对同表只保留一条输出→输入边
             const pairTableKey = [producerScript, consumerScript].sort().join('\0') + '\0' + table;
@@ -1090,6 +1092,7 @@ function buildDirectScriptGraph(
         // 原始逻辑：聚合为一条边
         const sharedTables: string[] = [];
         producerWrites.forEach((table) => {
+          if (!table.includes('.')) return;
           if (consumerReads.has(table)) {
             sharedTables.push(table.split('.').pop() || table);
           }
