@@ -1,10 +1,10 @@
 import { useMemo, useCallback, useEffect, useRef, type JSX } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { sql } from '@codemirror/lang-sql';
-import { EditorView, Decoration, type DecorationSet } from '@codemirror/view';
+import { EditorView, Decoration, type DecorationSet, keymap } from '@codemirror/view';
 import { StateField, StateEffect, RangeSet } from '@codemirror/state';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { search } from '@codemirror/search';
+import { search, closeSearchPanel } from '@codemirror/search';
 
 import { useLineage } from '../store';
 import type { SqlViewProps } from '../types';
@@ -196,6 +196,20 @@ export function SqlView({
       });
     }
   }, [highlightedSpan, issueHighlights, isControlled]);
+
+  // 点击编辑器外部时关闭搜索面板
+  useEffect(() => {
+    const el = editorRef.current?.view?.dom;
+    if (!el) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!el.contains(target) && !(target as HTMLElement).closest('.cm-panel.cm-search')) {
+        closeSearchPanel(editorRef.current!.view!);
+      }
+    };
+    document.addEventListener('mousedown', handler, true);
+    return () => document.removeEventListener('mousedown', handler, true);
+  }, []);
 
   return (
     <div className={`flowscope-sql-view ${className || ''}`}>

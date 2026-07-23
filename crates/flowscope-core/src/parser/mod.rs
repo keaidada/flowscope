@@ -669,10 +669,26 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
         let upper_stmt = content.to_uppercase();
         let first_word = upper_stmt.split_whitespace().next().unwrap_or("");
         match first_word {
-            "DECLARE" | "SET" | "IF" | "ELSE" | "ELSEIF" | "WHILE" | "LOOP" | "FOR"
+            "DECLARE" | "IF" | "ELSE" | "ELSEIF" | "WHILE" | "LOOP" | "FOR"
             | "BREAK" | "CONTINUE" | "RETURN" | "RAISE" | "BEGIN" | "END"
             | "CALL" | "DROP" | "ALTER" | "GRANT" | "REVOKE"
             | "UPDATE" => {} // UPDATE with CASE WHEN may not parse in Generic dialect
+            "SET" => {
+                // SET variable = "SQL text" — extract the SQL if it contains DML keywords
+                if let Some(sql_text) = extract_sql_from_set_stmt(trimmed) {
+                    let uw = sql_text.to_uppercase();
+                    let fw = uw.split_whitespace().next().unwrap_or("");
+                    match fw {
+                        "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" => {
+                            out.push_str(&sql_text);
+                            if !sql_text.ends_with(';') { out.push(';'); }
+                            out.push('\n');
+                            has_any = true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             "EXECUTE" | "EXEC" => {
                 // Extract SQL from EXECUTE IMMEDIATE FORMAT("""...""", ...)
                 if let Some(inner) = extract_execute_immediate_sql(trimmed) {
@@ -770,6 +786,27 @@ fn replace_format_placeholders(s: &str) -> String {
         i += 1;
     }
     out
+}
+
+/// Extract SQL text from a SET variable = "SQL string..." statement.
+/// Returns the SQL content if the value string contains DML keywords.
+fn extract_sql_from_set_stmt(s: &str) -> Option<String> {
+    let eq_pos = s.find('=')?;
+    let after_eq = s[eq_pos + 1..].trim_start();
+    if after_eq.is_empty() { return None; }
+    if !after_eq.starts_with('"') && !after_eq.starts_with('\'') { return None; }
+    let q = after_eq.as_bytes()[0];
+    let mut end = 1;
+    let bytes = after_eq.as_bytes();
+    while end < bytes.len() && bytes[end] != q {
+        if bytes[end] == b'\\' { end += 2; continue; }
+        end += 1;
+    }
+    if end >= bytes.len() { return None; }
+    let inner = after_eq[1..end].to_string();
+    let upper = inner.to_uppercase();
+    let first_word = upper.split_whitespace().next()?;
+    matches!(first_word, "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN").then_some(inner)
 }
 
 fn split_sql_statements(body: &str) -> Vec<String> {
