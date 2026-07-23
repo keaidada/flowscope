@@ -729,38 +729,65 @@ fn is_leading_word_boundary(bytes: &[u8], i: usize) -> bool {
     i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_'
 }
 
-/// Extract the inner SQL string from EXECUTE IMMEDIATE FORMAT("""...""", ...)
+/// Extract the inner SQL string from EXECUTE IMMEDIATE statements.
+/// Supports patterns:
+///   EXECUTE IMMEDIATE 'SQL'
+///   EXECUTE IMMEDIATE """SQL"""
+///   EXECUTE IMMEDIATE FORMAT("""SQL""", ...)
 fn extract_execute_immediate_sql(s: &str) -> Option<String> {
     let upper = s.to_uppercase();
-    let format_pos = upper.find("FORMAT")?;
-    let after = &s[format_pos..];
-    let after = after.trim_start();
-    let after = if after.len() > 6 { &after[6..] } else { return None; };
-    let after = after.trim_start();
-    let after = if after.starts_with('(') { &after[1..].trim_start() } else { after };
-    let (q, qlen) = if after.starts_with("\"\"\"") {
-        ("\"\"\"", 3)
-    } else if after.starts_with("'''") {
-        ("'''", 3)
-    } else if after.starts_with('"') {
-        ("\"", 1)
-    } else if after.starts_with('\'') {
-        ("'", 1)
-    } else {
-        return None;
-    };
-    let rest = &after[qlen..];
-    let mut end = 0;
-    while end + qlen <= rest.len() {
-        if &rest.as_bytes()[end..end + qlen] == q.as_bytes() {
-            let inner = rest[..end].to_string();
-            // Replace BigQuery FORMAT placeholders with dummy values
-            // so the SQL can be parsed for lineage analysis
-            return Some(replace_format_placeholders(&inner));
+    // Skip past "EXECUTE IMMEDIATE "
+    let after_keyword = upper.find("IMMEDIATE").map(|i| i + 9)?;
+    let rest = &s[after_keyword..].trim_start();
+    if rest.is_empty() { return None; }
+    
+    // Case 1: FORMAT("""...""", ...) or FORMAT(...)
+    if rest.to_uppercase().starts_with("FORMAT") {
+        let after = &rest[6..].trim_start();
+        let after = if after.starts_with('(') { &after[1..].trim_start() } else { after };
+        let (q, qlen) = pick_quote(after)?;
+        let inner = extract_between_quotes(after, q, qlen)?;
+        return Some(replace_format_placeholders(&inner));
+    }
+    
+    // Case 2: """...""" or '''...''' (direct triple-quoted string, no FORMAT)
+    if let Some(inner) = extract_triple_quoted(rest) {
+        return Some(replace_format_placeholders(&inner));
+    }
+    
+    // Case 3: '...' or "..." (direct single-quoted string, no FORMAT)
+    let (q, qlen) = pick_quote(rest)?;
+    extract_between_quotes(rest, q, qlen)
+}
+
+/// Pick the quote type (triple/single) at the start of text
+fn pick_quote(text: &str) -> Option<(&str, usize)> {
+    if text.starts_with("\"\"\"") { Some(("\"\"\"", 3)) }
+    else if text.starts_with("'''") { Some(("'''", 3)) }
+    else if text.starts_with('"') { Some(("\"", 1)) }
+    else if text.starts_with('\'') { Some(("'", 1)) }
+    else { None }
+}
+
+/// Extract text between opening and closing quotes
+fn extract_between_quotes(text: &str, q: &str, qlen: usize) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut pos = qlen;
+    while pos + qlen <= bytes.len() {
+        if &bytes[pos..pos + qlen] == q.as_bytes() {
+            return Some(text[qlen..pos].to_string());
         }
-        end += 1;
+        pos += 1;
     }
     None
+}
+
+/// Extract from """...""" or '''...''' at the start
+fn extract_triple_quoted(text: &str) -> Option<String> {
+    let (q, qlen) = if text.starts_with("\"\"\"") { ("\"\"\"", 3) }
+    else if text.starts_with("'''") { ("'''", 3) }
+    else { return None; };
+    extract_between_quotes(text, q, qlen)
 }
 
 /// Replace BigQuery FORMAT() placeholders with dummy literal values
@@ -794,6 +821,18 @@ fn extract_sql_from_set_stmt(s: &str) -> Option<String> {
     let eq_pos = s.find('=')?;
     let after_eq = s[eq_pos + 1..].trim_start();
     if after_eq.is_empty() { return None; }
+    // Handle SET var = FORMAT("""...""", ...)
+    let upper = after_eq.to_uppercase();
+    if upper.starts_with("FORMAT") {
+        let after = &after_eq[6..].trim_start();
+        let after = if after.starts_with('(') { &after[1..].trim_start() } else { after };
+        let (q, qlen) = pick_quote(after)?;
+        let inner = extract_between_quotes(after, q, qlen)?;
+        let upper_inner = inner.to_uppercase();
+        let first_word = upper_inner.split_whitespace().next()?;
+        return matches!(first_word, "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN").then_some(replace_format_placeholders(&inner));
+    }
+    // Handle SET var = 'SQL' or SET var = "SQL"
     if !after_eq.starts_with('"') && !after_eq.starts_with('\'') { return None; }
     let q = after_eq.as_bytes()[0];
     let mut end = 1;
