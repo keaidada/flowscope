@@ -130,7 +130,15 @@ export function InsightsGraphView({
         )}
       </div>
       <div className="relative min-h-0 flex-1">
-        {!showGraph && (
+        {isSearching && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50 backdrop-blur-[1px] transition-opacity">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <span className="text-sm text-muted-foreground">正在搜索...</span>
+            </div>
+          </div>
+        )}
+        {!showGraph && !isSearching && (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
             <div className="rounded-full bg-muted p-4"><Database className="h-8 w-8 text-muted-foreground" /></div>
             <div>
