@@ -210,8 +210,8 @@ export function SqlView({
       // 外部 → 关闭
       closeSearchPanel(view);
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('mousedown', handler, true);
+    return () => document.removeEventListener('mousedown', handler, true);
   }, []);
 
   // 搜索面板标签国际化（只改文本节点，不动复选框等 input）
