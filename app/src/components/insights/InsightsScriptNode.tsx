@@ -116,6 +116,9 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
     requestAnimationFrame(() => updateNodeInternals(id as string));
   }, [id, expanded, layout, updateNodeInternals]);
 
+  const active = selected || isSelected;
+  const isGrouped = !!(outputGroups && outputGroups.length > 1);
+
   const handleCopy = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     navigator.clipboard.writeText(label).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
@@ -124,25 +127,37 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
   const handleCopyAll = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     const lines: string[] = [];
-    lines.push(`脚本: ${sourceName}`);
-    if (reads.length > 0) {
-      lines.push(`输入 (${reads.length}):`);
-      for (const t of reads) lines.push(`  - ${t}`);
-    }
-    if (writes.length > 0) {
-      lines.push(`输出 (${writes.length}):`);
-      for (const t of writes) lines.push(`  - ${t}`);
+    lines.push(`${sourceName}`);
+    if (isGrouped && outputGroups) {
+      for (let gi = 0; gi < outputGroups.length; gi++) {
+        const g = outputGroups[gi];
+        if (gi > 0) lines.push('---');
+        if (g.inputs.length > 0) {
+          lines.push(`输入 (${g.inputs.length}):`);
+          for (const t of g.inputs) lines.push(`  ${t}`);
+        }
+        if (g.outputs.length > 0) {
+          lines.push(`输出 (${g.outputs.length}):`);
+          for (const t of g.outputs) lines.push(`  ${t}`);
+        }
+      }
+    } else {
+      if (reads.length > 0) {
+        lines.push(`输入 (${reads.length}):`);
+        for (const t of reads) lines.push(`  ${t}`);
+      }
+      if (writes.length > 0) {
+        lines.push(`输出 (${writes.length}):`);
+        for (const t of writes) lines.push(`  ${t}`);
+      }
     }
     navigator.clipboard.writeText(lines.join('\n')).then(() => { setCopiedAll(true); setTimeout(() => setCopiedAll(false), 1500); });
-  }, [sourceName, reads, writes]);
+  }, [sourceName, isGrouped, outputGroups, reads, writes]);
 
   const toggle = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setLocal((v) => (v === null ? !showScriptTables : !v));
   }, [showScriptTables]);
-
-  const active = selected || isSelected;
-  const isGrouped = !!(outputGroups && outputGroups.length > 1);
 
   return (
     <div ref={nodeRef} style={{
