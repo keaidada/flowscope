@@ -209,8 +209,8 @@ export function SqlView({
       if ((target as HTMLElement).closest('.cm-panel.cm-search')) return;
       closeSearchPanel(view);
     };
-    document.addEventListener('mousedown', handler, { capture: true, passive: true });
-    return () => document.removeEventListener('mousedown', handler, { capture: true, passive: true });
+    document.addEventListener('mousedown', handler, true);
+    return () => document.removeEventListener('mousedown', handler, true);
   }, []);
 
   // 搜索面板标签国际化
