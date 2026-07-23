@@ -55,6 +55,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/db/cache/clear", post(clear_cache_api))
         .route("/db/file-results", post(set_file_result_api))
         .route("/db/file-results", get(get_file_results_api))
+        .route("/db/file-results", delete(delete_file_results_api))
         .route("/db/file-result", get(get_file_result_api))
         .route("/db/lineage", post(save_lineage_api))
         .route("/db/projects", get(get_projects))
@@ -1574,6 +1575,37 @@ pub(crate) async fn get_file_results_api(
         serde_json::json!({ "filePath": fp, "resultJson": json, "contentHash": hash, "fileName": fn_, "dirPath": dp })
     }).collect();
     Ok(Json(serde_json::json!({ "files": list })).into_response())
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct DeleteFileResultsRequest {
+    #[serde(alias = "projectId")]
+    project_id: String,
+    #[serde(default)]
+    file_paths: Vec<String>,
+}
+
+/// DELETE /api/db/file-results - Delete file results
+#[utoipa::path(
+    delete,
+    path = "/api/db/file-results",
+    tag = "Schema",
+    request_body = DeleteFileResultsRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn delete_file_results_api(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DeleteFileResultsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    for fp in &payload.file_paths {
+        store::delete_file_result(&db, &payload.project_id, fp)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+    Ok(StatusCode::OK)
 }
 
 // ── lineage ────────────────────────────────────────────────────────────

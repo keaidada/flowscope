@@ -317,6 +317,13 @@ export async function loadProjectFileResults(
   }));
 }
 
+export async function deleteProjectFileResults(
+  projectId: string,
+  filePaths: string[],
+): Promise<void> {
+  await api<void>('DELETE', '/file-results', { project_id: projectId, file_paths: filePaths });
+}
+
 // ── lineage ────────────────────────────────────────────────────────────
 
 export async function getLineageNodes(projectId: string, filePath?: string): Promise<LineageNodeRow[]> {

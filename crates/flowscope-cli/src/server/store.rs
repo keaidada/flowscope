@@ -1602,6 +1602,18 @@ pub fn get_file_results(
     rows.collect()
 }
 
+pub fn delete_file_result(
+    conn: &Connection,
+    project_id: &str,
+    file_path: &str,
+) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "DELETE FROM project_file_results WHERE project_id = ?1 AND file_path = ?2",
+        params![project_id, file_path],
+    )?;
+    Ok(())
+}
+
 // ── lineage ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

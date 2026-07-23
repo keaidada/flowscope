@@ -933,13 +933,19 @@ async function _repairMissingLineageData(projectId: string): Promise<void> {
 
   let repaired = 0;
   let failed = 0;
-  let useless = 0;
+  let stale = 0;
+  const stalePaths: string[] = [];
   for (const fp of missing) {
     const result = await readFileResult(projectId, fp);
-    if (!result || !result.statements?.length) continue;
+    if (!result || !result.statements?.length) {
+      stalePaths.push(fp);
+      stale++;
+      continue;
+    }
     if (!hasMeaningfulLineage(result)) {
-      useless++;
-      emit({ category: 'self_ref_only', severity: 'warning', script: fp, message: '缓存结果无有效 data_flow（纯自引用），不补写' });
+      stalePaths.push(fp);
+      stale++;
+      emit({ category: 'self_ref_only', severity: 'warning', script: fp, message: '缓存结果无有效 data_flow，清除 file_results 残留' });
       continue;
     }
     try {
@@ -951,8 +957,12 @@ async function _repairMissingLineageData(projectId: string): Promise<void> {
       emit({ category: 'write_failed', severity: 'error', script: fp, message: '补写 lineage 失败', detail: String(err) });
     }
   }
+  // 清除无血缘的 file_results 残留，避免绿色图标误导
+  if (stalePaths.length > 0) {
+    try { await serverDb.deleteProjectFileResults(projectId, stalePaths); } catch { /* non-fatal */ }
+  }
   if (repaired > 0) {
-    emit({ category: 'repair_needed', severity: 'warning', message: `已从缓存修复 ${repaired} 个脚本的 lineage 数据${useless > 0 ? `，${useless} 个跳过（无有效血缘）` : ''}${failed > 0 ? `，${failed} 个失败` : ''}` });
+    emit({ category: 'repair_needed', severity: 'warning', message: `已从缓存修复 ${repaired} 个脚本的 lineage 数据${stale > 0 ? `，清除 ${stale} 个残留` : ''}${failed > 0 ? `，${failed} 个失败` : ''}` });
     try { await writeTableLevelEdges(projectId); } catch { /* non-fatal */ }
   }
 }

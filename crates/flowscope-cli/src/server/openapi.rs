@@ -63,6 +63,7 @@ use super::api;
         api::set_file_result_api,
         api::get_file_result_api,
         api::get_file_results_api,
+        api::delete_file_results_api,
         // ── DB: lineage ──
         api::save_lineage_api,
         api::save_table_level_edges_api,
