@@ -210,7 +210,7 @@ export function SqlView({
       closeSearchPanel(view);
     };
     document.addEventListener('mousedown', handler, { capture: true, passive: true });
-    return () => document.removeEventListener('mousedown', handler, true);
+    return () => document.removeEventListener('mousedown', handler, { capture: true, passive: true });
   }, []);
 
   // 搜索面板标签国际化
