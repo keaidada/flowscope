@@ -1089,6 +1089,7 @@ export async function searchLineageForInsights(
   const scriptUp = new Map<string, Set<string>>();   // reader → {writers}
   for (const [script, reads] of scriptReads) {
     for (const qname of reads) {
+      if (!qname.includes('.')) continue; // 跳过无 schema 前缀的临时表
       for (const writer of qnameWriters.get(qname) ?? []) {
         if (writer === script) continue;
         if (!scriptDown.has(writer)) scriptDown.set(writer, new Set());
