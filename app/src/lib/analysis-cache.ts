@@ -1143,13 +1143,32 @@ export async function searchLineageForInsights(
   // ── 5. 表感知 BFS（上游/下游各自独立深度）────────────────
   const upstreamScripts = new Set<string>();
   const downstreamScripts = new Set<string>();
+  const centerScripts = new Set<string>(); // 表搜索时的中心脚本
 
   if (matchedQNames.size > 0) {
-    // 表感知 BFS：第一跳只经过匹配表
+    // 中心脚本：写入了匹配到的表（搜索表名时，写出该表的脚本是中心）
+    // 中心脚本：写入了匹配到的表（搜索表名时，写出该表的脚本是中心）
+    const centerScripts = new Set<string>();
+    const centerScriptsArr: string[] = [];
+    for (const s of matchedScripts) {
+      const writes = scriptWrites.get(s) ?? new Set();
+      for (const qn of matchedQNames) {
+        if (writes.has(qn)) {
+          centerScripts.add(s);
+          centerScriptsArr.push(s);
+          break;
+        }
+      }
+    }
+    // 如无脚本写出匹配表（纯读表），退化为所有匹配脚本
+    if (centerScripts.size === 0) {
+      for (const s of matchedScripts) centerScriptsArr.push(s);
+    }
+
+    // 上游：中心脚本的输入表的写出者
     if (upstreamDepth > 0) {
-      for (const s of matchedScripts) {
+      for (const s of centerScriptsArr) {
         for (const qn of scriptReads.get(s) ?? []) {
-          if (!matchedQNames.has(qn)) continue;
           for (const writer of qnameWriters.get(qn) ?? []) {
             if (writer !== s) upstreamScripts.add(writer);
           }
@@ -1161,7 +1180,7 @@ export async function searchLineageForInsights(
           const [s, d] = q[i];
           if (d >= upstreamDepth) continue;
           for (const prev of scriptUp.get(s) ?? []) {
-            if (!upstreamScripts.has(prev) && !matchedScripts.has(prev)) {
+            if (!upstreamScripts.has(prev) && !centerScripts.has(prev)) {
               upstreamScripts.add(prev);
               q.push([prev, d + 1]);
             }
@@ -1170,10 +1189,10 @@ export async function searchLineageForInsights(
       }
     }
 
+    // 下游：中心脚本的输出表的读取者
     if (downstreamDepth > 0) {
-      for (const s of matchedScripts) {
+      for (const s of centerScriptsArr) {
         for (const qn of scriptWrites.get(s) ?? []) {
-          if (!matchedQNames.has(qn)) continue;
           for (const reader of qnameReaders.get(qn) ?? []) {
             if (reader !== s) downstreamScripts.add(reader);
           }
@@ -1185,7 +1204,7 @@ export async function searchLineageForInsights(
           const [s, d] = q[i];
           if (d >= downstreamDepth) continue;
           for (const next of scriptDown.get(s) ?? []) {
-            if (!downstreamScripts.has(next) && !matchedScripts.has(next)) {
+            if (!downstreamScripts.has(next) && !centerScripts.has(next)) {
               downstreamScripts.add(next);
               q.push([next, d + 1]);
             }
@@ -1225,15 +1244,19 @@ export async function searchLineageForInsights(
   }
 
   let reachableScripts = new Set([
-    ...matchedScripts,
+    ...(centerScripts.size > 0 ? centerScripts : matchedScripts),
     ...upstreamScripts,
     ...downstreamScripts,
   ]);
+  // 表搜索时，纯读匹配脚本（不写匹配表）也纳入但不保留（可能被孤儿过滤）
+  if (centerScripts.size > 0) {
+    for (const s of matchedScripts) reachableScripts.add(s);
+  }
 
-  // ── 6. 过滤孤立脚本（保留用户匹配的脚本）─────────────────────
+  // ── 6. 过滤孤立脚本（保留中心/匹配脚本）─────────────────────
   reachableScripts = filterOrphanScripts(
     reachableScripts,
-    matchedScripts,
+    centerScripts.size > 0 ? centerScripts : matchedScripts,
     scriptReads,
     scriptWrites,
     qnameReaders,
