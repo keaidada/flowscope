@@ -100,6 +100,8 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       readFileResultPaths(activeProjectId).then((paths) => {
         setLineageFileIds(new Set(paths));
       });
+      // 后台初始化缓存数据，搜索走缓存不阻塞
+      import('@/lib/analysis-cache').then(m => m.initProjectData(activeProjectId)).catch(() => {});
     }
   }, [activeProjectId]);
 

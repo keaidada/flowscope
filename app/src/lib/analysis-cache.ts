@@ -147,7 +147,7 @@ export async function writeFileResult(
 }
 
 export async function readFileResultPaths(projectId: string): Promise<string[]> {
-  const rows = await serverDb.loadProjectFileResults(projectId);
+  const rows = await serverDb.loadProjectFileResultsLight(projectId);
   return rows.map(r => r.file_path);
 }
 
@@ -955,7 +955,7 @@ async function _repairMissingLineageData(
   projectId: string,
   knownLineagePaths?: Set<string>,
 ): Promise<void> {
-  const lineagePaths = knownLineagePaths ?? await _loadLineagePaths(projectId);
+  const lineagePaths = knownLineagePaths ?? await _loadLineagePathsFallback(projectId);
 
   const fileResultPaths = await readFileResultPaths(projectId);
   const missing: string[] = [];
@@ -1004,13 +1004,37 @@ const _tleEnsured = new Set<string>();
 const _repairedSet = new Set<string>();
 const _nodeCache = new Map<string, serverDb.LineageNodeRow[]>();
 const _fileResultCache = new Map<string, { file_path: string; file_name?: string }[]>();
+const _tleEdgeCache = new Map<string, Array<[string, string, string]>>(); // 缓存 table_level_edges
 
-/** 从 lineage_nodes 加载所有不重复的 file_path */
-async function _loadLineagePaths(projectId: string): Promise<Set<string>> {
-  const nodes = await getOrLoadNodes(projectId);
-  const paths = new Set<string>();
-  for (const n of nodes) paths.add(n.file_path);
-  return paths;
+/**
+ * 应用启动时后台初始化：加载所有需要的缓存数据。
+ * 搜索直接走缓存，不阻塞。
+ */
+export async function initProjectData(projectId: string): Promise<void> {
+  if (_tleEnsured.has(projectId) && _repairedSet.has(projectId)) return;
+  
+  // 并行加载所有数据
+  const [rawNodes, rawEdges, fileResults, tleEdges] = await Promise.all([
+    serverDb.getLineageNodes(projectId),
+    serverDb.getLineageEdges(projectId, undefined, 'data_flow'),
+    serverDb.loadProjectFileResultsLight(projectId),
+    serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>),
+  ]);
+
+  // 写入缓存
+  _nodeCache.set(projectId, rawNodes);
+  _fileResultCache.set(projectId, fileResults);
+  _tleEdgeCache.set(projectId, tleEdges);
+
+  // 重建 TLE
+  const lineagePaths = new Set<string>();
+  for (const n of rawNodes) lineagePaths.add(n.file_path);
+  try {
+    await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
+  } catch { /* non-fatal */ }
+  _tleEnsured.add(projectId);
+  _repairedSet.add(projectId);
+  _repairMissingLineageData(projectId, lineagePaths).catch(() => {});
 }
 
 /** 获取缓存的节点数据（优先用 TLE 计算时已加载的，避免重复请求） */
@@ -1022,29 +1046,18 @@ async function getOrLoadNodes(projectId: string): Promise<serverDb.LineageNodeRo
   return nodes;
 }
 
+/** 回退方案：从 lineage_nodes 加载 file_path（当 initProjectData 未运行时使用） */
+async function _loadLineagePathsFallback(projectId: string): Promise<Set<string>> {
+  const nodes = await serverDb.getLineageNodes(projectId);
+  const paths = new Set<string>();
+  for (const n of nodes) paths.add(n.file_path);
+  return paths;
+}
+
 async function _ensureTableLevelEdges(projectId: string): Promise<void> {
   if (_tleEnsured.has(projectId) && _repairedSet.has(projectId)) return;
-  if (_tleEnsured.has(projectId)) {
-    _repairedSet.add(projectId);
-    _repairMissingLineageData(projectId).catch(() => {});
-    return;
-  }
-  // 首次调用：用 lineage_nodes + lineage_edges 确保精确分组
-  const [rawNodes, rawEdges] = await Promise.all([
-    getOrLoadNodes(projectId),
-    serverDb.getLineageEdges(projectId, undefined, 'data_flow'),
-  ]);
-  // 提取节点路径集合供修复使用
-  const lineagePaths = new Set<string>();
-  for (const n of rawNodes) lineagePaths.add(n.file_path);
-  // 重建 TLE
-  try {
-    await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
-  } catch { /* non-fatal */ }
-  _tleEnsured.add(projectId);
-  // 修复缺失（异步不阻塞）
-  _repairedSet.add(projectId);
-  _repairMissingLineageData(projectId, lineagePaths).catch(() => {});
+  // 未初始化时同步加载（兼容旧的直接调用路径）
+  await initProjectData(projectId);
 }
 
 export async function searchLineageForInsights(
@@ -1056,12 +1069,16 @@ export async function searchLineageForInsights(
   const term = searchTerm.trim().toLowerCase();
   if (!term) return null;
 
-  // ── 0. 确保 table_level_edges 是 per-statement 正确数据 ────────────
+  // ── 0. 确保 table_level_edges 已缓存 ────────────
   await _ensureTableLevelEdges(projectId);
 
-  // ── 1. 只加载轻量数据做匹配：table_level_edges ──
-  const tleEdges = await serverDb.loadTableLevelEdges(projectId)
-    .catch(() => [] as Array<[string, string, string]>);
+  // ── 1. 从缓存读取 table_level_edges ──
+  let tleEdges = _tleEdgeCache.get(projectId);
+  if (!tleEdges) {
+    tleEdges = await serverDb.loadTableLevelEdges(projectId)
+      .catch(() => [] as Array<[string, string, string]>);
+    _tleEdgeCache.set(projectId, tleEdges);
+  }
 
   // ── 2. 从 table_level_edges 构建 reads/writes ────────────
   // edge = [from_table, to_table, script], 方向精确不用启发式
