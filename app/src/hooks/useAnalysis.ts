@@ -728,11 +728,24 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             const allFilePaths = context.files.map((f: { name: string; path?: string }) => f.path ?? f.name);
             const { writeLineageData, writeTableMetadata, hasMeaningfulLineage, hasAnyDataFlow } = await import('@/lib/analysis-cache');
             if (!hasMeaningfulLineage(result)) {
-              if (hasAnyDataFlow(result)) {
-                console.warn('[useAnalysis] 结果仅有自引用 data_flow，跳过持久化', allFilePaths);
-              } else {
-                console.warn('[useAnalysis] 结果无有效 data_flow，跳过持久化', allFilePaths);
-              }
+              const reason = hasAnyDataFlow(result)
+                ? '结果仅有自引用 data_flow（纯自引用），跳过持久化'
+                : '结果无有效 data_flow，跳过持久化';
+              console.warn('[useAnalysis] ' + reason, allFilePaths);
+              import('@/lib/server-db').then(db => {
+                for (const fp of allFilePaths) {
+                  db.saveAnomaly(activeProjectId, {
+                    filePath: fp,
+                    scriptName: fp.split('/').pop() ?? fp,
+                    scriptContent: '',
+                    severity: 'warning',
+                    anomalyType: 'self_ref_only',
+                    message: reason,
+                    detail: `statements=${result.statements.length}, hasAnyDataFlow=${hasAnyDataFlow(result)}`,
+                    isTest: 0,
+                  }).catch(() => {});
+                }
+              });
             } else {
               try {
                 await writeBatchFileResults(activeProjectId, allFilePaths, cacheKey, result);
