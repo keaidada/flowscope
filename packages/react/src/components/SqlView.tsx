@@ -211,16 +211,31 @@ export function SqlView({
     return () => document.removeEventListener('mousedown', handler, true);
   }, []);
 
-  // 搜索面板国际化：替换 CodeMirror 内置标签
+  // 搜索面板国际化：替换 CodeMirror 内置标签为中文
   useEffect(() => {
     const el = editorRef.current?.view?.dom;
     if (!el) return;
+    const labels: Record<string, string> = {
+      'Find': '查找',
+      'Replace': '替换',
+      'next': '下一个',
+      'previous': '上一个',
+      'replace': '替换',
+      'replace all': '全部替换',
+    };
     const observer = new MutationObserver(() => {
       const panel = el.querySelector('.cm-panel.cm-search');
       if (!panel) return;
-      // CodeMirror 搜索面板标签已国际化不可直接替换，通过 CSS 提供主题适配
+      for (const [orig, zh] of Object.entries(labels)) {
+        // textContent 精确匹配（避免匹配到输入框内的值）
+        panel.querySelectorAll('label, .cm-button, .cm-search button, [class*=button]').forEach((el) => {
+          if (el.textContent?.trim() === orig) {
+            el.textContent = zh;
+          }
+        });
+      }
     });
-    observer.observe(el, { childList: true, subtree: true });
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
     return () => observer.disconnect();
   }, []);
 
