@@ -1052,6 +1052,7 @@ function buildDirectScriptGraph(
 ): SerializedFlowEdge[] {
   const edges: SerializedFlowEdge[] = [];
   const edgeSet = new Set<string>();
+  const pairTableSet = new Set<string>(); // 去重双向边：同脚本对同表只保留一条
 
   scriptMap.forEach((producerStmts, producerScript) => {
     const { writeQualified: producerWrites } = getScriptIO(producerStmts);
@@ -1066,6 +1067,11 @@ function buildDirectScriptGraph(
         let parallelIdx = 0;
         producerWrites.forEach((table) => {
           if (consumerReads.has(table)) {
+            // 去重：同脚本对同表只保留一条输出→输入边
+            const pairTableKey = [producerScript, consumerScript].sort().join('\0') + '\0' + table;
+            if (pairTableSet.has(pairTableKey)) return;
+            pairTableSet.add(pairTableKey);
+
             const edgeId = `${producerScript}->${consumerScript}:${table}`;
             if (!edgeSet.has(edgeId)) {
               edgeSet.add(edgeId);
