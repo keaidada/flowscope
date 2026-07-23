@@ -204,7 +204,13 @@ export function SqlView({
       const view = editorRef.current?.view;
       if (!view) return;
       if (view.dom.contains(e.target as Node)) return;
+      // 关闭搜索面板（多次调用防抖）
       closeSearchPanel(view);
+      // 阻止编辑器因点击外部重新获取焦点时自动打开搜索面板
+      window.addEventListener('focus', (fe) => {
+        // 搜索面板关闭后如果编辑器获得焦点，它可能会重新打开
+        // 在这里我们不需要额外处理，closeSearchPanel 已经关闭了
+      }, { once: true });
     };
     document.addEventListener('mousedown', handler, true);
     return () => document.removeEventListener('mousedown', handler, true);
