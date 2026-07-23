@@ -328,6 +328,15 @@ export async function writeTableLevelEdges(projectId: string): Promise<void> {
     serverDb.getLineageNodes(projectId),
     serverDb.getLineageEdges(projectId),
   ]);
+  await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
+}
+
+/** 内部函数：直接用已加载的数据重建 TLE，避免重复请求 */
+async function _writeTableLevelEdgesInternal(
+  projectId: string,
+  rawNodes: serverDb.LineageNodeRow[],
+  rawEdges: serverDb.LineageEdgeRow[],
+): Promise<void> {
 
   // node_id is UNIQUE per (project_id, file_path), NOT globally unique.
   // Same CTE name in different files → same hash node_id.
@@ -939,11 +948,13 @@ function filterOrphanScripts(
 /**
  * 修复：从 analysis_cache 读取结果，补写入 lineage_nodes/edges 中缺失的脚本。
  * 场景：writeBatchFileResults 成功但 writeLineageData 失败（如缓存命中的二次分析跳过了写入）。
+ * knownLineagePaths：可选的预加载节点路径集合，避免重复查询。
  */
-async function _repairMissingLineageData(projectId: string): Promise<void> {
-  const allNodes = await serverDb.getLineageNodes(projectId);
-  const lineagePaths = new Set<string>();
-  for (const n of allNodes) lineagePaths.add(n.file_path);
+async function _repairMissingLineageData(
+  projectId: string,
+  knownLineagePaths?: Set<string>,
+): Promise<void> {
+  const lineagePaths = knownLineagePaths ?? await _loadLineagePaths(projectId);
 
   const fileResultPaths = await readFileResultPaths(projectId);
   const missing: string[] = [];
@@ -990,25 +1001,38 @@ async function _repairMissingLineageData(projectId: string): Promise<void> {
 
 const _tleEnsured = new Set<string>();
 const _repairedSet = new Set<string>();
-async function _ensureTableLevelEdges(projectId: string): Promise<void> {
-  if (!_tleEnsured.has(projectId)) {
-    _tleEnsured.add(projectId);
-    try {
-      await writeTableLevelEdges(projectId);
-    } catch {
-      // non-fatal: will use whatever data exists
-    }
-  }
 
-  // ── 修复：file_results 有记录但 lineage_nodes 缺失的脚本 ──
-  if (!_repairedSet.has(projectId)) {
+/** 从 lineage_nodes 加载所有不重复的 file_path */
+async function _loadLineagePaths(projectId: string): Promise<Set<string>> {
+  const nodes = await serverDb.getLineageNodes(projectId);
+  const paths = new Set<string>();
+  for (const n of nodes) paths.add(n.file_path);
+  return paths;
+}
+
+async function _ensureTableLevelEdges(projectId: string): Promise<void> {
+  if (_tleEnsured.has(projectId) && _repairedSet.has(projectId)) return;
+  if (_tleEnsured.has(projectId)) {
     _repairedSet.add(projectId);
-    try {
-      await _repairMissingLineageData(projectId);
-    } catch {
-      // non-fatal
-    }
+    try { await _repairMissingLineageData(projectId); } catch {}
+    return;
   }
+  // 首次调用：一次性加载 lineage_nodes + lineage_edges，避免重复请求
+  const [rawNodes, rawEdges] = await Promise.all([
+    serverDb.getLineageNodes(projectId),
+    serverDb.getLineageEdges(projectId),
+  ]);
+  // 提取节点路径集合供修复使用（复用在内存中的数据，不重新请求）
+  const lineagePaths = new Set<string>();
+  for (const n of rawNodes) lineagePaths.add(n.file_path);
+  // 重建 TLE
+  try {
+    await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
+  } catch { /* non-fatal */ }
+  _tleEnsured.add(projectId);
+  // 修复缺失
+  _repairedSet.add(projectId);
+  try { await _repairMissingLineageData(projectId, lineagePaths); } catch {}
 }
 
 export async function searchLineageForInsights(
