@@ -384,6 +384,40 @@ export async function writeTableLevelEdges(projectId: string): Promise<void> {
     if (!groupsByScript.has(script)) groupsByScript.set(script, []);
     groupsByScript.get(script)!.push({ inputs: [...reads], outputs: [...writes] });
   }
+  // ── 合并同脚本内共享输出表的组，避免同一表作为多个组 output 重复 ──
+  for (const [, groups] of groupsByScript) {
+    if (groups.length <= 1) continue;
+    const parent = groups.map((_, i) => i);
+    const find = (i: number): number => {
+      while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; }
+      return i;
+    };
+    const union = (a: number, b: number) => { parent[find(a)] = find(b); };
+    // Build output → group index map, merge when collision
+    const outToGroup = new Map<string, number>();
+    for (let i = 0; i < groups.length; i++) {
+      for (const o of groups[i].outputs) {
+        const prev = outToGroup.get(o);
+        if (prev !== undefined) union(prev, i);
+        outToGroup.set(o, find(i));
+      }
+    }
+    // Collect merged groups
+    const merged: Map<number, { inputs: Set<string>; outputs: Set<string> }> = new Map();
+    for (let i = 0; i < groups.length; i++) {
+      const root = find(i);
+      if (!merged.has(root)) merged.set(root, { inputs: new Set(), outputs: new Set() });
+      const m = merged.get(root)!;
+      for (const x of groups[i].inputs) m.inputs.add(x);
+      for (const x of groups[i].outputs) m.outputs.add(x);
+    }
+    if (merged.size < groups.length) {
+      groups.length = 0;
+      for (const m of merged.values()) {
+        groups.push({ inputs: [...m.inputs], outputs: [...m.outputs] });
+      }
+    }
+  }
   _groupsCache.set(projectId, groupsByScript);
 }
 
