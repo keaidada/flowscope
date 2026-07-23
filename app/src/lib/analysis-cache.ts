@@ -331,6 +331,104 @@ export async function writeTableLevelEdges(projectId: string): Promise<void> {
   await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
 }
 
+/**
+ * 只用 lineage_nodes 重建 TLE（4MB），不用 lineage_edges（78.7MB）。
+ * 通过 resolution_source='implied' 判断写入方向。
+ */
+async function _writeTableLevelEdgesFromNodes(
+  projectId: string,
+  rawNodes: serverDb.LineageNodeRow[],
+): Promise<void> {
+  // 按 (script, statement_index) 分组
+  const stmtMap = new Map<string, { script: string; reads: Set<string>; writes: Set<string> }>();
+  for (const n of rawNodes) {
+    if (n.node_type !== 'table' && n.node_type !== 'view') continue;
+    const script = n.file_path;
+    const stmtKey = `${script}\0${n.statement_index}`;
+    const qn = (n.qualified_name ?? n.label).toLowerCase();
+    if (!stmtMap.has(stmtKey)) stmtMap.set(stmtKey, { script, reads: new Set(), writes: new Set() });
+    const entry = stmtMap.get(stmtKey)!;
+    if (n.resolution_source === 'implied') entry.writes.add(qn);
+    else entry.reads.add(qn);
+  }
+
+  // Cross-product reads × writes per group
+  const edgeSet = new Set<string>();
+  const edges: Array<[string, string, string]> = [];
+  const mergedScript = new Map<string, string>(); // root → script
+  const mergedReads = new Map<string, Set<string>>();
+  const mergedWrites = new Map<string, Set<string>>();
+
+  for (const [, entry] of stmtMap) {
+    const root = entry.script + '\0' + entry.script; // simplified: no CTE merge
+    mergedScript.set(root, entry.script);
+    if (!mergedReads.has(root)) { mergedReads.set(root, new Set()); mergedWrites.set(root, new Set()); }
+    for (const r of entry.reads) mergedReads.get(root)!.add(r);
+    for (const w of entry.writes) mergedWrites.get(root)!.add(w);
+  }
+
+  for (const [root, reads] of mergedReads) {
+    const writes = mergedWrites.get(root);
+    if (!writes || writes.size === 0) continue;
+    if (reads.size === 0) continue;
+    const script = mergedScript.get(root)!;
+    for (const fromQn of reads) {
+      for (const toQn of writes) {
+        if (fromQn !== toQn) {
+          const dedup = `${fromQn}\0${toQn}\0${script}`;
+          if (!edgeSet.has(dedup)) {
+            edgeSet.add(dedup);
+            edges.push([fromQn, toQn, script]);
+          }
+        }
+      }
+    }
+  }
+
+  if (edges.length > 0) {
+    await serverDb.saveTableLevelEdges(projectId, edges);
+  }
+
+  // ── Cache per-script groups ──
+  const groupsByScript = new Map<string, OutputGroup[]>();
+  for (const [root, reads] of mergedReads) {
+    const writes = mergedWrites.get(root);
+    if (!writes || writes.size === 0) continue;
+    if (reads.size === 0) continue;
+    const script = mergedScript.get(root)!;
+    if (!groupsByScript.has(script)) groupsByScript.set(script, []);
+    groupsByScript.get(script)!.push({ inputs: [...reads], outputs: [...writes] });
+  }
+  // 合并同脚本内共享输出表的组
+  for (const [, groups] of groupsByScript) {
+    if (groups.length <= 1) continue;
+    const parent = groups.map((_, i) => i);
+    const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    const union = (a: number, b: number) => { parent[find(a)] = find(b); };
+    const outToGroup = new Map<string, number>();
+    for (let i = 0; i < groups.length; i++) {
+      for (const o of groups[i].outputs) {
+        const prev = outToGroup.get(o);
+        if (prev !== undefined) union(prev, i);
+        outToGroup.set(o, find(i));
+      }
+    }
+    const merged: Map<number, { inputs: Set<string>; outputs: Set<string> }> = new Map();
+    for (let i = 0; i < groups.length; i++) {
+      const root = find(i);
+      if (!merged.has(root)) merged.set(root, { inputs: new Set(), outputs: new Set() });
+      const m = merged.get(root)!;
+      for (const x of groups[i].inputs) m.inputs.add(x);
+      for (const x of groups[i].outputs) m.outputs.add(x);
+    }
+    if (merged.size < groups.length) {
+      groups.length = 0;
+      for (const m of merged.values()) groups.push({ inputs: [...m.inputs], outputs: [...m.outputs] });
+    }
+  }
+  _groupsCache.set(projectId, groupsByScript);
+}
+
 /** 内部函数：直接用已加载的数据重建 TLE，避免重复请求 */
 async function _writeTableLevelEdgesInternal(
   projectId: string,
@@ -1029,20 +1127,17 @@ async function _ensureTableLevelEdges(projectId: string): Promise<void> {
     _repairMissingLineageData(projectId).catch(() => {});
     return;
   }
-  // 首次调用：一次性加载 lineage_nodes + lineage_edges，避免重复请求
-  const [rawNodes, rawEdges] = await Promise.all([
-    getOrLoadNodes(projectId),
-    serverDb.getLineageEdges(projectId),
-  ]);
-  // 提取节点路径集合供修复使用（复用在内存中的数据，不重新请求）
+  // 首次调用：只用 lineage_nodes（4MB），不用 lineage_edges（78.7MB）
+  const rawNodes = await getOrLoadNodes(projectId);
+  // 提取节点路径集合供修复使用
   const lineagePaths = new Set<string>();
   for (const n of rawNodes) lineagePaths.add(n.file_path);
   // 重建 TLE
   try {
-    await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
+    await _writeTableLevelEdgesFromNodes(projectId, rawNodes);
   } catch { /* non-fatal */ }
   _tleEnsured.add(projectId);
-  // 修复缺失（异步不阻塞，_repairedSet 已置位防止重复触发）
+  // 修复缺失（异步不阻塞）
   _repairedSet.add(projectId);
   _repairMissingLineageData(projectId, lineagePaths).catch(() => {});
 }
