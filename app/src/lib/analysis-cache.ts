@@ -7,6 +7,58 @@
 import type { AnalyzeResult, StatementLineage, Node, Edge } from '@pondpilot/flowscope-core';
 import * as serverDb from './server-db';
 
+// ── 统一异常拦截器 ──────────────────────────────────────────────
+
+export type AnomalySeverity = 'error' | 'warning' | 'info';
+export type AnomalyCategory =
+  | 'no_dataflow'
+  | 'self_ref_only'
+  | 'write_failed'
+  | 'parse_empty'
+  | 'cache_stale'
+  | 'repair_needed'
+  | 'repair_ok';
+
+export interface Anomaly {
+  category: AnomalyCategory;
+  severity: AnomalySeverity;
+  message: string;
+  script?: string;
+  detail?: string;
+}
+
+let _anomalyListener: ((a: Anomaly) => void) | null = null;
+
+/** 注册全局异常监听器（比如用于 toast 通知） */
+export function onAnalysisAnomaly(listener: (a: Anomaly) => void): () => void {
+  _anomalyListener = listener;
+  return () => { _anomalyListener = null; };
+}
+
+function emit(anomaly: Anomaly): void {
+  if (_anomalyListener) {
+    try { _anomalyListener(anomaly); } catch { /* listener 不应影响主流程 */ }
+  }
+  const level = anomaly.severity === 'error' ? 'error' : anomaly.severity === 'warning' ? 'warn' : 'log';
+  console[level](`[LineageAnomaly][${anomaly.category}]`, anomaly.message, anomaly.detail ?? '');
+}
+
+/** 检查 AnalyzeResult 是否有有效的 data_flow（非纯自引用） */
+export function hasMeaningfulLineage(result: AnalyzeResult | null): boolean {
+  if (!result) return false;
+  return result.statements.some(stmt =>
+    stmt.edges?.some(e => e.type === 'data_flow' && e.from !== e.to)
+  );
+}
+
+/** 检查 AnalyzeResult 是否有任何 data_flow 边 */
+export function hasAnyDataFlow(result: AnalyzeResult | null): boolean {
+  if (!result) return false;
+  return result.statements.some(stmt =>
+    stmt.edges?.some(e => e.type === 'data_flow')
+  );
+}
+
 // ── Analysis result cache ───────────────────────────────────────────
 
 export async function readCachedAnalysisResult(cacheKey: string): Promise<AnalyzeResult | null> {
@@ -880,18 +932,27 @@ async function _repairMissingLineageData(projectId: string): Promise<void> {
   if (missing.length === 0) return;
 
   let repaired = 0;
+  let failed = 0;
+  let useless = 0;
   for (const fp of missing) {
     const result = await readFileResult(projectId, fp);
     if (!result || !result.statements?.length) continue;
+    if (!hasMeaningfulLineage(result)) {
+      useless++;
+      emit({ category: 'self_ref_only', severity: 'warning', script: fp, message: '缓存结果无有效 data_flow（纯自引用），不补写' });
+      continue;
+    }
     try {
       await writeLineageData(projectId, result);
       repaired++;
-    } catch {
-      // skip individual failures
+      emit({ category: 'repair_ok', severity: 'info', script: fp, message: '补写 lineage 成功' });
+    } catch (err) {
+      failed++;
+      emit({ category: 'write_failed', severity: 'error', script: fp, message: '补写 lineage 失败', detail: String(err) });
     }
   }
   if (repaired > 0) {
-    // Rebuild TLE after repair
+    emit({ category: 'repair_needed', severity: 'warning', message: `已从缓存修复 ${repaired} 个脚本的 lineage 数据${useless > 0 ? `，${useless} 个跳过（无有效血缘）` : ''}${failed > 0 ? `，${failed} 个失败` : ''}` });
     try { await writeTableLevelEdges(projectId); } catch { /* non-fatal */ }
   }
 }

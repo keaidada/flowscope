@@ -726,10 +726,14 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             // and batch-insert DB pointer rows.  This avoids writing the same
             // 10MB+ JSON O(N) times when N files share one result.
             const allFilePaths = context.files.map((f: { name: string; path?: string }) => f.path ?? f.name);
-            const hasUsefulLineage = result.statements.some(stmt =>
-              stmt.edges?.some(e => e.type === 'data_flow' && e.from !== e.to)
-            );
-            if (hasUsefulLineage) {
+            const { writeLineageData, writeTableMetadata, hasMeaningfulLineage, hasAnyDataFlow } = await import('@/lib/analysis-cache');
+            if (!hasMeaningfulLineage(result)) {
+              if (hasAnyDataFlow(result)) {
+                console.warn('[useAnalysis] 结果仅有自引用 data_flow，跳过持久化', allFilePaths);
+              } else {
+                console.warn('[useAnalysis] 结果无有效 data_flow，跳过持久化', allFilePaths);
+              }
+            } else {
               try {
                 await writeBatchFileResults(activeProjectId, allFilePaths, cacheKey, result);
               } catch (err) {
@@ -748,8 +752,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
             // Persist lineage data (nodes/columns/edges) per file — do this FIRST
             // before other writes that may fail in serve mode (writeSchemaData etc. use DuckDB/OPFS)
-            const { writeLineageData, writeTableMetadata } = await import('@/lib/analysis-cache');
-            if (hasUsefulLineage) {
+            if (hasMeaningfulLineage(result)) {
               try {
                 await writeLineageData(activeProjectId, result);
               } catch (err) {
