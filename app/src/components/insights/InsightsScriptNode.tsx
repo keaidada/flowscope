@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { FileCode, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { FileCode, Copy, Check, ChevronDown, ChevronUp, ClipboardList } from 'lucide-react';
 import { useLineageStore, useColors } from '@pondpilot/flowscope-react';
 import type { ScriptNodeData } from '@pondpilot/flowscope-react';
 import { shouldHighlightRow, toggleHighlight, onHighlightChange } from './highlightState';
@@ -33,6 +33,7 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
   const updateNodeInternals = useUpdateNodeInternals();
 
   const [copied, setCopied] = useState(false);
+  const [copiedAll, setCopiedAll] = useState(false);
   const showScriptTables = useLineageStore((state) => state.showScriptTables);
   const [local, setLocal] = useState<boolean | null>(null);
   const prev = useRef(showScriptTables);
@@ -120,6 +121,21 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
     navigator.clipboard.writeText(label).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
   }, [label]);
 
+  const handleCopyAll = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const lines: string[] = [];
+    lines.push(`脚本: ${sourceName}`);
+    if (reads.length > 0) {
+      lines.push(`输入 (${reads.length}):`);
+      for (const t of reads) lines.push(`  - ${t}`);
+    }
+    if (writes.length > 0) {
+      lines.push(`输出 (${writes.length}):`);
+      for (const t of writes) lines.push(`  - ${t}`);
+    }
+    navigator.clipboard.writeText(lines.join('\n')).then(() => { setCopiedAll(true); setTimeout(() => setCopiedAll(false), 1500); });
+  }, [sourceName, reads, writes]);
+
   const toggle = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setLocal((v) => (v === null ? !showScriptTables : !v));
@@ -177,6 +193,9 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
             <span>入 {reads.length}</span><span>出 {writes.length}</span>
           </div>
         </div>
+        <button onClick={handleCopyAll} className="shrink-0 p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors" title="复制所有表">
+          {copiedAll ? <Check className="h-3.5 w-3.5" style={{ color: c.status.success }} /> : <ClipboardList className="h-3.5 w-3.5" style={{ color: s.textSecondary }} />}
+        </button>
         <button onClick={toggle} className="shrink-0 p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors">
           {expanded ? <ChevronUp className="h-4 w-4" style={{ color: s.textSecondary }} /> : <ChevronDown className="h-4 w-4" style={{ color: s.textSecondary }} />}
         </button>
