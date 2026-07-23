@@ -728,10 +728,14 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             const allFilePaths = context.files.map((f: { name: string; path?: string }) => f.path ?? f.name);
             const { writeLineageData, writeTableMetadata, hasMeaningfulLineage, hasAnyDataFlow } = await import('@/lib/analysis-cache');
             if (!hasMeaningfulLineage(result)) {
+              const totalEdges = result.statements.reduce((s, st) => s + (st.edges?.length ?? 0), 0);
+              const nonSelfEdges = result.statements.reduce((s, st) => s + (st.edges?.filter(e => e.type === 'data_flow' && e.from !== e.to)?.length ?? 0), 0);
+              const selfRefEdges = totalEdges - nonSelfEdges;
               const reason = hasAnyDataFlow(result)
-                ? '结果仅有自引用 data_flow（纯自引用），跳过持久化'
-                : '结果无有效 data_flow，跳过持久化';
-              console.warn('[useAnalysis] ' + reason, allFilePaths);
+                ? `结果仅有 ${selfRefEdges} 条自引用 data_flow（from===to），${nonSelfEdges} 条有效，跳过持久化`
+                : `结果无任何 data_flow 边（共 ${totalEdges} 条边，均为其他类型），跳过持久化`;
+              console.warn('[useAnalysis] ' + reason, allFilePaths, 'statements:', result.statements.map(s => ({ stmt: s.statementIndex, nodes: s.nodes.length, edges: s.edges?.length })));
+              setError(reason);
               import('@/lib/server-db').then(db => {
                 for (const fp of allFilePaths) {
                   db.saveAnomaly(activeProjectId, {
@@ -741,12 +745,13 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
                     severity: 'warning',
                     anomalyType: 'self_ref_only',
                     message: reason,
-                    detail: `statements=${result.statements.length}, hasAnyDataFlow=${hasAnyDataFlow(result)}`,
+                    detail: `statements=${result.statements.length}, edges=${totalEdges}, selfRef=${selfRefEdges}, valid=${nonSelfEdges}`,
                     isTest: 0,
                   }).catch(() => {});
                 }
               });
             } else {
+              setError(null);
               try {
                 await writeBatchFileResults(activeProjectId, allFilePaths, cacheKey, result);
               } catch (err) {
