@@ -847,6 +847,7 @@ function getOutputGroups(script: string, projectId: string): OutputGroup[] {
 
 function filterOrphanScripts(
   scripts: Set<string>,
+  preserve: Set<string>,
   scriptReads: Map<string, Set<string>>,
   scriptWrites: Map<string, Set<string>>,
   qnameReaders: Map<string, Set<string>>,
@@ -854,6 +855,7 @@ function filterOrphanScripts(
 ): Set<string> {
   const result = new Set<string>();
   for (const script of scripts) {
+    if (preserve.has(script)) { result.add(script); continue; }
     const reads = scriptReads.get(script) ?? new Set();
     const writes = scriptWrites.get(script) ?? new Set();
     let hasEdge = false;
@@ -1070,9 +1072,10 @@ export async function searchLineageForInsights(
     ...downstreamScripts,
   ]);
 
-  // ── 6. 过滤孤立脚本 ────────────────────────────────────
+  // ── 6. 过滤孤立脚本（保留用户匹配的脚本）─────────────────────
   reachableScripts = filterOrphanScripts(
     reachableScripts,
+    matchedScripts,
     scriptReads,
     scriptWrites,
     qnameReaders,
