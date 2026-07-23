@@ -183,7 +183,7 @@ function InsightsScriptNodeComponent({ id, data, selected }: NodeProps): JSX.Ele
       </div>
 
       {expanded && (
-        <div className="border-t overflow-y-auto" style={{ borderColor: s.border, maxHeight: '70vh' }}>
+        <div className="border-t" style={{ borderColor: s.border }}>
           {isGrouped ? (
             <GroupedTables
               groups={layout.groups}
