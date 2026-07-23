@@ -1003,6 +1003,7 @@ async function _repairMissingLineageData(
 const _tleEnsured = new Set<string>();
 const _repairedSet = new Set<string>();
 const _nodeCache = new Map<string, serverDb.LineageNodeRow[]>();
+const _fileResultCache = new Map<string, { file_path: string; file_name?: string }[]>();
 
 /** 从 lineage_nodes 加载所有不重复的 file_path */
 async function _loadLineagePaths(projectId: string): Promise<Set<string>> {
@@ -1104,7 +1105,11 @@ export async function searchLineageForInsights(
   const matchedScripts = new Set<string>();
 
   // 从 file_results 获取脚本名用于匹配（轻量，不加载 lineage_nodes）
-  const fileResultRows = await serverDb.loadProjectFileResults(projectId);
+  let fileResultRows = _fileResultCache.get(projectId);
+  if (!fileResultRows) {
+    fileResultRows = await serverDb.loadProjectFileResults(projectId);
+    _fileResultCache.set(projectId, fileResultRows);
+  }
   const scriptFileName = new Map<string, string>();
   for (const r of fileResultRows) {
     if (r.file_path && r.file_name) scriptFileName.set(r.file_path, r.file_name);
