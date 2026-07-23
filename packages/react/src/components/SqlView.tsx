@@ -202,14 +202,18 @@ export function SqlView({
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const ed = document.querySelector<HTMLElement>('.cm-editor');
+      console.log('[searchPanel] mousedown capture', { hasEditor: !!ed, target: (e.target as HTMLElement)?.tagName, targetClass: (e.target as HTMLElement)?.className?.slice(0, 50), insideEditor: ed ? ed.contains(e.target as Node) : 'no-editor' });
       if (!ed) return;
-      if (ed.contains(e.target as Node)) return;
+      if (ed.contains(e.target as Node)) {
+        console.log('[searchPanel] skip - inside editor');
+        return;
+      }
       const view = editorRef.current?.view;
+      console.log('[searchPanel] closing panel', { hasView: !!view });
       if (!view) return;
-      // 先更新状态（让 CodeMirror 知道面板已关闭）
       closeSearchPanel(view);
-      // 再立即移除 DOM（防止异步刷新时重现）
       const panel = ed.querySelector<HTMLElement>('.cm-panel.cm-search');
+      console.log('[searchPanel] after closeSearchPanel', { panelExists: !!panel });
       if (panel) panel.remove();
     };
     document.addEventListener('mousedown', handler, true);
