@@ -1024,7 +1024,7 @@ async function _ensureTableLevelEdges(projectId: string): Promise<void> {
   if (_tleEnsured.has(projectId) && _repairedSet.has(projectId)) return;
   if (_tleEnsured.has(projectId)) {
     _repairedSet.add(projectId);
-    try { await _repairMissingLineageData(projectId); } catch {}
+    _repairMissingLineageData(projectId).catch(() => {});
     return;
   }
   // 首次调用：一次性加载 lineage_nodes + lineage_edges，避免重复请求
@@ -1040,9 +1040,9 @@ async function _ensureTableLevelEdges(projectId: string): Promise<void> {
     await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
   } catch { /* non-fatal */ }
   _tleEnsured.add(projectId);
-  // 修复缺失
+  // 修复缺失（异步不阻塞，_repairedSet 已置位防止重复触发）
   _repairedSet.add(projectId);
-  try { await _repairMissingLineageData(projectId, lineagePaths); } catch {}
+  _repairMissingLineageData(projectId, lineagePaths).catch(() => {});
 }
 
 export async function searchLineageForInsights(
