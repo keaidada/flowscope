@@ -702,6 +702,9 @@
     "next": "next",
     "previous": "previous",
     "replace": "replace",
-    "replace all": "replace all"
+    "replace all": "replace all",
+    "match case": "match case",
+    "regexp": "regexp",
+    "by word": "by word"
   }
 }

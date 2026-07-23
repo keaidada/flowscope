@@ -405,6 +405,9 @@ export function EditorArea({
               'previous': t('editorSearch.previous'),
               'replace': t('editorSearch.replace'),
               'replace all': t('editorSearch.replace all'),
+              'match case': t('editorSearch.match case'),
+              'regexp': t('editorSearch.regexp'),
+              'by word': t('editorSearch.by word'),
             }}
           />
         </ErrorBoundary>
