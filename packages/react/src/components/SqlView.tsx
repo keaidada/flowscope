@@ -201,10 +201,17 @@ export function SqlView({
   // 点击编辑器外部时关闭搜索面板
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      const view = editorRef.current?.view;
-      if (!view) return;
-      if (view.dom.contains(e.target as Node)) return;
-      closeSearchPanel(view);
+      const ed = document.querySelector<HTMLElement>('.cm-editor');
+      if (!ed) return;
+      if (ed.contains(e.target as Node)) return;
+      // 直接移除搜索面板 DOM
+      const panel = ed.querySelector<HTMLElement>('.cm-panel.cm-search');
+      if (panel) panel.remove();
+      // 同步 CodeMirror 状态
+      setTimeout(() => {
+        const view = editorRef.current?.view;
+        if (view) closeSearchPanel(view);
+      }, 0);
     };
     document.addEventListener('mousedown', handler, true);
     return () => document.removeEventListener('mousedown', handler, true);
