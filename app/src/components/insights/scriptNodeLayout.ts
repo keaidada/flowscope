@@ -43,8 +43,26 @@ export function computeScriptNodeLayout(
     const groups: GroupLayoutInfo[] = [];
     let cursor = HEADER_H;
 
-    for (let gi = 0; gi < outputGroups.length; gi++) {
-      const g = outputGroups[gi];
+    // Collect all qnames covered by outputGroups to detect orphans
+    const coveredReads = new Set<string>();
+    const coveredWrites = new Set<string>();
+    for (const g of outputGroups) {
+      g.inputs.forEach((q) => coveredReads.add(q));
+      g.outputs.forEach((q) => coveredWrites.add(q));
+    }
+
+    // Find orphan tables: in tableNamesRead/Written but not in any group
+    const orphanReads = tableNamesRead.filter((q) => !coveredReads.has(q));
+    const orphanWrites = tableNamesWritten.filter((q) => !coveredWrites.has(q));
+
+    // Append orphans as a synthetic group so they are still rendered
+    const allGroups = [...outputGroups];
+    if (orphanReads.length > 0 || orphanWrites.length > 0) {
+      allGroups.push({ inputs: orphanReads, outputs: orphanWrites });
+    }
+
+    for (let gi = 0; gi < allGroups.length; gi++) {
+      const g = allGroups[gi];
       const groupStartY = cursor;
       const inputs: HandlePosition[] = [];
       const outputs: HandlePosition[] = [];
@@ -72,7 +90,7 @@ export function computeScriptNodeLayout(
       groups.push({ inputs, outputs, startY: groupStartY, height });
 
       // Divider between groups
-      if (gi < outputGroups.length - 1) {
+      if (gi < allGroups.length - 1) {
         cursor += DIVIDER_H;
       }
     }
@@ -115,6 +133,17 @@ export function estimateScriptNodeHeight(
 ): number {
   if (outputGroups && outputGroups.length > 1) {
     let height = HEADER_H;
+
+    // Account for orphans: tables in readCount/writeCount not covered by outputGroups
+    let coveredReads = 0;
+    let coveredWrites = 0;
+    for (const g of outputGroups) {
+      coveredReads += g.inputs.length;
+      coveredWrites += g.outputs.length;
+    }
+    const orphanReads = readCount - coveredReads;
+    const orphanWrites = writeCount - coveredWrites;
+
     for (let gi = 0; gi < outputGroups.length; gi++) {
       const g = outputGroups[gi];
       const hasInputs = g.inputs.length > 0;
@@ -124,6 +153,15 @@ export function estimateScriptNodeHeight(
       height += SECTION_HEADER_H + g.outputs.length * ROW;
       if (gi < outputGroups.length - 1) height += DIVIDER_H;
     }
+
+    // Add orphan group if present
+    if (orphanReads > 0 || orphanWrites > 0) {
+      if (outputGroups.length > 0) height += DIVIDER_H;
+      height += SECTION_HEADER_H + orphanReads * ROW;
+      if (orphanReads > 0 && orphanWrites > 0) height += GAP_BETWEEN_SECTIONS;
+      height += SECTION_HEADER_H + orphanWrites * ROW;
+    }
+
     return height;
   }
   const rs = readCount > 0 ? SECTION_HEADER_H + readCount * ROW : 0;
