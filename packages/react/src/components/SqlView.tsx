@@ -204,14 +204,13 @@ export function SqlView({
       const ed = document.querySelector<HTMLElement>('.cm-editor');
       if (!ed) return;
       if (ed.contains(e.target as Node)) return;
-      // 直接移除搜索面板 DOM
+      const view = editorRef.current?.view;
+      if (!view) return;
+      // 先更新状态（让 CodeMirror 知道面板已关闭）
+      closeSearchPanel(view);
+      // 再立即移除 DOM（防止异步刷新时重现）
       const panel = ed.querySelector<HTMLElement>('.cm-panel.cm-search');
       if (panel) panel.remove();
-      // 同步 CodeMirror 状态
-      setTimeout(() => {
-        const view = editorRef.current?.view;
-        if (view) closeSearchPanel(view);
-      }, 0);
     };
     document.addEventListener('mousedown', handler, true);
     return () => document.removeEventListener('mousedown', handler, true);
