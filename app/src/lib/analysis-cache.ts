@@ -850,23 +850,15 @@ function filterOrphanScripts(
   preserve: Set<string>,
   scriptReads: Map<string, Set<string>>,
   scriptWrites: Map<string, Set<string>>,
-  qnameReaders: Map<string, Set<string>>,
-  qnameWriters: Map<string, Set<string>>,
+  _qnameReaders: Map<string, Set<string>>,
+  _qnameWriters: Map<string, Set<string>>,
 ): Set<string> {
   const result = new Set<string>();
   for (const script of scripts) {
     if (preserve.has(script)) { result.add(script); continue; }
     const reads = scriptReads.get(script) ?? new Set();
     const writes = scriptWrites.get(script) ?? new Set();
-    let hasEdge = false;
-    for (const qn of [...reads, ...writes]) {
-      const connected = [...(qnameReaders.get(qn) ?? []), ...(qnameWriters.get(qn) ?? [])];
-      if (connected.some((s) => s !== script && scripts.has(s))) {
-        hasEdge = true;
-        break;
-      }
-    }
-    if (hasEdge) result.add(script);
+    if (reads.size > 0 || writes.size > 0) { result.add(script); }
   }
   return result;
 }
