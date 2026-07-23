@@ -726,6 +726,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             // and batch-insert DB pointer rows.  This avoids writing the same
             // 10MB+ JSON O(N) times when N files share one result.
             const allFilePaths = context.files.map((f: { name: string; path?: string }) => f.path ?? f.name);
+            const fileContentMap = new Map(context.files.map((f: { name: string; path?: string; content?: string }) => [f.path ?? f.name, f.content ?? '']));
             const { writeLineageData, writeTableMetadata, hasMeaningfulLineage, hasAnyDataFlow } = await import('@/lib/analysis-cache');
             if (!hasMeaningfulLineage(result)) {
               const totalEdges = result.statements.reduce((s, st) => s + (st.edges?.length ?? 0), 0);
@@ -741,7 +742,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
                   db.saveAnomaly(activeProjectId, {
                     filePath: fp,
                     scriptName: fp.split('/').pop() ?? fp,
-                    scriptContent: '',
+                    scriptContent: fileContentMap.get(fp) ?? '',
                     severity: 'warning',
                     anomalyType: 'self_ref_only',
                     message: reason,

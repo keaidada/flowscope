@@ -107,16 +107,16 @@ export function EditorArea({
 
   const { isAnalyzing, error, runAnalysis, setError } = analysis;
 
-  // Show error toast when error occurs
+  // Show error toast when error occurs, keep visible until next analysis
   useEffect(() => {
     if (error) {
       toast.error(t('editor.analysisError'), {
         description: error,
-        duration: 5000,
+        duration: 8000,
       });
-      setError(null);
+      // 不清除 error，让它在页面上持久显示直到下一次分析
     }
-  }, [error, setError]);
+  }, [error]);
 
   // Debounce schema SQL to prevent rapid re-analysis during editing
   const debouncedSchemaSQL = useDebounce(currentProject?.schemaSQL ?? '', 300);
@@ -376,6 +376,13 @@ export function EditorArea({
         onOpenEtl={handleOpenEtl}
         onSave={handleSave}
       />
+
+      {error && (
+        <div className="flex items-start gap-2.5 px-4 py-3 text-sm border-b" style={{ backgroundColor: '#fef2f2', borderColor: '#f87171', borderLeft: '4px solid #ef4444', color: '#991b1b' }}>
+          <AlertCircle className="h-5 w-5 mt-0.5 shrink-0" style={{ color: '#ef4444' }} />
+          <div className="flex-1 whitespace-pre-wrap font-medium">{error}</div>
+        </div>
+      )}
 
       <div
         ref={editorContainerRef}
