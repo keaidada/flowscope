@@ -55,6 +55,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/db/cache/clear", post(clear_cache_api))
         .route("/db/file-results", post(set_file_result_api))
         .route("/db/file-results", get(get_file_results_api))
+        .route("/db/file-results/light", get(get_file_results_light_api))
         .route("/db/file-results", delete(delete_file_results_api))
         .route("/db/file-result", get(get_file_result_api))
         .route("/db/lineage", post(save_lineage_api))
@@ -1575,6 +1576,20 @@ pub(crate) async fn get_file_results_api(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let list: Vec<serde_json::Value> = results.into_iter().map(|(fp, json, hash, fn_, dp)| {
         serde_json::json!({ "filePath": fp, "resultJson": json, "contentHash": hash, "fileName": fn_, "dirPath": dp })
+    }).collect();
+    Ok(Json(serde_json::json!({ "files": list })).into_response())
+}
+
+/// GET /api/db/file-results/light - 轻量查询 file_path + file_name，不含大字段
+pub(crate) async fn get_file_results_light_api(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ProjectFilesQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let results = store::get_file_results_light(&db, &q.project_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let list: Vec<serde_json::Value> = results.into_iter().map(|(fp, fn_)| {
+        serde_json::json!({ "filePath": fp, "fileName": fn_ })
     }).collect();
     Ok(Json(serde_json::json!({ "files": list })).into_response())
 }

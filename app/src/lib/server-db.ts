@@ -317,6 +317,17 @@ export async function loadProjectFileResults(
   }));
 }
 
+/** 轻量查询 file_path + file_name，不含 result_json 等大字段 */
+export async function loadProjectFileResultsLight(
+  projectId: string
+): Promise<{ file_path: string; file_name?: string }[]> {
+  const resp = await api<{ files: Array<{ filePath: string; fileName?: string }> }>('GET', `/file-results/light?projectId=${encodeURIComponent(projectId)}`);
+  return resp.files.map(f => ({
+    file_path: f.filePath,
+    file_name: f.fileName,
+  }));
+}
+
 export async function deleteProjectFileResults(
   projectId: string,
   filePaths: string[],

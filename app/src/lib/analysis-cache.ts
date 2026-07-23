@@ -1107,7 +1107,7 @@ export async function searchLineageForInsights(
   // 从 file_results 获取脚本名用于匹配（轻量，不加载 lineage_nodes）
   let fileResultRows = _fileResultCache.get(projectId);
   if (!fileResultRows) {
-    fileResultRows = await serverDb.loadProjectFileResults(projectId);
+    fileResultRows = await serverDb.loadProjectFileResultsLight(projectId);
     _fileResultCache.set(projectId, fileResultRows);
   }
   const scriptFileName = new Map<string, string>();

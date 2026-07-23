@@ -1621,6 +1621,23 @@ pub fn get_file_results(
     rows.collect()
 }
 
+/// 轻量查询：只返回 file_path + file_name，用于搜索匹配，不返回大字段 result_json
+pub fn get_file_results_light(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<(String, String)>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT file_path, file_name FROM project_file_results WHERE project_id = ?1"
+    )?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+        ))
+    })?;
+    rows.collect()
+}
+
 pub fn delete_file_result(
     conn: &Connection,
     project_id: &str,
