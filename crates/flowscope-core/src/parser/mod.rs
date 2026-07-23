@@ -748,7 +748,8 @@ fn extract_execute_immediate_sql(s: &str) -> Option<String> {
 }
 
 /// Replace BigQuery FORMAT() placeholders with dummy literal values
-/// for lineage parsing purposes. %% → %, %d → 0, %s → '', %t → '...', etc.
+/// for lineage parsing purposes. %% → %, %d → 0, %s → x, %t → 2024-01-01, etc.
+/// Note: values are WITHOUT quotes — the original template already provides them (e.g. '%t')
 fn replace_format_placeholders(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let bytes = s.as_bytes();
@@ -758,10 +759,10 @@ fn replace_format_placeholders(s: &str) -> String {
             match bytes[i + 1] {
                 b'%' => { out.push('%'); i += 2; continue; }
                 b'd' | b'i' | b'u' | b'o' | b'x' | b'X' => { out.push('0'); i += 2; continue; }
-                b's' | b'S' => { out.push_str("''"); i += 2; continue; }
-                b'f' | b'F' | b'e' | b'E' | b'g' | b'G' => { out.push_str("0.0"); i += 2; continue; }
-                b'c' => { out.push_str("'x'"); i += 2; continue; }
-                b't' | b'T' => { out.push_str("'2024-01-01'"); i += 2; continue; }
+                b's' | b'S' => { out.push('x'); i += 2; continue; }
+                b'f' | b'F' | b'e' | b'E' | b'g' | b'G' => { out.push('0'); out.push('.'); out.push('0'); i += 2; continue; }
+                b'c' => { out.push('x'); i += 2; continue; }
+                b't' | b'T' => { out.push_str("2024-01-01"); i += 2; continue; }
                 _ => {}
             }
         }
@@ -1454,6 +1455,37 @@ END;"#;
         let stmts = parsed.unwrap();
         println!("Parse OK: {} statements", stmts.len());
         assert!(stmts.len() >= 3, "Expected >=3 statements from DELETE + EXECUTE IMMEDIATE body + INSERT, got {}", stmts.len());
+    }
+
+    #[test]
+    fn test_bigquery_procedure_from_actual_file() {
+        let path = "/tmp/fnc_test_di.sql";
+        let sql = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(_) => { eprintln!("Cannot read file, skipping"); return; }
+        };
+        if sql.trim().is_empty() { eprintln!("File empty, skipping"); return; }
+
+        let sanitized = sanitize_bigquery_procedure(&sql);
+        match &sanitized {
+            Some(body) => {
+                println!("SANITIZED LENGTH: {}", body.len());
+                println!("SANITIZED:\n---\n{}\n---", body);
+                let generic = GenericDialect {};
+                match Parser::parse_sql(&generic, body) {
+                    Ok(stmts) => println!("Parsed {} statements", stmts.len()),
+                    Err(e) => println!("Parse failed: {:?}", e),
+                }
+            }
+            None => println!("sanitize_bigquery_procedure returned None"),
+        }
+        // End-to-end: test parse_sql_with_dialect_output
+        for dialect in [Dialect::Bigquery, Dialect::Generic] {
+            match parse_sql_with_dialect_output(&sql, dialect) {
+                Ok(o) => println!("parse_sql_with_dialect_output({dialect:?}) OK: {} stmts, fallback={}", o.statements.len(), o.parser_fallback_used),
+                Err(e) => println!("parse_sql_with_dialect_output({dialect:?}) FAILED: {e:?}"),
+            }
+        }
     }
 }
 
