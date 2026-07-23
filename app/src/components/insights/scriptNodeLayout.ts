@@ -57,7 +57,7 @@ export function computeScriptNodeLayout(
 
     // Append orphans as a synthetic group so they are still rendered
     const allGroups = [...outputGroups];
-    if (orphanReads.length > 0 || orphanWrites.length > 0) {
+    if (orphanReads.length > 0 && orphanWrites.length > 0) {
       allGroups.push({ inputs: orphanReads, outputs: orphanWrites });
     }
 
@@ -154,8 +154,8 @@ export function estimateScriptNodeHeight(
       if (gi < outputGroups.length - 1) height += DIVIDER_H;
     }
 
-    // Add orphan group if present
-    if (orphanReads > 0 || orphanWrites > 0) {
+    // Add orphan group if both sides have content
+    if (orphanReads > 0 && orphanWrites > 0) {
       if (outputGroups.length > 0) height += DIVIDER_H;
       height += SECTION_HEADER_H + orphanReads * ROW;
       if (orphanReads > 0 && orphanWrites > 0) height += GAP_BETWEEN_SECTIONS;
