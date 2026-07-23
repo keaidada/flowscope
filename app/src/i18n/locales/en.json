@@ -695,5 +695,13 @@
     "pngImage": "PNG Image",
     "mermaid": "Mermaid (.md)",
     "htmlReport": "HTML Report"
+  },
+  "editorSearch": {
+    "Find": "Find",
+    "Replace": "Replace",
+    "next": "next",
+    "previous": "previous",
+    "replace": "replace",
+    "replace all": "replace all"
   }
 }

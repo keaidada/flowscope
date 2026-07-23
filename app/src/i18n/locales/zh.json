@@ -695,5 +695,13 @@
     "pngImage": "PNG 图片",
     "mermaid": "Mermaid (.md)",
     "htmlReport": "HTML 报告"
+  },
+  "editorSearch": {
+    "Find": "查找",
+    "Replace": "替换",
+    "next": "下一个",
+    "previous": "上一个",
+    "replace": "替换",
+    "replace all": "全部替换"
   }
 }
