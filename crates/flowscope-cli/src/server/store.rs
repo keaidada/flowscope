@@ -532,6 +532,20 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 status       INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, file_path)
             );",
+        "lineage_anomalies" => "
+            CREATE TABLE lineage_anomalies (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id    TEXT    NOT NULL,
+                file_path     TEXT    NOT NULL DEFAULT '',
+                script_name   TEXT    NOT NULL DEFAULT '',
+                script_content TEXT    NOT NULL DEFAULT '',
+                severity      TEXT    NOT NULL DEFAULT 'warning',
+                anomaly_type  TEXT    NOT NULL DEFAULT 'unknown',
+                message       TEXT    NOT NULL DEFAULT '',
+                detail        TEXT    NOT NULL DEFAULT '',
+                is_test       INTEGER NOT NULL DEFAULT 0,
+                created_at    TEXT    NOT NULL DEFAULT ''
+            );",
         "lineage_nodes" => "
             CREATE TABLE lineage_nodes (
                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -685,6 +699,11 @@ fn indexes_for(table: &str) -> &'static [&'static str] {
         ],
         "project_file_results" => &[
             "CREATE INDEX IF NOT EXISTS idx_project_file_results_project ON project_file_results(project_id);",
+        ],
+        "lineage_anomalies" => &[
+            "CREATE INDEX IF NOT EXISTS idx_anomalies_project ON lineage_anomalies(project_id);",
+            "CREATE INDEX IF NOT EXISTS idx_anomalies_created ON lineage_anomalies(created_at);",
+            "CREATE INDEX IF NOT EXISTS idx_anomalies_type ON lineage_anomalies(anomaly_type);",
         ],
         "table_metadata" => &[
             "CREATE INDEX IF NOT EXISTS idx_table_metadata_project ON table_metadata(project_id);",
@@ -1612,6 +1631,64 @@ pub fn delete_file_result(
         params![project_id, file_path],
     )?;
     Ok(())
+}
+
+// ── lineage_anomalies ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct LineageAnomalyRow {
+    #[serde(default)]
+    pub id: i64,
+    pub project_id: String,
+    pub file_path: String,
+    pub script_name: String,
+    pub script_content: String,
+    pub severity: String,
+    pub anomaly_type: String,
+    pub message: String,
+    pub detail: String,
+    pub is_test: i64,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+pub fn insert_anomaly(
+    conn: &Connection,
+    row: &LineageAnomalyRow,
+) -> Result<i64, rusqlite::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO lineage_anomalies (project_id, file_path, script_name, script_content, severity, anomaly_type, message, detail, is_test, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![row.project_id, row.file_path, row.script_name, row.script_content, row.severity, row.anomaly_type, row.message, row.detail, row.is_test, now],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn get_anomalies(
+    conn: &Connection,
+    project_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<LineageAnomalyRow>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, file_path, script_name, script_content, severity, anomaly_type, message, detail, is_test, created_at FROM lineage_anomalies WHERE project_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
+    )?;
+    let rows = stmt.query_map(params![project_id, limit, offset], |row| {
+        Ok(LineageAnomalyRow {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            file_path: row.get(2)?,
+            script_name: row.get(3)?,
+            script_content: row.get(4)?,
+            severity: row.get(5)?,
+            anomaly_type: row.get(6)?,
+            message: row.get(7)?,
+            detail: row.get(8)?,
+            is_test: row.get(9)?,
+            created_at: row.get(10)?,
+        })
+    })?;
+    rows.collect()
 }
 
 // ── lineage ────────────────────────────────────────────────────────────

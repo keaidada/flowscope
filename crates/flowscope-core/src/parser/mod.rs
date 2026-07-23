@@ -716,56 +716,104 @@ fn is_leading_word_boundary(bytes: &[u8], i: usize) -> bool {
 /// Extract the inner SQL string from EXECUTE IMMEDIATE FORMAT("""...""", ...)
 fn extract_execute_immediate_sql(s: &str) -> Option<String> {
     let upper = s.to_uppercase();
-    // Find FORMAT(""" or FORMAT(''')
     let format_pos = upper.find("FORMAT")?;
-    let after_format = &upper[format_pos + 6..];
-    let after_format = after_format.trim_start();
-    // Check for """ or '''
-    let rest = &s[format_pos + 6..];
-    let rest = rest.trim_start();
-    let (q, qlen) = if after_format.starts_with("\"\"\"") {
+    let after = &s[format_pos..];
+    let after = after.trim_start();
+    let after = if after.len() > 6 { &after[6..] } else { return None; };
+    let after = after.trim_start();
+    let after = if after.starts_with('(') { &after[1..].trim_start() } else { after };
+    let (q, qlen) = if after.starts_with("\"\"\"") {
         ("\"\"\"", 3)
-    } else if after_format.starts_with("'''") {
+    } else if after.starts_with("'''") {
         ("'''", 3)
-    } else if after_format.starts_with('"') {
+    } else if after.starts_with('"') {
         ("\"", 1)
-    } else if after_format.starts_with('\'') {
+    } else if after.starts_with('\'') {
         ("'", 1)
     } else {
         return None;
     };
-    let inner_start = rest.find(q).map(|i| i + qlen)?;
-    let after_open = &rest[inner_start..];
-    // Find the matching closing quote
-    let mut pos = 0;
-    let bytes = after_open.as_bytes();
-    while pos + qlen <= bytes.len() {
-        if &bytes[pos..pos + qlen] == q.as_bytes() {
-            return Some(after_open[..pos].to_string());
+    let rest = &after[qlen..];
+    let mut end = 0;
+    while end + qlen <= rest.len() {
+        if &rest.as_bytes()[end..end + qlen] == q.as_bytes() {
+            let inner = rest[..end].to_string();
+            // Replace BigQuery FORMAT placeholders with dummy values
+            // so the SQL can be parsed for lineage analysis
+            return Some(replace_format_placeholders(&inner));
         }
-        pos += 1;
+        end += 1;
     }
     None
+}
+
+/// Replace BigQuery FORMAT() placeholders with dummy literal values
+/// for lineage parsing purposes. %% → %, %d → 0, %s → '', %t → '...', etc.
+fn replace_format_placeholders(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'%' => { out.push('%'); i += 2; continue; }
+                b'd' | b'i' | b'u' | b'o' | b'x' | b'X' => { out.push('0'); i += 2; continue; }
+                b's' | b'S' => { out.push_str("''"); i += 2; continue; }
+                b'f' | b'F' | b'e' | b'E' | b'g' | b'G' => { out.push_str("0.0"); i += 2; continue; }
+                b'c' => { out.push_str("'x'"); i += 2; continue; }
+                b't' | b'T' => { out.push_str("'2024-01-01'"); i += 2; continue; }
+                _ => {}
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
 }
 
 fn split_sql_statements(body: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
     let mut in_s = false; let mut in_d = false; let mut in_b = false;
+    let mut in_trip_s = false; let mut in_trip_d = false;
     let mut in_lc = false; let mut in_bc = false;
     let bytes = body.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         let c = bytes[i];
-        if !in_s && !in_d && !in_b && !in_lc && !in_bc {
+        // Triple-quoted string start (must check before single/double quote logic)
+        if !in_s && !in_d && !in_b && !in_trip_s && !in_trip_d && !in_lc && !in_bc {
+            if c == b'\'' && i+2 < bytes.len() && bytes[i+1] == b'\'' && bytes[i+2] == b'\'' {
+                in_trip_s = true; current.push_str("'''"); i += 3; continue;
+            }
+            if c == b'"' && i+2 < bytes.len() && bytes[i+1] == b'"' && bytes[i+2] == b'"' {
+                in_trip_d = true; current.push_str("\"\"\""); i += 3; continue;
+            }
+        }
+        if !in_s && !in_d && !in_b && !in_trip_s && !in_trip_d && !in_lc && !in_bc {
             if c == b'-' && i+1 < bytes.len() && bytes[i+1] == b'-' { in_lc = true; current.push_str("--"); i+=2; continue; }
             if c == b'/' && i+1 < bytes.len() && bytes[i+1] == b'*' { in_bc = true; current.push_str("/*"); i+=2; continue; }
-            if c == b'\'' { in_s = true; } else if c == b'"' { in_d = true; } else if c == b'`' { in_b = true; }
+            if c == b'\'' { in_s = true; }
+            else if c == b'"' { in_d = true; }
+            else if c == b'`' { in_b = true; }
             else if c == b';' { result.push(current); current = String::new(); i+=1; continue; }
-        } else if in_s { if c == b'\\' && i+1 < bytes.len() { current.push(bytes[i] as char); current.push(bytes[i+1] as char); i+=2; continue; } if c == b'\'' { in_s = false; } }
-        else if in_d { if c == b'\\' && i+1 < bytes.len() { current.push(bytes[i] as char); current.push(bytes[i+1] as char); i+=2; continue; } if c == b'"' { in_d = false; } }
-        else if in_b { if c == b'`' { in_b = false; } }
-        else if in_lc { if c == b'\n' { in_lc = false; } }
+        } else if in_s {
+            if c == b'\\' && i+1 < bytes.len() { current.push(bytes[i] as char); current.push(bytes[i+1] as char); i+=2; continue; }
+            if c == b'\'' { in_s = false; }
+        } else if in_d {
+            if c == b'\\' && i+1 < bytes.len() { current.push(bytes[i] as char); current.push(bytes[i+1] as char); i+=2; continue; }
+            if c == b'"' { in_d = false; }
+        } else if in_b {
+            if c == b'`' { in_b = false; }
+        } else if in_trip_s {
+            if c == b'\'' && i+2 < bytes.len() && bytes[i+1] == b'\'' && bytes[i+2] == b'\'' {
+                in_trip_s = false; current.push_str("'''"); i += 3; continue;
+            }
+        } else if in_trip_d {
+            if c == b'"' && i+2 < bytes.len() && bytes[i+1] == b'"' && bytes[i+2] == b'"' {
+                in_trip_d = false; current.push_str("\"\"\""); i += 3; continue;
+            }
+        } else if in_lc { if c == b'\n' { in_lc = false; } }
         else if in_bc { if c == b'*' && i+1 < bytes.len() && bytes[i+1] == b'/' { in_bc = false; current.push_str("*/"); i+=2; continue; } }
         current.push(c as char); i += 1;
     }
@@ -1373,6 +1421,39 @@ END;
             ),
             Err(e) => println!("Generic dialect failed: {:?}", e),
         }
+    }
+
+    #[test]
+    fn test_bigquery_execute_immediate_with_triple_quotes() {
+        let sql = r#"
+CREATE PROCEDURE ds.foo(i INT64)
+BEGIN
+    DECLARE v INT64 DEFAULT 0;
+    SET v = i * 10;
+    DELETE FROM target WHERE id = v;
+    EXECUTE IMMEDIATE FORMAT("""
+        INSERT INTO ds.target (id, name)
+        SELECT a.id, a.name
+        FROM ds.source_a a
+        LEFT JOIN ds.source_b b ON a.id = b.id
+        WHERE a.prd_id = %d
+    """, v);
+    INSERT INTO ds.monitor(func_name, row_affected) VALUES ('foo', v);
+END;"#;
+        // Test sanitizer directly
+        let sanitized = sanitize_bigquery_procedure(sql);
+        match &sanitized {
+            Some(body) => println!("SANITIZED:\n---\n{}\n---", body),
+            None => println!("sanitize_bigquery_procedure returned None"),
+        }
+        assert!(sanitized.is_some(), "sanitizer should produce output");
+        // Parse the sanitized output
+        let generic = GenericDialect {};
+        let parsed = Parser::parse_sql(&generic, sanitized.as_deref().unwrap());
+        assert!(parsed.is_ok(), "sanitized SQL parse failed: {:?}", parsed.err());
+        let stmts = parsed.unwrap();
+        println!("Parse OK: {} statements", stmts.len());
+        assert!(stmts.len() >= 3, "Expected >=3 statements from DELETE + EXECUTE IMMEDIATE body + INSERT, got {}", stmts.len());
     }
 }
 

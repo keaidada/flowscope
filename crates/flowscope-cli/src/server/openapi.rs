@@ -64,6 +64,9 @@ use super::api;
         api::get_file_result_api,
         api::get_file_results_api,
         api::delete_file_results_api,
+        // ── DB: anomalies ──
+        api::save_anomaly_api,
+        api::get_anomalies_api,
         // ── DB: lineage ──
         api::save_lineage_api,
         api::save_table_level_edges_api,

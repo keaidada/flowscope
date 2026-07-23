@@ -324,6 +324,37 @@ export async function deleteProjectFileResults(
   await api<void>('DELETE', '/file-results', { project_id: projectId, file_paths: filePaths });
 }
 
+export interface AnomalyRow {
+  id?: number;
+  projectId: string;
+  filePath: string;
+  scriptName: string;
+  scriptContent: string;
+  severity: string;
+  anomalyType: string;
+  message: string;
+  detail: string;
+  isTest: number;
+  createdAt?: string;
+}
+
+export async function saveAnomaly(
+  projectId: string,
+  row: Omit<AnomalyRow, 'id' | 'createdAt' | 'projectId'>,
+): Promise<void> {
+  await api<void>('POST', '/anomalies', {
+    project_id: projectId,
+    file_path: row.filePath,
+    script_name: row.scriptName,
+    script_content: row.scriptContent,
+    severity: row.severity,
+    anomaly_type: row.anomalyType,
+    message: row.message,
+    detail: row.detail,
+    is_test: row.isTest,
+  });
+}
+
 // ── lineage ────────────────────────────────────────────────────────────
 
 export async function getLineageNodes(projectId: string, filePath?: string): Promise<LineageNodeRow[]> {

@@ -72,6 +72,8 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/db/table-metadata", post(save_table_metadata_api))
         .route("/db/table-metadata", get(get_table_metadata_api))
         .route("/db/column-metadata", get(get_column_metadata_api))
+        .route("/db/anomalies", post(save_anomaly_api))
+        .route("/db/anomalies", get(get_anomalies_api))
 }
 
 // === Request/Response types ===
@@ -1606,6 +1608,81 @@ pub(crate) async fn delete_file_results_api(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
     Ok(StatusCode::OK)
+}
+
+// ── lineage_anomalies ──────────────────────────────────────────────────────
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SaveAnomalyRequest {
+    #[serde(alias = "projectId")]
+    project_id: String,
+    #[serde(alias = "filePath")]
+    file_path: String,
+    #[serde(alias = "scriptName")]
+    script_name: String,
+    #[serde(alias = "scriptContent")]
+    script_content: String,
+    severity: String,
+    #[serde(alias = "anomalyType")]
+    anomaly_type: String,
+    message: String,
+    detail: String,
+    #[serde(alias = "isTest")]
+    is_test: i64,
+}
+
+/// POST /api/db/anomalies - Save anomaly
+#[utoipa::path(
+    post,
+    path = "/api/db/anomalies",
+    tag = "Schema",
+    request_body = SaveAnomalyRequest,
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn save_anomaly_api(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<SaveAnomalyRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let row = store::LineageAnomalyRow {
+        id: 0,
+        project_id: payload.project_id,
+        file_path: payload.file_path,
+        script_name: payload.script_name,
+        script_content: payload.script_content,
+        severity: payload.severity,
+        anomaly_type: payload.anomaly_type,
+        message: payload.message,
+        detail: payload.detail,
+        is_test: payload.is_test,
+        created_at: String::new(),
+    };
+    store::insert_anomaly(&db, &row)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(StatusCode::OK)
+}
+
+/// GET /api/db/anomalies - Get anomalies
+#[utoipa::path(
+    get,
+    path = "/api/db/anomalies",
+    tag = "Schema",
+    responses(
+        (status = 200, description = "OK"),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn get_anomalies_api(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ProjectFilesQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let rows = store::get_anomalies(&db, &q.project_id, 100, 0)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(serde_json::json!({ "anomalies": rows })).into_response())
 }
 
 // ── lineage ────────────────────────────────────────────────────────────

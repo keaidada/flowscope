@@ -35,12 +35,33 @@ export function onAnalysisAnomaly(listener: (a: Anomaly) => void): () => void {
   return () => { _anomalyListener = null; };
 }
 
-function emit(anomaly: Anomaly): void {
+function emit(anomaly: Anomaly, projectId?: string): void {
   if (_anomalyListener) {
     try { _anomalyListener(anomaly); } catch { /* listener 不应影响主流程 */ }
   }
   const level = anomaly.severity === 'error' ? 'error' : anomaly.severity === 'warning' ? 'warn' : 'log';
   console[level](`[LineageAnomaly][${anomaly.category}]`, anomaly.message, anomaly.detail ?? '');
+  if (projectId && (anomaly.severity === 'error' || anomaly.severity === 'warning')) {
+    recordAnomalyToDb(projectId, anomaly);
+  }
+}
+
+/** 异步记录 anomaly 到数据库异常表，不阻塞主流程 */
+function recordAnomalyToDb(projectId: string, anomaly: Anomaly): void {
+  import('./server-db').then(db => {
+    let fromPath = '';
+    try { fromPath = window.location.pathname; } catch {}
+    db.saveAnomaly(projectId, {
+      filePath: anomaly.script ?? fromPath,
+      scriptName: anomaly.script ?? '',
+      scriptContent: '',
+      severity: anomaly.severity,
+      anomalyType: anomaly.category,
+      message: anomaly.message,
+      detail: anomaly.detail ?? '',
+      isTest: 0,
+    }).catch(() => {});
+  }).catch(() => {});
 }
 
 /** 检查 AnalyzeResult 是否有有效的 data_flow（非纯自引用） */
@@ -945,16 +966,16 @@ async function _repairMissingLineageData(projectId: string): Promise<void> {
     if (!hasMeaningfulLineage(result)) {
       stalePaths.push(fp);
       stale++;
-      emit({ category: 'self_ref_only', severity: 'warning', script: fp, message: '缓存结果无有效 data_flow，清除 file_results 残留' });
+      emit({ category: 'self_ref_only', severity: 'warning', script: fp, message: '缓存结果无有效 data_flow，清除 file_results 残留' }, projectId);
       continue;
     }
     try {
       await writeLineageData(projectId, result);
       repaired++;
-      emit({ category: 'repair_ok', severity: 'info', script: fp, message: '补写 lineage 成功' });
+      emit({ category: 'repair_ok', severity: 'info', script: fp, message: '补写 lineage 成功' }, projectId);
     } catch (err) {
       failed++;
-      emit({ category: 'write_failed', severity: 'error', script: fp, message: '补写 lineage 失败', detail: String(err) });
+      emit({ category: 'write_failed', severity: 'error', script: fp, message: '补写 lineage 失败', detail: String(err) }, projectId);
     }
   }
   // 清除无血缘的 file_results 残留，避免绿色图标误导
@@ -962,7 +983,7 @@ async function _repairMissingLineageData(projectId: string): Promise<void> {
     try { await serverDb.deleteProjectFileResults(projectId, stalePaths); } catch { /* non-fatal */ }
   }
   if (repaired > 0) {
-    emit({ category: 'repair_needed', severity: 'warning', message: `已从缓存修复 ${repaired} 个脚本的 lineage 数据${stale > 0 ? `，清除 ${stale} 个残留` : ''}${failed > 0 ? `，${failed} 个失败` : ''}` });
+    emit({ category: 'repair_needed', severity: 'warning', message: `已从缓存修复 ${repaired} 个脚本的 lineage 数据${stale > 0 ? `，清除 ${stale} 个残留` : ''}${failed > 0 ? `，${failed} 个失败` : ''}` }, projectId);
     try { await writeTableLevelEdges(projectId); } catch { /* non-fatal */ }
   }
 }
