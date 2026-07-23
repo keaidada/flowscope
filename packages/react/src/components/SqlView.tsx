@@ -4,6 +4,7 @@ import { sql } from '@codemirror/lang-sql';
 import { EditorView, Decoration, type DecorationSet } from '@codemirror/view';
 import { StateField, StateEffect, RangeSet } from '@codemirror/state';
 import { oneDark } from '@codemirror/theme-one-dark';
+import { search } from '@codemirror/search';
 
 import { useLineage } from '../store';
 import type { SqlViewProps } from '../types';
@@ -140,6 +141,7 @@ export function SqlView({
       baseTheme,
       ...(lineWrapping ? [EditorView.lineWrapping] : []),
       EditorView.editable.of(editable),
+      search({ top: true }),
     ],
     [editable, lineWrapping]
   );
@@ -197,6 +199,25 @@ export function SqlView({
 
   return (
     <div className={`flowscope-sql-view ${className || ''}`}>
+      <style>{`
+        .flowscope-codemirror .cm-editor { position: relative; }
+        .flowscope-codemirror .cm-editor .cm-scroller { flex: 1; }
+        .flowscope-codemirror .cm-editor .cm-panel.cm-search {
+          position: absolute;
+          top: 4px;
+          right: 4px;
+          z-index: 10;
+          background: var(--cm-background, #fff);
+          border: 1px solid var(--cm-border, #ddd);
+          border-radius: 6px;
+          padding: 6px 8px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+          width: auto;
+          min-width: 280px;
+        }
+        .flowscope-codemirror .cm-editor .cm-panel.cm-search label { font-size: 12px; }
+        .flowscope-codemirror .cm-editor .cm-panel.cm-search input { font-size: 12px; padding: 2px 6px; }
+      `}</style>
       <CodeMirror
         ref={editorRef}
         value={sqlText}
