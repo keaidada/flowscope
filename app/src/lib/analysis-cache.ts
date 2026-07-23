@@ -628,7 +628,7 @@ export async function repopulateTableLevelEdges(
 export async function buildGlobalLineageFromNodes(
   projectId: string,
 ): Promise<AnalyzeResult | null> {
-  const rawNodes = await serverDb.getLineageNodes(projectId);
+  const rawNodes = await getOrLoadNodes(projectId);
   const tableNodes = rawNodes.filter(
     (n) => n.node_type === 'table' || n.node_type === 'view',
   );
@@ -1001,13 +1001,23 @@ async function _repairMissingLineageData(
 
 const _tleEnsured = new Set<string>();
 const _repairedSet = new Set<string>();
+const _nodeCache = new Map<string, serverDb.LineageNodeRow[]>();
 
 /** 从 lineage_nodes 加载所有不重复的 file_path */
 async function _loadLineagePaths(projectId: string): Promise<Set<string>> {
-  const nodes = await serverDb.getLineageNodes(projectId);
+  const nodes = await getOrLoadNodes(projectId);
   const paths = new Set<string>();
   for (const n of nodes) paths.add(n.file_path);
   return paths;
+}
+
+/** 获取缓存的节点数据（优先用 TLE 计算时已加载的，避免重复请求） */
+async function getOrLoadNodes(projectId: string): Promise<serverDb.LineageNodeRow[]> {
+  const cached = _nodeCache.get(projectId);
+  if (cached) return cached;
+  const nodes = await serverDb.getLineageNodes(projectId);
+  _nodeCache.set(projectId, nodes);
+  return nodes;
 }
 
 async function _ensureTableLevelEdges(projectId: string): Promise<void> {
@@ -1019,7 +1029,7 @@ async function _ensureTableLevelEdges(projectId: string): Promise<void> {
   }
   // 首次调用：一次性加载 lineage_nodes + lineage_edges，避免重复请求
   const [rawNodes, rawEdges] = await Promise.all([
-    serverDb.getLineageNodes(projectId),
+    getOrLoadNodes(projectId),
     serverDb.getLineageEdges(projectId),
   ]);
   // 提取节点路径集合供修复使用（复用在内存中的数据，不重新请求）
@@ -1049,7 +1059,7 @@ export async function searchLineageForInsights(
 
   // ── 1. 查 lineage_nodes + table_level_edges ──────────
   const [rawNodes, tleEdges] = await Promise.all([
-    serverDb.getLineageNodes(projectId),
+    getOrLoadNodes(projectId),
     serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>),
   ]);
 
