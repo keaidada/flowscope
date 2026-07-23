@@ -201,12 +201,9 @@ export function SqlView({
   // 点击编辑器外部时关闭搜索面板
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      const ed = document.querySelector<HTMLElement>('.flowscope-codemirror .cm-editor')
-        ?? editorRef.current?.view?.dom as HTMLElement | null;
-      if (!ed) return;
-      if (ed.contains(e.target as Node)) return;
       const view = editorRef.current?.view;
       if (!view) return;
+      if (view.dom.contains(e.target as Node)) return;
       closeSearchPanel(view);
     };
     document.addEventListener('mousedown', handler, true);
