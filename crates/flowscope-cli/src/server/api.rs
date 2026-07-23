@@ -768,6 +768,8 @@ pub(crate) struct LineageQuery {
     project_id: String,
     #[serde(alias = "filePath")]
     file_path: Option<String>,
+    #[serde(alias = "edgeType")]
+    edge_type: Option<String>,
 }
 
 // ── project_files ──────────────────────────────────────────────────────
@@ -1873,7 +1875,7 @@ pub(crate) async fn get_lineage_edges_api(
     Query(q): Query<LineageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let edges = store::load_lineage_edges(&db, &q.project_id, q.file_path.as_deref())
+    let edges = store::load_lineage_edges(&db, &q.project_id, q.file_path.as_deref(), q.edge_type.as_deref())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(edges))
 }

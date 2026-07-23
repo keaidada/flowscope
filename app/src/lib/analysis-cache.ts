@@ -326,7 +326,7 @@ interface OutputGroup {
 export async function writeTableLevelEdges(projectId: string): Promise<void> {
   const [rawNodes, rawEdges] = await Promise.all([
     serverDb.getLineageNodes(projectId),
-    serverDb.getLineageEdges(projectId),
+    serverDb.getLineageEdges(projectId, undefined, 'data_flow'),
   ]);
   await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
 }
@@ -1032,7 +1032,7 @@ async function _ensureTableLevelEdges(projectId: string): Promise<void> {
   // 首次调用：用 lineage_nodes + lineage_edges 确保精确分组
   const [rawNodes, rawEdges] = await Promise.all([
     getOrLoadNodes(projectId),
-    serverDb.getLineageEdges(projectId),
+    serverDb.getLineageEdges(projectId, undefined, 'data_flow'),
   ]);
   // 提取节点路径集合供修复使用
   const lineagePaths = new Set<string>();

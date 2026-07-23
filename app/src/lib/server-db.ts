@@ -380,9 +380,10 @@ export async function getLineageColumns(projectId: string, filePath?: string): P
   return api<LineageColumnRow[]>('GET', `/lineage/columns?${params}`);
 }
 
-export async function getLineageEdges(projectId: string, filePath?: string): Promise<LineageEdgeRow[]> {
+export async function getLineageEdges(projectId: string, filePath?: string, edgeType?: string): Promise<LineageEdgeRow[]> {
   const params = new URLSearchParams({ projectId });
   if (filePath) params.set('filePath', filePath);
+  if (edgeType) params.set('edgeType', edgeType);
   return api<LineageEdgeRow[]>('GET', `/lineage/edges?${params}`);
 }
 

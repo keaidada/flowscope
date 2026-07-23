@@ -1891,7 +1891,7 @@ pub fn load_lineage_nodes(
         )
     };
     let params: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
-    let mut stmt = conn.prepare(sql)?;
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params.as_slice(), |row| {
         Ok(LineageNodeRow {
             node_id: row.get(0)?,
@@ -1925,7 +1925,7 @@ pub fn load_lineage_columns(
         )
     };
     let params: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
-    let mut stmt = conn.prepare(sql)?;
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params.as_slice(), |row| {
         Ok(LineageColumnRow {
             column_id: row.get(0)?,
@@ -1946,20 +1946,27 @@ pub fn load_lineage_edges(
     conn: &Connection,
     project_id: &str,
     file_path: Option<&str>,
+    edge_type: Option<&str>,
 ) -> Result<Vec<LineageEdgeRow>, rusqlite::Error> {
-    let (sql, params_vec) = if let Some(fp) = file_path {
-        (
-            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND file_path = ?2",
-            vec![project_id.to_string(), fp.to_string()],
-        )
-    } else {
-        (
-            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1",
-            vec![project_id.to_string()],
-        )
+    let sql = match (file_path, edge_type) {
+        (Some(_), Some(_)) => format!(
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND file_path = ?2 AND edge_type = ?3"
+        ),
+        (Some(_), None) => format!(
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND file_path = ?2"
+        ),
+        (None, Some(_)) => format!(
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND edge_type = ?2"
+        ),
+        (None, None) => format!(
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1"
+        ),
     };
+    let mut params_vec: Vec<String> = vec![project_id.to_string()];
+    if let Some(fp) = file_path { params_vec.push(fp.to_string()); }
+    if let Some(et) = edge_type { params_vec.push(et.to_string()); }
     let params: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
-    let mut stmt = conn.prepare(sql)?;
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params.as_slice(), |row| {
         Ok(LineageEdgeRow {
             edge_id: row.get(0)?,
