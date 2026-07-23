@@ -671,8 +671,28 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
         match first_word {
             "DECLARE" | "SET" | "IF" | "ELSE" | "ELSEIF" | "WHILE" | "LOOP" | "FOR"
             | "BREAK" | "CONTINUE" | "RETURN" | "RAISE" | "BEGIN" | "END"
-            | "CALL" | "EXECUTE" | "EXEC" | "DROP" | "ALTER" | "GRANT" | "REVOKE"
+            | "CALL" | "DROP" | "ALTER" | "GRANT" | "REVOKE"
             | "UPDATE" => {} // UPDATE with CASE WHEN may not parse in Generic dialect
+            "EXECUTE" | "EXEC" => {
+                // Extract SQL from EXECUTE IMMEDIATE FORMAT("""...""", ...)
+                if let Some(inner) = extract_execute_immediate_sql(trimmed) {
+                    for inner_stmt in split_sql_statements(&inner) {
+                        let s = inner_stmt.trim();
+                        if s.is_empty() { continue; }
+                        let uw = s.to_uppercase();
+                        let fw = uw.split_whitespace().next().unwrap_or("");
+                        match fw {
+                            "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" => {
+                                out.push_str(s);
+                                if !s.ends_with(';') { out.push(';'); }
+                                out.push('\n');
+                                has_any = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
             "CREATE" => { if upper_stmt.contains("AS SELECT") || upper_stmt.contains("AS\nSELECT") { out.push_str(trimmed); if !trimmed.ends_with(';') { out.push(';'); } out.push('\n'); has_any = true; } }
             "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" => { out.push_str(trimmed); if !trimmed.ends_with(';') { out.push(';'); } out.push('\n'); has_any = true; }
             _ => {}
@@ -691,6 +711,41 @@ fn is_word_boundary(bytes: &[u8], i: usize, word_len: usize) -> bool {
 /// (alphanumeric or underscore). Used to prevent matching `v_END` as keyword `END`.
 fn is_leading_word_boundary(bytes: &[u8], i: usize) -> bool {
     i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_'
+}
+
+/// Extract the inner SQL string from EXECUTE IMMEDIATE FORMAT("""...""", ...)
+fn extract_execute_immediate_sql(s: &str) -> Option<String> {
+    let upper = s.to_uppercase();
+    // Find FORMAT(""" or FORMAT(''')
+    let format_pos = upper.find("FORMAT")?;
+    let after_format = &upper[format_pos + 6..];
+    let after_format = after_format.trim_start();
+    // Check for """ or '''
+    let rest = &s[format_pos + 6..];
+    let rest = rest.trim_start();
+    let (q, qlen) = if after_format.starts_with("\"\"\"") {
+        ("\"\"\"", 3)
+    } else if after_format.starts_with("'''") {
+        ("'''", 3)
+    } else if after_format.starts_with('"') {
+        ("\"", 1)
+    } else if after_format.starts_with('\'') {
+        ("'", 1)
+    } else {
+        return None;
+    };
+    let inner_start = rest.find(q).map(|i| i + qlen)?;
+    let after_open = &rest[inner_start..];
+    // Find the matching closing quote
+    let mut pos = 0;
+    let bytes = after_open.as_bytes();
+    while pos + qlen <= bytes.len() {
+        if &bytes[pos..pos + qlen] == q.as_bytes() {
+            return Some(after_open[..pos].to_string());
+        }
+        pos += 1;
+    }
+    None
 }
 
 fn split_sql_statements(body: &str) -> Vec<String> {

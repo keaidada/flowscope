@@ -928,6 +928,7 @@ mod tests {
             issues: vec![],
             summary: Summary::default(),
             resolved_schema: None,
+            precomputed_lineage: None,
         };
 
         let json = serde_json::to_string_pretty(&result).unwrap();

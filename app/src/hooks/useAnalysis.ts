@@ -726,10 +726,15 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             // and batch-insert DB pointer rows.  This avoids writing the same
             // 10MB+ JSON O(N) times when N files share one result.
             const allFilePaths = context.files.map((f: { name: string; path?: string }) => f.path ?? f.name);
-            try {
-              await writeBatchFileResults(activeProjectId, allFilePaths, cacheKey, result);
-            } catch (err) {
-              console.error('[useAnalysis] writeBatchFileResults failed', err);
+            const hasUsefulLineage = result.statements.some(stmt =>
+              stmt.edges?.some(e => e.type === 'data_flow' && e.from !== e.to)
+            );
+            if (hasUsefulLineage) {
+              try {
+                await writeBatchFileResults(activeProjectId, allFilePaths, cacheKey, result);
+              } catch (err) {
+                console.error('[useAnalysis] writeBatchFileResults failed', err);
+              }
             }
 
             // Update progress bar to show completion
@@ -744,17 +749,19 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             // Persist lineage data (nodes/columns/edges) per file — do this FIRST
             // before other writes that may fail in serve mode (writeSchemaData etc. use DuckDB/OPFS)
             const { writeLineageData, writeTableMetadata } = await import('@/lib/analysis-cache');
-            try {
-              await writeLineageData(activeProjectId, result);
-            } catch (err) {
-              console.error('[useAnalysis] writeLineageData failed', err);
-            }
-            // 预计算表级血缘(穿透 CTE)物化到 table_level_edges,供导出快速读取
-            try {
-              const { writeTableLevelEdges } = await import('@/lib/analysis-cache');
-              await writeTableLevelEdges(activeProjectId);
-            } catch (err) {
-              console.error('[useAnalysis] writeTableLevelEdges failed', err);
+            if (hasUsefulLineage) {
+              try {
+                await writeLineageData(activeProjectId, result);
+              } catch (err) {
+                console.error('[useAnalysis] writeLineageData failed', err);
+              }
+              // 预计算表级血缘(穿透 CTE)物化到 table_level_edges,供导出快速读取
+              try {
+                const { writeTableLevelEdges } = await import('@/lib/analysis-cache');
+                await writeTableLevelEdges(activeProjectId);
+              } catch (err) {
+                console.error('[useAnalysis] writeTableLevelEdges failed', err);
+              }
             }
 
             // Persist table/column metadata from resolvedSchema
