@@ -149,7 +149,9 @@ export async function writeFileResult(
 export async function readFileResultPaths(projectId: string): Promise<string[]> {
   let rows = _fileResultCache.get(projectId);
   if (!rows) {
-    rows = await serverDb.loadProjectFileResultsLight(projectId);
+    rows = await _dedupedLoad(`fileResults:${projectId}`, () =>
+      serverDb.loadProjectFileResultsLight(projectId)
+    );
     _fileResultCache.set(projectId, rows);
   }
   return rows.map(r => r.file_path);
@@ -1008,7 +1010,17 @@ const _tleEnsured = new Set<string>();
 const _repairedSet = new Set<string>();
 const _nodeCache = new Map<string, serverDb.LineageNodeRow[]>();
 const _fileResultCache = new Map<string, { file_path: string; file_name?: string }[]>();
-const _tleEdgeCache = new Map<string, Array<[string, string, string]>>(); // 缓存 table_level_edges
+const _tleEdgeCache = new Map<string, Array<[string, string, string]>>();
+
+// Promise 缓存：同 Key 并发请求仅发一次 API
+const _promiseCache = new Map<string, Promise<any>>();
+function _dedupedLoad<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  const existing = _promiseCache.get(key);
+  if (existing) return existing;
+  const p = loader().then(val => { _promiseCache.delete(key); return val; }, err => { _promiseCache.delete(key); throw err; });
+  _promiseCache.set(key, p);
+  return p;
+}
 
 /**
  * 应用启动时后台初始化：加载所有需要的缓存数据。
@@ -1017,22 +1029,24 @@ const _tleEdgeCache = new Map<string, Array<[string, string, string]>>(); // 缓
 export async function initProjectData(projectId: string): Promise<void> {
   if (_tleEnsured.has(projectId) && _repairedSet.has(projectId)) return;
   
-  // 优先走缓存，只加载缺失的数据
   const tasks: Promise<any>[] = [];
   if (!_nodeCache.has(projectId)) tasks.push(
-    serverDb.getLineageNodes(projectId).then(r => _nodeCache.set(projectId, r))
+    _dedupedLoad(`nodes:${projectId}`, () => serverDb.getLineageNodes(projectId))
+      .then(r => _nodeCache.set(projectId, r))
   );
   if (!_tleEdgeCache.has(projectId)) tasks.push(
-    serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>)
+    _dedupedLoad(`tleEdges:${projectId}`, () => serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>))
       .then(r => _tleEdgeCache.set(projectId, r))
   );
   if (!_fileResultCache.has(projectId)) tasks.push(
-    serverDb.loadProjectFileResultsLight(projectId).then(r => _fileResultCache.set(projectId, r))
+    _dedupedLoad(`fileResults:${projectId}`, () => serverDb.loadProjectFileResultsLight(projectId))
+      .then(r => _fileResultCache.set(projectId, r))
   );
   // lineage_edges 只在首次 TLE 计算时加载
   let rawEdges: any[] = [];
   if (!_tleEnsured.has(projectId)) tasks.push(
-    serverDb.getLineageEdges(projectId, undefined, 'data_flow').then(r => { rawEdges = r; })
+    _dedupedLoad(`edges:${projectId}`, () => serverDb.getLineageEdges(projectId, undefined, 'data_flow'))
+      .then(r => { rawEdges = r; })
   );
   
   await Promise.all(tasks);
@@ -1058,7 +1072,7 @@ export async function initProjectData(projectId: string): Promise<void> {
 async function getOrLoadNodes(projectId: string): Promise<serverDb.LineageNodeRow[]> {
   const cached = _nodeCache.get(projectId);
   if (cached) return cached;
-  const nodes = await serverDb.getLineageNodes(projectId);
+  const nodes = await _dedupedLoad(`nodes:${projectId}`, () => serverDb.getLineageNodes(projectId));
   _nodeCache.set(projectId, nodes);
   return nodes;
 }
