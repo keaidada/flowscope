@@ -129,7 +129,7 @@ interface ProjectContextType {
   updateSchemaSQL: (projectId: string, schemaSQL: string) => void;
 
   // Import/Export
-  importFiles: (files: FileList | File[]) => Promise<void>;
+  importFiles: (files: FileList | File[], dialect?: string) => Promise<void>;
   replaceWithFiles: (files: FileList | File[]) => Promise<void>;
   /** Directly add pre-built ProjectFile objects (no file reading needed) */
   addFilesDirectly: (files: ProjectFile[]) => void;
@@ -1161,7 +1161,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const importFiles = useCallback(
-    async (fileList: FileList | File[]) => {
+    async (fileList: FileList | File[], dialect?: string) => {
       if (!activeProjectId) return;
 
       const newFiles: ProjectFile[] = [];
@@ -1181,14 +1181,36 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         const upper = content.toUpperCase();
         const isProcedure = upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC');
 
+        let transformedContent: string | null = null;
+        if (isProcedure && dialect === 'bigquery') {
+          // Basic sanitization: extract DML from BQ procedure body
+          const beginIdx = upper.indexOf('BEGIN');
+          const endIdx = upper.lastIndexOf('END');
+          if (beginIdx >= 0 && endIdx > beginIdx) {
+            const body = content.slice(beginIdx + 5, endIdx);
+            // Uncomment block comments
+            const uncommented = body.replace(/\/\*[\s\S]*?\*\//g, (m) => m.slice(2, -2));
+            const stmts = uncommented.split(';').map(s => s.trim()).filter(s => {
+              const u = s.toUpperCase().trimStart();
+              return u.startsWith('SELECT') || u.startsWith('INSERT') ||
+                u.startsWith('DELETE') || u.startsWith('MERGE') ||
+                u.startsWith('UPDATE') || u.startsWith('TRUNCATE') ||
+                u.startsWith('WITH') || u.startsWith('CREATE TABLE') ||
+                u.startsWith('CREATE OR REPLACE TABLE');
+            });
+            if (stmts.length > 0) transformedContent = stmts.join(';\n');
+          }
+        }
+
         newFiles.push({
           id: uuidv4(),
           name: file.name,
           path,
           content,
           language: getFileLanguage(file.name),
+          dialect,
           isProcedure,
-          transformedContent: null,
+          transformedContent,
         });
       }
 
