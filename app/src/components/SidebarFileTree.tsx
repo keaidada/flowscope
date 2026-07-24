@@ -23,7 +23,7 @@ import {
   DEFAULT_FILE_NAMES,
 } from '@/lib/constants';
 import { genId } from '@/lib/utils';
-import { saveProjectFiles } from '@/lib/file-storage';
+import { saveProjectFiles, upsertProjectFiles } from '@/lib/file-storage';
 import { ConvertFolderDialog } from './ConvertFolderDialog';
 import type { Dialect } from '@/lib/dialect-constants';
 
@@ -295,6 +295,19 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       }
 
       setConvertProgress({ done: total, total });
+
+      // Persist to DB: save all processed files in chunks
+      {
+        const saveFiles = project.files.filter(f =>
+          f.path.startsWith(prefix) && f.isProcedure && f.content.length > 0
+        );
+        if (saveFiles.length > 0) {
+          const CHUNK = 500;
+          for (let i = 0; i < saveFiles.length; i += CHUNK) {
+            await upsertProjectFiles(project.id, saveFiles.slice(i, i + CHUNK));
+          }
+        }
+      }
     } catch (e) {
       console.error('Failed to convert procedures:', e);
     } finally {
