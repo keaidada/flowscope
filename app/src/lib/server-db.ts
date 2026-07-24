@@ -14,6 +14,9 @@ interface ProjectFile {
   content: string;
   language: string;
   size: number;
+  dialect: string;
+  is_procedure: number;
+  transformed_content: string;
   created_at: string;
   updated_at: string;
 }

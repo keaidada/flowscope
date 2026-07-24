@@ -15,7 +15,7 @@ use utoipa::ToSchema;
 /// v0: original — time fields (`created_at`, `updated_at`, `last_accessed_at`)
 ///     stored as `INTEGER` Unix millisecond timestamps.
 /// v1: time fields stored as `TEXT` RFC3339 / ISO 8601 strings (human-readable).
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 /// Open (or create) the database file at the given path.
 pub fn open_db(path: &Path) -> Result<Mutex<Connection>, rusqlite::Error> {
@@ -55,7 +55,9 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         migrate_v3_to_v4(conn)?;
     }
 
-    // Future migrations: if current < 5 { migrate_v4_to_v5(conn)?; } ...
+    if current < 5 {
+        migrate_v4_to_v5(conn)?;
+    }
 
     if current != SCHEMA_VERSION {
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
@@ -475,22 +477,45 @@ fn split_file_path(file_path: &str) -> (String, String) {
     }
 }
 
+/// v4→v5: add dialect, is_procedure, transformed_content columns to project_files
+fn migrate_v4_to_v5(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let pf_cols: Vec<String> = conn
+        .prepare("PRAGMA table_info(project_files)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .collect();
+
+    if !pf_cols.iter().any(|c| c == "dialect") {
+        conn.execute_batch("ALTER TABLE project_files ADD COLUMN dialect TEXT NOT NULL DEFAULT '';")?;
+    }
+    if !pf_cols.iter().any(|c| c == "is_procedure") {
+        conn.execute_batch("ALTER TABLE project_files ADD COLUMN is_procedure INTEGER NOT NULL DEFAULT 0;")?;
+    }
+    if !pf_cols.iter().any(|c| c == "transformed_content") {
+        conn.execute_batch("ALTER TABLE project_files ADD COLUMN transformed_content TEXT NOT NULL DEFAULT '';")?;
+    }
+    Ok(())
+}
+
 /// Returns the `CREATE TABLE` statement for the given table with the current
 /// (v1) schema — time columns as `TEXT`.
 fn create_table_sql_for(table: &str) -> &'static str {
     match table {
         "project_files" => "
             CREATE TABLE project_files (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT    NOT NULL,
-                name       TEXT    NOT NULL,
-                path       TEXT    NOT NULL,
-                content    TEXT    NOT NULL DEFAULT '',
-                language   TEXT    NOT NULL DEFAULT 'sql',
-                size       INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT    NOT NULL DEFAULT '',
-                updated_at TEXT    NOT NULL DEFAULT '',
-                status     INTEGER NOT NULL DEFAULT 1,
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id          TEXT    NOT NULL,
+                name                TEXT    NOT NULL,
+                path                TEXT    NOT NULL,
+                content             TEXT    NOT NULL DEFAULT '',
+                language            TEXT    NOT NULL DEFAULT 'sql',
+                size                INTEGER NOT NULL DEFAULT 0,
+                dialect             TEXT    NOT NULL DEFAULT '',
+                is_procedure        INTEGER NOT NULL DEFAULT 0,
+                transformed_content TEXT    NOT NULL DEFAULT '',
+                created_at          TEXT    NOT NULL DEFAULT '',
+                updated_at          TEXT    NOT NULL DEFAULT '',
+                status              INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, path)
             );",
         "schema_files" => "
@@ -722,17 +747,20 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS project_files (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id TEXT    NOT NULL,
-            name       TEXT    NOT NULL,
-            path       TEXT    NOT NULL,
-            content    TEXT    NOT NULL DEFAULT '',
-            language   TEXT    NOT NULL DEFAULT 'sql',
-            size       INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT    NOT NULL DEFAULT '',
-            updated_at TEXT    NOT NULL DEFAULT '',
-            status     INTEGER NOT NULL DEFAULT 1,
-            dir_id     TEXT    NOT NULL DEFAULT '',
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id          TEXT    NOT NULL,
+            name                TEXT    NOT NULL,
+            path                TEXT    NOT NULL,
+            content             TEXT    NOT NULL DEFAULT '',
+            language            TEXT    NOT NULL DEFAULT 'sql',
+            size                INTEGER NOT NULL DEFAULT 0,
+            dialect             TEXT    NOT NULL DEFAULT '',
+            is_procedure        INTEGER NOT NULL DEFAULT 0,
+            transformed_content TEXT    NOT NULL DEFAULT '',
+            created_at          TEXT    NOT NULL DEFAULT '',
+            updated_at          TEXT    NOT NULL DEFAULT '',
+            status              INTEGER NOT NULL DEFAULT 1,
+            dir_id              TEXT    NOT NULL DEFAULT '',
             UNIQUE(project_id, path)
         );
 
@@ -946,9 +974,14 @@ pub struct ProjectFileRow {
     pub content: String,
     pub language: String,
     pub size: i64,
+    pub dialect: String,
+    pub is_procedure: i64,
+    pub transformed_content: String,
     pub created_at: String,
     pub updated_at: String,
 }
+
+// ── project_files (internal) ────────────────────────────────────────────
 
 pub fn save_project_files(
     conn: &Connection,
@@ -970,10 +1003,10 @@ pub fn save_project_files_batch(
     }
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO project_files (project_id, name, path, content, language, size, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+            "INSERT OR REPLACE INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
         )?;
         for f in files {
-            stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, f.created_at, f.updated_at])?;
+            stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, f.dialect, f.is_procedure, f.transformed_content, f.created_at, f.updated_at])?;
         }
     }
     tx.commit()?;
@@ -985,7 +1018,7 @@ pub fn load_project_files(
     project_id: &str,
 ) -> Result<Vec<ProjectFileRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT name, path, content, language, size, created_at, updated_at FROM project_files WHERE project_id = ?1 ORDER BY path"
+        "SELECT name, path, content, language, size, COALESCE(dialect,'') as dialect, COALESCE(is_procedure,0) as is_procedure, COALESCE(transformed_content,'') as transformed_content, created_at, updated_at FROM project_files WHERE project_id = ?1 ORDER BY path"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(ProjectFileRow {
@@ -994,8 +1027,11 @@ pub fn load_project_files(
             content: row.get(2)?,
             language: row.get(3)?,
             size: row.get(4)?,
-            created_at: row.get(5)?,
-            updated_at: row.get(6)?,
+            dialect: row.get(5)?,
+            is_procedure: row.get(6)?,
+            transformed_content: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
         })
     })?;
     rows.collect()
@@ -1101,14 +1137,14 @@ pub fn upsert_project_files(
     let tx = conn.unchecked_transaction()?;
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO project_files (project_id, name, path, content, language, size, created_at, updated_at, dir_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+            "INSERT OR REPLACE INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at, dir_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
         )?;
         for f in files {
             let (_, dir) = split_file_path(&f.path);
             let created = if f.created_at.is_empty() { &now } else { &f.created_at };
             let updated = if f.updated_at.is_empty() { &now } else { &f.updated_at };
-            stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, created, updated, dir])?;
+            stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, f.dialect, f.is_procedure, f.transformed_content, created, updated, dir])?;
         }
     }
     tx.commit()?;
