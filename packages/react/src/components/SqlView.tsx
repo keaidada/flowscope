@@ -119,7 +119,7 @@ export function SqlView({
       <style>{`
         .monaco-editor-wrapper { position: relative; }
         .monaco-editor-wrapper .monaco-editor { border-radius: 4px; }
-        .monaco-editor-wrapper .monaco-editor .find-widget { top: 32px !important; }
+        .monaco-editor-wrapper .monaco-editor .find-widget.visible { top: 32px !important; }
         .flowscope-sql-highlight-active { background-color: rgba(253,224,71,0.6); }
         .flowscope-sql-highlight-error { background-color: rgba(239,72,111,0.25); }
         .flowscope-sql-highlight-warning { background-color: rgba(244,164,98,0.25); }
