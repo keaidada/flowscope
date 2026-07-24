@@ -27,7 +27,6 @@ import { LayoutModeToggle } from './LayoutModeToggle';
 import { ProjectSelector } from './ProjectSelector';
 import { ShareDialog } from './ShareDialog';
 import { ExportDialog } from './ExportDialog';
-import { ImportConfigDialog } from './ImportConfigDialog';
 import { ThemeToggle } from './ThemeToggle';
 import { LanguageToggle } from './LanguageToggle';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
@@ -60,7 +59,7 @@ interface WorkspaceProps {
 
 export function Workspace({ backendReady, error, onRetry, isRetrying }: WorkspaceProps) {
   const { t } = useTranslation();
-  const { currentProject, selectFile, activeProjectId, isReadOnly, importDialogOpen, pendingImportFiles, confirmImportFiles, cancelImport } = useProject();
+  const { currentProject, selectFile, activeProjectId, isReadOnly } = useProject();
   const { adapter } = useBackend();
   const analysis = useAnalysis(backendReady, { adapter });
   const lineageActions = useLineageActions();
@@ -657,15 +656,6 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
           project={currentProject}
         />
       )}
-
-      {/* Import Config Dialog */}
-      <ImportConfigDialog
-        open={importDialogOpen}
-        onOpenChange={(open) => { if (!open) cancelImport(); }}
-        pendingFiles={pendingImportFiles}
-        currentDialect={currentProject?.dialect || 'generic'}
-        onConfirm={confirmImportFiles}
-      />
 
       {/* Keyboard Shortcuts Help Dialog */}
       <KeyboardShortcutsDialog

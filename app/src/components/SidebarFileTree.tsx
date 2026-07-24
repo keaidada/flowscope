@@ -16,6 +16,7 @@ import { FileTree } from '@/components/FileTree';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { DialectSelectDialog } from './DialectSelectDialog';
 import {
   ACCEPTED_FILE_TYPES,
   BINARY_EXTENSIONS,
@@ -63,6 +64,8 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     done: boolean;
     stage?: 'reading' | 'saving';
   } | null>(null);
+  const [dialectSelectOpen, setDialectSelectOpen] = useState(false);
+  const nextUploadTarget = useRef<'file' | 'folder'>('file');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -89,6 +92,19 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     }
     setIsCreatingFolder(false);
     setNewFolderName('');
+  };
+
+  const handleOpenDialectSelect = (target: 'file' | 'folder') => {
+    nextUploadTarget.current = target;
+    setDialectSelectOpen(true);
+  };
+
+  const handleDialectConfirm = (_dialect: string) => {
+    if (nextUploadTarget.current === 'file') {
+      fileInputRef.current?.click();
+    } else {
+      folderInputRef.current?.click();
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -433,7 +449,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => handleOpenDialectSelect('file')}
                   >
                     <Upload className="h-3.5 w-3.5" />
                   </Button>
@@ -448,7 +464,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
-                    onClick={() => folderInputRef.current?.click()}
+                    onClick={() => handleOpenDialectSelect('folder')}
                   >
                     <FolderUp className="h-3.5 w-3.5" />
                   </Button>
@@ -594,7 +610,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
                     variant="outline"
                     size="sm"
                     className="mt-3 text-xs"
-                    onClick={() => folderInputRef.current?.click()}
+                    onClick={() => handleOpenDialectSelect('folder')}
                   >
                     <FolderUp className="h-3.5 w-3.5 mr-1.5" />
                     {t('common.folder')}
@@ -639,6 +655,13 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         className="hidden"
         onChange={handleFolderUpload}
         {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+      />
+
+      <DialectSelectDialog
+        open={dialectSelectOpen}
+        onOpenChange={setDialectSelectOpen}
+        currentDialect={currentProject?.dialect || 'generic'}
+        onConfirm={handleDialectConfirm}
       />
     </div>
   );
