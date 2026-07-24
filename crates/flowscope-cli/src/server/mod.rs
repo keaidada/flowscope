@@ -337,7 +337,7 @@ pub fn scan_sql_files(
                 } else {
                     relative_str.to_string()
                 };
-                sources.push(flowscope_core::FileSource { name, content });
+                sources.push(flowscope_core::FileSource { name, content, is_procedure: false, transformed_content: None });
 
                 // Store mtime for change detection
                 if let Ok(mtime) = metadata.modified() {

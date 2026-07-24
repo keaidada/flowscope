@@ -19,7 +19,7 @@ import { ANALYSIS_CACHE_MAX_BYTES } from '../lib/constants';
 import type { TemplateMode } from '../types';
 
 export interface AnalysisWorkerPayload {
-  files?: Array<{ name: string; content: string }>;
+  files?: Array<{ name: string; content: string; isProcedure?: boolean; transformedContent?: string | null }>;
   fileNames?: string[];
   dialect: Dialect;
   schemaSQL: string;
@@ -179,7 +179,9 @@ async function ensureWasmReady(): Promise<void> {
   wasmReady = true;
 }
 
-function resolveFiles(payload: AnalysisWorkerPayload): Array<{ name: string; content: string }> {
+type WorkerFile = { name: string; content: string; isProcedure?: boolean; transformedContent?: string | null };
+
+function resolveFiles(payload: AnalysisWorkerPayload): WorkerFile[] {
   if (payload.files && payload.files.length > 0) {
     return payload.files;
   }
@@ -202,7 +204,7 @@ function resolveFiles(payload: AnalysisWorkerPayload): Array<{ name: string; con
 
 function resolvePayload(
   payload: AnalysisWorkerPayload
-): AnalysisWorkerPayload & { files: Array<{ name: string; content: string }> } {
+): AnalysisWorkerPayload & { files: WorkerFile[] } {
   const files = resolveFiles(payload);
   if (files.length === 0) {
     throw new WorkerError(WorkerErrorCode.NO_FILES_AVAILABLE, 'No files available for analysis');
@@ -214,7 +216,7 @@ function resolvePayload(
 }
 
 async function buildImportedSchema(
-  payload: AnalysisWorkerPayload & { files: Array<{ name: string; content: string }> }
+  payload: AnalysisWorkerPayload & { files: WorkerFile[] }
 ): Promise<{
   schema:
     | {

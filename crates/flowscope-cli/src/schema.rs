@@ -24,6 +24,8 @@ fn parse_schema_ddl(content: &str, dialect: Dialect) -> Result<SchemaMetadata> {
         files: Some(vec![FileSource {
             name: "schema.sql".to_string(),
             content: content.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         }]),
         dialect,
         source_name: None,

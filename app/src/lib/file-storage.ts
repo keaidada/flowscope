@@ -15,9 +15,9 @@ export async function saveProjectFiles(projectId: string, files: ProjectFile[]):
     content: f.content,
     language: f.language,
     size: f.size || new TextEncoder().encode(f.content).length,
-    dialect: (f as any).dialect || '',
-    is_procedure: (f as any).is_procedure || 0,
-    transformed_content: (f as any).transformed_content || '',
+    dialect: f.dialect || '',
+    is_procedure: f.isProcedure ? 1 : 0,
+    transformed_content: f.transformedContent || '',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   })));
@@ -49,6 +49,9 @@ export async function loadProjectFilesMeta(projectId: string): Promise<ProjectFi
     content: '',
     language: (f.language || 'sql') as ProjectFile['language'],
     size: f.size,
+    dialect: (f as any).dialect || '',
+    isProcedure: (f as any).is_procedure ? true : false,
+    transformedContent: (f as any).transformed_content || '',
   }));
 }
 
@@ -73,9 +76,9 @@ export async function upsertProjectFiles(projectId: string, files: ProjectFile[]
     content: f.content,
     language: f.language,
     size: f.size || new TextEncoder().encode(f.content).length,
-    dialect: (f as any).dialect || '',
-    is_procedure: (f as any).is_procedure || 0,
-    transformed_content: (f as any).transformed_content || '',
+    dialect: f.dialect || '',
+    is_procedure: f.isProcedure ? 1 : 0,
+    transformed_content: f.transformedContent || '',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   })) as never);

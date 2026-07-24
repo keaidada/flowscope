@@ -183,9 +183,10 @@ fn looks_like_hive_spark_syntax(sql: &str) -> bool {
         || sql.contains('#') // Hive-style comments
 }
 
-fn looks_like_bigquery_procedure(sql: &str) -> bool {
+/// Detects whether SQL text is a stored procedure (CREATE PROCEDURE / CREATE PROC).
+/// Works across dialects (BigQuery, TSQL, MySQL, Oracle, etc.).
+pub fn looks_like_stored_procedure(sql: &str) -> bool {
     let upper = sql.to_uppercase();
-    // Case 1: CREATE [OR REPLACE] PROCEDURE
     if let Some(pos) = upper.find("PROCEDURE") {
         if upper[..pos].trim_end().ends_with("CREATE")
             || upper[..pos].trim_end().ends_with("REPLACE")
@@ -193,7 +194,24 @@ fn looks_like_bigquery_procedure(sql: &str) -> bool {
             return true;
         }
     }
-    // Case 2: Standalone BEGIN...END block (procedure body without header)
+    // TSQL: CREATE PROC / CREATE OR ALTER PROC
+    if let Some(pos) = upper.find("PROC ") {
+        if upper[..pos].trim_end().ends_with("CREATE")
+            || upper[..pos].trim_end().ends_with("REPLACE")
+            || upper[..pos].trim_end().ends_with("ALTER")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn looks_like_bigquery_procedure(sql: &str) -> bool {
+    // Case 1: Generic CREATE PROCEDURE detection (uses the common detector)
+    if looks_like_stored_procedure(sql) {
+        return true;
+    }
+    // Case 2: Standalone BEGIN...END block with DECLARE (BQ procedure body without header)
     let trimmed = sql.trim_start();
     let upper_trimmed = trimmed.to_uppercase();
     if upper_trimmed.starts_with("BEGIN")

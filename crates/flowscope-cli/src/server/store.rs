@@ -974,8 +974,11 @@ pub struct ProjectFileRow {
     pub content: String,
     pub language: String,
     pub size: i64,
+    #[serde(default)]
     pub dialect: String,
+    #[serde(default)]
     pub is_procedure: i64,
+    #[serde(default)]
     pub transformed_content: String,
     pub created_at: String,
     pub updated_at: String,

@@ -31,10 +31,14 @@ fn golden_multi_file_keeps_sources() {
             FileSource {
                 name: "alpha.sql".to_string(),
                 content: "SELECT * FROM alpha_table;".to_string(),
+                is_procedure: false,
+                transformed_content: None,
             },
             FileSource {
                 name: "beta.sql".to_string(),
                 content: "SELECT * FROM beta_table;".to_string(),
+                is_procedure: false,
+                transformed_content: None,
             },
         ]),
         dialect: Dialect::Generic,

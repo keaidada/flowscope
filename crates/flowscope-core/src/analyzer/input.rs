@@ -279,10 +279,23 @@ pub(crate) fn collect_statements<'a>(
     // Parse files first (if present)
     if let Some(files) = &request.files {
         for file in files {
+            // When a file is a stored procedure with pre-transformed content,
+            // use the transformed (sanitized) SQL for lineage analysis instead
+            // of the original CREATE PROCEDURE wrapper. This lets the parser
+            // directly analyze the extracted DML statements.
+            let proc_sql: &str = if file.is_procedure {
+                match &file.transformed_content {
+                    Some(t) if !t.trim().is_empty() => t.as_str(),
+                    _ => file.content.as_str(),
+                }
+            } else {
+                file.content.as_str()
+            };
+
             // Apply templating if configured
             #[cfg(feature = "templating")]
             let (source_sql, templating_applied): (Cow<'_, str>, bool) = {
-                match apply_template(&file.content, request.template_config.as_ref()) {
+                match apply_template(proc_sql, request.template_config.as_ref()) {
                     Ok((sql, applied)) => (sql, applied),
                     Err(e) => {
                         issues.push(template_error_issue(&e, Some(&file.name)));
@@ -292,7 +305,7 @@ pub(crate) fn collect_statements<'a>(
             };
             #[cfg(not(feature = "templating"))]
             let (source_sql, templating_applied): (Cow<'_, str>, bool) =
-                (Cow::Owned(quote_shell_vars(&file.content)), false);
+                (Cow::Owned(quote_shell_vars(proc_sql)), false);
 
             let ctx = ParseContext {
                 source_sql,
@@ -1125,6 +1138,8 @@ mod tests {
         request.files = Some(vec![FileSource {
             name: "file.sql".to_string(),
             content: "SELECT 1".to_string(),
+            is_procedure: false,
+            transformed_content: None,
         }]);
 
         let (statements, issues) = collect_statements(&request);
@@ -1281,6 +1296,8 @@ mod tests {
                 SELECT b FROM t2;
             "#
             .to_string(),
+            is_procedure: false,
+            transformed_content: None,
         }]);
 
         let (statements, issues) = collect_statements(&request);
@@ -1354,6 +1371,8 @@ mod tests {
         request.files = Some(vec![FileSource {
             name: "file.sql".to_string(),
             content: "SELECT 1".to_string(),
+            is_procedure: false,
+            transformed_content: None,
         }]);
 
         let (statements, issues) = collect_statements(&request);

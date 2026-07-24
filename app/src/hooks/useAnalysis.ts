@@ -49,6 +49,8 @@ interface PreparedAnalysisFile {
   id?: string;
   name: string;
   content: string;
+  isProcedure?: boolean;
+  transformedContent?: string | null;
 }
 
 /**
@@ -172,6 +174,8 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
               id: projectActiveFile?.id,
               name: currentFilePath,
               content: currentFileContent,
+              isProcedure: projectActiveFile?.isProcedure ?? false,
+              transformedContent: projectActiveFile?.transformedContent ?? null,
             },
           ];
           contextDescription = `Analyzing file: ${currentFilePath}`;
@@ -187,6 +191,8 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           id: file.id,
           name: file.path,
           content: file.content,
+          isProcedure: file.isProcedure ?? false,
+          transformedContent: file.transformedContent ?? null,
         }));
         contextDescription = `Analyzing selected: ${filesToAnalyze.length} files`;
       } else {
@@ -195,6 +201,8 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           id: file.id,
           name: file.path,
           content: file.content,
+          isProcedure: file.isProcedure ?? false,
+          transformedContent: file.transformedContent ?? null,
         }));
         contextDescription = `Analyzing project: ${sqlFiles.length} files`;
       }

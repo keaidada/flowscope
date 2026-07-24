@@ -54,6 +54,8 @@ pub fn read_lint_input(paths: &[PathBuf], respect_gitignore: bool) -> Result<Vec
                 source: FileSource {
                     name: path.display().to_string(),
                     content,
+                    is_procedure: false,
+                    transformed_content: None,
                 },
                 path: Some(path),
             })
@@ -72,6 +74,8 @@ fn read_from_stdin() -> Result<Vec<FileSource>> {
         // Use .sql extension so frontend filters include stdin content
         name: "<stdin>.sql".to_string(),
         content,
+        is_procedure: false,
+        transformed_content: None,
     }])
 }
 
@@ -86,6 +90,8 @@ fn read_from_files(files: &[PathBuf]) -> Result<Vec<FileSource>> {
             Ok(FileSource {
                 name: path.display().to_string(),
                 content,
+                is_procedure: false,
+                transformed_content: None,
             })
         })
         .collect()

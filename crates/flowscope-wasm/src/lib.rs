@@ -2,9 +2,10 @@ mod encoding;
 
 use encoding::{convert_spans_to_utf16, utf16_to_utf8_offset, Encoding};
 use flowscope_core::{
-    analyze, completion_context, completion_items, split_statements, AnalyzeRequest, AnalyzeResult,
-    CompletionContext, CompletionItemsResult, CompletionRequest, StatementSplitRequest,
-    StatementSplitResult,
+    analyze, completion_context, completion_items,
+    looks_like_stored_procedure, sanitize_bigquery_raw_double_quoted_literals, split_statements,
+    AnalyzeRequest, AnalyzeResult, CompletionContext, CompletionItemsResult, CompletionRequest,
+    StatementSplitRequest, StatementSplitResult,
 };
 use flowscope_export::{
     export_csv_bundle as export_csv_bundle_internal, export_html as export_html_internal,
@@ -680,6 +681,21 @@ fn parse_exported_at(value: Option<&str>) -> Result<chrono::DateTime<chrono::Utc
     } else {
         Ok(chrono::Utc::now())
     }
+}
+
+/// Detects whether SQL text is a stored procedure (CREATE PROCEDURE / CREATE PROC).
+/// Works across dialects (BigQuery, TSQL, MySQL, Oracle, etc.).
+#[wasm_bindgen]
+pub fn is_stored_procedure(sql: &str) -> bool {
+    looks_like_stored_procedure(sql)
+}
+
+/// Sanitizes a BigQuery stored procedure, extracting DML/SELECT statements
+/// from the BEGIN...END body. Returns the sanitized SQL string or null if
+/// the input is not a BigQuery procedure or sanitization fails.
+#[wasm_bindgen]
+pub fn sanitize_procedure(sql: &str) -> Option<String> {
+    sanitize_bigquery_raw_double_quoted_literals(sql)
 }
 
 #[cfg(test)]

@@ -1769,10 +1769,14 @@ async fn files_returns_loaded_files() {
         FileSource {
             name: "queries.sql".to_string(),
             content: "SELECT * FROM users".to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "reports/summary.sql".to_string(),
             content: "SELECT COUNT(*) FROM orders".to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
     ];
 

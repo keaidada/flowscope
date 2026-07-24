@@ -273,6 +273,8 @@ fn file_statements_produce_spans() {
     request.files = Some(vec![FileSource {
         name: "file.sql".to_string(),
         content: file_sql.to_string(),
+        is_procedure: false,
+        transformed_content: None,
     }]);
 
     let result = analyze(&request);
@@ -295,10 +297,14 @@ fn lint_document_rules_apply_to_each_file_in_multi_file_request() {
         FileSource {
             name: "first.sql".to_string(),
             content: "SELECT 1;;".to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "second.sql".to_string(),
             content: "SELECT 2;;".to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
     ]);
     request.options = Some(AnalysisOptions {

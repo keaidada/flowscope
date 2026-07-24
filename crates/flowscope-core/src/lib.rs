@@ -15,7 +15,10 @@ pub use completion::{completion_context, completion_items};
 pub use error::ParseError;
 pub use extractors::extract_tables;
 pub use linter::config::LintConfig;
-pub use parser::{parse_sql, parse_sql_with_dialect};
+pub use parser::{
+    looks_like_stored_procedure, parse_sql, parse_sql_with_dialect,
+    sanitize_bigquery_raw_double_quoted_literals,
+};
 
 // Re-export types explicitly
 pub use types::{

@@ -141,6 +141,9 @@ export interface ProjectFile {
   content: string;
   language: 'sql' | 'json' | 'text';
   size?: number;
+  dialect?: string;
+  isProcedure?: boolean;
+  transformedContent?: string | null;
 }
 
 export interface Project {
@@ -1233,12 +1236,20 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         // Use webkitRelativePath if available (folder upload), otherwise just filename
         const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
         const path = relativePath || file.name;
+
+        // Detect stored procedures (CREATE PROCEDURE / CREATE PROC)
+        const upper = content.toUpperCase();
+        const isProcedure = upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC');
+
         newFiles.push({
           id: uuidv4(),
           name: file.name,
           path,
           content,
           language: getFileLanguage(file.name),
+          dialect: isProcedure ? undefined : undefined, // Will be filled by project dialect at analysis time
+          isProcedure,
+          transformedContent: null,
         });
       }
 

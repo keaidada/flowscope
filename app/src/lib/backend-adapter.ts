@@ -8,8 +8,15 @@
 import type { AnalyzeResult, Dialect } from '@pondpilot/flowscope-core';
 import type { TemplateMode } from '@/types';
 
+export interface AnalysisFile {
+  name: string;
+  content: string;
+  isProcedure?: boolean;
+  transformedContent?: string | null;
+}
+
 export interface AnalysisPayload {
-  files: Array<{ name: string; content: string }>;
+  files: AnalysisFile[];
   dialect: Dialect;
   schemaSQL: string;
   hideCTEs: boolean;
@@ -72,7 +79,12 @@ export class RestBackendAdapter implements BackendAdapter {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sql: '',
-        files: payload.files,
+        files: payload.files.map((f) => ({
+          name: f.name,
+          content: f.content,
+          isProcedure: f.isProcedure || false,
+          transformedContent: f.transformedContent || null,
+        })),
         hide_ctes: payload.hideCTEs,
         enable_column_lineage: payload.enableColumnLineage,
         enable_linting: payload.enableLinting ?? false,

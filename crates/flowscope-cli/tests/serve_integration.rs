@@ -172,10 +172,14 @@ async fn analyze_endpoint_with_multiple_files() {
         FileSource {
             name: "views/user_summary.sql".to_string(),
             content: "CREATE VIEW user_summary AS SELECT id, name FROM users".to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "queries/report.sql".to_string(),
             content: "SELECT * FROM user_summary".to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
     ];
 

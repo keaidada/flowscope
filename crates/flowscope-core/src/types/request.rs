@@ -82,6 +82,10 @@ pub struct StatementSplitRequest {
 pub struct FileSource {
     pub name: String,
     pub content: String,
+    #[serde(default)]
+    pub is_procedure: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transformed_content: Option<String>,
 }
 
 /// SQL dialect for parsing and analysis.

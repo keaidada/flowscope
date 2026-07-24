@@ -1003,14 +1003,20 @@ GROUP BY 1, 2, 3
         FileSource {
             name: "stg_orders.sql".to_string(),
             content: stg_orders.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "stg_payments.sql".to_string(),
             content: stg_payments.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "int_orders_payments.sql".to_string(),
             content: int_orders_payments.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
     ]);
 
@@ -1149,22 +1155,32 @@ LEFT JOIN customer_orders USING (customer_id)
         FileSource {
             name: "stg_customers.sql".to_string(),
             content: stg_customers.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "stg_orders.sql".to_string(),
             content: stg_orders.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "stg_payments.sql".to_string(),
             content: stg_payments.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "int_orders_payments.sql".to_string(),
             content: int_orders_payments.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "customers.sql".to_string(),
             content: customers_mart.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
     ]);
 
@@ -1228,10 +1244,14 @@ FROM {{ ref('stg_orders') }}
         FileSource {
             name: "stg_orders.sql".to_string(),
             content: stg_orders.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "orders_mart.sql".to_string(),
             content: orders_mart.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
     ]);
 
@@ -1294,6 +1314,8 @@ WHERE order_date >= '{{ var("min_date", "2020-01-01") }}'
     let result = analyze_dbt_files(vec![FileSource {
         name: "filtered_orders.sql".to_string(),
         content: model.to_string(),
+        is_procedure: false,
+        transformed_content: None,
     }]);
 
     assert!(
@@ -1348,10 +1370,14 @@ FROM {{ ref('orders') }}
         FileSource {
             name: "orders.sql".to_string(),
             content: orders.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "orders_ranked.sql".to_string(),
             content: orders_ranked.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
     ]);
 
@@ -1424,10 +1450,14 @@ GROUP BY order_date
         FileSource {
             name: "orders.sql".to_string(),
             content: orders.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "daily_revenue.sql".to_string(),
             content: daily_revenue.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
     ]);
 
@@ -1503,10 +1533,14 @@ GROUP BY customer_id
         FileSource {
             name: "models/staging/stg_orders.sql".to_string(),
             content: stg_orders.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "models/marts/orders_summary.sql".to_string(),
             content: orders_summary.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
     ]);
 
@@ -1591,10 +1625,14 @@ FROM scoped_data
         FileSource {
             name: "models/marts/customers.sql".to_string(),
             content: customers.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
         FileSource {
             name: "models/marts/orders.sql".to_string(),
             content: orders.to_string(),
+            is_procedure: false,
+            transformed_content: None,
         },
     ]);
 
@@ -1649,6 +1687,8 @@ fn dbt_model_name_extraction_from_path() {
     let result = analyze_dbt_files(vec![FileSource {
         name: "models/staging/stg_customers.sql".to_string(),
         content: model.to_string(),
+        is_procedure: false,
+        transformed_content: None,
     }]);
 
     let output_node = result
