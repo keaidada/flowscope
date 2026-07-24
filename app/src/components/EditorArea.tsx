@@ -398,17 +398,6 @@ export function EditorArea({
             isDark={isDark}
             highlightedSpan={sqlViewMode === 'template' ? highlightedSpan : null}
             lineWrapping={lineWrapping}
-            searchLabels={{
-              'Find': t('editorSearch.Find'),
-              'Replace': t('editorSearch.Replace'),
-              'next': t('editorSearch.next'),
-              'previous': t('editorSearch.previous'),
-              'replace': t('editorSearch.replace'),
-              'replace all': t('editorSearch.replace all'),
-              'match case': t('editorSearch.match case'),
-              'regexp': t('editorSearch.regexp'),
-              'by word': t('editorSearch.by word'),
-            }}
           />
         </ErrorBoundary>
         {isReadOnly && (

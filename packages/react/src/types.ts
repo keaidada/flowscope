@@ -270,8 +270,6 @@ export interface SqlViewProps {
   highlightedSpan?: Span | null;
   /** Whether to enable line wrapping (default: true) */
   lineWrapping?: boolean;
-  /** 搜索面板标签国际化映射，如 { 'Find': '查找', 'next': '下一个' } */
-  searchLabels?: Record<string, string>;
 }
 
 /**

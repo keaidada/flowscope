@@ -1,90 +1,8 @@
-import { useMemo, useCallback, useEffect, useRef, type JSX } from 'react';
-import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
-import { sql } from '@codemirror/lang-sql';
-import { EditorView, Decoration, type DecorationSet } from '@codemirror/view';
-import { StateField, StateEffect, RangeSet } from '@codemirror/state';
-import { oneDark } from '@codemirror/theme-one-dark';
-import { search, closeSearchPanel } from '@codemirror/search';
+import { useCallback, useEffect, useRef, useMemo, type JSX } from 'react';
+import Editor, { type OnMount, type OnChange } from '@monaco-editor/react';
 
 import { useLineage } from '../store';
 import type { SqlViewProps } from '../types';
-
-type HighlightRange = { from: number; to: number; className: string };
-
-const setHighlights = StateEffect.define<HighlightRange[]>();
-
-/** Line-level highlight (for search result): highlights entire line(s) */
-const setLineHighlights = StateEffect.define<number[]>(); // line positions (doc offsets)
-
-const highlightField = StateField.define<DecorationSet>({
-  create() {
-    return Decoration.none;
-  },
-  update(highlights, tr) {
-    for (const effect of tr.effects) {
-      if (effect.is(setHighlights)) {
-        if (effect.value.length === 0) {
-          return Decoration.none;
-        }
-        const marks = effect.value.map(({ from, to, className }) =>
-          Decoration.mark({ class: className }).range(from, to)
-        );
-        return Decoration.set(marks);
-      }
-    }
-    if (tr.docChanged) {
-      return highlights.map(tr.changes);
-    }
-    return highlights;
-  },
-  provide: (f) => EditorView.decorations.from(f),
-});
-
-const searchLineHighlight = Decoration.line({ class: 'flowscope-sql-search-line' });
-
-const lineHighlightField = StateField.define<DecorationSet>({
-  create() {
-    return RangeSet.empty;
-  },
-  update(decos, tr) {
-    for (const effect of tr.effects) {
-      if (effect.is(setLineHighlights)) {
-        if (effect.value.length === 0) {
-          return RangeSet.empty;
-        }
-        const lineDecos = effect.value.map((pos) => searchLineHighlight.range(pos));
-        return RangeSet.of(lineDecos, true);
-      }
-    }
-    if (tr.docChanged) {
-      return decos.map(tr.changes);
-    }
-    return decos;
-  },
-  provide: (f) => EditorView.decorations.from(f),
-});
-
-const baseTheme = EditorView.baseTheme({
-  '.flowscope-sql-highlight-active': {
-    backgroundColor: 'rgba(253, 224, 71, 0.6)',
-    borderRadius: '2px',
-  },
-  '.flowscope-sql-search-line': {
-    backgroundColor: 'rgba(253, 224, 71, 0.35)',
-  },
-  '.flowscope-sql-highlight-error': {
-    backgroundColor: 'rgba(239, 72, 111, 0.25)',
-    borderRadius: '2px',
-  },
-  '.flowscope-sql-highlight-warning': {
-    backgroundColor: 'rgba(244, 164, 98, 0.25)',
-    borderRadius: '2px',
-  },
-  '.flowscope-sql-highlight-info': {
-    backgroundColor: 'rgba(76, 97, 255, 0.15)',
-    borderRadius: '2px',
-  },
-});
 
 export function SqlView({
   className,
@@ -94,220 +12,150 @@ export function SqlView({
   isDark,
   highlightedSpan: highlightedSpanProp,
   lineWrapping = true,
-  searchLabels,
 }: SqlViewProps): JSX.Element {
   const { state, actions } = useLineage();
   const isControlled = value !== undefined;
-
-  // Warn in dev mode if highlightedSpan is passed without value (it will be ignored)
-  if (process.env.NODE_ENV !== 'production' && !isControlled && highlightedSpanProp !== undefined) {
-    console.warn(
-      'SqlView: `highlightedSpan` prop is ignored in uncontrolled mode. Pass a `value` prop to use controlled mode.'
-    );
-  }
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const decorationsRef = useRef<string[]>([]);
 
   const sqlText = isControlled ? value : state.sql;
-  // In controlled mode, prefer the prop; in uncontrolled mode, use store state
-  // Normalize undefined to null for consistent type handling downstream
   const highlightedSpan = isControlled ? (highlightedSpanProp ?? null) : state.highlightedSpan;
-  const issueHighlights = useMemo<HighlightRange[]>(() => {
-    if (isControlled) {
-      return [];
-    }
-    const issues = state.result?.issues ?? [];
-    return issues
-      .filter((issue) => issue.span)
-      .map((issue) => {
-        const className =
-          issue.severity === 'error'
-            ? 'flowscope-sql-highlight-error'
-            : issue.severity === 'warning'
-              ? 'flowscope-sql-highlight-warning'
-              : 'flowscope-sql-highlight-info';
-        return {
+
+  const issueHighlights = useMemo(
+    () => {
+      if (isControlled) return [];
+      return (state.result?.issues ?? [])
+        .filter((issue) => issue.span)
+        .map((issue) => ({
           from: issue.span!.start,
           to: issue.span!.end,
-          className,
-        };
-      });
-  }, [state.result, isControlled]);
-
-  const editorRef = useRef<ReactCodeMirrorRef>(null);
-
-  const extensions = useMemo(
-    () => [
-      sql(),
-      highlightField,
-      lineHighlightField,
-      baseTheme,
-      ...(lineWrapping ? [EditorView.lineWrapping] : []),
-      EditorView.editable.of(editable),
-      search({ top: true }),
-    ],
-    [editable, lineWrapping]
-  );
-
-  const theme = useMemo(() => (isDark ? oneDark : 'light'), [isDark]);
-
-  const handleChange = useCallback(
-    (val: string) => {
-      if (!isControlled) {
-        actions.setSql(val);
-      }
-      onChange?.(val);
+          className: issue.severity === 'error'
+            ? 'error' : issue.severity === 'warning'
+            ? 'warning' : 'info',
+        }));
     },
-    [actions, onChange, isControlled]
+    [state.result, isControlled],
   );
 
-  useEffect(() => {
-    const view = editorRef.current?.view;
-    if (!view) return;
-
-    // Mark decorations (issue highlights + inline text highlight)
-    const ranges: HighlightRange[] = [];
-    if (!isControlled) {
-      ranges.push(...issueHighlights);
-    }
-    if (highlightedSpan) {
-      ranges.push({
-        from: highlightedSpan.start,
-        to: highlightedSpan.end,
-        className: 'flowscope-sql-highlight-active',
-      });
-    }
-
-    view.dispatch({
-      effects: setHighlights.of(ranges),
-    });
-
-    // Line decoration (full-line background for search highlight)
-    if (highlightedSpan) {
-      const line = view.state.doc.lineAt(highlightedSpan.start);
-      view.dispatch({
-        effects: setLineHighlights.of([line.from]),
-      });
-      // Scroll into view
-      view.dispatch({
-        selection: { anchor: highlightedSpan.start },
-        scrollIntoView: true,
-      });
-    } else {
-      view.dispatch({
-        effects: setLineHighlights.of([]),
-      });
-    }
-  }, [highlightedSpan, issueHighlights, isControlled]);
-
-  // 点击编辑器内容区外部时关闭搜索面板
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      // 点在搜索面板内 → 不关闭
-      if (target.closest('.cm-panel.cm-search')) return;
-      // 点在脚本内容区 → 不关闭
-      if (document.querySelector('.cm-content')?.contains(target)) return;
-      // 其他位置 → 关闭
-      const view = editorRef.current?.view;
-      if (view) closeSearchPanel(view);
-    };
-    document.addEventListener('mousedown', handler, true);
-    return () => document.removeEventListener('mousedown', handler, true);
+  const handleMount: OnMount = useCallback((editor) => {
+    editorRef.current = editor;
   }, []);
 
-  // 搜索面板标签国际化（只改文本节点，不动复选框等 input）
+  const handleChange: OnChange = useCallback(
+    (val) => {
+      if (val === undefined) return;
+      if (!isControlled) actions.setSql(val);
+      onChange?.(val);
+    },
+    [actions, onChange, isControlled],
+  );
+
+  // Apply decorations (issue highlights + active span highlight)
   useEffect(() => {
-    if (!searchLabels) return;
-    const root = document.querySelector('.flowscope-codemirror .cm-editor') as HTMLElement | null
-      ?? editorRef.current?.view?.dom as HTMLElement | null;
-    if (!root) return;
-    const entries = Object.entries(searchLabels);
-    const observer = new MutationObserver(() => {
-      const panel = root.querySelector('.cm-panel.cm-search');
-      if (!panel) return;
-      for (const [orig, trans] of entries) {
-        panel.querySelectorAll('label, .cm-button, .cm-search button').forEach((el) => {
-          // 只改最后一个文本节点（复选框后跟的文本），不动子 input
-          const textNodes: Text[] = [];
-          el.childNodes.forEach(n => { if (n.nodeType === Node.TEXT_NODE) textNodes.push(n as Text); });
-          const lastText = textNodes[textNodes.length - 1];
-          if (lastText && lastText.textContent?.trim() === orig) {
-            lastText.textContent = ' ' + trans;
-          }
-        });
-        // 也匹配纯文本标签（无子元素的 label）
-        panel.querySelectorAll('.cm-search label:not(:has(*))').forEach((el) => {
-          if (el.textContent?.trim() === orig) el.textContent = trans;
-        });
-      }
-    });
-    observer.observe(root, { childList: true, subtree: true, characterData: true });
-    return () => observer.disconnect();
-  }, [searchLabels]);
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const model = editor.getModel();
+    if (!model) return;
+
+    const newDecorations: Array<{
+      range: any;
+      options: {
+        inlineClassName?: string;
+        className?: string;
+        isWholeLine?: boolean;
+        linesDecorationsClassName?: string;
+      };
+    }> = [];
+
+    // Issue highlights
+    for (const h of issueHighlights) {
+      const startPos = model.getPositionAt(h.from);
+      const endPos = model.getPositionAt(h.to);
+      const sevClass = h.className === 'error'
+        ? 'flowscope-sql-highlight-error'
+        : h.className === 'warning'
+        ? 'flowscope-sql-highlight-warning'
+        : 'flowscope-sql-highlight-info';
+
+      newDecorations.push({
+        range: {
+          startLineNumber: startPos.lineNumber,
+          startColumn: startPos.column,
+          endLineNumber: endPos.lineNumber,
+          endColumn: endPos.column,
+        },
+        options: { inlineClassName: sevClass },
+      });
+    }
+
+    // Active span highlight (search/jump result)
+    if (highlightedSpan) {
+      const startPos = model.getPositionAt(highlightedSpan.start);
+      const endPos = model.getPositionAt(highlightedSpan.end);
+      newDecorations.push({
+        range: {
+          startLineNumber: startPos.lineNumber,
+          startColumn: startPos.column,
+          endLineNumber: endPos.lineNumber,
+          endColumn: endPos.column,
+        },
+        options: {
+          inlineClassName: 'flowscope-sql-highlight-active',
+        },
+      });
+      // Scroll to highlight
+      editor.revealLineInCenter(startPos.lineNumber);
+    }
+
+    decorationsRef.current = editor.deltaDecorations(
+      decorationsRef.current,
+      newDecorations,
+    );
+  }, [highlightedSpan, issueHighlights]);
 
   return (
-    <div className={`flowscope-sql-view ${className || ''}`}>
+    <div className={`flowscope-sql-view monaco-editor-wrapper ${className || ''}`}>
       <style>{`
-        .flowscope-codemirror .cm-editor { position: relative; }
-        .flowscope-codemirror .cm-editor .cm-scroller { flex: 1; }
-        .flowscope-codemirror .cm-editor .cm-panel.cm-search {
-          position: absolute;
-          top: 4px;
-          right: 4px;
-          z-index: 10;
-          background: hsl(var(--background));
-          border: 1px solid hsl(var(--border));
-          border-radius: 6px;
-          padding: 8px 10px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-          width: auto;
-          min-width: 300px;
-        }
-        .flowscope-codemirror .cm-editor .cm-panel.cm-search label,
-        .flowscope-codemirror .cm-editor .cm-panel.cm-search .cm-button {
-          font-size: 12px;
-          color: hsl(var(--muted-foreground));
-        }
-        .flowscope-codemirror .cm-editor .cm-panel.cm-search input {
-          font-size: 12px;
-          padding: 4px 8px;
-          background: hsl(var(--background));
-          border: 1px solid hsl(var(--input));
-          border-radius: 4px;
-          color: hsl(var(--foreground));
-        }
-        .flowscope-codemirror .cm-editor .cm-panel.cm-search input:focus {
-          outline: none;
-          border-color: hsl(var(--ring));
-          box-shadow: 0 0 0 2px hsl(var(--ring) / 0.2);
-        }
-        .flowscope-codemirror .cm-editor .cm-panel.cm-search .cm-button {
-          background: hsl(var(--secondary));
-          border: 1px solid hsl(var(--border));
-          border-radius: 4px;
-          padding: 2px 8px;
-          cursor: pointer;
-          font-size: 12px;
-          color: hsl(var(--secondary-foreground));
-        }
-        .flowscope-codemirror .cm-editor .cm-panel.cm-search .cm-button:hover {
-          background: hsl(var(--secondary) / 0.8);
-        }
-        .flowscope-codemirror .cm-editor .cm-panel.cm-search .cm-textfield { margin: 0 2px; }
-        .flowscope-codemirror .cm-editor .cm-panel.cm-search [name=replace] { margin-left: 4px; }
+        .monaco-editor-wrapper { position: relative; }
+        .monaco-editor-wrapper .monaco-editor { border-radius: 4px; }
+        .flowscope-sql-highlight-active { background-color: rgba(253,224,71,0.6); }
+        .flowscope-sql-highlight-error { background-color: rgba(239,72,111,0.25); }
+        .flowscope-sql-highlight-warning { background-color: rgba(244,164,98,0.25); }
+        .flowscope-sql-highlight-info { background-color: rgba(76,97,255,0.15); }
       `}</style>
-      <CodeMirror
-        ref={editorRef}
+      <Editor
+        height="100%"
+        width="100%"
+        language="sql"
+        theme={isDark ? 'vs-dark' : 'vs'}
         value={sqlText}
         onChange={handleChange}
-        extensions={extensions}
-        editable={editable}
-        theme={theme}
-        basicSetup={{
-          lineNumbers: true,
-          highlightActiveLineGutter: true,
-          foldGutter: true,
+        onMount={handleMount}
+        loading={
+          <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+            Loading editor...
+          </div>
+        }
+        options={{
+          readOnly: !editable,
+          wordWrap: lineWrapping ? 'on' : 'off',
+          minimap: { enabled: false },
+          lineNumbers: 'on',
+          folding: true,
+          fontSize: 13,
+          fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+          scrollBeyondLastLine: false,
+          renderLineHighlight: 'line',
+          automaticLayout: true,
+          padding: { top: 4 },
+          suggest: { showWords: true },
+          tabSize: 2,
+          insertSpaces: true,
+          detectIndentation: false,
+          quickSuggestions: false,
+          // 搜索面板：Monaco 原生处理，自动关闭
         }}
-        className="flowscope-codemirror"
       />
     </div>
   );
