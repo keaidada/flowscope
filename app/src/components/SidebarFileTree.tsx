@@ -218,7 +218,16 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     [addFilesDirectly, updateFiles, currentProject]
   );
 
-  const extractDmlFromProcedure = (content: string): string | null => {
+  // Dialects that support automatic procedure-to-DML conversion
+  const CONVERT_SUPPORTED_DIALECTS: Set<string> = new Set(['bigquery']);
+
+  const extractDmlFromProcedure = (content: string, dialect: string): string | null => {
+    if (dialect === 'bigquery') return extractBqDml(content);
+    // Other dialect conversions not yet implemented
+    return null;
+  };
+
+  const extractBqDml = (content: string): string | null => {
     try {
       const upper = content.toUpperCase();
       const beginIdx = upper.indexOf('BEGIN');
@@ -446,12 +455,25 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
   const handleConvertFolder = useCallback(async (dialect: Dialect) => {
     if (!currentProject) return;
+
     const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
     const folderFiles = currentProject.files.filter(f => f.path.startsWith(prefix));
     const procFiles = folderFiles.filter(f => f.isProcedure);
     const total = procFiles.length;
 
     if (total === 0) return;
+
+    // For unsupported dialects, mark all as empty (no conversion logic available yet)
+    if (!CONVERT_SUPPORTED_DIALECTS.has(dialect)) {
+      setConvertResult({
+        success: 0,
+        successPaths: [],
+        empty: procFiles.map(f => f.path),
+        errors: [],
+      });
+      setConvertProgress({ done: total, total });
+      return;
+    }
 
     setIsConvertingFolder(true);
     setConvertProgress({ done: 0, total });
@@ -485,7 +507,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
               emptyFiles.push(f.path);
               continue;
             }
-            const transformedContent = extractDmlFromProcedure(content);
+            const transformedContent = extractDmlFromProcedure(content, dialect);
             if (!transformedContent) {
               emptyFiles.push(f.path);
             } else {

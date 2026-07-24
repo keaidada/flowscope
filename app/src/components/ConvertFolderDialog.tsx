@@ -200,6 +200,11 @@ export function ConvertFolderDialog({
                     ))}
                   </SelectContent>
                 </Select>
+                {dialect !== 'bigquery' && (
+                  <p className="text-xs text-muted-foreground">
+                    该引擎的存储过程转换尚未实现，仅支持 BigQuery。
+                  </p>
+                )}
               </div>
             )}
 
