@@ -9,7 +9,7 @@
 
 const DML_KEYWORDS = [
   'SELECT', 'INSERT', 'DELETE', 'MERGE', 'UPDATE',
-  'TRUNCATE', 'WITH', 'CREATE TABLE', 'CREATE OR REPLACE TABLE',
+  'TRUNCATE', 'WITH', 'CREATE', 'EXPLAIN',
 ] as const;
 
 const isDml = (s: string): boolean =>
