@@ -24,6 +24,7 @@ import {
   DEFAULT_FILE_NAMES,
 } from '@/lib/constants';
 import { genId } from '@/lib/utils';
+import { saveProjectFiles } from '@/lib/file-storage';
 
 interface SidebarFileTreeProps {
   onContentWidthChange?: (widthPx: number) => void;
@@ -196,7 +197,6 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       // Phase 4: Persist to SQLite → OPFS/IndexedDB
       setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false, stage: 'saving' });
       try {
-        const { saveProjectFiles } = await import('@/lib/file-storage');
         if (currentProject) {
           const allProjectFiles = [
             ...(currentProject.files.filter((f) => !projectFiles.some((pf) => pf.id === f.id))),
