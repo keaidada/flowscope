@@ -259,26 +259,25 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         await ensureFilesContent(unloadedIds);
       }
 
-      // Step 2: process in batches with progress updates
-      const BATCH = 50;
-      let allUpdates: Array<{
-        fileId: string;
-        content: string;
-        isProcedure?: boolean;
-        transformedContent?: string | null;
-      }> = [];
-
-      // Use ref to get latest project state after content loading
+      // Step 2: process in batches and save directly to DB
       const project = currentProjectRef.current;
       if (!project) return;
 
       const refreshed = project.files.filter(f => f.path.startsWith(prefix) && f.isProcedure && f.content.length > 0);
+      const BATCH = 50;
+
+      // Collect processed file objects for DB save
+      const savedFiles: ProjectFile[] = [];
 
       for (let i = 0; i < refreshed.length; i += BATCH) {
         const batch = refreshed.slice(i, i + BATCH);
-        const batchUpdates: typeof allUpdates = [];
+        const batchUpdates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }> = [];
+
         for (const f of batch) {
           const transformedContent = extractDmlFromProcedure(f.content);
+          const updatedFile = { ...f, isProcedure: true as const, transformedContent };
+          savedFiles.push(updatedFile);
+
           batchUpdates.push({
             fileId: f.id,
             content: f.content,
@@ -286,26 +285,21 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
             transformedContent,
           });
         }
+
         if (batchUpdates.length > 0) {
           updateFiles(batchUpdates);
         }
         setConvertProgress({ done: Math.min(i + BATCH, total), total });
-        // Yield to allow UI update
         await new Promise(r => setTimeout(r, 0));
       }
 
       setConvertProgress({ done: total, total });
 
-      // Persist to DB: save all processed files in chunks
-      {
-        const saveFiles = project.files.filter(f =>
-          f.path.startsWith(prefix) && f.isProcedure && f.content.length > 0
-        );
-        if (saveFiles.length > 0) {
-          const CHUNK = 500;
-          for (let i = 0; i < saveFiles.length; i += CHUNK) {
-            await upsertProjectFiles(project.id, saveFiles.slice(i, i + CHUNK));
-          }
+      // Step 3: persist to DB with the actual processed data (not dependent on React state)
+      if (savedFiles.length > 0) {
+        const CHUNK = 200;
+        for (let i = 0; i < savedFiles.length; i += CHUNK) {
+          await upsertProjectFiles(project.id, savedFiles.slice(i, i + CHUNK));
         }
       }
     } catch (e) {
