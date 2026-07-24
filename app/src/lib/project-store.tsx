@@ -1186,6 +1186,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
       if (newFiles.length === 0) return;
 
+      // Mark content as loaded so debounced save picks it up
+      for (const f of newFiles) {
+        loadedContentIds.current.add(f.id);
+      }
+
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id !== activeProjectId) return p;
@@ -1196,6 +1201,12 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         })
       );
       setActiveFileIdOverride(newFiles[0].id);
+
+      // Trigger immediate save for imported files (debounced saves may not
+      // fire reliably if the signature was already tracked)
+      upsertProjectFiles(activeProjectId, newFiles).catch((e) =>
+        console.error('Failed to save imported files:', e)
+      );
     },
     [activeProjectId]
   );
