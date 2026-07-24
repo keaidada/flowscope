@@ -17,15 +17,29 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { FileCode, AlertCircle, Wand2 } from 'lucide-react';
-import type { Dialect, ProjectFile } from '@/lib/project-store';
+import type { Dialect } from '@/lib/dialect-constants';
 import { DIALECT_OPTIONS } from '@/lib/dialect-constants';
+
+type FileLanguage = 'sql' | 'json' | 'text';
+
+interface ProjectFile {
+  id: string;
+  name: string;
+  path: string;
+  content: string;
+  language: FileLanguage;
+  size?: number;
+  dialect?: string;
+  isProcedure?: boolean;
+  transformedContent?: string | null;
+}
 
 interface PendingFile {
   file: File;
   name: string;
   path: string;
   content: string;
-  language: ProjectFile['language'];
+  language: FileLanguage;
   isProcedure: boolean;
 }
 
