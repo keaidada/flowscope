@@ -198,18 +198,17 @@ export function SqlView({
     }
   }, [highlightedSpan, issueHighlights, isControlled]);
 
-  // 点击编辑器外部时关闭搜索面板
+  // 点击编辑器内容区外部时关闭搜索面板
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      // 搜索面板自身：不关闭
       const target = e.target as HTMLElement;
+      // 点在搜索面板内 → 不关闭
       if (target.closest('.cm-panel.cm-search')) return;
-      // 点击脚本内容区：不关闭
-      const content = document.querySelector<HTMLElement>('.cm-content');
-      if (content && content.contains(e.target as Node)) return;
+      // 点在脚本内容区 → 不关闭
+      if (document.querySelector('.cm-content')?.contains(target)) return;
+      // 其他位置 → 关闭
       const view = editorRef.current?.view;
-      if (!view) return;
-      closeSearchPanel(view);
+      if (view) closeSearchPanel(view);
     };
     document.addEventListener('mousedown', handler, true);
     return () => document.removeEventListener('mousedown', handler, true);
