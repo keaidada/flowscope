@@ -15,7 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, FolderTree, AlertTriangle, XCircle, CheckCircle } from 'lucide-react';
+import { Loader2, FolderTree, AlertTriangle, XCircle, CheckCircle, Copy, Check } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 import type { Dialect } from '@/lib/dialect-constants';
 import { DIALECT_OPTIONS } from '@/lib/dialect-constants';
 
@@ -38,9 +39,32 @@ function FileListDialog({ open, onOpenChange, title, files, icon }: {
   files: string[];
   icon: 'success' | 'warn' | 'error';
 }) {
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [copied, setCopied] = useState(false);
+
+  const allSelected = files.length > 0 && selected.size === files.length;
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(files.map((_, i) => i)));
+    }
+  };
+  const toggleOne = (i: number) => {
+    const next = new Set(selected);
+    if (next.has(i)) next.delete(i); else next.add(i);
+    setSelected(next);
+  };
+  const copySelected = async () => {
+    const paths = files.filter((_, i) => selected.has(i)).join('\n');
+    await navigator.clipboard.writeText(paths);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[90vw] w-fit min-w-[340px] max-h-[80vh]">
+      <DialogContent className="max-w-[90vw] w-fit min-w-[380px] max-h-[80vh]">
         <DialogHeader>
           <DialogTitle className="text-sm flex items-center gap-2">
             {icon === 'success' ? (
@@ -51,15 +75,41 @@ function FileListDialog({ open, onOpenChange, title, files, icon }: {
               <XCircle className="h-4 w-4 text-red-500" />
             )}
             {title} ({files.length})
+            {selected.size > 0 && (
+              <span className="text-xs text-muted-foreground font-normal">
+                — 已选 {selected.size}
+              </span>
+            )}
           </DialogTitle>
         </DialogHeader>
-        <div className="max-h-[60vh] overflow-y-auto text-xs">
+
+        <div className="flex items-center gap-2 px-1 pb-1 border-b">
+          <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
+          <button className="text-xs text-muted-foreground hover:text-foreground" onClick={toggleAll}>
+            {allSelected ? '取消全选' : '全选'}
+          </button>
+          {selected.size > 0 && (
+            <Button variant="ghost" size="sm" className="h-6 ml-auto text-xs" onClick={copySelected}>
+              {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+              <span className="ml-1">{copied ? '已复制' : '复制选中'}</span>
+            </Button>
+          )}
+        </div>
+
+        <div className="max-h-[55vh] overflow-y-auto text-xs">
           {files.map((p, i) => (
             <div
               key={i}
-              className="py-0.5 px-1 font-mono text-muted-foreground hover:bg-muted/50 break-all"
+              className="flex items-start gap-1.5 py-0.5 px-1 hover:bg-muted/50"
             >
-              {p}
+              <Checkbox
+                checked={selected.has(i)}
+                onCheckedChange={() => toggleOne(i)}
+                className="mt-0.5 shrink-0"
+              />
+              <span className="font-mono text-muted-foreground break-all cursor-pointer flex-1" onClick={() => toggleOne(i)}>
+                {p}
+              </span>
             </div>
           ))}
         </div>
