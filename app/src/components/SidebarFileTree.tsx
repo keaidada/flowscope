@@ -26,83 +26,33 @@ import {
 import { genId } from '@/lib/utils';
 import { saveProjectFiles } from '@/lib/file-storage';
 
-function isWordBoundary(bytes: Uint8Array, start: number, end: number): boolean {
-  if (start > 0 && isAlphaNum(bytes[start - 1])) return false;
-  if (end < bytes.length && isAlphaNum(bytes[end])) return false;
-  return true;
-}
-
-function isAlphaNum(b: number): boolean {
-  return (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b === 95;
-}
-
 function sanitizeBigQueryProcedure(sql: string): string | null {
-  const uc = new TextEncoder().encode(sql.toUpperCase());
-  const raw = new TextEncoder().encode(sql);
+  try {
+    const beginIdx = sql.toUpperCase().indexOf('BEGIN');
+    const endIdx = sql.toUpperCase().lastIndexOf('END');
+    if (beginIdx < 0 || endIdx <= beginIdx) return null;
 
-  let start = -1;
-  for (let i = 0; i < uc.length - 4; i++) {
-    if (uc[i] === 66 /*B*/ && uc[i + 1] === 69 /*E*/ && uc[i + 2] === 71 /*G*/ && uc[i + 3] === 73 /*I*/ && uc[i + 4] === 78 /*N*/) {
-      if (isWordBoundary(uc, i, i + 5)) { start = i; break; }
-    }
+    const body = sql.slice(beginIdx + 5, endIdx);
+    // Remove single-line comments (-- to end of line) and block comments (/* */)
+    const uncommented = body
+      .replace(/--[^\n]*/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .trim();
+
+    // Extract DML/SELECT statements
+    const stmts = uncommented.split(';').map(s => s.trim()).filter(s => {
+      const u = s.toUpperCase().trimStart();
+      return u.startsWith('SELECT') || u.startsWith('INSERT') ||
+        u.startsWith('DELETE') || u.startsWith('MERGE') ||
+        u.startsWith('UPDATE') || u.startsWith('TRUNCATE') ||
+        u.startsWith('WITH') || u.startsWith('CREATE TABLE') ||
+        u.startsWith('CREATE OR REPLACE TABLE');
+    });
+
+    return stmts.length > 0 ? stmts.join(';\n') : null;
+  } catch {
+    return null;
   }
-
-  if (start < 0) return null;
-
-  let depth = 0;
-  let end = -1;
-  let i = start;
-  while (i < uc.length - 2) {
-    if (uc[i] === 66 && uc[i + 1] === 69 && uc[i + 2] === 71 && uc[i + 3] === 73 && uc[i + 4] === 78) {
-      if (isWordBoundary(uc, i, i + 5)) {
-        const after = String.fromCharCode(...uc.slice(i + 5)).trimStart();
-        if (!after.toUpperCase().startsWith('IF') && !after.toUpperCase().startsWith('WHILE') && !after.toUpperCase().startsWith('LOOP') && !after.toUpperCase().startsWith('FOR')) {
-          depth++;
-        }
-      }
-    }
-    if (uc[i] === 69 && uc[i + 1] === 78 && uc[i + 2] === 68) {
-      const isCtlEnd = i + 3 < uc.length && (uc[i + 3] === 32 || uc[i + 3] === 9 || uc[i + 3] === 10 || uc[i + 3] === 13 || uc[i + 3] === 59);
-      if (isCtlEnd || i + 3 >= uc.length) {
-        const prefix = String.fromCharCode(...uc.slice(0, i)).trimEnd();
-        if (prefix.toUpperCase().endsWith('IF') || prefix.toUpperCase().endsWith('WHILE') || prefix.toUpperCase().endsWith('LOOP')) {
-          // control flow END
-        } else {
-          depth--;
-          if (depth === 0) { end = i + 3; break; }
-        }
-      }
-    }
-    i++;
-  }
-
-  if (end < 0 || end <= start) return null;
-
-  const bodyRaw = raw.slice(start, end);
-  const body = new TextDecoder().decode(bodyRaw);
-
-  // Uncomment block comments
-  const uncommented = body.replace(/\/\*[\s\S]*?\*\//g, (m) => m.slice(2, -2));
-
-  // Split into statements and extract DML
-  const statements = uncommented.split(';');
-  const dml: string[] = [];
-  for (let s of statements) {
-    s = s.trim();
-    if (!s) continue;
-    const upper = s.toUpperCase().trimStart();
-    if (
-      upper.startsWith('SELECT') || upper.startsWith('INSERT') ||
-      upper.startsWith('DELETE') || upper.startsWith('MERGE') ||
-      upper.startsWith('UPDATE') || upper.startsWith('TRUNCATE') ||
-      upper.startsWith('WITH') || upper.startsWith('CREATE TABLE') ||
-      upper.startsWith('CREATE OR REPLACE TABLE')
-    ) {
-      dml.push(s);
-    }
-  }
-
-  return dml.length > 0 ? dml.join(';\n') : null;
 }
 
 function detectStoredProcedure(content: string): boolean {
@@ -253,46 +203,58 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         addFilesDirectly(projectFiles);
       }
 
-      // Phase 3: Read content in background, update React state + SQLite progressively
+      // Phase 3: Read content in background, update React state progressively
       let loaded = 0;
-      const BATCH = 100;
+      const BATCH = 50;
       for (let i = 0; i < supportedFiles.length; i += BATCH) {
         const batchFiles = supportedFiles.slice(i, i + BATCH);
         const batchPFs = projectFiles.slice(i, i + BATCH);
 
-        // Read content for this batch in parallel
-        const contents = await Promise.all(batchFiles.map((f) => f.text()));
+        try {
+          // Read content for this batch in parallel
+          const contents = await Promise.all(batchFiles.map((f) => f.text()));
 
-        // Update in-memory ProjectFile objects with content + procedure detection
-        const updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }> = [];
-        for (let j = 0; j < batchPFs.length; j++) {
-          batchPFs[j].content = contents[j];
-          const isProcedure = detectStoredProcedure(contents[j]);
-          let transformedContent: string | null = null;
-          if (isProcedure && selectedDialectRef.current === 'bigquery') {
-            transformedContent = sanitizeBigQueryProcedure(contents[j]);
+          // Update in-memory ProjectFile objects with content + procedure detection
+          const updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }> = [];
+          for (let j = 0; j < batchPFs.length; j++) {
+            batchPFs[j].content = contents[j];
+            const isProcedure = detectStoredProcedure(contents[j]);
+            let transformedContent: string | null = null;
+            if (isProcedure && selectedDialectRef.current === 'bigquery') {
+              try {
+                transformedContent = sanitizeBigQueryProcedure(contents[j]);
+              } catch {
+                transformedContent = null;
+              }
+            }
+            batchPFs[j].isProcedure = isProcedure;
+            batchPFs[j].transformedContent = transformedContent;
+            updates.push({ fileId: batchPFs[j].id, content: contents[j], isProcedure, transformedContent });
           }
-          batchPFs[j].isProcedure = isProcedure;
-          batchPFs[j].transformedContent = transformedContent;
-          updates.push({ fileId: batchPFs[j].id, content: contents[j], isProcedure, transformedContent });
+
+          // Batch-update React state
+          updateFiles(updates);
+
+          loaded += batchFiles.length;
+          setUploadProgress({ total: importTotal, loaded, skipped, done: false, stage: 'reading' });
+        } catch (batchErr) {
+          console.error(`Failed to process batch ${Math.floor(i / BATCH)}:`, batchErr);
+          loaded += batchFiles.length;
+          setUploadProgress({ total: importTotal, loaded, skipped, done: false, stage: 'reading' });
         }
-
-        // Batch-update React state
-        updateFiles(updates);
-
-        loaded += batchFiles.length;
-        setUploadProgress({ total: importTotal, loaded, skipped, done: false, stage: 'reading' });
       }
 
-      // Phase 4: Persist to SQLite → OPFS/IndexedDB
+      // Phase 4: Save incrementally (chunked to avoid large API payloads)
       setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false, stage: 'saving' });
       try {
         if (currentProject) {
-          const allProjectFiles = [
-            ...(currentProject.files.filter((f) => !projectFiles.some((pf) => pf.id === f.id))),
-            ...projectFiles,
-          ];
-          await saveProjectFiles(currentProject.id, allProjectFiles);
+          const SAVE_CHUNK = 500;
+          for (let i = 0; i < projectFiles.length; i += SAVE_CHUNK) {
+            const chunk = projectFiles.slice(i, i + SAVE_CHUNK).filter((f) => f.content.length > 0);
+            if (chunk.length > 0) {
+              await saveProjectFiles(currentProject.id, chunk);
+            }
+          }
         }
       } catch (e) {
         console.error('Failed to persist imported files:', e);
