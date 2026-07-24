@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, FolderTree } from 'lucide-react';
+import { Loader2, FolderTree, CheckCircle2 } from 'lucide-react';
 import type { Dialect } from '@/lib/dialect-constants';
 import { DIALECT_OPTIONS } from '@/lib/dialect-constants';
 
@@ -26,6 +26,7 @@ interface ConvertFolderDialogProps {
   procedureCount: number;
   totalFileCount: number;
   isConverting: boolean;
+  convertProgress: { done: number; total: number } | null;
   onConfirm: (dialect: Dialect) => void;
 }
 
@@ -36,9 +37,11 @@ export function ConvertFolderDialog({
   procedureCount,
   totalFileCount,
   isConverting,
+  convertProgress,
   onConfirm,
 }: ConvertFolderDialogProps) {
   const [dialect, setDialect] = useState<Dialect>('bigquery');
+  const completed = convertProgress && convertProgress.done >= convertProgress.total;
 
   const handleConfirm = () => {
     onConfirm(dialect);
@@ -71,41 +74,69 @@ export function ConvertFolderDialog({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">引擎类型</label>
-            <Select
-              value={dialect}
-              onValueChange={(v) => setDialect(v as Dialect)}
-              disabled={isConverting}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DIALECT_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {!isConverting && !completed && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">引擎类型</label>
+              <Select value={dialect} onValueChange={(v) => setDialect(v as Dialect)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DIALECT_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {(isConverting || completed) && convertProgress && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>{completed ? '完成' : '转换中...'}</span>
+                <span>{convertProgress.done} / {convertProgress.total}</span>
+              </div>
+              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    completed ? 'bg-green-500' : 'bg-amber-500'
+                  }`}
+                  style={{ width: `${convertProgress.total > 0 ? (convertProgress.done / convertProgress.total) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {completed && (
+            <div className="flex items-center gap-2 text-sm text-green-600">
+              <CheckCircle2 className="h-4 w-4" />
+              已转换 {convertProgress?.total ?? 0} 个存储过程
+            </div>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isConverting}>
-            取消
-          </Button>
-          <Button onClick={handleConfirm} disabled={procedureCount === 0 || isConverting}>
-            {isConverting ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                转换中...
-              </>
-            ) : (
-              `转换 ${procedureCount} 个存储过程`
-            )}
-          </Button>
+          {completed ? (
+            <Button onClick={() => onOpenChange(false)}>完成</Button>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isConverting}>
+                取消
+              </Button>
+              <Button onClick={handleConfirm} disabled={procedureCount === 0 || isConverting}>
+                {isConverting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    转换中...
+                  </>
+                ) : (
+                  `转换 ${procedureCount} 个存储过程`
+                )}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -50,6 +50,8 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     renameFolder,
     deleteFolder,
     isReadOnly,
+    ensureFilesContent,
+    isContentLoaded,
   } = useProject();
 
   const [search, setSearch] = useState('');
@@ -69,6 +71,10 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const [convertDialogOpen, setConvertDialogOpen] = useState(false);
   const [convertTargetPath, setConvertTargetPath] = useState('');
   const [isConvertingFolder, setIsConvertingFolder] = useState(false);
+  const [convertProgress, setConvertProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const currentProjectRef = useRef(currentProject);
+  currentProjectRef.current = currentProject;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -236,31 +242,65 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
   const handleConvertFolder = useCallback(async (_dialect: Dialect) => {
     if (!currentProject) return;
+    const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
+    const folderFiles = currentProject.files.filter(f => f.path.startsWith(prefix));
+    const procFiles = folderFiles.filter(f => f.isProcedure);
+    const total = procFiles.length;
+
+    if (total === 0) return;
+
     setIsConvertingFolder(true);
+    setConvertProgress({ done: 0, total });
+
     try {
-      const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
-      const folderFiles = currentProject.files.filter(f => f.path.startsWith(prefix));
-      const procFiles = folderFiles.filter(f => f.isProcedure && f.content.length > 0);
-      const updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }> = [];
-
-      for (const f of procFiles) {
-        const transformedContent = extractDmlFromProcedure(f.content);
-        updates.push({
-          fileId: f.id,
-          content: f.content,
-          isProcedure: true,
-          transformedContent,
-        });
+      // Step 1: ensure all procedure files have content loaded
+      const unloadedIds = procFiles.filter(f => !isContentLoaded(f.id)).map(f => f.id);
+      if (unloadedIds.length > 0) {
+        await ensureFilesContent(unloadedIds);
       }
 
-      if (updates.length > 0) {
-        updateFiles(updates);
+      // Step 2: process in batches with progress updates
+      const BATCH = 50;
+      let allUpdates: Array<{
+        fileId: string;
+        content: string;
+        isProcedure?: boolean;
+        transformedContent?: string | null;
+      }> = [];
+
+      // Use ref to get latest project state after content loading
+      const project = currentProjectRef.current;
+      if (!project) return;
+
+      const refreshed = project.files.filter(f => f.path.startsWith(prefix) && f.isProcedure && f.content.length > 0);
+
+      for (let i = 0; i < refreshed.length; i += BATCH) {
+        const batch = refreshed.slice(i, i + BATCH);
+        const batchUpdates: typeof allUpdates = [];
+        for (const f of batch) {
+          const transformedContent = extractDmlFromProcedure(f.content);
+          batchUpdates.push({
+            fileId: f.id,
+            content: f.content,
+            isProcedure: true,
+            transformedContent,
+          });
+        }
+        if (batchUpdates.length > 0) {
+          updateFiles(batchUpdates);
+        }
+        setConvertProgress({ done: Math.min(i + BATCH, total), total });
+        // Yield to allow UI update
+        await new Promise(r => setTimeout(r, 0));
       }
+
+      setConvertProgress({ done: total, total });
+    } catch (e) {
+      console.error('Failed to convert procedures:', e);
     } finally {
       setIsConvertingFolder(false);
-      setConvertDialogOpen(false);
     }
-  }, [currentProject, convertTargetPath, updateFiles]);
+  }, [currentProject, convertTargetPath, updateFiles, ensureFilesContent, isContentLoaded]);
 
   const folderProcedureCount = useMemo(() => {
     if (!convertDialogOpen || !currentProject) return 0;
@@ -722,11 +762,12 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
       <ConvertFolderDialog
         open={convertDialogOpen}
-        onOpenChange={setConvertDialogOpen}
+        onOpenChange={(open) => { if (!isConvertingFolder) { setConvertDialogOpen(open); if (!open) setConvertProgress(null); } }}
         folderPath={convertTargetPath}
         procedureCount={folderProcedureCount}
         totalFileCount={folderTotalCount}
         isConverting={isConvertingFolder}
+        convertProgress={convertProgress}
         onConfirm={handleConvertFolder}
       />
     </div>
