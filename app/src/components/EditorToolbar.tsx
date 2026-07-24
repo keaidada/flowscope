@@ -1,4 +1,4 @@
-import { Play, Loader2, ChevronDown, Braces, Code, FileCode, Network, WrapText, Wand2, Save } from 'lucide-react';
+import { Play, Loader2, ChevronDown, Braces, Code, FileCode, Network, WrapText, Wand2, Save, Scissors } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
@@ -48,6 +48,9 @@ interface EditorToolbarProps {
   hasLineageResult?: boolean;
   onOpenEtl?: () => void;
   onSave?: () => void;
+  isProcedure?: boolean;
+  onConvertProcedure?: () => void;
+  isConverting?: boolean;
 }
 
 export function EditorToolbar({
@@ -73,6 +76,8 @@ export function EditorToolbar({
   hasLineageResult = false,
   onOpenEtl,
   onSave,
+  onConvertProcedure,
+  isConverting,
 }: EditorToolbarProps) {
   const { t } = useTranslation();
 
@@ -203,6 +208,30 @@ export function EditorToolbar({
               </TooltipTrigger>
               <TooltipContent>
                 <p>ETL 工具</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {onConvertProcedure && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={onConvertProcedure}
+                  disabled={isConverting}
+                >
+                  {isConverting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Scissors className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>转换存储过程</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

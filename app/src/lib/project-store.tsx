@@ -111,7 +111,7 @@ interface ProjectContextType {
   // File actions for active project
   createFile: (name: string, content?: string, path?: string) => void;
   updateFile: (fileId: string, content: string) => void;
-  updateFiles: (updates: Array<{ fileId: string; content: string }>) => void;
+  updateFiles: (updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }>) => void;
   deleteFile: (fileId: string) => void;
   deleteFiles: (fileIds: string[]) => void;
   renameFile: (fileId: string, newName: string) => void;

@@ -57,6 +57,7 @@ export function EditorArea({
   const {
     currentProject,
     updateFile,
+    updateFiles,
     createFile,
     setRunMode,
     isReadOnly,
@@ -280,6 +281,45 @@ export function EditorArea({
     [activeFile, updateFile]
   );
 
+  const [isConverting, setIsConverting] = useState(false);
+
+  const handleConvertProcedure = useCallback(async () => {
+    if (!activeFile) return;
+    const content = activeFile.content;
+    if (!content) return;
+
+    setIsConverting(true);
+    try {
+      // Extract DML from BigQuery stored procedure body
+      const beginIdx = content.toUpperCase().indexOf('BEGIN');
+      const endIdx = content.toUpperCase().lastIndexOf('END');
+      let transformedContent: string | null = null;
+
+      if (beginIdx >= 0 && endIdx > beginIdx) {
+        const body = content.slice(beginIdx + 5, endIdx);
+        const uncommented = body
+          .replace(/--[^\n]*/g, '')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .trim();
+        const stmts = uncommented.split(';').map(s => s.trim()).filter(s => {
+          const u = s.toUpperCase().trimStart();
+          return u.startsWith('SELECT') || u.startsWith('INSERT') ||
+            u.startsWith('DELETE') || u.startsWith('MERGE') ||
+            u.startsWith('UPDATE') || u.startsWith('TRUNCATE') ||
+            u.startsWith('WITH') || u.startsWith('CREATE TABLE') ||
+            u.startsWith('CREATE OR REPLACE TABLE');
+        });
+        if (stmts.length > 0) transformedContent = stmts.join(';\n');
+      }
+
+      updateFiles([{ fileId: activeFile.id, content, isProcedure: true, transformedContent }]);
+    } finally {
+      setIsConverting(false);
+    }
+  }, [activeFile, updateFiles]);
+
+  const isProcedure = activeFile?.isProcedure ?? false;
+
   // Keyboard shortcuts for running analysis
   const analysisShortcuts = useMemo<GlobalShortcut[]>(
     () => [
@@ -375,6 +415,9 @@ export function EditorArea({
         hasLineageResult={!!result}
         onOpenEtl={handleOpenEtl}
         onSave={handleSave}
+        isProcedure={isProcedure}
+        onConvertProcedure={isProcedure ? handleConvertProcedure : undefined}
+        isConverting={isConverting}
       />
 
       {error && (
