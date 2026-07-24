@@ -9,6 +9,7 @@ import {
   Pencil,
   Trash2,
   Plus,
+  Scissors,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -66,6 +67,8 @@ interface FileTreeProps {
   onRenameFolder?: (oldFolderPath: string, newFolderName: string) => void;
   /** Called when user clicks the delete button on a folder */
   onDeleteFolder?: (folderPath: string) => void;
+  /** Called when user clicks the convert procedure button on a folder */
+  onConvertProcedureInFolder?: (folderPath: string) => void;
   /** Current search query — when non-empty, auto-expand folders containing matched files */
   searchQuery?: string;
   /** Reports the rendered tree content width so the sidebar can auto-resize */
@@ -395,6 +398,18 @@ const FolderNode = memo(function FolderNode({ node, depth, props, expandedFolder
                 title="Delete folder"
               >
                 <Trash2 className="size-3" />
+              </button>
+            )}
+            {props.onConvertProcedureInFolder && (
+              <button
+                className="p-0.5 rounded hover:bg-amber-500/20 text-muted-foreground hover:text-amber-500"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onConvertProcedureInFolder!(node.path);
+                }}
+                title="Convert stored procedures in folder"
+              >
+                <Scissors className="size-3" />
               </button>
             )}
           </div>

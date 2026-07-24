@@ -24,6 +24,8 @@ import {
 } from '@/lib/constants';
 import { genId } from '@/lib/utils';
 import { saveProjectFiles } from '@/lib/file-storage';
+import { ConvertFolderDialog } from './ConvertFolderDialog';
+import type { Dialect } from '@/lib/dialect-constants';
 
 interface SidebarFileTreeProps {
   onContentWidthChange?: (widthPx: number) => void;
@@ -64,6 +66,9 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     done: boolean;
     stage?: 'reading' | 'saving';
   } | null>(null);
+  const [convertDialogOpen, setConvertDialogOpen] = useState(false);
+  const [convertTargetPath, setConvertTargetPath] = useState('');
+  const [isConvertingFolder, setIsConvertingFolder] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -199,6 +204,75 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     },
     [addFilesDirectly, updateFiles, currentProject]
   );
+
+  const extractDmlFromProcedure = (content: string): string | null => {
+    try {
+      const beginIdx = content.toUpperCase().indexOf('BEGIN');
+      const endIdx = content.toUpperCase().lastIndexOf('END');
+      if (beginIdx < 0 || endIdx <= beginIdx) return null;
+      const body = content.slice(beginIdx + 5, endIdx);
+      const uncommented = body
+        .replace(/--[^\n]*/g, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .trim();
+      const stmts = uncommented.split(';').map(s => s.trim()).filter(s => {
+        const u = s.toUpperCase().trimStart();
+        return u.startsWith('SELECT') || u.startsWith('INSERT') ||
+          u.startsWith('DELETE') || u.startsWith('MERGE') ||
+          u.startsWith('UPDATE') || u.startsWith('TRUNCATE') ||
+          u.startsWith('WITH') || u.startsWith('CREATE TABLE') ||
+          u.startsWith('CREATE OR REPLACE TABLE');
+      });
+      return stmts.length > 0 ? stmts.join(';\n') : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleOpenConvertFolder = useCallback((folderPath: string) => {
+    setConvertTargetPath(folderPath);
+    setConvertDialogOpen(true);
+  }, []);
+
+  const handleConvertFolder = useCallback(async (_dialect: Dialect) => {
+    if (!currentProject) return;
+    setIsConvertingFolder(true);
+    try {
+      const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
+      const folderFiles = currentProject.files.filter(f => f.path.startsWith(prefix));
+      const procFiles = folderFiles.filter(f => f.isProcedure && f.content.length > 0);
+      const updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }> = [];
+
+      for (const f of procFiles) {
+        const transformedContent = extractDmlFromProcedure(f.content);
+        updates.push({
+          fileId: f.id,
+          content: f.content,
+          isProcedure: true,
+          transformedContent,
+        });
+      }
+
+      if (updates.length > 0) {
+        updateFiles(updates);
+      }
+    } finally {
+      setIsConvertingFolder(false);
+      setConvertDialogOpen(false);
+    }
+  }, [currentProject, convertTargetPath, updateFiles]);
+
+  const folderProcedureCount = useMemo(() => {
+    if (!convertDialogOpen || !currentProject) return 0;
+    const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
+    return currentProject.files.filter(f => f.path.startsWith(prefix) && f.isProcedure).length;
+  }, [convertDialogOpen, currentProject, convertTargetPath]);
+
+  const folderTotalCount = useMemo(() => {
+    if (!convertDialogOpen || !currentProject) return 0;
+    const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
+    return currentProject.files.filter(f => f.path.startsWith(prefix)).length;
+  }, [convertDialogOpen, currentProject, convertTargetPath]);
 
   const handleSelectFile = (fileId: string) => {
     selectFile(fileId);
@@ -584,6 +658,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
                 }
               }
             }}
+            onConvertProcedureInFolder={!isReadOnly ? handleOpenConvertFolder : undefined}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4 text-center">
@@ -643,6 +718,16 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         className="hidden"
         onChange={handleFolderUpload}
         {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+      />
+
+      <ConvertFolderDialog
+        open={convertDialogOpen}
+        onOpenChange={setConvertDialogOpen}
+        folderPath={convertTargetPath}
+        procedureCount={folderProcedureCount}
+        totalFileCount={folderTotalCount}
+        isConverting={isConvertingFolder}
+        onConfirm={handleConvertFolder}
       />
     </div>
   );
