@@ -59,76 +59,11 @@ function validateProjectName(name: string, existingNames: string[]): string | nu
   return trimmed;
 }
 
-export type Dialect =
-  | 'generic'
-  | 'ansi'
-  | 'bigquery'
-  | 'clickhouse'
-  | 'databricks'
-  | 'duckdb'
-  | 'hive'
-  | 'mssql'
-  | 'mysql'
-  | 'oracle'
-  | 'postgres'
-  | 'redshift'
-  | 'snowflake'
-  | 'sqlite';
-
-/** Human-readable labels for each dialect. */
-const DIALECT_LABELS: Record<Dialect, string> = {
-  generic: 'Generic SQL',
-  ansi: 'ANSI SQL',
-  bigquery: 'BigQuery',
-  clickhouse: 'ClickHouse',
-  databricks: 'Databricks',
-  duckdb: 'DuckDB',
-  hive: 'Hive',
-  mssql: 'MS SQL Server',
-  mysql: 'MySQL',
-  oracle: 'Oracle',
-  postgres: 'PostgreSQL',
-  redshift: 'Redshift',
-  snowflake: 'Snowflake',
-  sqlite: 'SQLite',
-};
-
-/** All valid dialect values for runtime validation. */
-export const VALID_DIALECTS: readonly Dialect[] = [
-  'generic',
-  'ansi',
-  'bigquery',
-  'clickhouse',
-  'databricks',
-  'duckdb',
-  'hive',
-  'mssql',
-  'mysql',
-  'oracle',
-  'postgres',
-  'redshift',
-  'snowflake',
-  'sqlite',
-] as const;
-
-/**
- * Dialect options for UI dropdowns, derived from VALID_DIALECTS.
- * This ensures the UI options are always in sync with valid dialect values.
- * Note: 'ansi' is excluded from UI since 'generic' serves the same purpose for users.
- */
-export const DIALECT_OPTIONS: readonly { value: Dialect; label: string }[] = VALID_DIALECTS.filter(
-  (d) => d !== 'ansi' // 'ansi' is valid but not shown in UI (use 'generic' instead)
-).map((value) => ({
-  value,
-  label: DIALECT_LABELS[value],
-}));
-
-/**
- * Type guard to check if a value is a valid Dialect.
- */
-export function isValidDialect(value: unknown): value is Dialect {
-  return typeof value === 'string' && VALID_DIALECTS.includes(value as Dialect);
-}
+// Re-export dialect types and constants from shared module to avoid circular imports
+import type { Dialect } from './dialect-constants';
+import { DIALECT_OPTIONS, VALID_DIALECTS, isValidDialect } from './dialect-constants';
+export type { Dialect };
+export { DIALECT_OPTIONS, VALID_DIALECTS, isValidDialect };
 
 export type RunMode = 'current' | 'all' | 'custom';
 // Re-export TemplateMode from shared types for backward compatibility

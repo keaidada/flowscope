@@ -18,7 +18,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { FileCode, AlertCircle, Wand2 } from 'lucide-react';
 import type { Dialect, ProjectFile } from '@/lib/project-store';
-import { DIALECT_OPTIONS } from '@/lib/project-store';
+import { DIALECT_OPTIONS } from '@/lib/dialect-constants';
 
 interface PendingFile {
   file: File;
