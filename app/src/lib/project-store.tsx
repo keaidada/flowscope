@@ -1228,16 +1228,24 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         const content = await file.text();
         const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
         const path = relativePath || file.name;
+        const upper = content.toUpperCase();
+        const isProcedure = upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC');
         newFiles.push({
           id: uuidv4(),
           name: file.name,
           path,
           content,
           language: getFileLanguage(file.name),
+          isProcedure,
+          transformedContent: null,
         });
       }
 
       if (newFiles.length === 0) return;
+
+      for (const f of newFiles) {
+        loadedContentIds.current.add(f.id);
+      }
 
       setProjects((prev) =>
         prev.map((p) => {
@@ -1250,6 +1258,10 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         })
       );
       setActiveFileIdOverride(newFiles[0].id);
+
+      upsertProjectFiles(activeProjectId, newFiles).catch((e) =>
+        console.error('Failed to save replaced files:', e)
+      );
     },
     [activeProjectId]
   );
