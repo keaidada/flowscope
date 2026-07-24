@@ -50,7 +50,7 @@ export async function loadProjectFilesMeta(projectId: string): Promise<ProjectFi
     language: (f.language || 'sql') as ProjectFile['language'],
     size: f.size,
     dialect: (f as any).dialect || '',
-    isProcedure: (f as any).is_procedure ? true : false,
+    isProcedure: (f.is_procedure ?? 0) !== 0,
     transformedContent: (f as any).transformed_content || '',
   }));
 }

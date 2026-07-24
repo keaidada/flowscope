@@ -103,6 +103,7 @@ export interface ProjectFileMeta {
   dir_id: string;
   language: string;
   size: number;
+  is_procedure: number;
   created_at: string;
   updated_at: string;
 }
