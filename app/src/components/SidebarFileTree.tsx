@@ -257,6 +257,8 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       const unloadedIds = procFiles.filter(f => !isContentLoaded(f.id)).map(f => f.id);
       if (unloadedIds.length > 0) {
         await ensureFilesContent(unloadedIds);
+        // Yield to allow React to process content loading state updates
+        await new Promise(r => setTimeout(r, 100));
       }
 
       // Step 2: process in batches and save directly to DB
