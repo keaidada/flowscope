@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from 'react';
+import { extractBqDml } from '@/lib/procedure-utils';
 import { Loader2, AlertCircle, FileX } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
@@ -290,28 +291,7 @@ export function EditorArea({
 
     setIsConverting(true);
     try {
-      // Extract DML from BigQuery stored procedure body
-      const beginIdx = content.toUpperCase().indexOf('BEGIN');
-      const endIdx = content.toUpperCase().lastIndexOf('END');
-      let transformedContent: string | null = null;
-
-      if (beginIdx >= 0 && endIdx > beginIdx) {
-        const body = content.slice(beginIdx + 5, endIdx);
-        const uncommented = body
-          .replace(/--[^\n]*/g, '')
-          .replace(/\/\*[\s\S]*?\*\//g, '')
-          .trim();
-        const stmts = uncommented.split(';').map(s => s.trim()).filter(s => {
-          const u = s.toUpperCase().trimStart();
-          return u.startsWith('SELECT') || u.startsWith('INSERT') ||
-            u.startsWith('DELETE') || u.startsWith('MERGE') ||
-            u.startsWith('UPDATE') || u.startsWith('TRUNCATE') ||
-            u.startsWith('WITH') || u.startsWith('CREATE TABLE') ||
-            u.startsWith('CREATE OR REPLACE TABLE');
-        });
-        if (stmts.length > 0) transformedContent = stmts.join(';\n');
-      }
-
+      const transformedContent = extractBqDml(content);
       updateFiles([{ fileId: activeFile.id, content, isProcedure: true, transformedContent }]);
     } finally {
       setIsConverting(false);
