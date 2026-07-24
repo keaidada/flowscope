@@ -199,6 +199,19 @@ interface ProjectContextType {
   /** Directly add pre-built ProjectFile objects (no file reading needed) */
   addFilesDirectly: (files: ProjectFile[]) => void;
 
+  // Import config dialog
+  importDialogOpen: boolean;
+  pendingImportFiles: Array<{
+    file: File;
+    name: string;
+    path: string;
+    content: string;
+    language: ProjectFile['language'];
+    isProcedure: boolean;
+  }>;
+  confirmImportFiles: (dialect: Dialect, files: ProjectFile[]) => void;
+  cancelImport: () => void;
+
   // Import from shared URL
   importProject: (payload: SharePayload) => string;
 
@@ -390,6 +403,17 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     templateMode: backendTemplateMode,
     refresh: refreshBackendFiles,
   } = useBackendFiles(isBackendMode);
+
+  // Import config dialog state
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [pendingImportFiles, setPendingImportFiles] = useState<Array<{
+    file: File;
+    name: string;
+    path: string;
+    content: string;
+    language: ProjectFile['language'];
+    isProcedure: boolean;
+  }>>([]);
 
   // Track backend-specific state separately since it's derived, not persisted.
   const [backendActiveFileId, setBackendActiveFileId] = useState<string | null>(null);
@@ -1221,11 +1245,17 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     async (fileList: FileList | File[]) => {
       if (!activeProjectId) return;
 
-      const newFiles: ProjectFile[] = [];
       const files = Array.from(fileList);
+      const pending: Array<{
+        file: File;
+        name: string;
+        path: string;
+        content: string;
+        language: ProjectFile['language'];
+        isProcedure: boolean;
+      }> = [];
 
       for (const file of files) {
-        // Filter by accepted file types
         const ext = '.' + file.name.split('.').pop()?.toLowerCase();
         if (
           !ACCEPTED_FILE_TYPES_ARRAY.includes(ext as (typeof ACCEPTED_FILE_TYPES_ARRAY)[number])
@@ -1233,38 +1263,24 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           continue;
         }
         const content = await file.text();
-        // Use webkitRelativePath if available (folder upload), otherwise just filename
         const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
         const path = relativePath || file.name;
-
-        // Detect stored procedures (CREATE PROCEDURE / CREATE PROC)
         const upper = content.toUpperCase();
         const isProcedure = upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC');
-
-        newFiles.push({
-          id: uuidv4(),
+        pending.push({
+          file,
           name: file.name,
           path,
           content,
           language: getFileLanguage(file.name),
-          dialect: isProcedure ? undefined : undefined, // Will be filled by project dialect at analysis time
           isProcedure,
-          transformedContent: null,
         });
       }
 
-      if (newFiles.length === 0) return;
+      if (pending.length === 0) return;
 
-      setProjects((prev) =>
-        prev.map((p) => {
-          if (p.id !== activeProjectId) return p;
-          return {
-            ...p,
-            files: [...p.files, ...newFiles],
-          };
-        })
-      );
-      setActiveFileIdOverride(newFiles[0].id);
+      setPendingImportFiles(pending);
+      setImportDialogOpen(true);
     },
     [activeProjectId]
   );
@@ -1336,6 +1352,20 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     },
     [activeProjectId]
   );
+
+  const confirmImportFiles = useCallback(
+    (_dialect: Dialect, enrichedFiles: ProjectFile[]) => {
+      addFilesDirectly(enrichedFiles);
+      setImportDialogOpen(false);
+      setPendingImportFiles([]);
+    },
+    [addFilesDirectly]
+  );
+
+  const cancelImport = useCallback(() => {
+    setImportDialogOpen(false);
+    setPendingImportFiles([]);
+  }, []);
 
   const importProject = useCallback(
     (payload: SharePayload): string => {
@@ -1419,6 +1449,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     replaceWithFiles,
     addFilesDirectly,
     importProject,
+    // Import config dialog
+    importDialogOpen,
+    pendingImportFiles,
+    confirmImportFiles,
+    cancelImport,
     // Backend mode state
     isBackendMode,
     isReadOnly,
