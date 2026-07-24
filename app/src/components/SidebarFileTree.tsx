@@ -175,11 +175,15 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         // Read content for this batch in parallel
         const contents = await Promise.all(batchFiles.map((f) => f.text()));
 
-        // Update in-memory ProjectFile objects
-        const updates: Array<{ fileId: string; content: string }> = [];
+        // Update in-memory ProjectFile objects with content + procedure detection
+        const updates: Array<{ fileId: string; content: string; isProcedure?: boolean }> = [];
         for (let j = 0; j < batchPFs.length; j++) {
           batchPFs[j].content = contents[j];
-          updates.push({ fileId: batchPFs[j].id, content: contents[j] });
+          const upper = contents[j].toUpperCase();
+          const isProcedure = upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC');
+          batchPFs[j].isProcedure = isProcedure;
+          batchPFs[j].transformedContent = null;
+          updates.push({ fileId: batchPFs[j].id, content: contents[j], isProcedure });
         }
 
         // Batch-update React state

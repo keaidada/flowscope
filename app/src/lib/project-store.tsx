@@ -922,10 +922,10 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateFiles = useCallback(
-    (updates: Array<{ fileId: string; content: string }>) => {
+    (updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }>) => {
       if (!activeProjectId || updates.length === 0) return;
 
-      const updatesMap = new Map(updates.map((u) => [u.fileId, u.content]));
+      const updatesMap = new Map(updates.map((u) => [u.fileId, u]));
 
       // Mark all as content loaded
       for (const { fileId } of updates) {
@@ -938,10 +938,18 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           return {
             ...p,
             files: p.files.map((f) => {
-              if (!updatesMap.has(f.id)) return f;
-              const content = updatesMap.get(f.id) ?? f.content;
+              const update = updatesMap.get(f.id);
+              if (!update) return f;
+              const content = update.content;
               const size = new TextEncoder().encode(content).length;
-              return { ...f, content, size };
+              const result = { ...f, content, size };
+              if (update.isProcedure !== undefined) {
+                result.isProcedure = update.isProcedure;
+              }
+              if (update.transformedContent !== undefined) {
+                result.transformedContent = update.transformedContent;
+              }
+              return result;
             }),
           };
         })
