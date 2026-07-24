@@ -75,6 +75,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const [convertProgress, setConvertProgress] = useState<{ done: number; total: number } | null>(null);
   const [convertResult, setConvertResult] = useState<{
     success: number;
+    successPaths: string[];
     empty: string[];
     errors: string[];
   } | null>(null);
@@ -273,6 +274,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       const BATCH = 50;
       const savedFiles: ProjectFile[] = [];
       let successCount = 0;
+      const successPaths: string[] = [];
       const emptyFiles: string[] = [];
       const errorFiles: string[] = [];
 
@@ -292,6 +294,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
               emptyFiles.push(f.path);
             } else {
               successCount++;
+              successPaths.push(f.path);
             }
             const updatedFile: ProjectFile = { ...f, content, dialect, isProcedure: true, transformedContent };
             savedFiles.push(updatedFile);
@@ -316,7 +319,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       }
 
       setConvertProgress({ done: total, total });
-      setConvertResult({ success: successCount, empty: emptyFiles, errors: errorFiles });
+      setConvertResult({ success: successCount, successPaths, empty: emptyFiles, errors: errorFiles });
 
       // Step 4: persist to DB
       if (savedFiles.length > 0) {

@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, FolderTree, AlertTriangle, XCircle } from 'lucide-react';
+import { Loader2, FolderTree, AlertTriangle, XCircle, CheckCircle } from 'lucide-react';
 import type { Dialect } from '@/lib/dialect-constants';
 import { DIALECT_OPTIONS } from '@/lib/dialect-constants';
 
@@ -27,7 +27,7 @@ interface ConvertFolderDialogProps {
   totalFileCount: number;
   isConverting: boolean;
   convertProgress: { done: number; total: number } | null;
-  convertResult: { success: number; empty: string[]; errors: string[] } | null;
+  convertResult: { success: number; successPaths: string[]; empty: string[]; errors: string[] } | null;
   onConfirm: (dialect: Dialect) => void;
 }
 
@@ -36,14 +36,16 @@ function FileListDialog({ open, onOpenChange, title, files, icon }: {
   onOpenChange: (open: boolean) => void;
   title: string;
   files: string[];
-  icon: 'warn' | 'error';
+  icon: 'success' | 'warn' | 'error';
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[90vw] w-fit min-w-[320px] max-h-[80vh]">
+      <DialogContent className="max-w-[90vw] w-fit min-w-[340px] max-h-[80vh]">
         <DialogHeader>
           <DialogTitle className="text-sm flex items-center gap-2">
-            {icon === 'warn' ? (
+            {icon === 'success' ? (
+              <CheckCircle className="h-4 w-4 text-green-500" />
+            ) : icon === 'warn' ? (
               <AlertTriangle className="h-4 w-4 text-amber-500" />
             ) : (
               <XCircle className="h-4 w-4 text-red-500" />
@@ -55,7 +57,7 @@ function FileListDialog({ open, onOpenChange, title, files, icon }: {
           {files.map((p, i) => (
             <div
               key={i}
-              className="py-0.5 px-1 font-mono text-muted-foreground hover:bg-muted/50 whitespace-nowrap"
+              className="py-0.5 px-1 font-mono text-muted-foreground hover:bg-muted/50 break-all"
             >
               {p}
             </div>
@@ -81,7 +83,7 @@ export function ConvertFolderDialog({
   onConfirm,
 }: ConvertFolderDialogProps) {
   const [dialect, setDialect] = useState<Dialect>('bigquery');
-  const [listType, setListType] = useState<'empty' | 'errors' | null>(null);
+  const [listType, setListType] = useState<'success' | 'empty' | 'errors' | null>(null);
   const completed = convertProgress && convertProgress.done >= convertProgress.total;
 
   const emptyCount = convertResult?.empty.length ?? 0;
@@ -170,7 +172,10 @@ export function ConvertFolderDialog({
 
             {completed && convertResult && (
               <div className="grid grid-cols-3 gap-2">
-                {resultCard('成功', convertResult.success, 'text-green-600')}
+                {convertResult.success > 0
+                  ? resultCard('成功', convertResult.success, 'text-green-600', () => setListType('success'))
+                  : resultCard('成功', convertResult.success, 'text-green-600')
+                }
                 {emptyCount > 0
                   ? resultCard('无 DML', emptyCount, 'text-amber-600', () => setListType('empty'))
                   : resultCard('无 DML', emptyCount, 'text-amber-600')
@@ -211,9 +216,18 @@ export function ConvertFolderDialog({
         <FileListDialog
           open
           onOpenChange={() => setListType(null)}
-          title={listType === 'empty' ? '未提取到 DML' : '异常'}
-          files={listType === 'empty' ? convertResult.empty : convertResult.errors}
-          icon={listType === 'empty' ? 'warn' : 'error'}
+          title={
+            listType === 'success' ? '成功转换' :
+            listType === 'empty' ? '未提取到 DML' : '异常'
+          }
+          files={
+            listType === 'success' ? convertResult.successPaths :
+            listType === 'empty' ? convertResult.empty : convertResult.errors
+          }
+          icon={
+            listType === 'success' ? 'success' :
+            listType === 'empty' ? 'warn' : 'error'
+          }
         />
       )}
     </>
