@@ -195,7 +195,7 @@ export function extractBqDml(content: string): string | null {
     const results: string[] = [];
 
     for (const stmt of rawStmts) {
-      const s = stmt.trim();
+      let s = stmt.trim();
       if (!s) continue;
 
       if (isDml(s)) { results.push(s); continue; }
@@ -205,6 +205,25 @@ export function extractBqDml(content: string): string | null {
 
       const setSql = extractSetStmtSql(s);
       if (setSql && isDml(setSql)) { results.push(setSql); continue; }
+
+      // Handle nested BEGIN blocks: strip leading keywords and retry
+      let remainder = s;
+      while (true) {
+        const upper2 = remainder.toUpperCase().trimStart();
+        const prefix = upper2.split(/\s+/)[0];
+        if (prefix === 'BEGIN' || prefix === 'IF' || prefix === 'WHILE' || prefix === 'LOOP' || prefix === 'ELSE' || prefix === 'THEN') {
+          const idx = upper2.indexOf(prefix);
+          remainder = remainder.slice(idx + prefix.length).trimStart();
+          // Try EXECUTE IMMEDIATE on remainder
+          const innerExec = extractExecuteImmediateSql(remainder);
+          if (innerExec && isDml(innerExec)) { results.push(innerExec); break; }
+          const innerSet = extractSetStmtSql(remainder);
+          if (innerSet && isDml(innerSet)) { results.push(innerSet); break; }
+          if (isDml(remainder)) { results.push(remainder); break; }
+          continue;
+        }
+        break;
+      }
     }
 
     return results.length > 0 ? results.join(';\n') : null;
