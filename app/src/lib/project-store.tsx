@@ -111,7 +111,7 @@ interface ProjectContextType {
   // File actions for active project
   createFile: (name: string, content?: string, path?: string) => void;
   updateFile: (fileId: string, content: string) => void;
-  updateFiles: (updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }>) => void;
+  updateFiles: (updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null; dialect?: string }>) => void;
   deleteFile: (fileId: string) => void;
   deleteFiles: (fileIds: string[]) => void;
   renameFile: (fileId: string, newName: string) => void;
@@ -922,7 +922,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateFiles = useCallback(
-    (updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }>) => {
+    (updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null; dialect?: string }>) => {
       if (!activeProjectId || updates.length === 0) return;
 
       const updatesMap = new Map(updates.map((u) => [u.fileId, u]));
@@ -948,6 +948,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
               }
               if (update.transformedContent !== undefined) {
                 result.transformedContent = update.transformedContent;
+              }
+              if (update.dialect !== undefined) {
+                result.dialect = update.dialect;
               }
               return result;
             }),

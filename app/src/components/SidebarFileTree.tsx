@@ -73,6 +73,11 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const [convertTargetPath, setConvertTargetPath] = useState('');
   const [isConvertingFolder, setIsConvertingFolder] = useState(false);
   const [convertProgress, setConvertProgress] = useState<{ done: number; total: number } | null>(null);
+  const [convertResult, setConvertResult] = useState<{
+    success: number;
+    empty: string[];
+    errors: string[];
+  } | null>(null);
 
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
@@ -238,10 +243,11 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
   const handleOpenConvertFolder = useCallback((folderPath: string) => {
     setConvertTargetPath(folderPath);
+    setConvertResult(null);
     setConvertDialogOpen(true);
   }, []);
 
-  const handleConvertFolder = useCallback(async (_dialect: Dialect) => {
+  const handleConvertFolder = useCallback(async (dialect: Dialect) => {
     if (!currentProject) return;
     const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
     const folderFiles = currentProject.files.filter(f => f.path.startsWith(prefix));
@@ -266,24 +272,40 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       // Step 3: process and save in batches
       const BATCH = 50;
       const savedFiles: ProjectFile[] = [];
+      let successCount = 0;
+      const emptyFiles: string[] = [];
+      const errorFiles: string[] = [];
 
       for (let i = 0; i < procFiles.length; i += BATCH) {
         const batch = procFiles.slice(i, i + BATCH);
-        const batchUpdates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }> = [];
+        const batchUpdates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null; dialect?: string }> = [];
 
         for (const f of batch) {
-          const content = contentMap.get(f.path) || f.content;
-          if (!content) continue;
-          const transformedContent = extractDmlFromProcedure(content);
-          const updatedFile: ProjectFile = { ...f, content, isProcedure: true, transformedContent };
-          savedFiles.push(updatedFile);
+          try {
+            const content = contentMap.get(f.path) || f.content;
+            if (!content) {
+              emptyFiles.push(f.path);
+              continue;
+            }
+            const transformedContent = extractDmlFromProcedure(content);
+            if (!transformedContent) {
+              emptyFiles.push(f.path);
+            } else {
+              successCount++;
+            }
+            const updatedFile: ProjectFile = { ...f, content, dialect, isProcedure: true, transformedContent };
+            savedFiles.push(updatedFile);
 
-          batchUpdates.push({
-            fileId: f.id,
-            content,
-            isProcedure: true,
-            transformedContent,
-          });
+            batchUpdates.push({
+              fileId: f.id,
+              content,
+              isProcedure: true,
+              transformedContent,
+              dialect,
+            });
+          } catch (err) {
+            errorFiles.push(`${f.path} (${err instanceof Error ? err.message : String(err)})`);
+          }
         }
 
         if (batchUpdates.length > 0) {
@@ -294,6 +316,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       }
 
       setConvertProgress({ done: total, total });
+      setConvertResult({ success: successCount, empty: emptyFiles, errors: errorFiles });
 
       // Step 4: persist to DB
       if (savedFiles.length > 0) {
@@ -778,6 +801,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         totalFileCount={folderTotalCount}
         isConverting={isConvertingFolder}
         convertProgress={convertProgress}
+        convertResult={convertResult}
         onConfirm={handleConvertFolder}
       />
     </div>
