@@ -16,7 +16,6 @@ import { FileTree } from '@/components/FileTree';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { DialectSelectDialog } from './DialectSelectDialog';
 import {
   ACCEPTED_FILE_TYPES,
   BINARY_EXTENSIONS,
@@ -25,40 +24,6 @@ import {
 } from '@/lib/constants';
 import { genId } from '@/lib/utils';
 import { saveProjectFiles } from '@/lib/file-storage';
-
-function sanitizeBigQueryProcedure(sql: string): string | null {
-  try {
-    const beginIdx = sql.toUpperCase().indexOf('BEGIN');
-    const endIdx = sql.toUpperCase().lastIndexOf('END');
-    if (beginIdx < 0 || endIdx <= beginIdx) return null;
-
-    const body = sql.slice(beginIdx + 5, endIdx);
-    // Remove single-line comments (-- to end of line) and block comments (/* */)
-    const uncommented = body
-      .replace(/--[^\n]*/g, '')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .trim();
-
-    // Extract DML/SELECT statements
-    const stmts = uncommented.split(';').map(s => s.trim()).filter(s => {
-      const u = s.toUpperCase().trimStart();
-      return u.startsWith('SELECT') || u.startsWith('INSERT') ||
-        u.startsWith('DELETE') || u.startsWith('MERGE') ||
-        u.startsWith('UPDATE') || u.startsWith('TRUNCATE') ||
-        u.startsWith('WITH') || u.startsWith('CREATE TABLE') ||
-        u.startsWith('CREATE OR REPLACE TABLE');
-    });
-
-    return stmts.length > 0 ? stmts.join(';\n') : null;
-  } catch {
-    return null;
-  }
-}
-
-function detectStoredProcedure(content: string): boolean {
-  const upper = content.toUpperCase();
-  return upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC');
-}
 
 interface SidebarFileTreeProps {
   onContentWidthChange?: (widthPx: number) => void;
@@ -99,9 +64,6 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     done: boolean;
     stage?: 'reading' | 'saving';
   } | null>(null);
-  const [dialectSelectOpen, setDialectSelectOpen] = useState(false);
-  const nextUploadTarget = useRef<'file' | 'folder'>('file');
-  const selectedDialectRef = useRef<string>('generic');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -130,23 +92,9 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     setNewFolderName('');
   };
 
-  const handleOpenDialectSelect = (target: 'file' | 'folder') => {
-    nextUploadTarget.current = target;
-    setDialectSelectOpen(true);
-  };
-
-  const handleDialectConfirm = (dialect: string) => {
-    selectedDialectRef.current = dialect;
-    if (nextUploadTarget.current === 'file') {
-      fileInputRef.current?.click();
-    } else {
-      folderInputRef.current?.click();
-    }
-  };
-
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      importFiles(e.target.files, selectedDialectRef.current);
+      importFiles(e.target.files);
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -194,7 +142,6 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
           path: relativePath || file.name,
           content: '',
           language: getFileLanguage(file.name),
-          dialect: selectedDialectRef.current,
         };
       });
 
@@ -203,58 +150,43 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         addFilesDirectly(projectFiles);
       }
 
-      // Phase 3: Read content in background, update React state progressively
+      // Phase 3: Read content in background, update React state + SQLite progressively
       let loaded = 0;
-      const BATCH = 50;
+      const BATCH = 100;
       for (let i = 0; i < supportedFiles.length; i += BATCH) {
         const batchFiles = supportedFiles.slice(i, i + BATCH);
         const batchPFs = projectFiles.slice(i, i + BATCH);
 
-        try {
-          // Read content for this batch in parallel
-          const contents = await Promise.all(batchFiles.map((f) => f.text()));
+        // Read content for this batch in parallel
+        const contents = await Promise.all(batchFiles.map((f) => f.text()));
 
-          // Update in-memory ProjectFile objects with content + procedure detection
-          const updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }> = [];
-          for (let j = 0; j < batchPFs.length; j++) {
-            batchPFs[j].content = contents[j];
-            const isProcedure = detectStoredProcedure(contents[j]);
-            let transformedContent: string | null = null;
-            if (isProcedure && selectedDialectRef.current === 'bigquery') {
-              try {
-                transformedContent = sanitizeBigQueryProcedure(contents[j]);
-              } catch {
-                transformedContent = null;
-              }
-            }
-            batchPFs[j].isProcedure = isProcedure;
-            batchPFs[j].transformedContent = transformedContent;
-            updates.push({ fileId: batchPFs[j].id, content: contents[j], isProcedure, transformedContent });
-          }
-
-          // Batch-update React state
-          updateFiles(updates);
-
-          loaded += batchFiles.length;
-          setUploadProgress({ total: importTotal, loaded, skipped, done: false, stage: 'reading' });
-        } catch (batchErr) {
-          console.error(`Failed to process batch ${Math.floor(i / BATCH)}:`, batchErr);
-          loaded += batchFiles.length;
-          setUploadProgress({ total: importTotal, loaded, skipped, done: false, stage: 'reading' });
+        // Update in-memory ProjectFile objects
+        const updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }> = [];
+        for (let j = 0; j < batchPFs.length; j++) {
+          batchPFs[j].content = contents[j];
+          const upper = contents[j].toUpperCase();
+          const isProcedure = upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC');
+          batchPFs[j].isProcedure = isProcedure;
+          batchPFs[j].transformedContent = null;
+          updates.push({ fileId: batchPFs[j].id, content: contents[j], isProcedure });
         }
+
+        // Batch-update React state
+        updateFiles(updates);
+
+        loaded += batchFiles.length;
+        setUploadProgress({ total: importTotal, loaded, skipped, done: false, stage: 'reading' });
       }
 
-      // Phase 4: Save incrementally (chunked to avoid large API payloads)
+      // Phase 4: Persist to SQLite → OPFS/IndexedDB
       setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false, stage: 'saving' });
       try {
         if (currentProject) {
-          const SAVE_CHUNK = 500;
-          for (let i = 0; i < projectFiles.length; i += SAVE_CHUNK) {
-            const chunk = projectFiles.slice(i, i + SAVE_CHUNK).filter((f) => f.content.length > 0);
-            if (chunk.length > 0) {
-              await saveProjectFiles(currentProject.id, chunk);
-            }
-          }
+          const allProjectFiles = [
+            ...(currentProject.files.filter((f) => !projectFiles.some((pf) => pf.id === f.id))),
+            ...projectFiles,
+          ];
+          await saveProjectFiles(currentProject.id, allProjectFiles);
         }
       } catch (e) {
         console.error('Failed to persist imported files:', e);
@@ -505,7 +437,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
-                    onClick={() => handleOpenDialectSelect('file')}
+                    onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload className="h-3.5 w-3.5" />
                   </Button>
@@ -520,7 +452,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
-                    onClick={() => handleOpenDialectSelect('folder')}
+                    onClick={() => folderInputRef.current?.click()}
                   >
                     <FolderUp className="h-3.5 w-3.5" />
                   </Button>
@@ -666,7 +598,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
                     variant="outline"
                     size="sm"
                     className="mt-3 text-xs"
-                    onClick={() => handleOpenDialectSelect('folder')}
+                    onClick={() => folderInputRef.current?.click()}
                   >
                     <FolderUp className="h-3.5 w-3.5 mr-1.5" />
                     {t('common.folder')}
@@ -711,13 +643,6 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         className="hidden"
         onChange={handleFolderUpload}
         {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
-      />
-
-      <DialectSelectDialog
-        open={dialectSelectOpen}
-        onOpenChange={setDialectSelectOpen}
-        currentDialect={currentProject?.dialect || 'generic'}
-        onConfirm={handleDialectConfirm}
       />
     </div>
   );
