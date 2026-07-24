@@ -18,7 +18,6 @@ const isDml = (s: string): boolean =>
 /** Split procedure body into statements, handling nested BEGIN/END and strings */
 function splitProcedureStatements(body: string): string[] {
   const results: string[] = [];
-  let depth = 0;
   let current = '';
   let i = 0;
 
@@ -52,19 +51,8 @@ function splitProcedureStatements(body: string): string[] {
       continue;
     }
 
-    // Track nested BEGIN/END
-    const word5 = body.slice(i, i + 5).toUpperCase();
-    if (word5 === 'BEGIN' && !/\w/.test(body[i + 5] || ' ')) {
-      depth++;
-    }
-    const word3 = body.slice(i, i + 3).toUpperCase();
-    if (word3 === 'END' && !/\w/.test(body[i + 3] || ' ') && i > 0 && body.slice(0, i).trimEnd().length !== i) {
-      depth--;
-      if (depth < 0) depth = 0;
-    }
-
-    // Split at semicolons only at depth 0
-    if (ch === ';' && depth === 0) {
+    // Split at semicolons (simple, matching Rust sanitizer behavior)
+    if (ch === ';') {
       results.push(current);
       current = '';
       i++;
