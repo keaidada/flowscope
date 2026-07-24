@@ -147,7 +147,11 @@ export async function writeFileResult(
 }
 
 export async function readFileResultPaths(projectId: string): Promise<string[]> {
-  const rows = await serverDb.loadProjectFileResultsLight(projectId);
+  let rows = _fileResultCache.get(projectId);
+  if (!rows) {
+    rows = await serverDb.loadProjectFileResultsLight(projectId);
+    _fileResultCache.set(projectId, rows);
+  }
   return rows.map(r => r.file_path);
 }
 
@@ -1013,28 +1017,41 @@ const _tleEdgeCache = new Map<string, Array<[string, string, string]>>(); // 缓
 export async function initProjectData(projectId: string): Promise<void> {
   if (_tleEnsured.has(projectId) && _repairedSet.has(projectId)) return;
   
-  // 并行加载所有数据
-  const [rawNodes, rawEdges, fileResults, tleEdges] = await Promise.all([
-    serverDb.getLineageNodes(projectId),
-    serverDb.getLineageEdges(projectId, undefined, 'data_flow'),
-    serverDb.loadProjectFileResultsLight(projectId),
-    serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>),
-  ]);
+  // 优先走缓存，只加载缺失的数据
+  const tasks: Promise<any>[] = [];
+  if (!_nodeCache.has(projectId)) tasks.push(
+    serverDb.getLineageNodes(projectId).then(r => _nodeCache.set(projectId, r))
+  );
+  if (!_tleEdgeCache.has(projectId)) tasks.push(
+    serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>)
+      .then(r => _tleEdgeCache.set(projectId, r))
+  );
+  if (!_fileResultCache.has(projectId)) tasks.push(
+    serverDb.loadProjectFileResultsLight(projectId).then(r => _fileResultCache.set(projectId, r))
+  );
+  // lineage_edges 只在首次 TLE 计算时加载
+  let rawEdges: any[] = [];
+  if (!_tleEnsured.has(projectId)) tasks.push(
+    serverDb.getLineageEdges(projectId, undefined, 'data_flow').then(r => { rawEdges = r; })
+  );
+  
+  await Promise.all(tasks);
 
-  // 写入缓存
-  _nodeCache.set(projectId, rawNodes);
-  _fileResultCache.set(projectId, fileResults);
-  _tleEdgeCache.set(projectId, tleEdges);
-
-  // 重建 TLE
-  const lineagePaths = new Set<string>();
-  for (const n of rawNodes) lineagePaths.add(n.file_path);
-  try {
-    await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
-  } catch { /* non-fatal */ }
-  _tleEnsured.add(projectId);
-  _repairedSet.add(projectId);
-  _repairMissingLineageData(projectId, lineagePaths).catch(() => {});
+  // TLE 首次计算
+  if (!_tleEnsured.has(projectId)) {
+    const rawNodes = _nodeCache.get(projectId) ?? [];
+    const lineagePaths = new Set<string>();
+    for (const n of rawNodes) lineagePaths.add(n.file_path);
+    try {
+      await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
+    } catch { /* non-fatal */ }
+    _tleEnsured.add(projectId);
+    _repairedSet.add(projectId);
+    _repairMissingLineageData(projectId, lineagePaths).catch(() => {});
+  } else {
+    _repairedSet.add(projectId);
+    _repairMissingLineageData(projectId).catch(() => {});
+  }
 }
 
 /** 获取缓存的节点数据（优先用 TLE 计算时已加载的，避免重复请求） */
