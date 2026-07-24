@@ -23,7 +23,7 @@ import {
   DEFAULT_FILE_NAMES,
 } from '@/lib/constants';
 import { genId } from '@/lib/utils';
-import { saveProjectFiles, upsertProjectFiles } from '@/lib/file-storage';
+import { saveProjectFiles, upsertProjectFiles, loadFileContentsBatch } from '@/lib/file-storage';
 import { ConvertFolderDialog } from './ConvertFolderDialog';
 import type { Dialect } from '@/lib/dialect-constants';
 
@@ -37,6 +37,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const { t } = useTranslation();
   const {
     currentProject,
+    activeProjectId,
     createFile,
     deleteFile,
     deleteFiles,
@@ -257,32 +258,29 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       const unloadedIds = procFiles.filter(f => !isContentLoaded(f.id)).map(f => f.id);
       if (unloadedIds.length > 0) {
         await ensureFilesContent(unloadedIds);
-        // Yield to allow React to process content loading state updates
-        await new Promise(r => setTimeout(r, 100));
       }
 
-      // Step 2: process in batches and save directly to DB
-      const project = currentProjectRef.current;
-      if (!project) return;
+      // Step 2: load content from DB directly (bypass React state timing)
+      const contentMap = await loadFileContentsBatch(activeProjectId ?? '', procFiles.map(f => f.path));
 
-      const refreshed = project.files.filter(f => f.path.startsWith(prefix) && f.isProcedure && f.content.length > 0);
+      // Step 3: process and save in batches
       const BATCH = 50;
-
-      // Collect processed file objects for DB save
       const savedFiles: ProjectFile[] = [];
 
-      for (let i = 0; i < refreshed.length; i += BATCH) {
-        const batch = refreshed.slice(i, i + BATCH);
+      for (let i = 0; i < procFiles.length; i += BATCH) {
+        const batch = procFiles.slice(i, i + BATCH);
         const batchUpdates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }> = [];
 
         for (const f of batch) {
-          const transformedContent = extractDmlFromProcedure(f.content);
-          const updatedFile = { ...f, isProcedure: true as const, transformedContent };
+          const content = contentMap.get(f.path) || f.content;
+          if (!content) continue;
+          const transformedContent = extractDmlFromProcedure(content);
+          const updatedFile: ProjectFile = { ...f, content, isProcedure: true, transformedContent };
           savedFiles.push(updatedFile);
 
           batchUpdates.push({
             fileId: f.id,
-            content: f.content,
+            content,
             isProcedure: true,
             transformedContent,
           });
@@ -297,11 +295,14 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
       setConvertProgress({ done: total, total });
 
-      // Step 3: persist to DB with the actual processed data (not dependent on React state)
+      // Step 4: persist to DB
       if (savedFiles.length > 0) {
-        const CHUNK = 200;
-        for (let i = 0; i < savedFiles.length; i += CHUNK) {
-          await upsertProjectFiles(project.id, savedFiles.slice(i, i + CHUNK));
+        const project = currentProjectRef.current;
+        if (project) {
+          const CHUNK = 200;
+          for (let i = 0; i < savedFiles.length; i += CHUNK) {
+            await upsertProjectFiles(project.id, savedFiles.slice(i, i + CHUNK));
+          }
         }
       }
     } catch (e) {
@@ -309,7 +310,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     } finally {
       setIsConvertingFolder(false);
     }
-  }, [currentProject, convertTargetPath, updateFiles, ensureFilesContent, isContentLoaded]);
+  }, [currentProject, convertTargetPath, updateFiles, ensureFilesContent, isContentLoaded, activeProjectId]);
 
   const folderProcedureCount = useMemo(() => {
     if (!convertDialogOpen || !currentProject) return 0;
