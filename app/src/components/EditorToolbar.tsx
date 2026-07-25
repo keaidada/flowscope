@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, Loader2, ChevronDown, Braces, Code, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff, ChevronsDownUp, ChevronsUpDown, XCircle, Trash2 } from 'lucide-react';
+import { Play, Loader2, ChevronDown, Braces, Code, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff, ChevronsDownUp, ChevronsUpDown, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
