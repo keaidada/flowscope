@@ -549,20 +549,31 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             filesNeedingTc.push(f);
           }
         }
+        console.log('[analysis] files needing TC:', filesNeedingTc.length, 'of', context.files.length, 'total');
+        if (filesNeedingTc.length > 0) {
+          console.log('[analysis] loading TC for:', filesNeedingTc.map(f => f.name).slice(0, 5));
+        }
         if (filesNeedingTc.length > 0 && activeProjectId) {
           const { loadFileContent: loadSingle } = await import('@/lib/file-storage');
+          let loadedCount = 0;
+          let tcCount = 0;
           const results = await Promise.all(
             filesNeedingTc.map(async (f) => {
               const loaded = await loadSingle(activeProjectId, f.name);
-              return { file: f, loaded };
+              return { file: f, loaded, path: f.name };
             })
           );
           // Directly update context.files in-place (no React state needed)
-          for (const { file, loaded } of results) {
+          for (const { file, loaded, path } of results) {
+            loadedCount++;
             if (loaded?.transformedContent) {
               file.transformedContent = loaded.transformedContent;
+              tcCount++;
+            } else if (loadedCount <= 3) {
+              console.log('[analysis] no TC for:', path, 'loaded:', !!loaded, 'content:', !!loaded?.content);
             }
           }
+          console.log('[analysis] loaded TC:', tcCount, '/', loadedCount, 'files');
         }
 
         if (context.files.length === 0) {
@@ -628,6 +639,18 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           enableLinting,
           templateMode: project.templateMode,
         };
+
+        // Debug: check what's being sent
+        const procFiles = context.files.filter((f: PreparedAnalysisFile) => f.isProcedure);
+        if (procFiles.length > 0) {
+          console.log('[analysis] sending', procFiles.length, 'procedure files to backend:');
+          for (const f of procFiles.slice(0, 3)) {
+            console.log('  file:', f.name,
+              'isProcedure:', f.isProcedure,
+              'hasTC:', !!f.transformedContent,
+              'tcLen:', f.transformedContent?.length ?? 0);
+          }
+        }
 
         const cachedResult = activeProjectId ? getResult(activeProjectId, hideCTEs) : null;
         const knownCacheKey =
