@@ -128,6 +128,7 @@ export function EditorToolbar({
               {/* Sticky action bar at top */}
               <div className="sticky top-0 bg-popover z-10 border-b px-1.5 py-1 space-y-1">
                 <div className="flex items-center gap-0.5 flex-wrap">
+                  <span className="text-[10px] text-muted-foreground shrink-0 pr-0.5">关闭/</span>
                   <DropdownMenuItem
                     className="h-6 text-[10px] text-red-500 cursor-pointer rounded-sm"
                     disabled={selectedForDelete.size === 0}
@@ -139,7 +140,6 @@ export function EditorToolbar({
                   >
                     选中 ({selectedForDelete.size})
                   </DropdownMenuItem>
-                  <span className="text-muted-foreground/30 text-[10px] mx-0.5">|</span>
                   <DropdownMenuItem
                     className="h-6 text-[10px] cursor-pointer rounded-sm"
                     onSelect={(e) => {
@@ -153,7 +153,6 @@ export function EditorToolbar({
                   >
                     {selectedForDelete.size === sortedFiles.length ? '取消' : '全选'}
                   </DropdownMenuItem>
-                  <span className="text-muted-foreground/30 text-[10px] mx-0.5">|</span>
                   {activeFileId && onCloseTab && (
                     <DropdownMenuItem className="h-6 text-[10px] cursor-pointer rounded-sm" onSelect={(e) => { e.preventDefault(); onCloseTab(activeFileId); }}>
                       当前
