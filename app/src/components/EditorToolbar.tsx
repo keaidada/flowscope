@@ -1,9 +1,10 @@
-import { Play, Loader2, ChevronDown, Braces, Code, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
+import { Play, Loader2, ChevronDown, Braces, Code, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff, ChevronsDownUp, ChevronsUpDown, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -18,10 +19,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import type { RunMode, Dialect } from '@/lib/project-store';
+import type { RunMode, Dialect, ProjectFile } from '@/lib/project-store';
 import { isValidDialect, DIALECT_OPTIONS } from '@/lib/project-store';
 import type { TemplateMode } from '@/types';
 import { isValidTemplateMode, TEMPLATE_MODE_OPTIONS } from '@/types';
+import { cn } from '@/lib/utils';
 
 export type SqlViewMode = 'template' | 'resolved';
 
@@ -54,6 +56,15 @@ interface EditorToolbarProps {
   hasTransformedContent?: boolean;
   onFoldAll?: () => void;
   onUnfoldAll?: () => void;
+  // Open file tabs
+  openFiles?: ProjectFile[];
+  activeFileId?: string | null;
+  onOpenFile?: (fileId: string) => void;
+  onCloseTab?: (fileId: string) => void;
+  onCloseAllTabs?: () => void;
+  onCloseOtherTabs?: (fileId: string) => void;
+  onCloseTabsToLeft?: (fileId: string) => void;
+  onCloseTabsToRight?: (fileId: string) => void;
 }
 
 export function EditorToolbar({
@@ -84,11 +95,99 @@ export function EditorToolbar({
   hasTransformedContent,
   onFoldAll,
   onUnfoldAll,
+  openFiles,
+  activeFileId,
+  onOpenFile,
+  onCloseTab,
+  onCloseAllTabs,
+  onCloseOtherTabs,
+  onCloseTabsToLeft,
+  onCloseTabsToRight,
 }: EditorToolbarProps) {
   const { t } = useTranslation();
+  const activeFile = openFiles?.find((f) => f.id === activeFileId);
 
   return (
-    <div className="flex items-center justify-end px-3 py-2 border-b h-[44px] shrink-0 bg-muted/30 overflow-hidden gap-2">
+    <div className="flex items-center justify-between px-3 py-2 border-b h-[44px] shrink-0 bg-muted/30 overflow-hidden gap-2">
+      {/* Left: file selector dropdown + close dropdown */}
+      <div className="flex items-center gap-1 min-w-0">
+        {openFiles && onOpenFile && (
+          <DropdownMenu>
+            <DropdownMenuTrigger className="flex items-center gap-1.5 h-7 px-2 text-sm rounded hover:bg-muted/50 min-w-0 max-w-[280px]">
+              {activeFile?.isProcedure && (
+                <span className={cn(
+                  'w-1.5 h-1.5 rounded-full shrink-0',
+                  activeFile.transformedContent ? 'bg-green-500' : 'bg-amber-500'
+                )} />
+              )}
+              <span className="truncate font-medium text-foreground text-xs">
+                {activeFile?.name || '—'}
+              </span>
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-72 max-h-80 overflow-y-auto">
+              {openFiles.map((f) => (
+                <DropdownMenuItem
+                  key={f.id}
+                  onClick={() => onOpenFile(f.id)}
+                  className={cn(
+                    'text-xs flex items-center gap-2',
+                    f.id === activeFileId && 'bg-muted/50 font-medium'
+                  )}
+                >
+                  {f.isProcedure && (
+                    <span className={cn(
+                      'w-1.5 h-1.5 rounded-full shrink-0',
+                      f.transformedContent ? 'bg-green-500' : 'bg-amber-500'
+                    )} />
+                  )}
+                  <span className="truncate flex-1">{f.name}</span>
+                  {onCloseTab && (
+                    <XCircle
+                      className="h-3.5 w-3.5 text-muted-foreground hover:text-red-500 shrink-0 opacity-0 group-hover:opacity-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCloseTab(f.id);
+                      }}
+                    />
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {onCloseAllTabs && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7">
+                <XCircle className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-36">
+              <DropdownMenuItem onClick={onCloseAllTabs} className="text-xs">
+                全部关闭
+              </DropdownMenuItem>
+              {activeFileId && onCloseOtherTabs && (
+                <DropdownMenuItem onClick={() => onCloseOtherTabs(activeFileId)} className="text-xs">
+                  关闭其他
+                </DropdownMenuItem>
+              )}
+              {activeFileId && onCloseTabsToLeft && (
+                <DropdownMenuItem onClick={() => onCloseTabsToLeft(activeFileId)} className="text-xs">
+                  关闭左侧
+                </DropdownMenuItem>
+              )}
+              {activeFileId && onCloseTabsToRight && (
+                <DropdownMenuItem onClick={() => onCloseTabsToRight(activeFileId)} className="text-xs">
+                  关闭右侧
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+
       <div className="flex items-center gap-2 min-w-0 flex-1">
         {showSqlViewToggle && (
           <TooltipProvider>
