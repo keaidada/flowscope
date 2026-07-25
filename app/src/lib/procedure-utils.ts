@@ -15,6 +15,17 @@ const DML_KEYWORDS = [
 const isDml = (s: string): boolean =>
   DML_KEYWORDS.some((k) => s.toUpperCase().trimStart().startsWith(k));
 
+/** Check if a string looks like a complete SQL statement (not just a description mentioning DML keywords) */
+const isSqlStatement = (s: string): boolean => {
+  const upper = s.toUpperCase().trimStart();
+  if (upper.startsWith('INSERT')) return /\bINTO\b/.test(upper);
+  if (upper.startsWith('SELECT')) return true; // SELECT can have various forms
+  if (upper.startsWith('DELETE')) return /\bFROM\b/.test(upper);
+  if (upper.startsWith('UPDATE')) return /\bSET\b/.test(upper);
+  if (upper.startsWith('MERGE')) return /\bUSING\b/.test(upper);
+  return true; // CREATE, TRUNCATE, WITH, EXPLAIN are accepted as-is
+};
+
 /** Split procedure body into statements, handling nested BEGIN/END and strings */
 function splitProcedureStatements(body: string): string[] {
   const results: string[] = [];
@@ -198,13 +209,13 @@ export function extractBqDml(content: string): string | null {
       let s = stmt.trim();
       if (!s) continue;
 
-      if (isDml(s)) { results.push(s); continue; }
+      if (isDml(s) && isSqlStatement(s)) { results.push(s); continue; }
 
       const execSql = extractExecuteImmediateSql(s);
-      if (execSql && isDml(execSql)) { results.push(execSql); continue; }
+      if (execSql && isDml(execSql) && isSqlStatement(execSql)) { results.push(execSql); continue; }
 
       const setSql = extractSetStmtSql(s);
-      if (setSql && isDml(setSql)) { results.push(setSql); continue; }
+      if (setSql && isDml(setSql) && isSqlStatement(setSql)) { results.push(setSql); continue; }
 
       // Handle nested BEGIN blocks: strip leading keywords and retry
       let remainder = s;
@@ -216,10 +227,10 @@ export function extractBqDml(content: string): string | null {
           remainder = remainder.slice(idx + prefix.length).trimStart();
           // Try EXECUTE IMMEDIATE on remainder
           const innerExec = extractExecuteImmediateSql(remainder);
-          if (innerExec && isDml(innerExec)) { results.push(innerExec); break; }
+          if (innerExec && isDml(innerExec) && isSqlStatement(innerExec)) { results.push(innerExec); break; }
           const innerSet = extractSetStmtSql(remainder);
-          if (innerSet && isDml(innerSet)) { results.push(innerSet); break; }
-          if (isDml(remainder)) { results.push(remainder); break; }
+          if (innerSet && isDml(innerSet) && isSqlStatement(innerSet)) { results.push(innerSet); break; }
+          if (isDml(remainder) && isSqlStatement(remainder)) { results.push(remainder); break; }
           continue;
         }
         break;
