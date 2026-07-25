@@ -1,6 +1,8 @@
-import { Play, Loader2, ChevronDown, Braces, Code, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff, ChevronsDownUp, ChevronsUpDown, XCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Play, Loader2, ChevronDown, Braces, Code, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff, ChevronsDownUp, ChevronsUpDown, XCircle, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -106,6 +108,8 @@ export function EditorToolbar({
 }: EditorToolbarProps) {
   const { t } = useTranslation();
   const activeFile = openFiles?.find((f) => f.id === activeFileId);
+  const [selectedForDelete, setSelectedForDelete] = useState<Set<string>>(new Set());
+  const sortedFiles = [...(openFiles || [])].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="flex items-center justify-between px-3 py-2 border-b h-[44px] shrink-0 bg-muted/30 overflow-hidden gap-2">
@@ -125,20 +129,71 @@ export function EditorToolbar({
               </span>
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-72 max-h-80 overflow-y-auto">
-              {openFiles.map((f) => (
+            <DropdownMenuContent align="start" className="w-80 max-h-80 overflow-y-auto">
+              <div className="flex items-center gap-1 px-2 py-1 border-b">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-[10px] text-red-500 hover:text-red-600"
+                  disabled={selectedForDelete.size === 0}
+                  onClick={() => {
+                    for (const id of selectedForDelete) {
+                      onCloseTab?.(id);
+                    }
+                    setSelectedForDelete(new Set());
+                  }}
+                >
+                  <Trash2 className="h-3 w-3 mr-1" />
+                  删除选中 ({selectedForDelete.size})
+                </Button>
+                <div className="flex-1" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-[10px]"
+                  onClick={() => {
+                    if (selectedForDelete.size === sortedFiles.length) {
+                      setSelectedForDelete(new Set());
+                    } else {
+                      setSelectedForDelete(new Set(sortedFiles.map((f) => f.id)));
+                    }
+                  }}
+                >
+                  {selectedForDelete.size === sortedFiles.length ? '取消全选' : '全选'}
+                </Button>
+              </div>
+              {sortedFiles.map((f) => (
                 <DropdownMenuItem
                   key={f.id}
-                  onClick={() => onOpenFile(f.id)}
+                  onClick={(e) => {
+                    // Don't switch if clicking checkbox area
+                    const target = e.target as HTMLElement;
+                    if (target.closest('[data-checkbox]')) return;
+                    onOpenFile(f.id);
+                    setSelectedForDelete(new Set());
+                  }}
                   className={cn(
-                    'text-xs flex items-center gap-2',
+                    'text-xs flex items-center gap-2 pr-1',
                     f.id === activeFileId && 'bg-muted/50 font-medium'
                   )}
                 >
-                  {f.isProcedure && (
+                  <span data-checkbox className="shrink-0 flex items-center">
+                    <Checkbox
+                      checked={selectedForDelete.has(f.id)}
+                      onCheckedChange={() => {
+                        const next = new Set(selectedForDelete);
+                        if (next.has(f.id)) next.delete(f.id); else next.add(f.id);
+                        setSelectedForDelete(next);
+                      }}
+                    />
+                  </span>
+                  {/* Dot: green for active, otherwise procedure status */}
+                  {(f.id === activeFileId || f.isProcedure) && (
                     <span className={cn(
                       'w-1.5 h-1.5 rounded-full shrink-0',
-                      f.transformedContent ? 'bg-green-500' : 'bg-amber-500'
+                      f.id === activeFileId
+                        ? 'bg-green-500'
+                        : f.transformedContent ? 'bg-green-400' : 'bg-amber-500'
                     )} />
                   )}
                   <span className="truncate flex-1">{f.name}</span>
