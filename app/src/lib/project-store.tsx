@@ -1276,10 +1276,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         if (p.id !== activeProjectId) return p;
         return { ...p, activeFileId: null, openFileIds: [] };
       });
-      // Eagerly save to localStorage so refresh picks up empty state
+      // Eagerly save to localStorage + sync to backend so refresh picks up empty state
       try {
-        const allProjects = next;
-        const settings = allProjects.map(p => ({
+        const settings = next.map(p => ({
           id: p.id, name: p.name, dialect: p.dialect,
           templateMode: p.templateMode, schemaSQL: p.schemaSQL,
           runMode: p.runMode, selectedFileIds: p.selectedFileIds,
@@ -1287,6 +1286,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         }));
         localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(settings));
       } catch {}
+      scheduleBackendProjectSync(next);
       return next;
     });
   }, [activeProjectId]);
