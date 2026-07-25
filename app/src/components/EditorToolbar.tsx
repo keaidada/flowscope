@@ -124,10 +124,10 @@ export function EditorToolbar({
               </span>
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-80 max-h-80 overflow-y-auto">
+            <DropdownMenuContent align="start" className="w-[440px] max-w-[90vw] max-h-80 overflow-y-auto">
               {/* Sticky action bar at top */}
-              <div className="sticky top-0 bg-popover z-10 border-b px-1.5 py-1 space-y-1">
-                <div className="flex items-center gap-0.5 flex-wrap">
+              <div className="sticky top-0 bg-popover z-10 border-b px-1.5 py-0.5">
+                <div className="flex items-center gap-0.5 whitespace-nowrap">
                   <span className="text-[10px] text-muted-foreground shrink-0 pr-0.5">关闭/</span>
                   <DropdownMenuItem
                     className="h-6 text-[10px] text-red-500 cursor-pointer rounded-sm"
