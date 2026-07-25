@@ -65,7 +65,24 @@ export function BackendProvider({ children }: BackendProviderProps) {
       }
     };
     initializeBackend();
-    return () => { cancelled = true; };
+
+    // Auto-retry every 5 seconds if backend is not ready
+    const retryInterval = setInterval(async () => {
+      try {
+        const result: BackendDetectionResult = await createBackendAdapter();
+        if (cancelled) return;
+        setAdapter(result.adapter);
+        setState({ ready: true, error: null, isRetrying: false, backendType: 'rest' });
+        clearInterval(retryInterval);
+      } catch {
+        // Backend still not available, keep retrying
+      }
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(retryInterval);
+    };
   }, []);
 
   const value = useMemo(() => ({ ...state, adapter, retry: retryBackend }), [state, adapter, retryBackend]);
