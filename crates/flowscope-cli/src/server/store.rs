@@ -1174,7 +1174,7 @@ pub fn upsert_project_files(
     if files.is_empty() {
         return Ok(());
     }
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Local::now().to_rfc3339();
     let tx = conn.unchecked_transaction()?;
     {
         let mut stmt = tx.prepare(
@@ -1234,7 +1234,7 @@ pub fn rename_project_file(
     new_name: &str,
 ) -> Result<(), rusqlite::Error> {
     let (_, dir) = split_file_path(new_path);
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "UPDATE project_files SET path = ?1, name = ?2, dir_id = ?3, updated_at = ?4
          WHERE project_id = ?5 AND path = ?6",
@@ -1250,7 +1250,7 @@ pub fn rename_project_folder(
     old_folder_path: &str,
     new_folder_path: &str,
 ) -> Result<(), rusqlite::Error> {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Local::now().to_rfc3339();
     let prefix = format!("{old_folder_path}/");
     // Update all files under the old folder
     let files_to_update: Vec<(String, String)> = conn
@@ -1326,7 +1326,7 @@ pub fn load_directories(
 
 /// Rebuild directories for a single project (called after file changes).
 fn rebuild_directories_for_project(conn: &Connection, project_id: &str) -> Result<(), rusqlite::Error> {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Local::now().to_rfc3339();
 
     conn.execute("DELETE FROM project_directories WHERE project_id = ?1", params![project_id])?;
 
@@ -1441,7 +1441,7 @@ pub fn save_view_state(
     project_id: &str,
     state_json: &str,
 ) -> Result<(), rusqlite::Error> {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT OR REPLACE INTO view_states (project_id, state_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
         params![project_id, state_json, now, now],
@@ -1522,7 +1522,7 @@ pub fn save_table_level_edges(
         for s in &scripts { params.push(s); }
         tx.execute(&sql, params_from_iter(params))?;
     }
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Local::now().to_rfc3339();
     const CHUNK: usize = 500;
     let row_ph = "(?,?,?,?,?,?,?)";
     for chunk in edges.chunks(CHUNK) {
@@ -1620,7 +1620,7 @@ pub fn get_cache(
     if let Some(row) = rows.next() {
         conn.execute(
             "UPDATE analysis_cache SET last_accessed_at = ?1 WHERE cache_key = ?2",
-            params![chrono::Utc::now().to_rfc3339(), cache_key],
+            params![chrono::Local::now().to_rfc3339(), cache_key],
         )?;
         Ok(Some(row?))
     } else {
@@ -1633,7 +1633,7 @@ pub fn set_cache(
     cache_key: &str,
     result_json: &str,
 ) -> Result<(), rusqlite::Error> {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT OR REPLACE INTO analysis_cache (cache_key, result_json, size_bytes, created_at, updated_at, last_accessed_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
         params![cache_key, result_json, result_json.len() as i64, now, now, now],
@@ -1660,7 +1660,7 @@ pub fn set_file_result(
     result_json: &str,
     content_hash: &str,
 ) -> Result<(), rusqlite::Error> {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Local::now().to_rfc3339();
     let (file_name, dir_path) = split_file_path(file_path);
     conn.execute(
         "INSERT OR REPLACE INTO project_file_results (project_id, file_path, file_name, dir_path, result_json, content_hash, size_bytes, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
@@ -1758,7 +1758,7 @@ pub fn insert_anomaly(
     conn: &Connection,
     row: &LineageAnomalyRow,
 ) -> Result<i64, rusqlite::Error> {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO lineage_anomalies (project_id, file_path, script_name, script_content, severity, anomaly_type, message, detail, is_test, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![row.project_id, row.file_path, row.script_name, row.script_content, row.severity, row.anomaly_type, row.message, row.detail, row.is_test, now],
@@ -1873,7 +1873,7 @@ pub fn save_lineage_batch(
         }
     }
 
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Local::now().to_rfc3339();
     const CHUNK: usize = 500;
     let row12 = "(?,?,?,?,?,?,?,?,?,?,?,?)";
 

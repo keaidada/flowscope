@@ -494,7 +494,7 @@ pub(crate) async fn project_export_start(
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         format!(
             "{:x}{:x}",
-            chrono::Utc::now().timestamp_millis(),
+            chrono::Local::now().timestamp_millis(),
             COUNTER.fetch_add(1, Ordering::SeqCst)
         )
     };
@@ -1294,7 +1294,7 @@ fn extract_and_save_ddl_metadata(
     project_id: &str,
     files: &[store::SchemaFileRow],
 ) -> Result<(), (StatusCode, String)> {
-    let now = || chrono::Utc::now().to_rfc3339();
+    let now = || chrono::Local::now().to_rfc3339();
 
     let mut all_tables: Vec<store::TableMetadataRow> = Vec::new();
     let mut all_columns: Vec<store::ColumnMetadataRow> = Vec::new();
