@@ -184,6 +184,11 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             'store_tc_len:', projectActiveFile?.transformedContent?.length ?? 0);
           contextDescription = `Analyzing file: ${currentFilePath}`;
         } else {
+          console.warn('[analysis] resolveContext: NO FILE FOUND',
+            'activeFileId:', project.activeFileId,
+            'hasActiveFile:', !!projectActiveFile,
+            'path:', projectActiveFile?.path,
+            'hasContent:', projectActiveFile?.content !== undefined);
           contextDescription = 'Analyzing current file';
         }
       } else if (runMode === 'custom') {
