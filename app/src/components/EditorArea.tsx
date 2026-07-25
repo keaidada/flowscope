@@ -384,8 +384,10 @@ export function EditorArea({
 
   if (!activeFile) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5">
-        <Loader2 className="h-6 w-6 animate-spin opacity-50" />
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5 gap-2">
+        <FileCode className="h-10 w-10 opacity-20" />
+        <p className="text-sm font-medium">{t('editor.noFileOpen')}</p>
+        <p className="text-xs opacity-70">{t('editor.noFileOpenDesc')}</p>
       </div>
     );
   }
@@ -455,24 +457,16 @@ export function EditorArea({
         data-testid="sql-editor"
       >
         <ErrorBoundary fallback={<SqlViewFallback />}>
-          {activeFile ? (
-            <SqlView
-              ref={sqlViewRef}
-              value={displayContent}
-              onChange={handleContentChange}
-              className="h-full text-sm"
-              editable={!showTransformed && sqlViewMode === 'template' && !isReadOnly}
-              isDark={isDark}
-              highlightedSpan={sqlViewMode === 'template' ? highlightedSpan : null}
-              lineWrapping={lineWrapping}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
-              <FileCode className="h-10 w-10 opacity-20" />
-              <p className="text-sm">{t('editor.noFileOpen')}</p>
-              <p className="text-xs">{t('editor.noFileOpenDesc')}</p>
-            </div>
-          )}
+          <SqlView
+            ref={sqlViewRef}
+            value={displayContent}
+            onChange={handleContentChange}
+            className="h-full text-sm"
+            editable={!showTransformed && sqlViewMode === 'template' && !isReadOnly}
+            isDark={isDark}
+            highlightedSpan={sqlViewMode === 'template' ? highlightedSpan : null}
+            lineWrapping={lineWrapping}
+          />
         </ErrorBoundary>
         {isReadOnly && (
           <div className="absolute top-2 right-5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-muted/80 text-muted-foreground rounded border">
