@@ -192,6 +192,13 @@
     "persistedCurrentResultDesc": "{{primary}} + {{rest}} more",
     "statusBadgeRestored": "Cache Restored",
     "statusBadgeFresh": "Fresh Analysis",
+    "errors": {
+      "noProjectContext": "No project context available",
+      "noFilesSelected": "No files selected for analysis",
+      "noSqlFiles": "No .sql files found in project",
+      "validationFailed": "Validation failed",
+      "noFilesToAnalyze": "No files to analyze"
+    },
     "statusSourceMemory": "Memory cache",
     "statusSourceIndexedDb": "Persisted cache",
     "statusSourceSqlite": "SQLite result cache",

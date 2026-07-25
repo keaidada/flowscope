@@ -192,6 +192,13 @@
     "persistedCurrentResultDesc": "{{primary}} + 其余 {{rest}} 个",
     "statusBadgeRestored": "缓存恢复",
     "statusBadgeFresh": "本次新算",
+    "errors": {
+      "noProjectContext": "无项目上下文",
+      "noFilesSelected": "未选择文件进行分析",
+      "noSqlFiles": "项目中未找到 .sql 文件",
+      "validationFailed": "文件验证失败",
+      "noFilesToAnalyze": "无可分析文件"
+    },
     "statusSourceMemory": "内存缓存",
     "statusSourceIndexedDb": "持久化缓存",
     "statusSourceSqlite": "SQLite 结果缓存",

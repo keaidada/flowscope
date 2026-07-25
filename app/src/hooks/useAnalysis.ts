@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, startTransition } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useLineageStore } from '@pondpilot/flowscope-react';
 import { toast } from 'sonner';
 import { analyzeWithWorker, getCachedAnalysis, syncAnalysisFiles } from '@/lib/analysis-worker';
@@ -60,6 +61,7 @@ interface PreparedAnalysisFile {
  * @param options - Optional configuration including the backend adapter
  */
 export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions) {
+  const { t } = useTranslation();
   const adapter = options?.adapter;
   const { currentProject, activeProjectId, updateFiles, ensureFilesContent } = useProject();
   const hideCTEs = useLineageStore((state) => state.hideCTEs);
@@ -118,7 +120,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
   const validateFiles = useCallback(
     (files: Array<{ name: string; content: string }>): FileValidationResult => {
       if (files.length === 0) {
-        return { valid: false, error: 'No files to analyze' };
+        return { valid: false, error: t('analysis.errors.noFilesToAnalyze') };
       }
 
       if (files.length > FILE_LIMITS.MAX_COUNT) {
@@ -525,7 +527,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         );
 
         if (!context) {
-          setError('No project context available');
+          setError(t('analysis.errors.noProjectContext'));
           return;
         }
 
@@ -593,11 +595,11 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
         if (context.files.length === 0) {
           if ((options?.runModeOverride ?? project.runMode) === 'custom') {
-            setError('No files selected for analysis.');
+            setError(t('analysis.errors.noFilesSelected'));
             return;
           }
           if (project.files.length > 0) {
-            setError('No .sql files found in project.');
+            setError(t('analysis.errors.noSqlFiles'));
             return;
           }
           return;
@@ -612,7 +614,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
         const validation = validateFiles(context.files);
         if (!validation.valid) {
-          setError(validation.error || 'Validation failed');
+          setError(validation.error || t('analysis.errors.validationFailed'));
           return;
         }
 
