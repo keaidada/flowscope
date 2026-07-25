@@ -72,6 +72,8 @@
     "tryReloading": "Try reloading the page",
     "analysisError": "Analysis Error",
     "noFileSelected": "No file selected",
+    "noFileOpen": "No file open",
+    "noFileOpenDesc": "Select a file from the sidebar to open",
     "saved": "Saved",
     "saveFailed": "Save failed",
     "noServerFiles": "No SQL files on server",

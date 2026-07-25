@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from 'react';
-import { Loader2, AlertCircle, FileX } from 'lucide-react';
+import { Loader2, AlertCircle, FileX, FileCode } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { SqlView, useLineageState } from '@pondpilot/flowscope-react';
@@ -455,16 +455,24 @@ export function EditorArea({
         data-testid="sql-editor"
       >
         <ErrorBoundary fallback={<SqlViewFallback />}>
-          <SqlView
-            ref={sqlViewRef}
-            value={displayContent}
-            onChange={handleContentChange}
-            className="h-full text-sm"
-            editable={!showTransformed && sqlViewMode === 'template' && !isReadOnly}
-            isDark={isDark}
-            highlightedSpan={sqlViewMode === 'template' ? highlightedSpan : null}
-            lineWrapping={lineWrapping}
-          />
+          {activeFile ? (
+            <SqlView
+              ref={sqlViewRef}
+              value={displayContent}
+              onChange={handleContentChange}
+              className="h-full text-sm"
+              editable={!showTransformed && sqlViewMode === 'template' && !isReadOnly}
+              isDark={isDark}
+              highlightedSpan={sqlViewMode === 'template' ? highlightedSpan : null}
+              lineWrapping={lineWrapping}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+              <FileCode className="h-10 w-10 opacity-20" />
+              <p className="text-sm">{t('editor.noFileOpen')}</p>
+              <p className="text-xs">{t('editor.noFileOpenDesc')}</p>
+            </div>
+          )}
         </ErrorBoundary>
         {isReadOnly && (
           <div className="absolute top-2 right-5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-muted/80 text-muted-foreground rounded border">

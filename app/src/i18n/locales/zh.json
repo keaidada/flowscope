@@ -72,6 +72,8 @@
     "tryReloading": "请尝试刷新页面",
     "analysisError": "分析错误",
     "noFileSelected": "未选择文件",
+    "noFileOpen": "未打开文件",
+    "noFileOpenDesc": "在左侧文件树中选择文件打开",
     "saved": "已保存",
     "saveFailed": "保存失败",
     "noServerFiles": "服务端暂无 SQL 文件",
