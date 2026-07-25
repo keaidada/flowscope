@@ -1277,7 +1277,16 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         return { ...p, activeFileId: null, openFileIds: [] };
       });
       // Eagerly save to localStorage so refresh picks up empty state
-      saveProjectSettingsToStorage(next);
+      try {
+        const allProjects = next;
+        const settings = allProjects.map(p => ({
+          id: p.id, name: p.name, dialect: p.dialect,
+          templateMode: p.templateMode, schemaSQL: p.schemaSQL,
+          runMode: p.runMode, selectedFileIds: p.selectedFileIds,
+          activeFileId: p.activeFileId, openFileIds: p.openFileIds || [],
+        }));
+        localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(settings));
+      } catch {}
       return next;
     });
   }, [activeProjectId]);
