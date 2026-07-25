@@ -19,7 +19,7 @@ export async function saveProjectFiles(projectId: string, files: ProjectFile[]):
     is_procedure: f.isProcedure ? 1 : 0,
     transformed_content: f.transformedContent || '',
     created_at: '',
-    updated_at: new Date().toISOString(),
+    updated_at: '',
   })));
 }
 
@@ -86,7 +86,7 @@ export async function upsertProjectFiles(projectId: string, files: ProjectFile[]
     is_procedure: f.isProcedure ? 1 : 0,
     transformed_content: f.transformedContent || '',
     created_at: '',
-    updated_at: new Date().toISOString(),
+    updated_at: '',
   })) as never);
 }
 

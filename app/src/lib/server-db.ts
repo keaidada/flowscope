@@ -163,7 +163,8 @@ export async function upsertProjectFiles(projectId: string, files: ProjectFile[]
       dialect: f.dialect || '',
       is_procedure: f.is_procedure || 0,
       transformed_content: f.transformed_content || '',
-      updated_at: new Date().toISOString(),
+      created_at: '',
+      updated_at: '',
     })),
   });
 }
