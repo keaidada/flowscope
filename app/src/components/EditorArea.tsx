@@ -211,6 +211,9 @@ export function EditorArea({
 
   // Content to display in the editor based on view mode
   const [showTransformed, setShowTransformed] = useState(false);
+  const showTransformedRef = useRef(showTransformed);
+  showTransformedRef.current = showTransformed;
+
   const hasTransformedContent = !!(activeFile?.transformedContent);
 
   const displayContent = useMemo(() => {
@@ -225,8 +228,7 @@ export function EditorArea({
 
   const handleContentChange = useCallback(
     (val: string) => {
-      if (!activeFile || showTransformed) return;
-      // Clear transformed_content when user edits the original content
+      if (!activeFile || showTransformedRef.current) return;
       if (activeFile.transformedContent) {
         updateFiles([
           {
@@ -240,9 +242,8 @@ export function EditorArea({
         updateFile(activeFile.id, val);
       }
     },
-    [activeFile, showTransformed, updateFile, updateFiles]
+    [activeFile, updateFile, updateFiles]
   );
-
   const handleSave = useCallback(() => {
     if (currentProject && currentProject.files.length > 0) {
       // Only save files that have content loaded (avoid overwriting DB with empty content)
