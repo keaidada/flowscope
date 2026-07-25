@@ -118,12 +118,7 @@ export function EditorToolbar({
         {openFiles && onOpenFile && (
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-1.5 h-7 px-2 text-sm rounded hover:bg-muted/50 min-w-0 max-w-[280px]">
-              {activeFile?.isProcedure && (
-                <span className={cn(
-                  'w-1.5 h-1.5 rounded-full shrink-0',
-                  activeFile.transformedContent ? 'bg-green-500' : 'bg-amber-500'
-                )} />
-              )}
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
               <span className="truncate font-medium text-foreground text-xs">
                 {activeFile?.name || '—'}
               </span>
@@ -182,15 +177,12 @@ export function EditorToolbar({
                       }}
                     />
                   </span>
-                  {/* Dot: green for active, otherwise procedure status */}
-                  {(f.id === activeFileId || f.isProcedure) && (
-                    <span className={cn(
-                      'w-1.5 h-1.5 rounded-full shrink-0',
-                      f.id === activeFileId
-                        ? 'bg-green-500'
-                        : f.transformedContent ? 'bg-green-400' : 'bg-amber-500'
-                    )} />
-                  )}
+                  {/* Dot: green only for active file */}
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0">
+                    {f.id === activeFileId && (
+                      <span className="block w-1.5 h-1.5 rounded-full bg-green-500" />
+                    )}
+                  </span>
                   <span className="truncate flex-1">{f.name}</span>
                   {onCloseTab && (
                     <XCircle
