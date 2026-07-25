@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "FlowScope - SQL Lineage Analyzer",
   "description": "隐私优先的 SQL 血缘分析工具，完全在浏览器中运行。可视化表、CTE 和列之间的数据流向。",
-  "version": "0.6.0",
+  "version": "1.0.0",
   "icons": {
     "16": "icon-16.png",
     "48": "icon-48.png",

@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stale rows in `table_metadata` surviving re-analysis when the new
   resolved schema no longer contained them.
 
-## [0.6.0] - 2026-03-22
+## [1.0.0] - 2026-03-22
 
 ### Added
 

@@ -129,7 +129,7 @@ cargo build -p flowscope-cli --features serve
 nohup ./target/debug/flowscope --serve --port 3000 --watch ./app > /tmp/flowscope-logs/serve.log 2>&1 &
 ```
 - URL: http://127.0.0.1:3000
-- Healthcheck: `curl http://127.0.0.1:3000/api/health` → `{"status":"ok","version":"0.6.0"}`
+- Healthcheck: `curl http://127.0.0.1:3000/api/health` → `{"status":"ok","version":"1.0.0"}`
 - Config: `curl http://127.0.0.1:3000/api/config`
 - Log: `/tmp/flowscope-logs/serve.log`
 - Stop: `pkill -f "flowscope --serve"`
