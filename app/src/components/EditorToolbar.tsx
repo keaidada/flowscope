@@ -90,15 +90,8 @@ export function EditorToolbar({
   const { t } = useTranslation();
 
   return (
-    <div className="flex items-center justify-between px-3 py-2 border-b h-[44px] shrink-0 bg-muted/30 overflow-hidden gap-2">
+    <div className="flex items-center justify-end px-3 py-2 border-b h-[44px] shrink-0 bg-muted/30 overflow-hidden gap-2">
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 min-w-0 text-sm text-muted-foreground">
-          <FileCode className="h-4 w-4 shrink-0" />
-          <span className="truncate font-medium text-foreground">
-            {activeFileName || t('editor.noFileSelected')}
-          </span>
-        </div>
-
         {showSqlViewToggle && (
           <TooltipProvider>
             <Tooltip>
