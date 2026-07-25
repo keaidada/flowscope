@@ -425,3 +425,12 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Known Issues / TODOs
+
+- **closeAllTabs + refresh**: After clicking "全部" to close all tabs and refreshing,
+  the editor still shows the previous script content instead of the empty state.
+  In backend mode, the server reloads `active_file_id` on refresh, overriding the
+  frontend's `activeFileId: null`. The sync via `scheduleBackendProjectSync` is
+  debounced (500ms) and may not complete before refresh. Fix: on backend project
+  load, prefer localStorage `activeFileId` when it's newer/different from server.
