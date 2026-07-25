@@ -165,9 +165,12 @@ export function EditorToolbar({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-36">
-              <DropdownMenuItem onClick={onCloseAllTabs} className="text-xs">
-                全部关闭
-              </DropdownMenuItem>
+              {activeFileId && onCloseTab && (
+                <DropdownMenuItem onClick={() => onCloseTab(activeFileId)} className="text-xs">
+                  关闭当前
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
               {activeFileId && onCloseOtherTabs && (
                 <DropdownMenuItem onClick={() => onCloseOtherTabs(activeFileId)} className="text-xs">
                   关闭其他
@@ -175,14 +178,18 @@ export function EditorToolbar({
               )}
               {activeFileId && onCloseTabsToLeft && (
                 <DropdownMenuItem onClick={() => onCloseTabsToLeft(activeFileId)} className="text-xs">
-                  关闭左侧
+                  关闭上方
                 </DropdownMenuItem>
               )}
               {activeFileId && onCloseTabsToRight && (
                 <DropdownMenuItem onClick={() => onCloseTabsToRight(activeFileId)} className="text-xs">
-                  关闭右侧
+                  关闭下方
                 </DropdownMenuItem>
               )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onCloseAllTabs} className="text-xs">
+                全部关闭
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         )}
