@@ -98,6 +98,7 @@ export function EditorArea({
   const [sqlViewMode, setSqlViewMode] = useState<SqlViewMode>('template');
   // Line wrapping toggle
   const [lineWrapping, setLineWrapping] = useState(true);
+  const sqlViewRef = useRef<any>(null);
 
   // ETL dialog state
   const [etlOpen, setEtlOpen] = useState(false);
@@ -422,6 +423,8 @@ export function EditorArea({
         showTransformed={showTransformed}
         onToggleTransformed={() => setShowTransformed((v) => !v)}
         hasTransformedContent={hasTransformedContent}
+        onFoldAll={() => sqlViewRef.current?.foldAll()}
+        onUnfoldAll={() => sqlViewRef.current?.unfoldAll()}
       />
 
       {error && (
@@ -438,6 +441,7 @@ export function EditorArea({
       >
         <ErrorBoundary fallback={<SqlViewFallback />}>
           <SqlView
+            ref={sqlViewRef}
             value={displayContent}
             onChange={handleContentChange}
             className="h-full text-sm"

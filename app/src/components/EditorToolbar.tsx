@@ -1,4 +1,4 @@
-import { Play, Loader2, ChevronDown, Braces, Code, FileCode, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff } from 'lucide-react';
+import { Play, Loader2, ChevronDown, Braces, Code, FileCode, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
@@ -53,6 +53,8 @@ interface EditorToolbarProps {
   showTransformed?: boolean;
   onToggleTransformed?: () => void;
   hasTransformedContent?: boolean;
+  onFoldAll?: () => void;
+  onUnfoldAll?: () => void;
 }
 
 export function EditorToolbar({
@@ -82,6 +84,8 @@ export function EditorToolbar({
   showTransformed,
   onToggleTransformed,
   hasTransformedContent,
+  onFoldAll,
+  onUnfoldAll,
 }: EditorToolbarProps) {
   const { t } = useTranslation();
 
@@ -193,6 +197,44 @@ export function EditorToolbar({
               </TooltipTrigger>
               <TooltipContent>
                 <p>{lineWrapping ? t('editor.nowrap') : t('editor.wrap')}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {onFoldAll && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={onFoldAll}
+                >
+                  <ChevronsDownUp className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>全部折叠</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {onUnfoldAll && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={onUnfoldAll}
+                >
+                  <ChevronsUpDown className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>全部展开</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

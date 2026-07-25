@@ -1,22 +1,37 @@
-import { useCallback, useEffect, useRef, useMemo, type JSX } from 'react';
+import { useCallback, useEffect, useRef, useMemo, useImperativeHandle, forwardRef } from 'react';
 import Editor, { type OnMount, type OnChange } from '@monaco-editor/react';
 
 import { useLineage } from '../store';
 import type { SqlViewProps } from '../types';
 
-export function SqlView({
-  className,
-  editable = false,
-  onChange,
-  value,
-  isDark,
-  highlightedSpan: highlightedSpanProp,
-  lineWrapping = true,
-}: SqlViewProps): JSX.Element {
+export interface SqlViewHandle {
+  foldAll: () => void;
+  unfoldAll: () => void;
+}
+
+export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(props, ref) {
+  const {
+    className,
+    editable = false,
+    onChange,
+    value,
+    isDark,
+    highlightedSpan: highlightedSpanProp,
+    lineWrapping = true,
+  } = props;
   const { state, actions } = useLineage();
   const isControlled = value !== undefined;
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const decorationsRef = useRef<string[]>([]);
+
+  useImperativeHandle(ref, () => ({
+    foldAll: () => {
+      editorRef.current?.trigger('fold', 'editor.foldAll', null);
+    },
+    unfoldAll: () => {
+      editorRef.current?.trigger('fold', 'editor.unfoldAll', null);
+    },
+  }), []);
 
   const sqlText = isControlled ? value : state.sql;
   const highlightedSpan = isControlled ? (highlightedSpanProp ?? null) : state.highlightedSpan;
@@ -202,4 +217,4 @@ export function SqlView({
       />
     </div>
   );
-}
+});
