@@ -178,6 +178,9 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
               transformedContent: projectActiveFile?.transformedContent ?? null,
             },
           ];
+          console.log('[analysis] resolveContext:', currentFilePath,
+            'store_isProcedure:', projectActiveFile?.isProcedure,
+            'store_tc:', !!projectActiveFile?.transformedContent);
           contextDescription = `Analyzing file: ${currentFilePath}`;
         } else {
           contextDescription = 'Analyzing current file';
@@ -545,6 +548,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         // Load transformed_content for procedure files that don't have it yet
         const filesNeedingTc: PreparedAnalysisFile[] = [];
         for (const f of context.files as PreparedAnalysisFile[]) {
+          console.log('[analysis] file:', f.name, 'isProcedure:', f.isProcedure, 'hasTC:', !!f.transformedContent);
           if (f.isProcedure && !f.transformedContent) {
             filesNeedingTc.push(f);
           }
