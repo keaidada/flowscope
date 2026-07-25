@@ -220,8 +220,13 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
   );
 
   const hydrateAnalysisFiles = useCallback(
-    async (files: PreparedAnalysisFile[]): Promise<Array<{ name: string; content: string }>> => {
-      return files.map((file) => ({ name: file.name, content: file.content }));
+    async (files: PreparedAnalysisFile[]): Promise<PreparedAnalysisFile[]> => {
+      return files.map((file) => ({
+        name: file.name,
+        content: file.content,
+        isProcedure: file.isProcedure,
+        transformedContent: file.transformedContent,
+      }));
     },
     [updateFiles]
   );
