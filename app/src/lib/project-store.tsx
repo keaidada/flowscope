@@ -1270,13 +1270,16 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   const closeAllTabs = useCallback(() => {
     if (!activeProjectId) return;
-    setProjects((prev) =>
-      prev.map((p) => {
+    setActiveFileIdOverride(null);
+    setProjects((prev) => {
+      const next = prev.map((p) => {
         if (p.id !== activeProjectId) return p;
-        setActiveFileIdOverride(null);
         return { ...p, activeFileId: null, openFileIds: [] };
-      })
-    );
+      });
+      // Eagerly save to localStorage so refresh picks up empty state
+      saveProjectSettingsToStorage(next);
+      return next;
+    });
   }, [activeProjectId]);
 
   const updateSchemaSQL = useCallback((projectId: string, schemaSQL: string) => {
