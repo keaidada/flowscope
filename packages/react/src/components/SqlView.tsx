@@ -41,6 +41,47 @@ export function SqlView({
     editorRef.current = editor;
   }, []);
 
+  // Register semicolon-based folding provider for SQL
+  const handleBeforeMount = useCallback((monaco: any) => {
+    monaco.languages.registerFoldingRangeProvider('sql', {
+      provideFoldingRanges(model: any) {
+        const ranges: Array<{ start: number; end: number; kind?: number }> = [];
+        const lineCount = model.getLineCount();
+
+        // Find statement boundaries by semicolons
+        let stmtStart = 1;
+        for (let line = 1; line <= lineCount; line++) {
+          const lineContent = model.getLineContent(line);
+          const semiIdx = lineContent.lastIndexOf(';');
+          if (semiIdx >= 0) {
+            // Check if the semicolon is not inside a string
+            const beforeSemi = lineContent.slice(0, semiIdx);
+            const quotes = (beforeSemi.match(/['"]/g) || []).length;
+            if (quotes % 2 === 0) {
+              // End of statement at this line
+              if (line > stmtStart) {
+                ranges.push({
+                  start: stmtStart,
+                  end: line,
+                });
+              }
+              stmtStart = line + 1;
+            }
+          }
+        }
+        // Last statement range if any
+        if (lineCount >= stmtStart) {
+          ranges.push({
+            start: stmtStart,
+            end: lineCount,
+          });
+        }
+
+        return ranges;
+      },
+    });
+  }, []);
+
   const handleChange: OnChange = useCallback(
     (val) => {
       if (val === undefined) return;
@@ -133,6 +174,7 @@ export function SqlView({
         value={sqlText}
         onChange={handleChange}
         onMount={handleMount}
+        beforeMount={handleBeforeMount}
         loading={
           <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
             Loading editor...
