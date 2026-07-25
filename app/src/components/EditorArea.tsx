@@ -225,19 +225,22 @@ export function EditorArea({
 
   const handleContentChange = useCallback(
     (val: string) => {
-      if (!activeFile) return;
+      if (!activeFile || showTransformed) return;
       // Clear transformed_content when user edits the original content
-      const hasTc = activeFile.transformedContent;
-      updateFiles([
-        {
-          fileId: activeFile.id,
-          content: val,
-          isProcedure: activeFile.isProcedure,
-          transformedContent: hasTc ? null : undefined,
-        },
-      ]);
+      if (activeFile.transformedContent) {
+        updateFiles([
+          {
+            fileId: activeFile.id,
+            content: val,
+            isProcedure: activeFile.isProcedure,
+            transformedContent: null,
+          },
+        ]);
+      } else {
+        updateFile(activeFile.id, val);
+      }
     },
-    [activeFile, updateFiles]
+    [activeFile, showTransformed, updateFile, updateFiles]
   );
 
   const handleSave = useCallback(() => {
