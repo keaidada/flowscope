@@ -980,7 +980,9 @@ pub struct ProjectFileRow {
     pub is_procedure: i64,
     #[serde(default)]
     pub transformed_content: String,
+    #[serde(default)]
     pub created_at: String,
+    #[serde(default)]
     pub updated_at: String,
 }
 
@@ -1176,14 +1178,22 @@ pub fn upsert_project_files(
     let tx = conn.unchecked_transaction()?;
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at, dir_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+            "INSERT INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at, dir_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?13), COALESCE(NULLIF(?11, ''), ?13), ?12)
+             ON CONFLICT(project_id, path) DO UPDATE SET
+             name = excluded.name,
+             content = excluded.content,
+             language = excluded.language,
+             size = excluded.size,
+             dialect = excluded.dialect,
+             is_procedure = excluded.is_procedure,
+             transformed_content = excluded.transformed_content,
+             updated_at = COALESCE(NULLIF(excluded.updated_at, ''), ?13),
+             dir_id = excluded.dir_id"
         )?;
         for f in files {
             let (_, dir) = split_file_path(&f.path);
-            let created = if f.created_at.is_empty() { &now } else { &f.created_at };
-            let updated = if f.updated_at.is_empty() { &now } else { &f.updated_at };
-            stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, f.dialect, f.is_procedure, f.transformed_content, created, updated, dir])?;
+            stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, f.dialect, f.is_procedure, f.transformed_content, f.created_at, f.updated_at, dir, now])?;
         }
     }
     tx.commit()?;
