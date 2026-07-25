@@ -49,10 +49,6 @@ export function EditorTabs({
       >
         {openFiles.map((file) => {
           const isActive = file.id === activeFileId;
-          // Determine tab status
-          const statusColor = file.isProcedure
-            ? (file.transformedContent ? 'before:bg-green-500' : 'before:bg-amber-500')
-            : '';
           return (
             <div
               key={file.id}

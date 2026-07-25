@@ -423,7 +423,6 @@ export function EditorArea({
         onAnalyze={handleAnalyze}
         allFileCount={allFileCount}
         selectedCount={selectedCount}
-        activeFileName={activeFile?.name}
         sqlViewMode={sqlViewMode}
         onSqlViewModeChange={setSqlViewMode}
         showSqlViewToggle={showSqlViewToggle}

@@ -1,4 +1,4 @@
-import { Play, Loader2, ChevronDown, Braces, Code, FileCode, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
+import { Play, Loader2, ChevronDown, Braces, Code, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,7 +33,6 @@ interface EditorToolbarProps {
   onAnalyze: () => void;
   allFileCount: number;
   selectedCount: number;
-  activeFileName?: string;
   sqlViewMode?: SqlViewMode;
   onSqlViewModeChange?: (mode: SqlViewMode) => void;
   showSqlViewToggle?: boolean;
@@ -65,7 +64,6 @@ export function EditorToolbar({
   onAnalyze,
   allFileCount,
   selectedCount,
-  activeFileName,
   sqlViewMode = 'template',
   onSqlViewModeChange,
   showSqlViewToggle = false,
