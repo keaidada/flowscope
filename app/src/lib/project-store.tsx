@@ -189,7 +189,9 @@ const loadProjectsFromStorage = (): Project[] => {
         templateMode: parseTemplateMode(p.templateMode),
         files: [], // Files are loaded from DuckDB asynchronously
         activeFileId: typeof p.activeFileId === 'string' ? p.activeFileId : null,
-        openFileIds: Array.isArray(p.openFileIds) ? p.openFileIds : [p.activeFileId].filter(Boolean),
+        openFileIds: Array.isArray(p.openFileIds) && p.openFileIds.length > 0
+          ? p.openFileIds
+          : (p.activeFileId ? [p.activeFileId] : []),
       }));
     }
   } catch (error) {
