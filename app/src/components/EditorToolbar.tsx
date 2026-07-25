@@ -125,35 +125,6 @@ export function EditorToolbar({
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-80 max-h-80 overflow-y-auto">
-              {/* Action bar */}
-              <div className="flex items-center gap-1 px-2 py-1 border-b sticky top-0 bg-popover z-10">
-                <DropdownMenuItem
-                  className="h-6 text-[10px] text-red-500 hover:text-red-600 cursor-pointer"
-                  disabled={selectedForDelete.size === 0}
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    for (const id of selectedForDelete) onCloseTab?.(id);
-                    setSelectedForDelete(new Set());
-                  }}
-                >
-                  <Trash2 className="h-3 w-3 mr-1" />
-                  关闭选中 ({selectedForDelete.size})
-                </DropdownMenuItem>
-                <div className="flex-1" />
-                <DropdownMenuItem
-                  className="h-6 text-[10px] cursor-pointer"
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    if (selectedForDelete.size === sortedFiles.length) {
-                      setSelectedForDelete(new Set());
-                    } else {
-                      setSelectedForDelete(new Set(sortedFiles.map((f) => f.id)));
-                    }
-                  }}
-                >
-                  {selectedForDelete.size === sortedFiles.length ? '取消全选' : '全选'}
-                </DropdownMenuItem>
-              </div>
               {/* File list */}
               {sortedFiles.map((f) => (
                 <div
@@ -195,43 +166,64 @@ export function EditorToolbar({
                   )}
                 </div>
               ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-
-        {onCloseAllTabs && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7">
-                <XCircle className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-36">
-              {activeFileId && onCloseTab && (
-                <DropdownMenuItem onClick={() => onCloseTab(activeFileId)} className="text-xs">
-                  关闭当前
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              {activeFileId && onCloseOtherTabs && (
-                <DropdownMenuItem onClick={() => onCloseOtherTabs(activeFileId)} className="text-xs">
-                  关闭其他
-                </DropdownMenuItem>
-              )}
-              {activeFileId && onCloseTabsToLeft && (
-                <DropdownMenuItem onClick={() => onCloseTabsToLeft(activeFileId)} className="text-xs">
-                  关闭上方
-                </DropdownMenuItem>
-              )}
-              {activeFileId && onCloseTabsToRight && (
-                <DropdownMenuItem onClick={() => onCloseTabsToRight(activeFileId)} className="text-xs">
-                  关闭下方
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={onCloseAllTabs} className="text-xs">
-                全部关闭
-              </DropdownMenuItem>
+              {/* Close actions footer */}
+              <div className="border-t pt-1 pb-1 px-2">
+                <div className="flex items-center gap-1">
+                  <DropdownMenuItem
+                    className="h-6 text-[10px] text-red-500 hover:text-red-600 cursor-pointer"
+                    disabled={selectedForDelete.size === 0}
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      for (const id of selectedForDelete) onCloseTab?.(id);
+                      setSelectedForDelete(new Set());
+                    }}
+                  >
+                    <Trash2 className="h-3 w-3 mr-1" />
+                    关闭选中 ({selectedForDelete.size})
+                  </DropdownMenuItem>
+                  <div className="flex-1" />
+                  <DropdownMenuItem
+                    className="h-6 text-[10px] cursor-pointer"
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      if (selectedForDelete.size === sortedFiles.length) {
+                        setSelectedForDelete(new Set());
+                      } else {
+                        setSelectedForDelete(new Set(sortedFiles.map((f) => f.id)));
+                      }
+                    }}
+                  >
+                    {selectedForDelete.size === sortedFiles.length ? '取消全选' : '全选'}
+                  </DropdownMenuItem>
+                </div>
+                <div className="flex items-centre gap-1 mt-1 border-t pt-1">
+                  {activeFileId && onCloseTab && (
+                    <DropdownMenuItem className="h-6 text-[10px] cursor-pointer" onSelect={(e) => { e.preventDefault(); onCloseTab(activeFileId); }}>
+                      关闭当前
+                    </DropdownMenuItem>
+                  )}
+                  {activeFileId && onCloseOtherTabs && (
+                    <DropdownMenuItem className="h-6 text-[10px] cursor-pointer" onSelect={(e) => { e.preventDefault(); onCloseOtherTabs(activeFileId); }}>
+                      关闭其他
+                    </DropdownMenuItem>
+                  )}
+                  {activeFileId && onCloseTabsToLeft && (
+                    <DropdownMenuItem className="h-6 text-[10px] cursor-pointer" onSelect={(e) => { e.preventDefault(); onCloseTabsToLeft(activeFileId); }}>
+                      关闭上方
+                    </DropdownMenuItem>
+                  )}
+                  {activeFileId && onCloseTabsToRight && (
+                    <DropdownMenuItem className="h-6 text-[10px] cursor-pointer" onSelect={(e) => { e.preventDefault(); onCloseTabsToRight(activeFileId); }}>
+                      关闭下方
+                    </DropdownMenuItem>
+                  )}
+                  {onCloseAllTabs && (
+                    <DropdownMenuItem className="h-6 text-[10px] cursor-pointer" onSelect={(e) => { e.preventDefault(); onCloseAllTabs(); }}>
+                      全部关闭
+                    </DropdownMenuItem>
+                  )}
+                </div>
+              </div>
             </DropdownMenuContent>
           </DropdownMenu>
         )}
