@@ -230,21 +230,11 @@ export function EditorArea({
   const handleContentChange = useCallback(
     (val: string) => {
       if (!activeFile || showTransformedRef.current) return;
-      if (activeFile.transformedContent) {
-        updateFiles([
-          {
-            fileId: activeFile.id,
-            content: val,
-            isProcedure: activeFile.isProcedure,
-            transformedContent: null,
-          },
-        ]);
-      } else {
-        updateFile(activeFile.id, val);
-      }
+      updateFile(activeFile.id, val);
     },
-    [activeFile, updateFile, updateFiles]
+    [activeFile, updateFile]
   );
+
   const handleSave = useCallback(() => {
     if (currentProject && currentProject.files.length > 0) {
       // Only save files that have content loaded (avoid overwriting DB with empty content)
