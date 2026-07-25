@@ -861,20 +861,29 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       const file = project?.files.find((f) => f.id === fileId);
       if (!file || !activeProjectId) return;
 
-      const content = await storageLoadFileContent(activeProjectId, file.path);
+      const result = await storageLoadFileContent(activeProjectId, file.path);
+      if (!result || result.content === null) return;
+
       loadedContentIds.current.add(fileId);
 
-      if (content !== null) {
-        setProjects((prev) =>
-          prev.map((p) => {
-            if (p.id !== activeProjectId) return p;
-            return {
-              ...p,
-              files: p.files.map((f) => (f.id === fileId ? { ...f, content } : f)),
-            };
-          })
-        );
-      }
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          return {
+            ...p,
+            files: p.files.map((f) =>
+              f.id === fileId
+                ? {
+                    ...f,
+                    content: result.content ?? '',
+                    isProcedure: result.isProcedure ?? f.isProcedure,
+                    transformedContent: result.transformedContent ?? f.transformedContent,
+                  }
+                : f
+            ),
+          };
+        })
+      );
     },
     [activeProjectId, projects]
   );

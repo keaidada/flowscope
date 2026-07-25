@@ -104,7 +104,6 @@ export interface ProjectFileMeta {
   language: string;
   size: number;
   is_procedure: number;
-  transformed_content: string;
   created_at: string;
   updated_at: string;
 }
@@ -115,12 +114,17 @@ export async function loadFilesMeta(projectId: string): Promise<ProjectFileMeta[
 
 // ── single file content ───────────────────────────────────────────────
 
-export async function loadFileContent(projectId: string, filePath: string): Promise<string | null> {
-  const resp = await api<{ content: string | null }>(
+export interface FileContentResult {
+  content: string | null;
+  is_procedure: number | null;
+  transformed_content: string | null;
+}
+
+export async function loadFileContent(projectId: string, filePath: string): Promise<FileContentResult> {
+  return api<FileContentResult>(
     'GET',
     `/file-content?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}`
   );
-  return resp.content;
 }
 
 export async function loadFileContentsBatch(
@@ -134,8 +138,8 @@ export async function loadFileContentsBatch(
     const batch = paths.slice(i, i + BATCH);
     const responses = await Promise.all(
       batch.map(async (p) => {
-        const content = await loadFileContent(projectId, p);
-        return [p, content ?? ''] as const;
+        const resp = await loadFileContent(projectId, p);
+        return [p, resp.content ?? ''] as const;
       })
     );
     for (const [p, c] of responses) {

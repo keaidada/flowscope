@@ -862,6 +862,10 @@ pub(crate) struct FileContentQuery {
 #[derive(Serialize, ToSchema)]
 pub(crate) struct FileContentResponse {
     content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_procedure: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transformed_content: Option<String>,
 }
 
 /// GET /api/db/file-content - Get file content
@@ -883,9 +887,13 @@ pub(crate) async fn get_file_content(
     Query(q): Query<FileContentQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let content = store::load_file_content(&db, &q.project_id, &q.path)
+    let full = store::load_file_full(&db, &q.project_id, &q.path)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(Json(FileContentResponse { content }))
+    Ok(Json(FileContentResponse {
+        content: full.as_ref().and_then(|f| f.content.clone()),
+        is_procedure: full.as_ref().map(|f| f.is_procedure),
+        transformed_content: full.as_ref().and_then(|f| f.transformed_content.clone()),
+    }))
 }
 
 // ── incremental upsert ─────────────────────────────────────────────────

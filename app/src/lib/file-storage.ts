@@ -51,13 +51,19 @@ export async function loadProjectFilesMeta(projectId: string): Promise<ProjectFi
     size: f.size,
     dialect: (f as any).dialect || '',
     isProcedure: (f.is_procedure ?? 0) !== 0,
-    transformedContent: f.transformed_content || null,
+    transformedContent: (f as any).transformed_content || null,
   }));
 }
 
 /** Load content for a single file */
-export async function loadFileContent(projectId: string, filePath: string): Promise<string | null> {
-  return serverDb.loadFileContent(projectId, filePath);
+export async function loadFileContent(projectId: string, filePath: string): Promise<{ content: string | null; isProcedure?: boolean; transformedContent?: string | null } | null> {
+  const resp = await serverDb.loadFileContent(projectId, filePath);
+  if (resp.content === null && resp.is_procedure === null) return null;
+  return {
+    content: resp.content,
+    isProcedure: (resp.is_procedure ?? 0) !== 0,
+    transformedContent: resp.transformed_content || null,
+  };
 }
 
 /** Load content for multiple files (batch) */
