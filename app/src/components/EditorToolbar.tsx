@@ -130,28 +130,25 @@ export function EditorToolbar({
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-80 max-h-80 overflow-y-auto">
-              <div className="flex items-center gap-1 px-2 py-1 border-b">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 text-[10px] text-red-500 hover:text-red-600"
+              {/* Action bar */}
+              <div className="flex items-center gap-1 px-2 py-1 border-b sticky top-0 bg-popover z-10">
+                <DropdownMenuItem
+                  className="h-6 text-[10px] text-red-500 hover:text-red-600 cursor-pointer"
                   disabled={selectedForDelete.size === 0}
-                  onClick={() => {
-                    for (const id of selectedForDelete) {
-                      onCloseTab?.(id);
-                    }
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    for (const id of selectedForDelete) onCloseTab?.(id);
                     setSelectedForDelete(new Set());
                   }}
                 >
                   <Trash2 className="h-3 w-3 mr-1" />
-                  删除选中 ({selectedForDelete.size})
-                </Button>
+                  关闭选中 ({selectedForDelete.size})
+                </DropdownMenuItem>
                 <div className="flex-1" />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 text-[10px]"
-                  onClick={() => {
+                <DropdownMenuItem
+                  className="h-6 text-[10px] cursor-pointer"
+                  onSelect={(e) => {
+                    e.preventDefault();
                     if (selectedForDelete.size === sortedFiles.length) {
                       setSelectedForDelete(new Set());
                     } else {
@@ -160,24 +157,22 @@ export function EditorToolbar({
                   }}
                 >
                   {selectedForDelete.size === sortedFiles.length ? '取消全选' : '全选'}
-                </Button>
+                </DropdownMenuItem>
               </div>
+              {/* File list */}
               {sortedFiles.map((f) => (
-                <DropdownMenuItem
+                <div
                   key={f.id}
-                  onClick={(e) => {
-                    // Don't switch if clicking checkbox area
-                    const target = e.target as HTMLElement;
-                    if (target.closest('[data-checkbox]')) return;
+                  className={cn(
+                    'text-xs flex items-center gap-2 pr-1 py-1.5 px-2 cursor-pointer hover:bg-muted/50 group',
+                    f.id === activeFileId && 'bg-muted/50 font-medium'
+                  )}
+                  onClick={() => {
                     onOpenFile(f.id);
                     setSelectedForDelete(new Set());
                   }}
-                  className={cn(
-                    'text-xs flex items-center gap-2 pr-1',
-                    f.id === activeFileId && 'bg-muted/50 font-medium'
-                  )}
                 >
-                  <span data-checkbox className="shrink-0 flex items-center">
+                  <span data-checkbox className="shrink-0 flex items-center" onClick={(e) => e.stopPropagation()}>
                     <Checkbox
                       checked={selectedForDelete.has(f.id)}
                       onCheckedChange={() => {
@@ -206,7 +201,7 @@ export function EditorToolbar({
                       }}
                     />
                   )}
-                </DropdownMenuItem>
+                </div>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
