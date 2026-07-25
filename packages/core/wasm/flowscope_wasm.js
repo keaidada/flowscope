@@ -325,6 +325,19 @@ export function get_version() {
 }
 
 /**
+ * Detects whether SQL text is a stored procedure (CREATE PROCEDURE / CREATE PROC).
+ * Works across dialects (BigQuery, TSQL, MySQL, Oracle, etc.).
+ * @param {string} sql
+ * @returns {boolean}
+ */
+export function is_stored_procedure(sql) {
+    const ptr0 = passStringToWasm0(sql, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.is_stored_procedure(ptr0, len0);
+    return ret !== 0;
+}
+
+/**
  * @param {string} results_json
  * @returns {string}
  */
@@ -407,6 +420,25 @@ export function merge_progressive_export(request_json) {
  */
 export function merge_progressive_init() {
     wasm.merge_progressive_init();
+}
+
+/**
+ * Sanitizes a BigQuery stored procedure, extracting DML/SELECT statements
+ * from the BEGIN...END body. Returns the sanitized SQL string or null if
+ * the input is not a BigQuery procedure or sanitization fails.
+ * @param {string} sql
+ * @returns {string | undefined}
+ */
+export function sanitize_procedure(sql) {
+    const ptr0 = passStringToWasm0(sql, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.sanitize_procedure(ptr0, len0);
+    let v2;
+    if (ret[0] !== 0) {
+        v2 = getStringFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v2;
 }
 
 /**

@@ -1050,6 +1050,8 @@ pub struct ProjectFileMetaRow {
     pub language: String,
     pub size: i64,
     pub is_procedure: i64,
+    #[serde(default)]
+    pub transformed_content: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1059,7 +1061,7 @@ pub fn load_file_metadata(
     project_id: &str,
 ) -> Result<Vec<ProjectFileMetaRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT name, path, COALESCE(dir_id, ''), language, size, COALESCE(is_procedure, 0), created_at, updated_at
+        "SELECT name, path, COALESCE(dir_id, ''), language, size, COALESCE(is_procedure, 0), COALESCE(transformed_content, ''), created_at, updated_at
          FROM project_files WHERE project_id = ?1 ORDER BY path"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
@@ -1070,8 +1072,9 @@ pub fn load_file_metadata(
             language: row.get(3)?,
             size: row.get(4)?,
             is_procedure: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
+            transformed_content: row.get(6)?,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
         })
     })?;
     rows.collect()

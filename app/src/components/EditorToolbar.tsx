@@ -1,4 +1,4 @@
-import { Play, Loader2, ChevronDown, Braces, Code, FileCode, Network, WrapText, Wand2, Save, Scissors } from 'lucide-react';
+import { Play, Loader2, ChevronDown, Braces, Code, FileCode, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
@@ -50,7 +50,9 @@ interface EditorToolbarProps {
   onSave?: () => void;
   isProcedure?: boolean;
   onConvertProcedure?: () => void;
-  isConverting?: boolean;
+  showTransformed?: boolean;
+  onToggleTransformed?: () => void;
+  hasTransformedContent?: boolean;
 }
 
 export function EditorToolbar({
@@ -77,7 +79,9 @@ export function EditorToolbar({
   onOpenEtl,
   onSave,
   onConvertProcedure,
-  isConverting,
+  showTransformed,
+  onToggleTransformed,
+  hasTransformedContent,
 }: EditorToolbarProps) {
   const { t } = useTranslation();
 
@@ -221,17 +225,36 @@ export function EditorToolbar({
                   size="icon"
                   className="h-7 w-7"
                   onClick={onConvertProcedure}
-                  disabled={isConverting}
                 >
-                  {isConverting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Scissors className="h-3.5 w-3.5" />
-                  )}
+                  <Scissors className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
                 <p>转换存储过程</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {onToggleTransformed && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`h-7 w-7 ${showTransformed ? 'bg-amber-500/10 text-amber-600' : ''}`}
+                  onClick={onToggleTransformed}
+                  disabled={!hasTransformedContent}
+                >
+                  {showTransformed ? (
+                    <Eye className="h-3.5 w-3.5" />
+                  ) : (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{showTransformed ? '查看原始脚本' : '查看转换结果'}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

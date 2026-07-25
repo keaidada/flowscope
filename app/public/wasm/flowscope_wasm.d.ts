@@ -83,6 +83,12 @@ export function export_xlsx(request_json: string): Uint8Array;
  */
 export function get_version(): string;
 
+/**
+ * Detects whether SQL text is a stored procedure (CREATE PROCEDURE / CREATE PROC).
+ * Works across dialects (BigQuery, TSQL, MySQL, Oracle, etc.).
+ */
+export function is_stored_procedure(sql: string): boolean;
+
 export function merge_analyze_results(results_json: string): string;
 
 /**
@@ -110,6 +116,13 @@ export function merge_progressive_export(request_json: string): Uint8Array;
  * Reset the progressive merge accumulator.
  */
 export function merge_progressive_init(): void;
+
+/**
+ * Sanitizes a BigQuery stored procedure, extracting DML/SELECT statements
+ * from the BEGIN...END body. Returns the sanitized SQL string or null if
+ * the input is not a BigQuery procedure or sanitization fails.
+ */
+export function sanitize_procedure(sql: string): string | undefined;
 
 /**
  * Install panic hook for better error messages in browser console
@@ -143,10 +156,12 @@ export interface InitOutput {
     readonly export_to_duckdb_sql: (a: number, b: number) => [number, number, number, number];
     readonly export_xlsx: (a: number, b: number) => [number, number, number, number];
     readonly get_version: () => [number, number];
+    readonly is_stored_procedure: (a: number, b: number) => number;
     readonly merge_analyze_results: (a: number, b: number) => [number, number, number, number];
     readonly merge_and_export: (a: number, b: number) => [number, number, number, number];
     readonly merge_progressive_add: (a: number, b: number) => [number, number];
     readonly merge_progressive_export: (a: number, b: number) => [number, number, number, number];
+    readonly sanitize_procedure: (a: number, b: number) => [number, number];
     readonly split_statements_json: (a: number, b: number) => [number, number];
     readonly merge_progressive_init: () => void;
     readonly set_panic_hook: () => void;

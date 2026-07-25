@@ -51,7 +51,7 @@ export async function loadProjectFilesMeta(projectId: string): Promise<ProjectFi
     size: f.size,
     dialect: (f as any).dialect || '',
     isProcedure: (f.is_procedure ?? 0) !== 0,
-    transformedContent: (f as any).transformed_content || '',
+    transformedContent: f.transformed_content || null,
   }));
 }
 

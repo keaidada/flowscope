@@ -1,5 +1,4 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from 'react';
-import { extractBqDml } from '@/lib/procedure-utils';
 import { Loader2, AlertCircle, FileX } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +12,7 @@ import type { GlobalShortcut } from '@/hooks';
 import { EditorToolbar } from './EditorToolbar';
 import type { SqlViewMode } from './EditorToolbar';
 import { EtlDialog } from './EtlDialog';
+import { ProcedureRepairDialog } from './ProcedureRepairDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_FILE_NAMES } from '@/lib/constants';
 import type { RunMode } from '@/lib/project-store';
@@ -210,12 +210,35 @@ export function EditorArea({
   const showSqlViewToggle = currentProject?.templateMode !== 'raw';
 
   // Content to display in the editor based on view mode
+  const [showTransformed, setShowTransformed] = useState(false);
+  const hasTransformedContent = !!(activeFile?.transformedContent);
+
   const displayContent = useMemo(() => {
     if (sqlViewMode === 'resolved' && resolvedSql) {
       return resolvedSql;
     }
+    if (showTransformed && hasTransformedContent) {
+      return activeFile?.transformedContent ?? '';
+    }
     return activeFile?.content ?? '';
-  }, [sqlViewMode, resolvedSql, activeFile?.content]);
+  }, [sqlViewMode, resolvedSql, activeFile?.content, activeFile?.transformedContent, showTransformed, hasTransformedContent]);
+
+  const handleContentChange = useCallback(
+    (val: string) => {
+      if (!activeFile) return;
+      // Clear transformed_content when user edits the original content
+      const hasTc = activeFile.transformedContent;
+      updateFiles([
+        {
+          fileId: activeFile.id,
+          content: val,
+          isProcedure: activeFile.isProcedure,
+          transformedContent: hasTc ? null : undefined,
+        },
+      ]);
+    },
+    [activeFile, updateFiles]
+  );
 
   const handleSave = useCallback(() => {
     if (currentProject && currentProject.files.length > 0) {
@@ -282,21 +305,21 @@ export function EditorArea({
     [activeFile, updateFile]
   );
 
-  const [isConverting, setIsConverting] = useState(false);
+  const [procedureDialogOpen, setProcedureDialogOpen] = useState(false);
 
-  const handleConvertProcedure = useCallback(async () => {
+  const handleConvertProcedure = useCallback(() => {
     if (!activeFile) return;
-    const content = activeFile.content;
-    if (!content) return;
+    setProcedureDialogOpen(true);
+  }, [activeFile]);
 
-    setIsConverting(true);
-    try {
-      const transformedContent = extractBqDml(content);
+  const handleApplyTransformed = useCallback(
+    (transformedContent: string | null) => {
+      if (!activeFile) return;
+      const content = activeFile.content;
       updateFiles([{ fileId: activeFile.id, content, isProcedure: true, transformedContent }]);
-    } finally {
-      setIsConverting(false);
-    }
-  }, [activeFile, updateFiles]);
+    },
+    [activeFile, updateFiles]
+  );
 
   const isProcedure = activeFile?.isProcedure ?? false;
 
@@ -397,7 +420,9 @@ export function EditorArea({
         onSave={handleSave}
         isProcedure={isProcedure}
         onConvertProcedure={isProcedure ? handleConvertProcedure : undefined}
-        isConverting={isConverting}
+        showTransformed={showTransformed}
+        onToggleTransformed={() => setShowTransformed((v) => !v)}
+        hasTransformedContent={hasTransformedContent}
       />
 
       {error && (
@@ -415,9 +440,9 @@ export function EditorArea({
         <ErrorBoundary fallback={<SqlViewFallback />}>
           <SqlView
             value={displayContent}
-            onChange={(val) => updateFile(activeFile.id, val)}
+            onChange={handleContentChange}
             className="h-full text-sm"
-            editable={sqlViewMode === 'template' && !isReadOnly}
+            editable={!showTransformed && sqlViewMode === 'template' && !isReadOnly}
             isDark={isDark}
             highlightedSpan={sqlViewMode === 'template' ? highlightedSpan : null}
             lineWrapping={lineWrapping}
@@ -435,6 +460,13 @@ export function EditorArea({
         onOpenChange={setEtlOpen}
         initialContent={initialEtlContent}
         onApplyResult={handleApplyEtlResult}
+      />
+
+      <ProcedureRepairDialog
+        open={procedureDialogOpen}
+        onOpenChange={setProcedureDialogOpen}
+        originalContent={activeFile?.content || ''}
+        onApply={handleApplyTransformed}
       />
     </div>
   );
