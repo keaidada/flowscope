@@ -180,7 +180,8 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           ];
           console.log('[analysis] resolveContext:', currentFilePath,
             'store_isProcedure:', projectActiveFile?.isProcedure,
-            'store_tc:', !!projectActiveFile?.transformedContent);
+            'store_tc:', !!projectActiveFile?.transformedContent,
+            'store_tc_len:', projectActiveFile?.transformedContent?.length ?? 0);
           contextDescription = `Analyzing file: ${currentFilePath}`;
         } else {
           contextDescription = 'Analyzing current file';
