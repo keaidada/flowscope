@@ -86,11 +86,12 @@ export interface Project {
   name: string;
   files: ProjectFile[];
   activeFileId: string | null;
+  openFileIds?: string[];
   dialect: Dialect;
   runMode: RunMode;
   selectedFileIds: string[];
-  schemaSQL: string; // User-provided CREATE TABLE statements for schema augmentation
-  templateMode: TemplateMode; // Template preprocessing mode (raw, jinja, dbt)
+  schemaSQL: string;
+  templateMode: TemplateMode;
 }
 
 interface ProjectContextType {
@@ -118,6 +119,18 @@ interface ProjectContextType {
   renameFolder: (oldFolderPath: string, newFolderName: string) => void;
   deleteFolder: (folderPath: string) => void;
   selectFile: (fileId: string) => void;
+  /** Open a file as a new tab (does not close other tabs) */
+  openFile: (fileId: string) => void;
+  /** Close a tab by file ID */
+  closeTab: (fileId: string) => void;
+  /** Close all tabs */
+  closeAllTabs: () => void;
+  /** Close tabs to the left of the given file */
+  closeTabsToLeft: (fileId: string) => void;
+  /** Close tabs to the right of the given file */
+  closeTabsToRight: (fileId: string) => void;
+  /** Close all tabs except the given file */
+  closeOtherTabs: (fileId: string) => void;
   /** Load content for a single file on demand (lazy content loading) */
   loadFileContent: (fileId: string) => Promise<void>;
   /** Check if a file's content has been loaded */
@@ -176,6 +189,7 @@ const loadProjectsFromStorage = (): Project[] => {
         templateMode: parseTemplateMode(p.templateMode),
         files: [], // Files are loaded from DuckDB asynchronously
         activeFileId: typeof p.activeFileId === 'string' ? p.activeFileId : null,
+        openFileIds: Array.isArray(p.openFileIds) ? p.openFileIds : [p.activeFileId].filter(Boolean),
       }));
     }
   } catch (error) {
@@ -202,6 +216,7 @@ const metaToProject = (m: serverDb.ProjectMeta): Project => ({
   templateMode: parseTemplateMode(m.template_mode),
   files: [],
   activeFileId: m.active_file_id,
+      openFileIds: [],
 });
 
 /**
@@ -219,6 +234,7 @@ const saveProjectSettingsToStorage = (projects: Project[]) => {
       runMode: p.runMode,
       selectedFileIds: p.selectedFileIds,
       activeFileId: p.activeFileId,
+        openFileIds: p.openFileIds || [],
     }));
     localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(settings));
     // 同步到后端(db 为 source of truth),debounced
@@ -1163,6 +1179,106 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     [activeProjectId, isBackendMode, effectiveActiveProjectId]
   );
 
+  const openFile = useCallback(
+    (fileId: string) => {
+      if (!activeProjectId) return;
+      // In backend mode, same as selectFile
+      if (isBackendMode && effectiveActiveProjectId === BACKEND_PROJECT_ID) {
+        setBackendActiveFileId(fileId);
+        return;
+      }
+      setActiveFileIdOverride(fileId);
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          const exists = p.openFileIds?.includes(fileId);
+          return {
+            ...p,
+            activeFileId: fileId,
+            openFileIds: exists ? p.openFileIds : [...(p.openFileIds || []), fileId],
+          };
+        })
+      );
+    },
+    [activeProjectId, isBackendMode, effectiveActiveProjectId]
+  );
+
+  const closeTab = useCallback(
+    (fileId: string) => {
+      if (!activeProjectId) return;
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          const remaining = (p.openFileIds || []).filter((id) => id !== fileId);
+          const newActive = p.activeFileId === fileId
+            ? remaining[remaining.length - 1] || null
+            : p.activeFileId;
+          setActiveFileIdOverride(newActive);
+          return { ...p, activeFileId: newActive, openFileIds: remaining };
+        })
+      );
+    },
+    [activeProjectId]
+  );
+
+  const closeTabsToLeft = useCallback(
+    (fileId: string) => {
+      if (!activeProjectId) return;
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          const idx = (p.openFileIds || []).indexOf(fileId);
+          if (idx < 0) return p;
+          const remaining = (p.openFileIds || []).slice(idx);
+          return { ...p, openFileIds: remaining };
+        })
+      );
+    },
+    [activeProjectId]
+  );
+
+  const closeTabsToRight = useCallback(
+    (fileId: string) => {
+      if (!activeProjectId) return;
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          const idx = (p.openFileIds || []).indexOf(fileId);
+          if (idx < 0) return p;
+          const remaining = (p.openFileIds || []).slice(0, idx + 1);
+          return { ...p, openFileIds: remaining };
+        })
+      );
+    },
+    [activeProjectId]
+  );
+
+  const closeOtherTabs = useCallback(
+    (fileId: string) => {
+      if (!activeProjectId) return;
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          if (!(p.openFileIds || []).includes(fileId)) return p;
+          setActiveFileIdOverride(fileId);
+          return { ...p, activeFileId: fileId, openFileIds: [fileId] };
+        })
+      );
+    },
+    [activeProjectId]
+  );
+
+  const closeAllTabs = useCallback(() => {
+    if (!activeProjectId) return;
+    setProjects((prev) =>
+      prev.map((p) => {
+        if (p.id !== activeProjectId) return p;
+        setActiveFileIdOverride(null);
+        return { ...p, activeFileId: null, openFileIds: [] };
+      })
+    );
+  }, [activeProjectId]);
+
   const updateSchemaSQL = useCallback((projectId: string, schemaSQL: string) => {
     setProjects((prev) =>
       prev.map((p) => {
@@ -1384,6 +1500,12 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     renameFolder,
     deleteFolder,
     selectFile,
+    openFile,
+    closeTab,
+    closeAllTabs,
+    closeTabsToLeft,
+    closeTabsToRight,
+    closeOtherTabs,
     loadFileContent,
     isContentLoaded,
     ensureFilesContent,

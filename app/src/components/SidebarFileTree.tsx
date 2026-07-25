@@ -42,7 +42,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     createFile,
     deleteFile,
     deleteFiles,
-    selectFile,
+    openFile,
     importFiles,
     addFilesDirectly,
     updateFiles,
@@ -349,7 +349,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   }, [convertDialogOpen, currentProject, convertTargetPath]);
 
   const handleSelectFile = (fileId: string) => {
-    selectFile(fileId);
+    openFile(fileId);
   };
 
   const handleDeleteClick = (e: React.MouseEvent, fileId: string) => {

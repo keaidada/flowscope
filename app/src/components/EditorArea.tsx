@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { SqlView, useLineageState } from '@pondpilot/flowscope-react';
 import { cn } from '@/lib/utils';
 import { useProject } from '@/lib/project-store';
+import type { ProjectFile } from '@/lib/project-store';
 import { upsertProjectFiles } from '@/lib/file-storage';
 import { useThemeStore, resolveTheme } from '@/lib/theme-store';
 import { useDebounce, useFileNavigation, useGlobalShortcuts } from '@/hooks';
@@ -13,6 +14,7 @@ import { EditorToolbar } from './EditorToolbar';
 import type { SqlViewMode } from './EditorToolbar';
 import { EtlDialog } from './EtlDialog';
 import { ProcedureRepairDialog } from './ProcedureRepairDialog';
+import { EditorTabs } from './EditorTabs';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_FILE_NAMES } from '@/lib/constants';
 import type { RunMode } from '@/lib/project-store';
@@ -68,6 +70,12 @@ export function EditorArea({
     filesLoaded,
     loadFileContent,
     isContentLoaded,
+    openFile,
+    closeTab,
+    closeAllTabs,
+    closeTabsToLeft,
+    closeTabsToRight,
+    closeOtherTabs,
   } = useProject();
 
   const theme = useThemeStore((state) => state.theme);
@@ -395,6 +403,18 @@ export function EditorArea({
 
   return (
     <div className={cn('flex flex-col h-full bg-background', className)}>
+      <EditorTabs
+        openFiles={(currentProject?.openFileIds || [])
+          .map((id) => currentProject?.files.find((f) => f.id === id))
+          .filter(Boolean) as ProjectFile[]}
+        activeFileId={currentProject?.activeFileId ?? null}
+        onSelectTab={openFile}
+        onCloseTab={closeTab}
+        onCloseAll={closeAllTabs}
+        onCloseOthers={closeOtherTabs}
+        onCloseToLeft={closeTabsToLeft}
+        onCloseToRight={closeTabsToRight}
+      />
       <EditorToolbar
         runMode={currentProject.runMode}
         onRunModeChange={(mode: RunMode) => setRunMode(currentProject.id, mode)}
