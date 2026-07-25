@@ -575,6 +575,8 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             }
             if (updates.length > 0) {
               updateFiles(updates);
+              // Yield to allow React to process state update before reading ref
+              await new Promise((r) => setTimeout(r, 100));
             }
           }
           // Rebuild context again with transformedContent loaded
