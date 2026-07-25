@@ -641,7 +641,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         };
 
         // Debug: check what's being sent
-        const procFiles = context.files.filter((f: PreparedAnalysisFile) => f.isProcedure);
+        const procFiles = (context.files as PreparedAnalysisFile[]).filter((f) => f.isProcedure);
         if (procFiles.length > 0) {
           console.log('[analysis] sending', procFiles.length, 'procedure files to backend:');
           for (const f of procFiles.slice(0, 3)) {
