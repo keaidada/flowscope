@@ -543,53 +543,24 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         }
 
         // Load transformed_content for procedure files that don't have it yet
-        const filesNeedingTc: Array<{ name: string; path: string }> = [];
+        const filesNeedingTc: PreparedAnalysisFile[] = [];
         for (const f of context.files as PreparedAnalysisFile[]) {
           if (f.isProcedure && !f.transformedContent) {
-            filesNeedingTc.push({ name: f.name, path: f.name });
+            filesNeedingTc.push(f);
           }
         }
-        if (filesNeedingTc.length > 0) {
+        if (filesNeedingTc.length > 0 && activeProjectId) {
           const { loadFileContent: loadSingle } = await import('@/lib/file-storage');
-          const updatedProject = currentProjectRef.current;
-          if (updatedProject && activeProjectId) {
-            const updates: Array<{
-              fileId: string;
-              content: string;
-              isProcedure?: boolean;
-              transformedContent?: string | null;
-            }> = [];
-            for (const fc of filesNeedingTc) {
-              const loaded = await loadSingle(activeProjectId, fc.path);
-              const pf = updatedProject.files.find(
-                (p) => p.path === fc.path || p.id === fc.path
-              );
-              if (loaded && pf) {
-                updates.push({
-                  fileId: pf.id,
-                  content: loaded.content ?? pf.content,
-                  isProcedure: true,
-                  transformedContent: loaded.transformedContent ?? null,
-                });
-              }
-            }
-            if (updates.length > 0) {
-              updateFiles(updates);
-              // Yield to allow React to process state update before reading ref
-              await new Promise((r) => setTimeout(r, 100));
-            }
-          }
-          // Rebuild context again with transformedContent loaded
-          const afterTc = currentProjectRef.current;
-          if (afterTc) {
-            const refreshedContext2 = await buildAnalysisContext(
-              afterTc,
-              activeFileContent,
-              activeFilePath,
-              runMode
-            );
-            if (refreshedContext2) {
-              context.files = refreshedContext2.files;
+          const results = await Promise.all(
+            filesNeedingTc.map(async (f) => {
+              const loaded = await loadSingle(activeProjectId, f.name);
+              return { file: f, loaded };
+            })
+          );
+          // Directly update context.files in-place (no React state needed)
+          for (const { file, loaded } of results) {
+            if (loaded?.transformedContent) {
+              file.transformedContent = loaded.transformedContent;
             }
           }
         }
