@@ -819,6 +819,7 @@ pub(crate) async fn save_project_files_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveProjectFilesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    eprintln!("[api] save_project_files: project={}, files={}", payload.project_id, payload.files.len());
     let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::save_project_files(&db, &payload.project_id, &payload.files)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
