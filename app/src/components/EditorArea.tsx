@@ -57,6 +57,7 @@ export function EditorArea({
   const { t } = useTranslation();
   const {
     currentProject,
+    activeProjectId,
     updateFile,
     updateFiles,
     createFile,
@@ -318,11 +319,15 @@ export function EditorArea({
 
   const handleApplyTransformed = useCallback(
     (transformedContent: string | null) => {
-      if (!activeFile) return;
+      if (!activeFile || !activeProjectId) return;
       const content = activeFile.content;
       updateFiles([{ fileId: activeFile.id, content, isProcedure: true, transformedContent }]);
+      // Persist to DB
+      upsertProjectFiles(activeProjectId, [{ ...activeFile, isProcedure: true, transformedContent }]).catch(
+        (e) => console.error('Failed to save transformed content:', e)
+      );
     },
-    [activeFile, updateFiles]
+    [activeFile, activeProjectId, updateFiles]
   );
 
   const isProcedure = activeFile?.isProcedure ?? false;
