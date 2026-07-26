@@ -199,7 +199,7 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[98vw] w-[1500px] h-[90vh] p-0 gap-0 flex flex-col">
+      <DialogContent size="full">
         {/* Header */}
         <DialogHeader className="px-3 pt-3 pb-0 shrink-0">
           <div className="flex items-center justify-between">
@@ -207,7 +207,7 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
               <div className="flex items-center justify-center w-6 h-6 rounded-md bg-orange-500/10">
                 <Wand2 className="h-3.5 w-3.5 text-orange-500" />
               </div>
-              <DialogTitle className="text-sm">ETL 工具</DialogTitle>
+              <DialogTitle>ETL 工具</DialogTitle>
               {summary && (
                 <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
                   {summary}
@@ -215,7 +215,7 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
               )}
             </div>
           </div>
-          <DialogDescription className="text-[10px] leading-tight">
+          <DialogDescription className="leading-tight">
             自动替换模板变量 <code className="bg-muted px-0.5 rounded text-[9px]">{'{var}'}</code> →{' '}
             <code className="bg-muted px-0.5 rounded text-[9px]">{"'{var}'"}</code>，支持 PySpark 提取 SQL
           </DialogDescription>

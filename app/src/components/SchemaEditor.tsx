@@ -65,7 +65,7 @@ export function SchemaEditor({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
+      <DialogContent size="xl" className="h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>
             {isReadOnly ? t('schemaEditor.viewTitle') : t('schemaEditor.editTitle')}

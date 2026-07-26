@@ -624,7 +624,7 @@ export function ExportDialog({
       </DropdownMenu>
 
       <Dialog open={duckDbDialogOpen} onOpenChange={setDuckDbDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent size="md">
           <DialogClose className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>
@@ -678,7 +678,7 @@ export function ExportDialog({
 
       {/* Sheet Selection Dialog */}
       <Dialog open={sheetDialogOpen} onOpenChange={setSheetDialogOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent size="sm">
           <DialogClose className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>
@@ -735,7 +735,7 @@ export function ExportDialog({
           setImageExportStatus('idle');
         }
       }}>
-        <DialogContent className="sm:max-w-[360px]">
+        <DialogContent size="sm">
           <DialogTitle className="text-center">
             {imageExportStatus === 'exporting' ? '导出中' : imageExportStatus === 'done' ? '导出完成' : '导出失败'}
           </DialogTitle>

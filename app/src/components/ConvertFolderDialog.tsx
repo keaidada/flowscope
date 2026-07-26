@@ -64,9 +64,9 @@ function FileListDialog({ open, onOpenChange, title, files, icon }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[90vw] w-fit min-w-[380px] max-h-[80vh]">
+      <DialogContent size="md" className="w-fit min-w-[380px] max-h-[80vh]">
         <DialogHeader>
-          <DialogTitle className="text-sm flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2">
             {icon === 'success' ? (
               <CheckCircle className="h-4 w-4 text-green-500" />
             ) : icon === 'warn' ? (
@@ -158,7 +158,7 @@ export function ConvertFolderDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={(open) => { if (!isConverting) onOpenChange(open); }}>
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle>批量转换存储过程</DialogTitle>
             <DialogDescription>

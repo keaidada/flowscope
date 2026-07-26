@@ -46,13 +46,13 @@ export function ProcedureRepairDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[95vw] w-[1400px] h-[85vh] p-0 gap-0 flex flex-col">
+      <DialogContent size="full">
         <DialogHeader className="px-4 pt-4 pb-2 shrink-0">
-          <DialogTitle className="text-sm flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2">
             <Wand2 className="h-4 w-4" />
             存储过程 DML 提取
           </DialogTitle>
-          <DialogDescription className="text-xs">
+          <DialogDescription>
             左：原始存储过程（只读） &nbsp; 右：提取的 DML（可编辑） &nbsp; 点击应用后保存为转换结果
           </DialogDescription>
         </DialogHeader>

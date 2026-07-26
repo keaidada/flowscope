@@ -89,7 +89,7 @@ export function ShareDialog({ open, onOpenChange, project }: ShareDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{t('share.title')}</DialogTitle>
           <DialogDescription>{t('share.description')}</DialogDescription>

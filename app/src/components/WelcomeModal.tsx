@@ -36,7 +36,7 @@ export function WelcomeModal({ onClose }: WelcomeModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent size="md">
         <DialogHeader>
           <DialogTitle className="text-xl">{t('welcome.title')}</DialogTitle>
           <DialogDescription>{t('welcome.description')}</DialogDescription>

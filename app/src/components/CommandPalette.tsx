@@ -203,7 +203,7 @@ export function CommandPalette({ open, onOpenChange, onExecuteCommand }: Command
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden" onKeyDown={handleKeyDown}>
+      <DialogContent size="lg" className="p-0 gap-0 overflow-hidden" showCloseButton={false} onKeyDown={handleKeyDown}>
         {/* Search Input */}
         <div className="flex items-center border-b px-3">
           <Search className="h-4 w-4 text-muted-foreground shrink-0" />
