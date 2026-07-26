@@ -1014,7 +1014,8 @@ pub fn save_project_files_batch(
 ) -> Result<(), rusqlite::Error> {
     let tx = conn.unchecked_transaction()?;
     if is_first {
-        tx.execute("DELETE FROM project_files WHERE project_id = ?1", params![project_id])?;
+        let now = chrono::Local::now().to_rfc3339();
+        tx.execute("UPDATE project_files SET status = 0, updated_at = ?2 WHERE project_id = ?1 AND status = 1", params![project_id, now])?;
     }
     let now = chrono::Local::now().to_rfc3339();
     {
@@ -1034,7 +1035,7 @@ pub fn load_project_files(
     project_id: &str,
 ) -> Result<Vec<ProjectFileRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT name, path, content, language, size, COALESCE(dialect,'') as dialect, COALESCE(is_procedure,0) as is_procedure, COALESCE(transformed_content,'') as transformed_content, created_at, updated_at FROM project_files WHERE project_id = ?1 ORDER BY path"
+        "SELECT name, path, content, language, size, COALESCE(dialect,'') as dialect, COALESCE(is_procedure,0) as is_procedure, COALESCE(transformed_content,'') as transformed_content, created_at, updated_at FROM project_files WHERE project_id = ?1 AND status = 1 ORDER BY path"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(ProjectFileRow {
@@ -1074,7 +1075,7 @@ pub fn load_file_metadata(
 ) -> Result<Vec<ProjectFileMetaRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT name, path, COALESCE(dir_id, ''), language, size, COALESCE(is_procedure, 0), CASE WHEN transformed_content <> '' THEN 1 ELSE 0 END, created_at, updated_at
-         FROM project_files WHERE project_id = ?1 ORDER BY path"
+         FROM project_files WHERE project_id = ?1 AND status = 1 ORDER BY path"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(ProjectFileMetaRow {
@@ -1100,7 +1101,7 @@ pub fn load_file_content(
     file_path: &str,
 ) -> Result<Option<String>, rusqlite::Error> {
     let result: Result<String, _> = conn.query_row(
-        "SELECT content FROM project_files WHERE project_id = ?1 AND path = ?2",
+        "SELECT content FROM project_files WHERE project_id = ?1 AND path = ?2 AND status = 1",
         params![project_id, file_path],
         |row| row.get(0),
     );
@@ -1125,7 +1126,7 @@ pub fn load_file_full(
 ) -> Result<Option<FileFullRow>, rusqlite::Error> {
     let result = conn.query_row(
         "SELECT content, COALESCE(is_procedure, 0), COALESCE(transformed_content, '')
-         FROM project_files WHERE project_id = ?1 AND path = ?2",
+         FROM project_files WHERE project_id = ?1 AND path = ?2 AND status = 1",
         params![project_id, file_path],
         |row| {
             Ok(FileFullRow {
@@ -1161,7 +1162,7 @@ pub fn load_file_contents_batch(
     }
     let placeholders: Vec<String> = (0..paths.len()).map(|i| format!("?{}", i + 2)).collect();
     let sql = format!(
-        "SELECT path, content FROM project_files WHERE project_id = ?1 AND path IN ({})",
+        "SELECT path, content FROM project_files WHERE project_id = ?1 AND path IN ({}) AND status = 1",
         placeholders.join(", ")
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -1226,11 +1227,32 @@ pub fn delete_project_files_by_paths(
     if paths.is_empty() {
         return Ok(());
     }
+    let now = chrono::Local::now().to_rfc3339();
     let tx = conn.unchecked_transaction()?;
     {
-        let mut stmt = tx.prepare("DELETE FROM project_files WHERE project_id = ?1 AND path = ?2")?;
+        let mut stmt = tx.prepare(
+            "UPDATE project_files SET status = 0, updated_at = ?3 WHERE project_id = ?1 AND path = ?2 AND status = 1"
+        )?;
         for path in paths {
-            stmt.execute(params![project_id, path])?;
+            stmt.execute(params![project_id, path, now])?;
+        }
+    }
+    // Cascade soft-delete to lineage data
+    for table in &["lineage_nodes", "lineage_columns", "lineage_edges"] {
+        let mut stmt = tx.prepare(
+            &format!("UPDATE {} SET status = 0, updated_at = ?3 WHERE project_id = ?1 AND file_path = ?2 AND status = 1", table)
+        )?;
+        for path in paths {
+            stmt.execute(params![project_id, path, now])?;
+        }
+    }
+    // Cascade soft-delete to file results
+    {
+        let mut stmt = tx.prepare(
+            "UPDATE project_file_results SET status = 0, updated_at = ?3 WHERE project_id = ?1 AND file_path = ?2 AND status = 1"
+        )?;
+        for path in paths {
+            stmt.execute(params![project_id, path, now])?;
         }
     }
     tx.commit()?;
@@ -1269,7 +1291,7 @@ pub fn rename_project_folder(
     // Update all files under the old folder
     let files_to_update: Vec<(String, String)> = conn
         .prepare(
-            "SELECT path FROM project_files WHERE project_id = ?1 AND (path = ?2 OR path LIKE ?3)"
+            "SELECT path FROM project_files WHERE project_id = ?1 AND status = 1 AND (path = ?2 OR path LIKE ?3) AND status = 1"
         )?
         .query_map(params![project_id, old_folder_path, format!("{prefix}%")], |row| {
             row.get::<_, String>(0)
@@ -1342,10 +1364,11 @@ pub fn load_directories(
 fn rebuild_directories_for_project(conn: &Connection, project_id: &str) -> Result<(), rusqlite::Error> {
     let now = chrono::Local::now().to_rfc3339();
 
-    conn.execute("DELETE FROM project_directories WHERE project_id = ?1", params![project_id])?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute("UPDATE project_directories SET status = 0, updated_at = ?2 WHERE project_id = ?1 AND status = 1", params![project_id, now])?;
 
     let paths: Vec<String> = conn
-        .prepare("SELECT path FROM project_files WHERE project_id = ?1")?
+        .prepare("SELECT path FROM project_files WHERE project_id = ?1 AND status = 1")?
         .query_map(params![project_id], |row| row.get::<_, String>(0))?
         .filter_map(Result::ok)
         .collect();
@@ -1428,7 +1451,7 @@ pub fn save_project(conn: &Connection, p: &ProjectRow) -> Result<(), rusqlite::E
 
 pub fn load_projects(conn: &Connection) -> Result<Vec<ProjectRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, dialect, run_mode, template_mode, schema_sql, selected_file_ids, active_file_id, created_at, updated_at, status FROM projects"
+        "SELECT id, name, dialect, run_mode, template_mode, schema_sql, selected_file_ids, active_file_id, created_at, updated_at, status FROM projects WHERE status = 1"
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(ProjectRow {
@@ -1449,7 +1472,19 @@ pub fn load_projects(conn: &Connection) -> Result<Vec<ProjectRow>, rusqlite::Err
 }
 
 pub fn delete_project(conn: &Connection, project_id: &str) -> Result<(), rusqlite::Error> {
-    conn.execute("DELETE FROM projects WHERE id = ?1", params![project_id])?;
+    let now = chrono::Local::now().to_rfc3339();
+    // Soft-delete project and cascade to all related tables
+    conn.execute("UPDATE projects SET status = 0, updated_at = ?2 WHERE id = ?1 AND status = 1", params![project_id, now])?;
+    for table in &[
+        "project_files", "project_directories", "schema_files", "project_file_results",
+        "lineage_nodes", "lineage_columns", "lineage_edges", "table_level_edges",
+        "lineage_anomalies", "view_states", "table_metadata", "column_metadata",
+    ] {
+        conn.execute(
+            &format!("UPDATE {} SET status = 0, updated_at = ?2 WHERE project_id = ?1 AND status = 1", table),
+            params![project_id, now],
+        )?;
+    }
     Ok(())
 }
 
@@ -1469,7 +1504,7 @@ pub fn save_view_state(
 }
 
 pub fn load_view_state(conn: &Connection, project_id: &str) -> Result<Option<String>, rusqlite::Error> {
-    let mut stmt = conn.prepare("SELECT state_json FROM view_states WHERE project_id = ?1")?;
+    let mut stmt = conn.prepare("SELECT state_json FROM view_states WHERE project_id = ?1 AND status = 1")?;
     let mut rows = stmt.query(params![project_id])?;
     if let Some(row) = rows.next()? {
         Ok(Some(row.get(0)?))
@@ -1479,7 +1514,7 @@ pub fn load_view_state(conn: &Connection, project_id: &str) -> Result<Option<Str
 }
 
 pub fn load_all_view_states(conn: &Connection) -> Result<Vec<(String, String)>, rusqlite::Error> {
-    let mut stmt = conn.prepare("SELECT project_id, state_json FROM view_states")?;
+    let mut stmt = conn.prepare("SELECT project_id, state_json FROM view_states WHERE status = 1")?;
     let rows = stmt.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -1536,8 +1571,9 @@ pub fn save_table_level_edges(
     let scripts: std::collections::HashSet<&str> = edges.iter().map(|(_, _, s)| s.as_str()).collect();
     if !scripts.is_empty() {
         let placeholders: Vec<String> = (0..scripts.len()).map(|_| "?".to_string()).collect();
-        let sql = format!("DELETE FROM table_level_edges WHERE project_id = ?1 AND script IN ({})", placeholders.join(","));
-        let mut params: Vec<&dyn ToSql> = vec![&project_id];
+        let now_tl = chrono::Local::now().to_rfc3339();
+        let sql = format!("UPDATE table_level_edges SET status = 0, updated_at = ? WHERE project_id = ? AND script IN ({}) AND status = 1", placeholders.join(","));
+        let mut params: Vec<&dyn ToSql> = vec![&now_tl, &project_id];
         for s in &scripts { params.push(s); }
         tx.execute(&sql, params_from_iter(params))?;
     }
@@ -1570,7 +1606,7 @@ pub fn save_table_level_edges(
 }
 
 pub fn load_table_level_edges(conn: &Connection, project_id: &str) -> Result<Vec<(String, String, String)>, rusqlite::Error> {
-    let mut stmt = conn.prepare("SELECT from_table, to_table, script FROM table_level_edges WHERE project_id = ?1")?;
+    let mut stmt = conn.prepare("SELECT from_table, to_table, script FROM table_level_edges WHERE project_id = ?1 AND status = 1")?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
     })?;
@@ -1595,7 +1631,8 @@ pub fn save_schema_files(
     files: &[SchemaFileRow],
 ) -> Result<(), rusqlite::Error> {
     let tx = conn.unchecked_transaction()?;
-    tx.execute("DELETE FROM schema_files WHERE project_id = ?1", params![project_id])?;
+    let now = chrono::Local::now().to_rfc3339();
+    tx.execute("UPDATE schema_files SET status = 0, updated_at = ?2 WHERE project_id = ?1 AND status = 1", params![project_id, now])?;
     {
         let mut stmt = tx.prepare(
             "INSERT OR REPLACE INTO schema_files (project_id, name, path, content, size, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)"
@@ -1613,7 +1650,7 @@ pub fn load_schema_files(
     project_id: &str,
 ) -> Result<Vec<SchemaFileRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT name, path, content, size, created_at, updated_at FROM schema_files WHERE project_id = ?1 ORDER BY path"
+        "SELECT name, path, content, size, created_at, updated_at FROM schema_files WHERE project_id = ?1 AND status = 1 ORDER BY path"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(SchemaFileRow {
@@ -1696,7 +1733,7 @@ pub fn get_file_result(
     file_path: &str,
 ) -> Result<Option<(String, String)>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT result_json, content_hash FROM project_file_results WHERE project_id = ?1 AND file_path = ?2"
+        "SELECT result_json, content_hash FROM project_file_results WHERE project_id = ?1 AND file_path = ?2 AND status = 1"
     )?;
     let mut rows = stmt.query_map(params![project_id, file_path], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -1713,7 +1750,7 @@ pub fn get_file_results(
     project_id: &str,
 ) -> Result<Vec<(String, String, String, String, String)>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT file_path, result_json, content_hash, file_name, dir_path FROM project_file_results WHERE project_id = ?1"
+        "SELECT file_path, result_json, content_hash, file_name, dir_path FROM project_file_results WHERE project_id = ?1 AND status = 1"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok((
@@ -1733,7 +1770,7 @@ pub fn get_file_results_light(
     project_id: &str,
 ) -> Result<Vec<(String, String)>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT file_path, file_name FROM project_file_results WHERE project_id = ?1"
+        "SELECT file_path, file_name FROM project_file_results WHERE project_id = ?1 AND status = 1"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok((
@@ -1749,9 +1786,10 @@ pub fn delete_file_result(
     project_id: &str,
     file_path: &str,
 ) -> Result<(), rusqlite::Error> {
+    let now = chrono::Local::now().to_rfc3339();
     conn.execute(
-        "DELETE FROM project_file_results WHERE project_id = ?1 AND file_path = ?2",
-        params![project_id, file_path],
+        "UPDATE project_file_results SET status = 0, updated_at = ?3 WHERE project_id = ?1 AND file_path = ?2 AND status = 1",
+        params![project_id, file_path, now],
     )?;
     Ok(())
 }
@@ -1798,7 +1836,7 @@ pub fn get_anomalies(
     offset: i64,
 ) -> Result<Vec<LineageAnomalyRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, file_path, script_name, script_content, severity, anomaly_type, message, detail, is_test, created_at, updated_at, status FROM lineage_anomalies WHERE project_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
+        "SELECT id, project_id, file_path, script_name, script_content, severity, anomaly_type, message, detail, is_test, created_at, updated_at, status FROM lineage_anomalies WHERE project_id = ?1 AND status = 1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
     )?;
     let rows = stmt.query_map(params![project_id, limit, offset], |row| {
         Ok(LineageAnomalyRow {
@@ -1887,14 +1925,16 @@ pub fn save_lineage_batch(
     let fps: Vec<&str> = fp_set.into_iter().collect();
     if !fps.is_empty() {
         let placeholders = (0..fps.len()).map(|_| "?").collect::<Vec<_>>().join(",");
+        let now_sd = chrono::Local::now().to_rfc3339();
         for table in &["lineage_nodes", "lineage_columns", "lineage_edges"] {
-            let mut p: Vec<&dyn ToSql> = Vec::with_capacity(fps.len() + 1);
+            let mut p: Vec<&dyn ToSql> = Vec::with_capacity(fps.len() + 2);
+            p.push(&now_sd);
             p.push(&project_id);
             for fp in &fps {
                 p.push(&*fp);
             }
             tx.execute(
-                &format!("DELETE FROM {} WHERE project_id = ? AND file_path IN ({})", table, placeholders),
+                &format!("UPDATE {} SET status = 0, updated_at = ? WHERE project_id = ? AND file_path IN ({}) AND status = 1", table, placeholders),
                 params_from_iter(p),
             )?;
         }
@@ -1996,12 +2036,12 @@ pub fn load_lineage_nodes(
 ) -> Result<Vec<LineageNodeRow>, rusqlite::Error> {
     let (sql, params_vec) = if let Some(fp) = file_path {
         (
-            "SELECT node_id, node_type, label, qualified_name, statement_index, resolution_source, file_path, file_name, dir_path FROM lineage_nodes WHERE project_id = ?1 AND file_path = ?2",
+            "SELECT node_id, node_type, label, qualified_name, statement_index, resolution_source, file_path, file_name, dir_path FROM lineage_nodes WHERE project_id = ?1 AND status = 1 AND file_path = ?2",
             vec![project_id.to_string(), fp.to_string()],
         )
     } else {
         (
-            "SELECT node_id, node_type, label, qualified_name, statement_index, resolution_source, file_path, file_name, dir_path FROM lineage_nodes WHERE project_id = ?1",
+            "SELECT node_id, node_type, label, qualified_name, statement_index, resolution_source, file_path, file_name, dir_path FROM lineage_nodes WHERE project_id = ?1 AND status = 1",
             vec![project_id.to_string()],
         )
     };
@@ -2030,12 +2070,12 @@ pub fn load_lineage_columns(
 ) -> Result<Vec<LineageColumnRow>, rusqlite::Error> {
     let (sql, params_vec) = if let Some(fp) = file_path {
         (
-            "SELECT column_id, label, qualified_name, parent_node_id, expression, statement_index, file_path, file_name, dir_path FROM lineage_columns WHERE project_id = ?1 AND file_path = ?2",
+            "SELECT column_id, label, qualified_name, parent_node_id, expression, statement_index, file_path, file_name, dir_path FROM lineage_columns WHERE project_id = ?1 AND status = 1 AND file_path = ?2",
             vec![project_id.to_string(), fp.to_string()],
         )
     } else {
         (
-            "SELECT column_id, label, qualified_name, parent_node_id, expression, statement_index, file_path, file_name, dir_path FROM lineage_columns WHERE project_id = ?1",
+            "SELECT column_id, label, qualified_name, parent_node_id, expression, statement_index, file_path, file_name, dir_path FROM lineage_columns WHERE project_id = ?1 AND status = 1",
             vec![project_id.to_string()],
         )
     };
@@ -2065,16 +2105,16 @@ pub fn load_lineage_edges(
 ) -> Result<Vec<LineageEdgeRow>, rusqlite::Error> {
     let sql = match (file_path, edge_type) {
         (Some(_), Some(_)) => format!(
-            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND file_path = ?2 AND edge_type = ?3"
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND status = 1 AND file_path = ?2 AND edge_type = ?3"
         ),
         (Some(_), None) => format!(
-            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND file_path = ?2"
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND status = 1 AND file_path = ?2"
         ),
         (None, Some(_)) => format!(
-            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND edge_type = ?2"
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND status = 1 AND edge_type = ?2"
         ),
         (None, None) => format!(
-            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1"
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND status = 1"
         ),
     };
     let mut params_vec: Vec<String> = vec![project_id.to_string()];
@@ -2103,10 +2143,11 @@ pub fn clear_lineage_for_file(
     project_id: &str,
     file_path: &str,
 ) -> Result<(), rusqlite::Error> {
+    let now = chrono::Local::now().to_rfc3339();
     for table in &["lineage_nodes", "lineage_columns", "lineage_edges"] {
         conn.execute(
-            &format!("DELETE FROM {} WHERE project_id = ?1 AND file_path = ?2", table),
-            params![project_id, file_path],
+            &format!("UPDATE {} SET status = 0, updated_at = ?3 WHERE project_id = ?1 AND file_path = ?2 AND status = 1", table),
+            params![project_id, file_path, now],
         )?;
     }
     Ok(())
@@ -2166,18 +2207,15 @@ pub fn save_table_metadata(
 
     // Replace semantics: clear this project's existing metadata before writing
     // the fresh set. The frontend `writeTableMetadata` now filters out
-    // temporary tables, so re-analysis must be able to physically evict stale
-    // rows (e.g. previously-captured `a/b/c/d` temp-table metadata) rather
-    // than leave them behind as orphans. Doing DELETE+INSERT per project_id
-    // is safe because callers always pass the full resolved schema for one
-    // project at a time.
+    // Soft-delete old metadata before re-upserting (status=0).
+    let now = chrono::Local::now().to_rfc3339();
     tx.execute(
-        "DELETE FROM column_metadata WHERE project_id = ?1",
-        params![project_id],
+        "UPDATE column_metadata SET status = 0, updated_at = ?2 WHERE project_id = ?1 AND status = 1",
+        params![project_id, now],
     )?;
     tx.execute(
-        "DELETE FROM table_metadata WHERE project_id = ?1",
-        params![project_id],
+        "UPDATE table_metadata SET status = 0, updated_at = ?2 WHERE project_id = ?1 AND status = 1",
+        params![project_id, now],
     )?;
 
     // Upsert each table by (project_id, catalog, schema_name, table_name)
@@ -2186,7 +2224,7 @@ pub fn save_table_metadata(
     )?;
 
     let mut get_table_id = tx.prepare(
-        "SELECT id FROM table_metadata WHERE project_id = ?1 AND catalog = ?2 AND schema_name = ?3 AND table_name = ?4"
+        "SELECT id FROM table_metadata WHERE project_id = ?1 AND catalog = ?2 AND schema_name = ?3 AND table_name = ?4 AND status = 1"
     )?;
 
     // Map of (catalog, schema, table_name) -> table_id for column insertion
@@ -2283,7 +2321,7 @@ pub fn load_table_metadata(
     project_id: &str,
 ) -> Result<Vec<TableMetadataRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, catalog, schema_name, table_name, table_type, origin, temporary, partition_keys, cluster_keys, file_format, location, properties_json, owner, comment, row_count, size_bytes, created_at, updated_at, status FROM table_metadata WHERE project_id = ?1 ORDER BY catalog, schema_name, table_name"
+        "SELECT id, project_id, catalog, schema_name, table_name, table_type, origin, temporary, partition_keys, cluster_keys, file_format, location, properties_json, owner, comment, row_count, size_bytes, created_at, updated_at, status FROM table_metadata WHERE project_id = ?1 AND status = 1 ORDER BY catalog, schema_name, table_name"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(TableMetadataRow {
@@ -2317,7 +2355,7 @@ pub fn load_column_metadata(
     project_id: &str,
 ) -> Result<Vec<ColumnMetadataRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, table_id, column_name, ordinal, data_type, is_nullable, is_primary_key, is_partition, default_value, comment, created_at, updated_at, status FROM column_metadata WHERE project_id = ?1 ORDER BY table_id, ordinal"
+        "SELECT id, project_id, table_id, column_name, ordinal, data_type, is_nullable, is_primary_key, is_partition, default_value, comment, created_at, updated_at, status FROM column_metadata WHERE project_id = ?1 AND status = 1 ORDER BY table_id, ordinal"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(ColumnMetadataRow {
