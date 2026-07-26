@@ -365,33 +365,41 @@ fn parse_statements_individually<'a>(
 ) -> (Vec<StatementInput<'a>>, Vec<Issue>) {
     let statement_ranges = compute_statement_ranges_for_dialect(&ctx.source_sql, ctx.dialect);
 
-    match parse_full_sql_buffer(ctx, &statement_ranges) {
-        Ok(statements) => (statements, Vec::new()),
-        Err(fallback_error) => {
-            let (statements, mut issues) =
-                parse_statement_ranges_best_effort(ctx, statement_ranges);
+    // For Hive dialect, INSERT-based splitting means each range must be parsed
+    // independently so that CTE contexts don't cross pollinate across INSERTs.
+    // Also applies when multiple ranges exist (semicolons are present).
+    let use_best_effort = matches!(ctx.dialect, Dialect::Hive) && statement_ranges.len() > 1;
 
-            // Surface the fallback reason to users so they understand why
-            // best-effort parsing was used
-            if let Some(error) = fallback_error {
-                let source_info = ctx
-                    .source_name
-                    .as_deref()
-                    .map(|n| format!(" in {n}"))
-                    .unwrap_or_default();
-                let message = format!(
-                    "Full SQL parsing failed{source_info}, using best-effort mode: {error}"
-                );
-                let mut issue = Issue::warning(issue_codes::PARSE_ERROR, message);
-                if let Some(name) = ctx.source_name.as_deref() {
-                    issue = issue.with_source_name(name);
+    if !use_best_effort {
+        match parse_full_sql_buffer(ctx, &statement_ranges) {
+            Ok(statements) => return (statements, Vec::new()),
+            Err(fallback_error) => {
+                let (statements, mut issues) =
+                    parse_statement_ranges_best_effort(ctx, statement_ranges);
+                // Surface the fallback reason
+                if let Some(error) = fallback_error {
+                    let source_info = ctx
+                        .source_name
+                        .as_deref()
+                        .map(|n| format!(" in {n}"))
+                        .unwrap_or_default();
+                    let message = format!(
+                        "Full SQL parsing failed{source_info}, using best-effort mode: {error}"
+                    );
+                    let mut issue = Issue::warning(issue_codes::PARSE_ERROR, message);
+                    if let Some(name) = ctx.source_name.as_deref() {
+                        issue = issue.with_source_name(name);
+                    }
+                    issues.push(issue);
                 }
-                issues.insert(0, issue);
+                return (statements, issues);
             }
-
-            (statements, issues)
         }
     }
+
+    // Best-effort mode: parse each range independently
+    let (statements, issues) = parse_statement_ranges_best_effort(ctx, statement_ranges);
+    (statements, issues)
 }
 
 /// Attempts full SQL buffer parsing with statement range alignment.
@@ -672,10 +680,107 @@ pub(crate) fn split_statement_spans_with_dialect(sql: &str, dialect: Dialect) ->
 
 fn compute_statement_ranges_for_dialect(sql: &str, dialect: Dialect) -> Vec<Range<usize>> {
     let ranges = compute_statement_ranges(sql);
+    if matches!(dialect, Dialect::Hive) {
+        return split_ranges_on_hive_insert_boundaries(sql, ranges);
+    }
     if !matches!(dialect, Dialect::Mssql) {
         return ranges;
     }
     split_ranges_on_mssql_go_separators(sql, ranges)
+}
+
+fn split_ranges_on_hive_insert_boundaries(sql: &str, ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    let mut out = Vec::new();
+    for range in ranges {
+        let slice = &sql[range.start..range.end];
+        let insert_positions = find_hive_insert_starts(slice);
+        // No INSERT found or single INSERT: keep range as-is
+        if insert_positions.len() <= 1 {
+            out.push(range);
+            continue;
+        }
+        // Identify the main WITH clause at the beginning of the range
+        let first_with = find_first_with_in_range(slice);
+        let mut sub_start = range.start;
+        for i in 0..insert_positions.len() {
+            let abs_insert = range.start + insert_positions[i];
+            // If a WITH clause exists at the range start and this isn't the first INSERT,
+            // check if there's a WITH between the previous INSERT and this one
+            let effective_start = if i == 0 {
+                // First INSERT: include the WITH clause if present
+                if let Some(w) = first_with {
+                    range.start
+                } else {
+                    abs_insert
+                }
+            } else {
+                // Check for a WITH between the end of previous INSERT and this INSERT
+                let prev_end = range.start + insert_positions[i - 1];
+                let gap = &sql[prev_end..abs_insert];
+                find_first_with_in_range(gap).map(|_| prev_end).unwrap_or(abs_insert)
+            };
+            
+            let end = if i + 1 < insert_positions.len() {
+                range.start + insert_positions[i + 1]
+            } else {
+                range.end
+            };
+            
+            if let Some(chunk) = trim_statement_range(sql, effective_start, end) {
+                out.push(chunk);
+            }
+            sub_start = end;
+        }
+    }
+    out
+}
+
+fn find_first_with_in_range(sql: &str) -> Option<usize> {
+    let trimmed = sql.trim_start();
+    let trimmed_upper = trimmed.to_uppercase();
+    if trimmed_upper.starts_with("WITH ") {
+        let with_end = sql.len() - trimmed.len();
+        // Verify the WITH is at the start of a logical line (preceded only by whitespace/comments)
+        let before = &sql[..with_end];
+        if before.is_empty() || before.ends_with('\n') {
+            return Some(with_end);
+        }
+    }
+    None
+}
+
+/// Find the start positions of top-level INSERT statements within SQL.
+/// Looks for lines starting with `insert` (case-insensitive) that are not
+/// inside comments or strings.
+fn find_hive_insert_starts(sql: &str) -> Vec<usize> {
+    let mut positions = Vec::new();
+    let bytes = sql.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    
+    while i < len {
+        // Skip to next newline to find line starts
+        let line_start = i;
+        
+        // Find end of this line
+        let line_end = bytes[i..].iter().position(|&b| b == b'\n').map(|p| i + p).unwrap_or(len);
+        
+        // Check if this line starts with INSERT (case-insensitive)
+        let line = std::str::from_utf8(&bytes[line_start..line_end]).unwrap_or("");
+        let trimmed = line.trim();
+        let upper = trimmed.to_uppercase();
+        
+        if upper.starts_with("INSERT ") || upper.starts_with("INSERT\t") {
+            // Locate the absolute position of INSERT in the original SQL
+            let insert_pos = line_start + (trimmed.as_ptr() as usize - line.as_ptr() as usize);
+            positions.push(insert_pos);
+        }
+        
+        i = line_end + 1;
+        if i >= len { break; }
+    }
+    
+    positions
 }
 
 fn split_ranges_on_mssql_go_separators(sql: &str, ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
