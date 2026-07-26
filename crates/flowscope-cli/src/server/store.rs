@@ -569,7 +569,9 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 message       TEXT    NOT NULL DEFAULT '',
                 detail        TEXT    NOT NULL DEFAULT '',
                 is_test       INTEGER NOT NULL DEFAULT 0,
-                created_at    TEXT    NOT NULL DEFAULT ''
+                created_at    TEXT    NOT NULL DEFAULT '',
+                updated_at    TEXT    NOT NULL DEFAULT '',
+                status        INTEGER NOT NULL DEFAULT 1
             );",
         "lineage_nodes" => "
             CREATE TABLE lineage_nodes (
@@ -925,7 +927,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             selected_file_ids TEXT    NOT NULL DEFAULT '[]',
             active_file_id    TEXT,
             created_at        TEXT    NOT NULL DEFAULT '',
-            updated_at        TEXT    NOT NULL DEFAULT ''
+            updated_at        TEXT    NOT NULL DEFAULT '',
+            status            INTEGER NOT NULL DEFAULT 1
         );
 
         CREATE TABLE IF NOT EXISTS view_states (
@@ -933,7 +936,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             project_id  TEXT    NOT NULL UNIQUE,
             state_json  TEXT    NOT NULL,
             created_at  TEXT    NOT NULL DEFAULT '',
-            updated_at  TEXT    NOT NULL DEFAULT ''
+            updated_at  TEXT    NOT NULL DEFAULT '',
+            status      INTEGER NOT NULL DEFAULT 1
         );
 
         CREATE TABLE IF NOT EXISTS table_level_edges (
@@ -945,6 +949,8 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             script_name TEXT    NOT NULL DEFAULT '',
             dir_path    TEXT    NOT NULL DEFAULT '',
             created_at  TEXT    NOT NULL DEFAULT '',
+            updated_at  TEXT    NOT NULL DEFAULT '',
+            status      INTEGER NOT NULL DEFAULT 1,
             UNIQUE(project_id, from_table, to_table, script)
         );
         CREATE INDEX IF NOT EXISTS idx_table_level_edges_project ON table_level_edges(project_id);
@@ -1401,19 +1407,23 @@ pub struct ProjectRow {
     pub active_file_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default = "default_status")]
+    pub status: i32,
 }
+
+fn default_status() -> i32 { 1 }
 
 pub fn save_project(conn: &Connection, p: &ProjectRow) -> Result<(), rusqlite::Error> {
     conn.execute(
-        "INSERT OR REPLACE INTO projects (id, name, dialect, run_mode, template_mode, schema_sql, selected_file_ids, active_file_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![p.id, p.name, p.dialect, p.run_mode, p.template_mode, p.schema_sql, p.selected_file_ids, p.active_file_id, p.created_at, p.updated_at],
+        "INSERT OR REPLACE INTO projects (id, name, dialect, run_mode, template_mode, schema_sql, selected_file_ids, active_file_id, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![p.id, p.name, p.dialect, p.run_mode, p.template_mode, p.schema_sql, p.selected_file_ids, p.active_file_id, p.created_at, p.updated_at, p.status],
     )?;
     Ok(())
 }
 
 pub fn load_projects(conn: &Connection) -> Result<Vec<ProjectRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, dialect, run_mode, template_mode, schema_sql, selected_file_ids, active_file_id, created_at, updated_at FROM projects"
+        "SELECT id, name, dialect, run_mode, template_mode, schema_sql, selected_file_ids, active_file_id, created_at, updated_at, status FROM projects"
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(ProjectRow {
@@ -1427,6 +1437,7 @@ pub fn load_projects(conn: &Connection) -> Result<Vec<ProjectRow>, rusqlite::Err
             active_file_id: row.get(7)?,
             created_at: row.get(8)?,
             updated_at: row.get(9)?,
+            status: row.get(10)?,
         })
     })?;
     rows.collect()
@@ -1446,7 +1457,7 @@ pub fn save_view_state(
 ) -> Result<(), rusqlite::Error> {
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
-        "INSERT OR REPLACE INTO view_states (project_id, state_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT OR REPLACE INTO view_states (project_id, state_json, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, 1)",
         params![project_id, state_json, now, now],
     )?;
     Ok(())
@@ -1527,13 +1538,13 @@ pub fn save_table_level_edges(
     }
     let now = chrono::Local::now().to_rfc3339();
     const CHUNK: usize = 500;
-    let row_ph = "(?,?,?,?,?,?,?)";
+    let row_ph = "(?,?,?,?,?,?,?,?,?)";
     for chunk in edges.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO table_level_edges (project_id, from_table, to_table, script, script_name, dir_path, created_at) VALUES {}",
+            "INSERT OR REPLACE INTO table_level_edges (project_id, from_table, to_table, script, script_name, dir_path, created_at, updated_at, status) VALUES {}",
             (0..chunk.len()).map(|_| row_ph).collect::<Vec<_>>().join(",")
         );
-        let mut p: Vec<std::boxed::Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 7);
+        let mut p: Vec<std::boxed::Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 9);
         for (from, to, script) in chunk {
             let (sn, dp) = split_file_path(script);
             p.push(Box::new(project_id.to_string()));
@@ -1543,6 +1554,8 @@ pub fn save_table_level_edges(
             p.push(Box::new(sn));
             p.push(Box::new(dp));
             p.push(Box::new(now.clone()));
+            p.push(Box::new(now.clone()));
+            p.push(Box::new(1));
         }
         let p_refs: Vec<&dyn ToSql> = p.iter().map(|b| b.as_ref()).collect();
         tx.execute(&sql, params_from_iter(p_refs))?;
@@ -1755,6 +1768,10 @@ pub struct LineageAnomalyRow {
     pub is_test: i64,
     #[serde(default)]
     pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
+    #[serde(default = "default_status")]
+    pub status: i32,
 }
 
 pub fn insert_anomaly(
@@ -1763,8 +1780,8 @@ pub fn insert_anomaly(
 ) -> Result<i64, rusqlite::Error> {
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO lineage_anomalies (project_id, file_path, script_name, script_content, severity, anomaly_type, message, detail, is_test, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![row.project_id, row.file_path, row.script_name, row.script_content, row.severity, row.anomaly_type, row.message, row.detail, row.is_test, now],
+        "INSERT INTO lineage_anomalies (project_id, file_path, script_name, script_content, severity, anomaly_type, message, detail, is_test, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![row.project_id, row.file_path, row.script_name, row.script_content, row.severity, row.anomaly_type, row.message, row.detail, row.is_test, now, now, 1],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -1776,7 +1793,7 @@ pub fn get_anomalies(
     offset: i64,
 ) -> Result<Vec<LineageAnomalyRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, file_path, script_name, script_content, severity, anomaly_type, message, detail, is_test, created_at FROM lineage_anomalies WHERE project_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
+        "SELECT id, project_id, file_path, script_name, script_content, severity, anomaly_type, message, detail, is_test, created_at, updated_at, status FROM lineage_anomalies WHERE project_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
     )?;
     let rows = stmt.query_map(params![project_id, limit, offset], |row| {
         Ok(LineageAnomalyRow {
@@ -1791,6 +1808,8 @@ pub fn get_anomalies(
             detail: row.get(8)?,
             is_test: row.get(9)?,
             created_at: row.get(10)?,
+            updated_at: row.get(11)?,
+            status: row.get(12)?,
         })
     })?;
     rows.collect()

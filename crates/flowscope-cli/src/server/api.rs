@@ -1708,6 +1708,8 @@ pub(crate) async fn save_anomaly_api(
         detail: payload.detail,
         is_test: payload.is_test,
         created_at: String::new(),
+        updated_at: String::new(),
+        status: 1,
     };
     store::insert_anomaly(&db, &row)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
