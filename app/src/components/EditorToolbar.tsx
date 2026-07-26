@@ -117,8 +117,18 @@ export function EditorToolbar({
       <div className="flex items-center gap-1 min-w-0">
         {openFiles && onOpenFile && (
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-1.5 h-7 px-2 text-sm rounded hover:bg-muted/50 min-w-0 max-w-[280px]">
+            <DropdownMenuTrigger className="flex items-center gap-1.5 h-7 px-2 text-sm rounded hover:bg-muted/50 min-w-0 max-w-[320px]">
               <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+              {activeFile?.isProcedure && (
+                <span className={cn(
+                  'text-[9px] px-1 py-px rounded shrink-0 font-medium',
+                  activeFile.transformedContent
+                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                    : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                )}>
+                  SP
+                </span>
+              )}
               <span className="truncate font-medium text-foreground text-xs">
                 {activeFile?.name || '—'}
               </span>
@@ -209,6 +219,16 @@ export function EditorToolbar({
                       <span className="block w-1.5 h-1.5 rounded-full bg-green-500" />
                     )}
                   </span>
+                  {f.isProcedure && (
+                    <span className={cn(
+                      'text-[9px] px-1 py-px rounded shrink-0 font-medium',
+                      f.transformedContent
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                        : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                    )}>
+                      SP
+                    </span>
+                  )}
                   <span className="truncate flex-1">{f.name}</span>
                   {onCloseTab && (
                     <XCircle
