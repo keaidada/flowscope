@@ -42,7 +42,11 @@ import type { GlobalShortcut } from '@/hooks';
 import { useThemeStore, type Theme } from '@/lib/theme-store';
 import { useViewStateStore } from '@/lib/view-state-store';
 import { useBackend } from '@/lib/backend-context';
-import { clearProjectLineage, buildGlobalLineageFromNodes, repopulateTableLevelEdges } from '@/lib/analysis-cache';
+import {
+  clearProjectLineage,
+  buildGlobalLineageFromNodes,
+  repopulateTableLevelEdges,
+} from '@/lib/analysis-cache';
 
 interface WorkspaceProps {
   backendReady: boolean;
@@ -144,14 +148,18 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
         setGlobalLineageLoading(false);
         return;
       }
-      console.log(`[GlobalLineage] Built from lineage_nodes in ${(performance.now() - startTime).toFixed(0)}ms, tables=${tableLevelResult.summary.tableCount}, edges=${tableLevelResult.globalLineage?.edges?.length ?? 0}`);
+      console.log(
+        `[GlobalLineage] Built from lineage_nodes in ${(performance.now() - startTime).toFixed(0)}ms, tables=${tableLevelResult.summary.tableCount}, edges=${tableLevelResult.globalLineage?.edges?.length ?? 0}`
+      );
       setLineageResult(tableLevelResult);
       setGlobalLineageLoading(false);
 
       // 后台填充 table_level_edges（数据洞察依赖此表），不阻塞 UI
-      repopulateTableLevelEdges(activeProjectId).then(
-        (n) => console.log(`[GlobalLineage] Table-level edges repopulated: ${n}`),
-      ).catch((e) => console.warn('[GlobalLineage] table_level_edges repop failed, will retry next open:', e));
+      repopulateTableLevelEdges(activeProjectId)
+        .then((n) => console.log(`[GlobalLineage] Table-level edges repopulated: ${n}`))
+        .catch((e) =>
+          console.warn('[GlobalLineage] table_level_edges repop failed, will retry next open:', e)
+        );
     } catch (error) {
       console.error('[Workspace] Failed to load global lineage:', error);
       toast.error('Failed to load global lineage');
@@ -205,8 +213,8 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       setGlobalFocusNodeId(undefined);
       setLayoutAlgorithm(previousLayoutRef.current);
       // 从缓存中取 result，过滤出只属于该文件的 statements
-      const cachedResult = globalFileResultsRef.current.get(file.path)
-        || globalFileResultsRef.current.get(file.name);
+      const cachedResult =
+        globalFileResultsRef.current.get(file.path) || globalFileResultsRef.current.get(file.name);
       if (cachedResult) {
         const fileStatements = cachedResult.statements.filter(
           (s) => s.sourceName === file.name || s.sourceName === file.path || !s.sourceName
@@ -222,7 +230,14 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       }
       selectFile(file.id);
     }
-  }, [lineageState.navigationRequest, globalLineageOpen, currentProject, selectFile, setLineageResult, setLayoutAlgorithm]);
+  }, [
+    lineageState.navigationRequest,
+    globalLineageOpen,
+    currentProject,
+    selectFile,
+    setLineageResult,
+    setLayoutAlgorithm,
+  ]);
 
   // 全局血缘打开期间，切换视图时强制保持 ELK 布局
   useEffect(() => {
@@ -355,8 +370,9 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
         setGlobalLineageOpen(false);
         setGlobalFocusNodeId(undefined);
         setLayoutAlgorithm(previousLayoutRef.current);
-        const cachedResult = globalFileResultsRef.current.get(file.path)
-          || globalFileResultsRef.current.get(file.name);
+        const cachedResult =
+          globalFileResultsRef.current.get(file.path) ||
+          globalFileResultsRef.current.get(file.name);
         if (cachedResult) {
           const fileStatements = cachedResult.statements.filter(
             (s) => s.sourceName === file.name || s.sourceName === file.path || !s.sourceName
@@ -631,10 +647,15 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
               </div>
               <DropdownMenuSeparator />
               {/* Debug toggle */}
-              <DropdownMenuItem onClick={() => setLineageDebug(!lineageDebug)} className="cursor-pointer">
+              <DropdownMenuItem
+                onClick={() => setLineageDebug(!lineageDebug)}
+                className="cursor-pointer"
+              >
                 <Bug className={`h-4 w-4 mr-2 ${lineageDebug ? 'text-orange-500' : ''}`} />
                 <span className="flex-1">{t('app.debug', 'Debug')}</span>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded ${lineageDebug ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' : 'text-muted-foreground'}`}>
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded ${lineageDebug ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' : 'text-muted-foreground'}`}
+                >
                   {lineageDebug ? 'ON' : 'OFF'}
                 </span>
               </DropdownMenuItem>
@@ -718,14 +739,12 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
                     <Network className="h-10 w-10 opacity-30" />
                     <p className="text-sm">{t('app.globalLineage')}</p>
-                    <p className="text-xs opacity-60">
-                      {t('analysis.emptyState.runAnalysis')}
-                    </p>
+                    <p className="text-xs opacity-60">{t('analysis.emptyState.runAnalysis')}</p>
                   </div>
                 )}
               </div>
             ) : (
-             /* Normal layout — sidebar + editor, lineage opens in a sheet */
+              /* Normal layout — sidebar + editor, lineage opens in a sheet */
               <>
                 {/* Activity Bar (narrow icon strip) */}
                 <ActivityBar
@@ -768,18 +787,20 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
                     {/* Main panels area */}
                     <ResizablePanel
-                      defaultSize={sidebarView && sidebarView !== 'schema' ? 100 - sidebarDefaultSize : 100}
+                      defaultSize={
+                        sidebarView && sidebarView !== 'schema' ? 100 - sidebarDefaultSize : 100
+                      }
                       minSize={40}
                     >
                       {sidebarView === 'schema' ? (
                         <SidebarSchema />
                       ) : (
                         editorOpen && (
-                        <EditorArea
-                          backendReady={backendReady}
-                          analysis={analysis}
-                          onRequestOpenLineage={() => setLineageWorkspaceOpen(true)}
-                        />
+                          <EditorArea
+                            backendReady={backendReady}
+                            analysis={analysis}
+                            onRequestOpenLineage={() => setLineageWorkspaceOpen(true)}
+                          />
                         )
                       )}
                     </ResizablePanel>

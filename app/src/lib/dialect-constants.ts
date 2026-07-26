@@ -59,11 +59,12 @@ export const VALID_DIALECTS: readonly Dialect[] = [
  * Dialect options for UI dropdowns, derived from VALID_DIALECTS.
  * Note: 'ansi' is excluded from UI since 'generic' serves the same purpose for users.
  */
-export const DIALECT_OPTIONS: readonly { value: Dialect; label: string }[] =
-  VALID_DIALECTS.filter((d) => d !== 'ansi').map((value) => ({
-    value,
-    label: DIALECT_LABELS[value],
-  }));
+export const DIALECT_OPTIONS: readonly { value: Dialect; label: string }[] = VALID_DIALECTS.filter(
+  (d) => d !== 'ansi'
+).map((value) => ({
+  value,
+  label: DIALECT_LABELS[value],
+}));
 
 /** Type guard to check if a value is a valid Dialect. */
 export function isValidDialect(value: unknown): value is Dialect {

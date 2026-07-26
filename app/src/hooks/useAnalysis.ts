@@ -180,17 +180,29 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
               transformedContent: projectActiveFile?.transformedContent ?? null,
             },
           ];
-          console.log('[analysis] resolveContext:', currentFilePath,
-            'store_isProcedure:', projectActiveFile?.isProcedure,
-            'store_tc:', !!projectActiveFile?.transformedContent,
-            'store_tc_len:', projectActiveFile?.transformedContent?.length ?? 0);
+          console.log(
+            '[analysis] resolveContext:',
+            currentFilePath,
+            'store_isProcedure:',
+            projectActiveFile?.isProcedure,
+            'store_tc:',
+            !!projectActiveFile?.transformedContent,
+            'store_tc_len:',
+            projectActiveFile?.transformedContent?.length ?? 0
+          );
           contextDescription = `Analyzing file: ${currentFilePath}`;
         } else {
-          console.warn('[analysis] resolveContext: NO FILE FOUND',
-            'activeFileId:', project.activeFileId,
-            'hasActiveFile:', !!projectActiveFile,
-            'path:', projectActiveFile?.path,
-            'hasContent:', projectActiveFile?.content !== undefined);
+          console.warn(
+            '[analysis] resolveContext: NO FILE FOUND',
+            'activeFileId:',
+            project.activeFileId,
+            'hasActiveFile:',
+            !!projectActiveFile,
+            'path:',
+            projectActiveFile?.path,
+            'hasContent:',
+            projectActiveFile?.content !== undefined
+          );
           contextDescription = 'Analyzing current file';
         }
       } else if (runMode === 'custom') {
@@ -372,9 +384,13 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         await ensureFilesContent([activeFile.id]);
       }
       const updatedActiveFile = activeFile?.id
-        ? currentProjectRef.current?.files.find((f) => f.id === activeFile.id) ?? activeFile
+        ? (currentProjectRef.current?.files.find((f) => f.id === activeFile.id) ?? activeFile)
         : activeFile;
-      const context = await buildAnalysisContext(project, updatedActiveFile?.content, updatedActiveFile?.path);
+      const context = await buildAnalysisContext(
+        project,
+        updatedActiveFile?.content,
+        updatedActiveFile?.path
+      );
       if (cancelled || !context || context.files.length === 0) {
         return;
       }
@@ -561,14 +577,27 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         // Load transformed_content for procedure files that don't have it yet
         const filesNeedingTc: PreparedAnalysisFile[] = [];
         for (const f of context.files as PreparedAnalysisFile[]) {
-          console.log('[analysis] file:', f.name, 'isProcedure:', f.isProcedure, 'hasTC:', !!f.transformedContent);
+          console.log(
+            '[analysis] file:',
+            f.name,
+            'isProcedure:',
+            f.isProcedure,
+            'hasTC:',
+            !!f.transformedContent
+          );
           if (f.isProcedure && !f.transformedContent) {
             filesNeedingTc.push(f);
           }
         }
-        console.log('[analysis] files needing TC:', filesNeedingTc.length, 'of', context.files.length, 'total');
+        console.log(
+          '[analysis] files needing TC:',
+          filesNeedingTc.length,
+          'of',
+          context.files.length,
+          'total'
+        );
         if (filesNeedingTc.length > 0) {
-          console.log('[analysis] loading TC for:', filesNeedingTc.map(f => f.name).slice(0, 5));
+          console.log('[analysis] loading TC for:', filesNeedingTc.map((f) => f.name).slice(0, 5));
         }
         if (filesNeedingTc.length > 0 && activeProjectId) {
           const { loadFileContent: loadSingle } = await import('@/lib/file-storage');
@@ -587,7 +616,14 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
               file.transformedContent = loaded.transformedContent;
               tcCount++;
             } else if (loadedCount <= 3) {
-              console.log('[analysis] no TC for:', path, 'loaded:', !!loaded, 'content:', !!loaded?.content);
+              console.log(
+                '[analysis] no TC for:',
+                path,
+                'loaded:',
+                !!loaded,
+                'content:',
+                !!loaded?.content
+              );
             }
           }
           console.log('[analysis] loaded TC:', tcCount, '/', loadedCount, 'files');
@@ -619,7 +655,9 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         }
 
         console.log(context.description);
-        analyzedFileNames = context.files.map((f: { name: string; path?: string }) => f.path ?? f.name);
+        analyzedFileNames = context.files.map(
+          (f: { name: string; path?: string }) => f.path ?? f.name
+        );
 
         let shouldBuildPreview = context.files.length <= ANALYSIS_SQL_PREVIEW_LIMITS.MAX_FILES;
         let totalChars = 0;
@@ -662,10 +700,16 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         if (procFiles.length > 0) {
           console.log('[analysis] sending', procFiles.length, 'procedure files to backend:');
           for (const f of procFiles.slice(0, 3)) {
-            console.log('  file:', f.name,
-              'isProcedure:', f.isProcedure,
-              'hasTC:', !!f.transformedContent,
-              'tcLen:', f.transformedContent?.length ?? 0);
+            console.log(
+              '  file:',
+              f.name,
+              'isProcedure:',
+              f.isProcedure,
+              'hasTC:',
+              !!f.transformedContent,
+              'tcLen:',
+              f.transformedContent?.length ?? 0
+            );
           }
         }
 
@@ -783,32 +827,59 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             (globalThis as any).__FLOWSCOPE_DEFER_PERSIST = true;
             // Fallback content hash so files with different content get distinct cache keys.
             // Otherwise all results collapse to 'no_hash' and only one is kept/exported.
-            const cacheKey = analysisResponse.cacheKey || (() => {
-              let h = 5381;
-              for (const f of context.files) {
-                const c = (f as { content?: string }).content ?? '';
-                const id = (f as { path?: string; name?: string }).path ?? f.name ?? '';
-                h = (((h * 33) ^ id.length) ^ c.length) | 0;
-              }
-              return 'h' + (h >>> 0).toString(36);
-            })();
+            const cacheKey =
+              analysisResponse.cacheKey ||
+              (() => {
+                let h = 5381;
+                for (const f of context.files) {
+                  const c = (f as { content?: string }).content ?? '';
+                  const id = (f as { path?: string; name?: string }).path ?? f.name ?? '';
+                  h = ((h * 33) ^ id.length ^ c.length) | 0;
+                }
+                return 'h' + (h >>> 0).toString(36);
+              })();
 
             // Collect all file paths, then write the merged result to OPFS once
             // and batch-insert DB pointer rows.  This avoids writing the same
             // 10MB+ JSON O(N) times when N files share one result.
-            const allFilePaths = context.files.map((f: { name: string; path?: string }) => f.path ?? f.name);
-            const fileContentMap = new Map(context.files.map((f: { name: string; path?: string; content?: string }) => [f.path ?? f.name, f.content ?? '']));
-            const { writeLineageData, writeTableMetadata, hasMeaningfulLineage, hasAnyDataFlow } = await import('@/lib/analysis-cache');
+            const allFilePaths = context.files.map(
+              (f: { name: string; path?: string }) => f.path ?? f.name
+            );
+            const fileContentMap = new Map(
+              context.files.map((f: { name: string; path?: string; content?: string }) => [
+                f.path ?? f.name,
+                f.content ?? '',
+              ])
+            );
+            const { writeLineageData, writeTableMetadata, hasMeaningfulLineage, hasAnyDataFlow } =
+              await import('@/lib/analysis-cache');
             if (!hasMeaningfulLineage(result)) {
-              const totalEdges = result.statements.reduce((s, st) => s + (st.edges?.length ?? 0), 0);
-              const nonSelfEdges = result.statements.reduce((s, st) => s + (st.edges?.filter(e => e.type === 'data_flow' && e.from !== e.to)?.length ?? 0), 0);
+              const totalEdges = result.statements.reduce(
+                (s, st) => s + (st.edges?.length ?? 0),
+                0
+              );
+              const nonSelfEdges = result.statements.reduce(
+                (s, st) =>
+                  s +
+                  (st.edges?.filter((e) => e.type === 'data_flow' && e.from !== e.to)?.length ?? 0),
+                0
+              );
               const selfRefEdges = totalEdges - nonSelfEdges;
               const reason = hasAnyDataFlow(result)
                 ? `结果仅有 ${selfRefEdges} 条自引用 data_flow（from===to），${nonSelfEdges} 条有效，跳过持久化`
                 : `结果无任何 data_flow 边（共 ${totalEdges} 条边，均为其他类型），跳过持久化`;
-              console.warn('[useAnalysis] ' + reason, allFilePaths, 'statements:', result.statements.map(s => ({ stmt: s.statementIndex, nodes: s.nodes.length, edges: s.edges?.length })));
+              console.warn(
+                '[useAnalysis] ' + reason,
+                allFilePaths,
+                'statements:',
+                result.statements.map((s) => ({
+                  stmt: s.statementIndex,
+                  nodes: s.nodes.length,
+                  edges: s.edges?.length,
+                }))
+              );
               setError(reason);
-              import('@/lib/server-db').then(db => {
+              import('@/lib/server-db').then((db) => {
                 for (const fp of allFilePaths) {
                   db.saveAnomaly(activeProjectId, {
                     filePath: fp,
@@ -865,8 +936,12 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             }
 
             // Write global artifacts (best-effort)
-            try { await writeSchemaData(activeProjectId, result); } catch {}
-            try { await writeHierarchyData(activeProjectId, result); } catch {}
+            try {
+              await writeSchemaData(activeProjectId, result);
+            } catch {}
+            try {
+              await writeHierarchyData(activeProjectId, result);
+            } catch {}
           }
 
           toast.success(i18n.t('analysis.persistedCurrentResult'), {
@@ -879,7 +954,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
                       i18n.t('analysis.loadingCurrentFilePending'),
                     rest: Math.max(0, context.fileCount - 1),
                   })
-                : context.files[0]?.name ?? requestedFileName ?? undefined,
+                : (context.files[0]?.name ?? requestedFileName ?? undefined),
             duration: 2200,
           });
           mergeResultStatus({
@@ -915,7 +990,10 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         setError(errorMsg);
         console.error('[useAnalysis] Analysis failed:', errorMsg);
         if (analyzedFileNames.length > 0) {
-          console.error('[useAnalysis] Files being analyzed when failure occurred:', analyzedFileNames);
+          console.error(
+            '[useAnalysis] Files being analyzed when failure occurred:',
+            analyzedFileNames
+          );
         }
       } finally {
         if (analysisRequestRef.current === requestId) {

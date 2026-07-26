@@ -29,7 +29,12 @@ interface EtlDialogProps {
   onApplyResult?: (content: string) => void;
 }
 
-export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResult }: EtlDialogProps) {
+export function EtlDialog({
+  open,
+  onOpenChange,
+  initialContent = '',
+  onApplyResult,
+}: EtlDialogProps) {
   const [input, setInput] = useState(initialContent);
   const [mergedLines, setMergedLines] = useState<MergedLine[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -76,7 +81,11 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
 
   // The raw output (non-removed lines only) for copy/apply
   const output = useMemo(
-    () => mergedLines.filter((l) => !l.removed).map((l) => l.content).join('\n'),
+    () =>
+      mergedLines
+        .filter((l) => !l.removed)
+        .map((l) => l.content)
+        .join('\n'),
     [mergedLines]
   );
 
@@ -100,10 +109,7 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
   }, [output]);
 
   // Count removed lines
-  const removedCount = useMemo(
-    () => mergedLines.filter((l) => l.removed).length,
-    [mergedLines]
-  );
+  const removedCount = useMemo(() => mergedLines.filter((l) => l.removed).length, [mergedLines]);
 
   const handleProcess = useCallback(() => {
     if (!input.trim()) return;
@@ -172,10 +178,7 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
       // User edited: diff originalContent → content, show user changes in cyan
       const diff = inlineDiff(line.originalContent, line.content);
       return diff.map((seg, si) => (
-        <span
-          key={si}
-          className={cn(seg.highlight && 'bg-cyan-300/60 rounded-sm')}
-        >
+        <span key={si} className={cn(seg.highlight && 'bg-cyan-300/60 rounded-sm')}>
           {seg.text}
         </span>
       ));
@@ -184,10 +187,7 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
     // ETL-processed only: show ETL changes in yellow
     if (line.changed || line.added) {
       return line.segments.map((seg, si) => (
-        <span
-          key={si}
-          className={cn(seg.highlight && 'bg-yellow-300/60 rounded-sm')}
-        >
+        <span key={si} className={cn(seg.highlight && 'bg-yellow-300/60 rounded-sm')}>
           {seg.text}
         </span>
       ));
@@ -217,7 +217,8 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
           </div>
           <DialogDescription className="leading-tight">
             自动替换模板变量 <code className="bg-muted px-0.5 rounded text-[9px]">{'{var}'}</code> →{' '}
-            <code className="bg-muted px-0.5 rounded text-[9px]">{"'{var}'"}</code>，支持 PySpark 提取 SQL
+            <code className="bg-muted px-0.5 rounded text-[9px]">{"'{var}'"}</code>，支持 PySpark
+            提取 SQL
           </DialogDescription>
         </DialogHeader>
 
@@ -287,7 +288,11 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
                   className="h-7 gap-1 text-[11px] px-2"
                   onClick={handleCopyAll}
                 >
-                  {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                  {copied ? (
+                    <Check className="h-3 w-3 text-green-500" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
                   {copied ? '已复制' : '复制全部'}
                 </Button>
               </>
@@ -308,10 +313,15 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
                 variant="ghost"
                 size="sm"
                 className="h-5 px-1.5 text-[10px]"
-                onClick={() => { setInput(''); setMergedLines([]); setLeftEditIdx(null); }}
+                onClick={() => {
+                  setInput('');
+                  setMergedLines([]);
+                  setLeftEditIdx(null);
+                }}
                 disabled={!input}
               >
-                <X className="h-2.5 w-2.5 mr-0.5" />清空
+                <X className="h-2.5 w-2.5 mr-0.5" />
+                清空
               </Button>
             </div>
             <div className="flex-1 min-h-0 flex overflow-hidden">
@@ -327,16 +337,33 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
                       <input
                         type="text"
                         value={line}
-                        onChange={(e) => setInput((prev) => { const ls = prev.split('\n'); ls[idx] = e.target.value; return ls.join('\n'); })}
+                        onChange={(e) =>
+                          setInput((prev) => {
+                            const ls = prev.split('\n');
+                            ls[idx] = e.target.value;
+                            return ls.join('\n');
+                          })
+                        }
                         onBlur={() => setLeftEditIdx(null)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setLeftEditIdx(null); }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === 'Escape') setLeftEditIdx(null);
+                        }}
                         autoFocus
-                        className={cn('flex-1 min-w-0 border-0 outline-none bg-transparent h-[15px] px-1', fSizeMono, 'font-mono', 'focus:bg-blue-500/5')}
+                        className={cn(
+                          'flex-1 min-w-0 border-0 outline-none bg-transparent h-[15px] px-1',
+                          fSizeMono,
+                          'font-mono',
+                          'focus:bg-blue-500/5'
+                        )}
                         spellCheck={false}
                       />
                     ) : (
                       <span
-                        className={cn('flex-1 whitespace-pre pr-2 overflow-hidden cursor-text px-1', fSizeMono, 'font-mono')}
+                        className={cn(
+                          'flex-1 whitespace-pre pr-2 overflow-hidden cursor-text px-1',
+                          fSizeMono,
+                          'font-mono'
+                        )}
                         onClick={() => setLeftEditIdx(idx)}
                         title="点击编辑"
                       >
@@ -352,7 +379,12 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
                 className="w-7 shrink-0 overflow-hidden bg-muted/5 border-l border-border/40 select-none"
               >
                 {input.split('\n').map((_, i) => (
-                  <div key={i} className="font-mono text-[9px] leading-[15px] h-[15px] text-muted-foreground text-right pr-1">{i + 1}</div>
+                  <div
+                    key={i}
+                    className="font-mono text-[9px] leading-[15px] h-[15px] text-muted-foreground text-right pr-1"
+                  >
+                    {i + 1}
+                  </div>
                 ))}
               </div>
             </div>
@@ -364,10 +396,7 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
               <div className="h-[29px] border-b shrink-0 flex items-center justify-center bg-muted/10">
                 <span className="text-[8px] text-muted-foreground">操作</span>
               </div>
-              <div
-                ref={middleScrollRef}
-                className="flex-1 min-h-0 overflow-hidden"
-              >
+              <div ref={middleScrollRef} className="flex-1 min-h-0 overflow-hidden">
                 {mergedLines.map((line, idx) => {
                   if (line.removed && !showRemoved && line.content.trim()) return null;
                   return (
@@ -378,7 +407,9 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
                     >
                       <button
                         title="标记为删除"
-                        onClick={() => { if (!line.removed) toggleRemoved(idx); }}
+                        onClick={() => {
+                          if (!line.removed) toggleRemoved(idx);
+                        }}
                         className={cn(
                           'p-0 rounded hover:bg-red-100 transition-colors',
                           line.removed && 'bg-red-100'
@@ -387,13 +418,17 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
                         <ArrowLeft
                           className={cn(
                             'h-2.5 w-2.5',
-                            line.removed ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400'
+                            line.removed
+                              ? 'text-red-500'
+                              : 'text-muted-foreground/40 hover:text-red-400'
                           )}
                         />
                       </button>
                       <button
                         title="保留此行"
-                        onClick={() => { if (line.removed) toggleRemoved(idx); }}
+                        onClick={() => {
+                          if (line.removed) toggleRemoved(idx);
+                        }}
                         className={cn(
                           'p-0 rounded hover:bg-green-100 transition-colors',
                           !line.removed && 'bg-green-100'
@@ -402,7 +437,9 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
                         <ArrowRight
                           className={cn(
                             'h-2.5 w-2.5',
-                            !line.removed ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400'
+                            !line.removed
+                              ? 'text-green-500'
+                              : 'text-muted-foreground/40 hover:text-green-400'
                           )}
                         />
                       </button>
@@ -451,8 +488,13 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
                         'flex items-start',
                         'h-[15px]',
                         line.removed && 'bg-red-500/[0.06]',
-                        !line.removed && line.added && 'bg-green-500/10 border-l-[3px] border-l-green-500',
-                        !line.removed && !line.added && line.changed && 'bg-orange-500/10 border-l-[3px] border-l-orange-500'
+                        !line.removed &&
+                          line.added &&
+                          'bg-green-500/10 border-l-[3px] border-l-green-500',
+                        !line.removed &&
+                          !line.added &&
+                          line.changed &&
+                          'bg-orange-500/10 border-l-[3px] border-l-orange-500'
                       )}
                     >
                       <span
@@ -494,7 +536,9 @@ export function EtlDialog({ open, onOpenChange, initialContent = '', onApplyResu
                           value={line.content}
                           onChange={(e) => handleLineChange(idx, e.target.value)}
                           onBlur={() => setEditingLineIdx(null)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditingLineIdx(null); }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === 'Escape') setEditingLineIdx(null);
+                          }}
                           autoFocus={editingLineIdx === idx}
                           className={cn(
                             'flex-1 min-w-0 pr-2 border-0 outline-none bg-transparent overflow-hidden',

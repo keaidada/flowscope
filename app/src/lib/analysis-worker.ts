@@ -203,12 +203,15 @@ export async function analyzeWithWorker(
   payload: AnalysisWorkerPayload,
   options?: AnalyzeWorkerOptions
 ): Promise<AnalysisWorkerResult> {
-  const response = await sendRequest({
-    type: 'analyze',
-    payload,
-    cacheMaxBytes: options?.cacheMaxBytes,
-    knownCacheKey: options?.knownCacheKey,
-  }, options?.onProgress);
+  const response = await sendRequest(
+    {
+      type: 'analyze',
+      payload,
+      cacheMaxBytes: options?.cacheMaxBytes,
+      knownCacheKey: options?.knownCacheKey,
+    },
+    options?.onProgress
+  );
 
   if (!response.cacheKey) {
     throw new Error('Worker returned an empty cache key');
@@ -347,16 +350,14 @@ export async function exportToJsonWorker(
 /**
  * Send an export request that may return binary data via transferable ArrayBuffer.
  */
-async function sendExportRequest(
-  payload: {
-    result?: AnalyzeResult;
-    results?: AnalyzeResult[];
-    schema?: string;
-    format?: 'duckdb' | 'xlsx' | 'csv' | 'json';
-    sheets?: string[];
-    compact?: boolean;
-  }
-): Promise<AnalysisWorkerResponse & { exportBytes?: ArrayBuffer }> {
+async function sendExportRequest(payload: {
+  result?: AnalyzeResult;
+  results?: AnalyzeResult[];
+  schema?: string;
+  format?: 'duckdb' | 'xlsx' | 'csv' | 'json';
+  sheets?: string[];
+  compact?: boolean;
+}): Promise<AnalysisWorkerResponse & { exportBytes?: ArrayBuffer }> {
   if (!isWorkerSupported()) {
     throw new Error('Web Workers are not supported in this environment');
   }
@@ -450,7 +451,18 @@ export async function exportStream(
 
     // Send start
     // #region debug-point O:stream-start-sent
-    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"O",location:"analysis-worker.ts:streamStart",msg:`[DEBUG] export stream start sent format=${format}`,data:{format},ts:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7777/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: 'export-csv-failure',
+        runId: 'post-fix',
+        hypothesisId: 'O',
+        location: 'analysis-worker.ts:streamStart',
+        msg: `[DEBUG] export stream start sent format=${format}`,
+        data: { format },
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
     // #endregion
     worker.postMessage({
       type: 'export-stream-start' as const,
@@ -553,7 +565,18 @@ export async function exportStreamLazy(
           // entirely bypassing structured clone (prevents browser OOM crash)
           const jsonStr = JSON.stringify(result);
           // #region debug-point P:stream-chunk-sent
-          fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"P",location:"analysis-worker.ts:streamChunk",msg:`[DEBUG] export stream chunk sent format=${format}`,data:{format,chunkCount,jsonSize:jsonStr.length},ts:Date.now()})}).catch(()=>{});
+          fetch('http://127.0.0.1:7777/event', {
+            method: 'POST',
+            body: JSON.stringify({
+              sessionId: 'export-csv-failure',
+              runId: 'post-fix',
+              hypothesisId: 'P',
+              location: 'analysis-worker.ts:streamChunk',
+              msg: `[DEBUG] export stream chunk sent format=${format}`,
+              data: { format, chunkCount, jsonSize: jsonStr.length },
+              ts: Date.now(),
+            }),
+          }).catch(() => {});
           // #endregion
           worker.postMessage({
             type: 'export-stream-chunk' as const,
@@ -566,7 +589,18 @@ export async function exportStreamLazy(
             reject(new Error('No results to export'));
           } else {
             // #region debug-point Q:stream-finish-sent
-            fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"Q",location:"analysis-worker.ts:streamFinish",msg:`[DEBUG] export stream finish sent format=${format}`,data:{format,chunkCount},ts:Date.now()})}).catch(()=>{});
+            fetch('http://127.0.0.1:7777/event', {
+              method: 'POST',
+              body: JSON.stringify({
+                sessionId: 'export-csv-failure',
+                runId: 'post-fix',
+                hypothesisId: 'Q',
+                location: 'analysis-worker.ts:streamFinish',
+                msg: `[DEBUG] export stream finish sent format=${format}`,
+                data: { format, chunkCount },
+                ts: Date.now(),
+              }),
+            }).catch(() => {});
             // #endregion
             worker.postMessage({
               type: 'export-stream-finish' as const,

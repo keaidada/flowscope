@@ -1,11 +1,7 @@
 import { useCallback, useMemo, type FC } from 'react';
 import { Network, Rows3, LayoutGrid, Loader2, Database } from 'lucide-react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
-import {
-  GraphErrorBoundary,
-  GraphView,
-  useLineageActions,
-} from '@pondpilot/flowscope-react';
+import { GraphErrorBoundary, GraphView, useLineageActions } from '@pondpilot/flowscope-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from './ui/button';
 import { GlobalLineageListView } from './GlobalLineageListView';

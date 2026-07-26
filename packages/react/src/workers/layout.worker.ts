@@ -102,7 +102,7 @@ function calculateNodeHeight(node: WorkerNodeData): number {
   if (node.tableCount > 0 && !node.isCollapsed) {
     const rs = node.readCount > 0 ? 24 + node.readCount * 22 : 0;
     const ws = node.writeCount > 0 ? 24 + node.writeCount * 22 : 0;
-    const gap = (node.readCount > 0 && node.writeCount > 0) ? 13 : 0;
+    const gap = node.readCount > 0 && node.writeCount > 0 ? 13 : 0;
     height = 55 + rs + gap + ws;
   }
 
@@ -120,7 +120,7 @@ function computeDagreLayout(
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
 
-  const hasExpanded = nodes.some(n => n.expandedTables);
+  const hasExpanded = nodes.some((n) => n.expandedTables);
   const nodesep = hasExpanded ? 120 : DAGRE_NODESEP_LR;
   const ranksep = hasExpanded ? 250 : DAGRE_RANKSEP_LR;
 

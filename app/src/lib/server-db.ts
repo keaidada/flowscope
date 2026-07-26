@@ -121,7 +121,10 @@ export interface FileContentResult {
   transformed_content: string | null;
 }
 
-export async function loadFileContent(projectId: string, filePath: string): Promise<FileContentResult> {
+export async function loadFileContent(
+  projectId: string,
+  filePath: string
+): Promise<FileContentResult> {
   return api<FileContentResult>(
     'GET',
     `/file-content?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}`
@@ -278,11 +281,17 @@ export async function getFileResult(
   projectId: string,
   filePath: string
 ): Promise<{ found: boolean; resultJson?: string; contentHash?: string }> {
-  return api('GET', `/file-result?projectId=${encodeURIComponent(projectId)}&filePath=${encodeURIComponent(filePath)}`);
+  return api(
+    'GET',
+    `/file-result?projectId=${encodeURIComponent(projectId)}&filePath=${encodeURIComponent(filePath)}`
+  );
 }
 
 export async function getFileResults(projectId: string): Promise<FileResult[]> {
-  const resp = await api<{ files: FileResult[] }>('GET', `/file-results?projectId=${encodeURIComponent(projectId)}`);
+  const resp = await api<{ files: FileResult[] }>(
+    'GET',
+    `/file-results?projectId=${encodeURIComponent(projectId)}`
+  );
   return resp.files;
 }
 
@@ -317,11 +326,11 @@ export async function saveProjectFileResults(
     rows: rows.map((r) => ({ file_path: r.file_path, content_hash: r.content_hash })),
   });
 }
-export async function loadProjectFileResults(
-  projectId: string
-): Promise<ProjectFileResultRow[]> {
-  const resp = await api<{ files: Array<{ filePath: string; contentHash: string; fileName?: string; dirPath?: string }> }>('GET', `/file-results?projectId=${encodeURIComponent(projectId)}`);
-  return resp.files.map(f => ({
+export async function loadProjectFileResults(projectId: string): Promise<ProjectFileResultRow[]> {
+  const resp = await api<{
+    files: Array<{ filePath: string; contentHash: string; fileName?: string; dirPath?: string }>;
+  }>('GET', `/file-results?projectId=${encodeURIComponent(projectId)}`);
+  return resp.files.map((f) => ({
     file_path: f.filePath,
     content_hash: f.contentHash || '',
     updated_at: '',
@@ -334,8 +343,11 @@ export async function loadProjectFileResults(
 export async function loadProjectFileResultsLight(
   projectId: string
 ): Promise<{ file_path: string; file_name?: string }[]> {
-  const resp = await api<{ files: Array<{ filePath: string; fileName?: string }> }>('GET', `/file-results/light?projectId=${encodeURIComponent(projectId)}`);
-  return resp.files.map(f => ({
+  const resp = await api<{ files: Array<{ filePath: string; fileName?: string }> }>(
+    'GET',
+    `/file-results/light?projectId=${encodeURIComponent(projectId)}`
+  );
+  return resp.files.map((f) => ({
     file_path: f.filePath,
     file_name: f.fileName,
   }));
@@ -343,7 +355,7 @@ export async function loadProjectFileResultsLight(
 
 export async function deleteProjectFileResults(
   projectId: string,
-  filePaths: string[],
+  filePaths: string[]
 ): Promise<void> {
   await api<void>('DELETE', '/file-results', { project_id: projectId, file_paths: filePaths });
 }
@@ -364,7 +376,7 @@ export interface AnomalyRow {
 
 export async function saveAnomaly(
   projectId: string,
-  row: Omit<AnomalyRow, 'id' | 'createdAt' | 'projectId'>,
+  row: Omit<AnomalyRow, 'id' | 'createdAt' | 'projectId'>
 ): Promise<void> {
   await api<void>('POST', '/anomalies', {
     project_id: projectId,
@@ -381,19 +393,29 @@ export async function saveAnomaly(
 
 // ── lineage ────────────────────────────────────────────────────────────
 
-export async function getLineageNodes(projectId: string, filePath?: string): Promise<LineageNodeRow[]> {
+export async function getLineageNodes(
+  projectId: string,
+  filePath?: string
+): Promise<LineageNodeRow[]> {
   const params = new URLSearchParams({ projectId });
   if (filePath) params.set('filePath', filePath);
   return api<LineageNodeRow[]>('GET', `/lineage/nodes?${params}`);
 }
 
-export async function getLineageColumns(projectId: string, filePath?: string): Promise<LineageColumnRow[]> {
+export async function getLineageColumns(
+  projectId: string,
+  filePath?: string
+): Promise<LineageColumnRow[]> {
   const params = new URLSearchParams({ projectId });
   if (filePath) params.set('filePath', filePath);
   return api<LineageColumnRow[]>('GET', `/lineage/columns?${params}`);
 }
 
-export async function getLineageEdges(projectId: string, filePath?: string, edgeType?: string): Promise<LineageEdgeRow[]> {
+export async function getLineageEdges(
+  projectId: string,
+  filePath?: string,
+  edgeType?: string
+): Promise<LineageEdgeRow[]> {
   const params = new URLSearchParams({ projectId });
   if (filePath) params.set('filePath', filePath);
   if (edgeType) params.set('edgeType', edgeType);
@@ -426,7 +448,10 @@ export async function saveTableLevelEdges(
 export async function loadTableLevelEdges(
   projectId: string
 ): Promise<Array<[string, string, string]>> {
-  return api<Array<[string, string, string]>>('GET', `/table-level-edges?projectId=${encodeURIComponent(projectId)}`);
+  return api<Array<[string, string, string]>>(
+    'GET',
+    `/table-level-edges?projectId=${encodeURIComponent(projectId)}`
+  );
 }
 
 // ── table_metadata / column_metadata ───────────────────────────────────
@@ -472,11 +497,17 @@ export interface ColumnMetadataRow {
 }
 
 export async function getTableMetadata(projectId: string): Promise<TableMetadataRow[]> {
-  return api<TableMetadataRow[]>('GET', `/table-metadata?projectId=${encodeURIComponent(projectId)}`);
+  return api<TableMetadataRow[]>(
+    'GET',
+    `/table-metadata?projectId=${encodeURIComponent(projectId)}`
+  );
 }
 
 export async function getColumnMetadata(projectId: string): Promise<ColumnMetadataRow[]> {
-  return api<ColumnMetadataRow[]>('GET', `/column-metadata?projectId=${encodeURIComponent(projectId)}`);
+  return api<ColumnMetadataRow[]>(
+    'GET',
+    `/column-metadata?projectId=${encodeURIComponent(projectId)}`
+  );
 }
 
 export async function saveTableMetadata(

@@ -11,7 +11,9 @@ try {
     const arr = JSON.parse(raw) as unknown;
     if (
       Array.isArray(arr) &&
-      arr.some((p: { id?: string }) => typeof p.id === 'string' && p.id.length === 36 && p.id.includes('-'))
+      arr.some(
+        (p: { id?: string }) => typeof p.id === 'string' && p.id.length === 36 && p.id.includes('-')
+      )
     ) {
       localStorage.removeItem('flowscope-projects');
       localStorage.removeItem('flowscope-active-project-id');

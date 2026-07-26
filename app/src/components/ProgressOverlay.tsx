@@ -7,8 +7,8 @@ interface Props {
   loaded?: number;
   total?: number;
   currentFile?: string;
-  batch?: string;        // e.g. "批次 5/36"
-  stage?: string;         // current stage label for secondary info
+  batch?: string; // e.g. "批次 5/36"
+  stage?: string; // current stage label for secondary info
   done?: boolean;
 }
 
@@ -38,12 +38,8 @@ export default function ProgressOverlay({
             {typeof loaded === 'number' && typeof total === 'number' && total > 0 && (
               <div className="text-xs text-muted-foreground">{`${loaded.toLocaleString()} / ${total.toLocaleString()} 个文件`}</div>
             )}
-            {batch && (
-              <div className="text-xs text-muted-foreground">{batch}</div>
-            )}
-            {stage && (
-              <div className="text-xs text-muted-foreground">{stage}</div>
-            )}
+            {batch && <div className="text-xs text-muted-foreground">{batch}</div>}
+            {stage && <div className="text-xs text-muted-foreground">{stage}</div>}
           </div>
         </div>
 

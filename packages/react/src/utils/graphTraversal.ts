@@ -123,7 +123,9 @@ export function findConnectedElementsWithDepth(
 
   if (downstreamDepth !== undefined && downstreamDepth > 0) {
     const downstream = traverseDirectionWithDepth(
-      startId, edgeMap, downstreamMap,
+      startId,
+      edgeMap,
+      downstreamMap,
       (edge) => edge.targetHandle || edge.target,
       downstreamDepth
     );
@@ -132,7 +134,9 @@ export function findConnectedElementsWithDepth(
 
   if (upstreamDepth !== undefined && upstreamDepth > 0) {
     const upstream = traverseDirectionWithDepth(
-      startId, edgeMap, upstreamMap,
+      startId,
+      edgeMap,
+      upstreamMap,
       (edge) => edge.sourceHandle || edge.source,
       upstreamDepth
     );
@@ -747,7 +751,8 @@ export function applyTableFilter(
 
   // Use pre-built index if provided, otherwise build on-the-fly
   const idx = graphIndex || buildGraphIndex(graph.edges);
-  const hasDepthLimit = tableFilter.upstreamDepth !== undefined || tableFilter.downstreamDepth !== undefined;
+  const hasDepthLimit =
+    tableFilter.upstreamDepth !== undefined || tableFilter.downstreamDepth !== undefined;
 
   const tableFilterConnected = new Set<string>();
 
@@ -762,7 +767,11 @@ export function applyTableFilter(
   } else {
     // Unlimited traversal (original behavior)
     const connected = graphIndex
-      ? findConnectedElementsMultipleDirectionalIndexed(allStartIds, graphIndex, tableFilter.direction)
+      ? findConnectedElementsMultipleDirectionalIndexed(
+          allStartIds,
+          graphIndex,
+          tableFilter.direction
+        )
       : findConnectedElementsMultipleDirectional(allStartIds, graph.edges, tableFilter.direction);
     for (const id of connected) tableFilterConnected.add(id);
   }

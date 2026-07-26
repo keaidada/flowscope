@@ -188,7 +188,9 @@ function calculateNodeHeight(data: NodeData | undefined): number {
   const d = data as Record<string, unknown>;
   if (d._expandedTables) {
     // Check for outputGroups (multi-output grouping)
-    const og = Array.isArray(d.outputGroups) ? d.outputGroups as Array<{ inputs: unknown[]; outputs: unknown[] }> : undefined;
+    const og = Array.isArray(d.outputGroups)
+      ? (d.outputGroups as Array<{ inputs: unknown[]; outputs: unknown[] }>)
+      : undefined;
     if (og && og.length > 1) {
       // Grouped layout: sum group heights + dividers
       let h = 55;
@@ -207,7 +209,7 @@ function calculateNodeHeight(data: NodeData | undefined): number {
       const writes = Array.isArray(d.tableNamesWritten) ? d.tableNamesWritten.length : 0;
       const rs = reads > 0 ? 24 + reads * 22 : 0;
       const ws = writes > 0 ? 24 + writes * 22 : 0;
-      const gap = (reads > 0 && writes > 0) ? 13 : 0;
+      const gap = reads > 0 && writes > 0 ? 13 : 0;
       height = 55 + rs + gap + ws;
     }
   }
@@ -221,7 +223,12 @@ function calculateNodeHeight(data: NodeData | undefined): number {
  */
 function getNodeWidth(data: NodeData | undefined): number {
   const d = data as Record<string, unknown> | undefined;
-  if (d && (d._expandedTables !== undefined || d.tableNamesRead !== undefined || d.tableNamesWritten !== undefined)) {
+  if (
+    d &&
+    (d._expandedTables !== undefined ||
+      d.tableNamesRead !== undefined ||
+      d.tableNamesWritten !== undefined)
+  ) {
     return SCRIPT_NODE_WIDTH;
   }
   return NODE_WIDTH;
@@ -238,7 +245,9 @@ function layoutWithDagre<N extends NodeData, E extends Record<string, unknown>>(
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
 
-  const hasExpanded = nodes.some(n => (n.data as Record<string, unknown>)?._expandedTables === true);
+  const hasExpanded = nodes.some(
+    (n) => (n.data as Record<string, unknown>)?._expandedTables === true
+  );
   const nodesep = hasExpanded ? 120 : 80;
   const ranksep = hasExpanded ? 250 : 120;
 
@@ -292,7 +301,9 @@ async function layoutWithElk<N extends NodeData, E extends Record<string, unknow
   const elkDirection = direction === 'LR' ? 'RIGHT' : 'DOWN';
 
   // 自适应间距：展开时宽松，收起时紧凑
-  const hasExpanded = nodes.some(n => (n.data as Record<string, unknown>)?._expandedTables === true);
+  const hasExpanded = nodes.some(
+    (n) => (n.data as Record<string, unknown>)?._expandedTables === true
+  );
   const betweenLayers = hasExpanded ? '300' : '120';
   const nodeNode = hasExpanded ? '120' : '50';
 

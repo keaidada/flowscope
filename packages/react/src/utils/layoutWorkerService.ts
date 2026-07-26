@@ -80,9 +80,12 @@ function nodesToWorkerFormat<N extends NodeData>(nodes: Node<N>[]): WorkerNodeDa
     const writeLen = Array.isArray(d.tablesWritten) ? d.tablesWritten.length : 0;
 
     // Compute estimated height for grouped script nodes
-    let estimatedHeight: number | undefined = typeof d._measuredHeight === 'number' ? d._measuredHeight : undefined;
+    let estimatedHeight: number | undefined =
+      typeof d._measuredHeight === 'number' ? d._measuredHeight : undefined;
     if (!estimatedHeight && d._expandedTables === true) {
-      const og = Array.isArray(d.outputGroups) ? d.outputGroups as Array<{ inputs: unknown[]; outputs: unknown[] }> : undefined;
+      const og = Array.isArray(d.outputGroups)
+        ? (d.outputGroups as Array<{ inputs: unknown[]; outputs: unknown[] }>)
+        : undefined;
       if (og && og.length > 1) {
         let h = 55;
         for (let gi = 0; gi < og.length; gi++) {

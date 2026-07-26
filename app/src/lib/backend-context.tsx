@@ -44,7 +44,12 @@ export function BackendProvider({ children }: BackendProviderProps) {
       setState({ ready: true, error: null, isRetrying: false, backendType: 'rest' });
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      setState({ ready: false, error: `Failed to initialize backend: ${errorMessage}`, isRetrying: false, backendType: null });
+      setState({
+        ready: false,
+        error: `Failed to initialize backend: ${errorMessage}`,
+        isRetrying: false,
+        backendType: null,
+      });
       setAdapter(null);
     }
   }, []);
@@ -60,7 +65,12 @@ export function BackendProvider({ children }: BackendProviderProps) {
       } catch (error: unknown) {
         if (cancelled) return;
         const errorMessage = error instanceof Error ? error.message : String(error);
-        setState({ ready: false, error: `Failed to initialize backend: ${errorMessage}`, isRetrying: false, backendType: null });
+        setState({
+          ready: false,
+          error: `Failed to initialize backend: ${errorMessage}`,
+          isRetrying: false,
+          backendType: null,
+        });
         setAdapter(null);
       }
     };
@@ -85,7 +95,10 @@ export function BackendProvider({ children }: BackendProviderProps) {
     };
   }, []);
 
-  const value = useMemo(() => ({ ...state, adapter, retry: retryBackend }), [state, adapter, retryBackend]);
+  const value = useMemo(
+    () => ({ ...state, adapter, retry: retryBackend }),
+    [state, adapter, retryBackend]
+  );
   return <BackendContext.Provider value={value}>{children}</BackendContext.Provider>;
 }
 

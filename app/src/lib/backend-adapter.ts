@@ -134,9 +134,7 @@ export class RestBackendAdapter implements BackendAdapter {
 /**
  * Always use REST backend. No fallback to WASM.
  */
-export async function createBackendAdapter(
-  restBaseUrl = ''
-): Promise<BackendDetectionResult> {
+export async function createBackendAdapter(restBaseUrl = ''): Promise<BackendDetectionResult> {
   const adapter = new RestBackendAdapter(restBaseUrl);
   await adapter.initialize();
   return { adapter, detectedType: 'rest' };

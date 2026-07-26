@@ -32,14 +32,21 @@ let _anomalyListener: ((a: Anomaly) => void) | null = null;
 /** 注册全局异常监听器（比如用于 toast 通知） */
 export function onAnalysisAnomaly(listener: (a: Anomaly) => void): () => void {
   _anomalyListener = listener;
-  return () => { _anomalyListener = null; };
+  return () => {
+    _anomalyListener = null;
+  };
 }
 
 function emit(anomaly: Anomaly, projectId?: string): void {
   if (_anomalyListener) {
-    try { _anomalyListener(anomaly); } catch { /* listener 不应影响主流程 */ }
+    try {
+      _anomalyListener(anomaly);
+    } catch {
+      /* listener 不应影响主流程 */
+    }
   }
-  const level = anomaly.severity === 'error' ? 'error' : anomaly.severity === 'warning' ? 'warn' : 'log';
+  const level =
+    anomaly.severity === 'error' ? 'error' : anomaly.severity === 'warning' ? 'warn' : 'log';
   console[level](`[LineageAnomaly][${anomaly.category}]`, anomaly.message, anomaly.detail ?? '');
   if (projectId && (anomaly.severity === 'error' || anomaly.severity === 'warning')) {
     recordAnomalyToDb(projectId, anomaly);
@@ -48,36 +55,38 @@ function emit(anomaly: Anomaly, projectId?: string): void {
 
 /** 异步记录 anomaly 到数据库异常表，不阻塞主流程 */
 function recordAnomalyToDb(projectId: string, anomaly: Anomaly): void {
-  import('./server-db').then(db => {
-    let fromPath = '';
-    try { fromPath = window.location.pathname; } catch {}
-    db.saveAnomaly(projectId, {
-      filePath: anomaly.script ?? fromPath,
-      scriptName: anomaly.script ?? '',
-      scriptContent: '',
-      severity: anomaly.severity,
-      anomalyType: anomaly.category,
-      message: anomaly.message,
-      detail: anomaly.detail ?? '',
-      isTest: 0,
-    }).catch(() => {});
-  }).catch(() => {});
+  import('./server-db')
+    .then((db) => {
+      let fromPath = '';
+      try {
+        fromPath = window.location.pathname;
+      } catch {}
+      db.saveAnomaly(projectId, {
+        filePath: anomaly.script ?? fromPath,
+        scriptName: anomaly.script ?? '',
+        scriptContent: '',
+        severity: anomaly.severity,
+        anomalyType: anomaly.category,
+        message: anomaly.message,
+        detail: anomaly.detail ?? '',
+        isTest: 0,
+      }).catch(() => {});
+    })
+    .catch(() => {});
 }
 
 /** 检查 AnalyzeResult 是否有有效的 data_flow（非纯自引用） */
 export function hasMeaningfulLineage(result: AnalyzeResult | null): boolean {
   if (!result) return false;
-  return result.statements.some(stmt =>
-    stmt.edges?.some(e => e.type === 'data_flow' && e.from !== e.to)
+  return result.statements.some((stmt) =>
+    stmt.edges?.some((e) => e.type === 'data_flow' && e.from !== e.to)
   );
 }
 
 /** 检查 AnalyzeResult 是否有任何 data_flow 边 */
 export function hasAnyDataFlow(result: AnalyzeResult | null): boolean {
   if (!result) return false;
-  return result.statements.some(stmt =>
-    stmt.edges?.some(e => e.type === 'data_flow')
-  );
+  return result.statements.some((stmt) => stmt.edges?.some((e) => e.type === 'data_flow'));
 }
 
 // ── Analysis result cache ───────────────────────────────────────────
@@ -118,12 +127,15 @@ export async function writeBatchFileResults(
   contentHash: string,
   result: AnalyzeResult
 ): Promise<void> {
-  await serverDb.saveProjectFileResults(projectId, filePaths.map(fp => ({
-    file_path: fp,
-    content_hash: contentHash || 'no_hash',
-    result_json: '',
-    updated_at: new Date().toISOString(),
-  })));
+  await serverDb.saveProjectFileResults(
+    projectId,
+    filePaths.map((fp) => ({
+      file_path: fp,
+      content_hash: contentHash || 'no_hash',
+      result_json: '',
+      updated_at: new Date().toISOString(),
+    }))
+  );
 
   // Also store the full result once, keyed by hash
   const cacheKey = `result:${projectId}:hash:${contentHash || 'no_hash'}`;
@@ -136,11 +148,13 @@ export async function writeFileResult(
   contentHash: string,
   result: AnalyzeResult
 ): Promise<void> {
-  await serverDb.saveProjectFileResults(projectId, [{
-    file_path: filePath,
-    content_hash: contentHash || 'no_hash',
-    updated_at: new Date().toISOString(),
-  }]);
+  await serverDb.saveProjectFileResults(projectId, [
+    {
+      file_path: filePath,
+      content_hash: contentHash || 'no_hash',
+      updated_at: new Date().toISOString(),
+    },
+  ]);
 
   const cacheKey = `result:${projectId}:hash:${contentHash || 'no_hash'}`;
   await serverDb.setCacheResult(cacheKey, result);
@@ -154,7 +168,7 @@ export async function readFileResultPaths(projectId: string): Promise<string[]> 
     );
     _fileResultCache.set(projectId, rows);
   }
-  return rows.map(r => r.file_path);
+  return rows.map((r) => r.file_path);
 }
 
 export async function readFileResult(
@@ -162,7 +176,7 @@ export async function readFileResult(
   filePath: string
 ): Promise<AnalyzeResult | null> {
   const rows = await serverDb.loadProjectFileResults(projectId);
-  const row = rows.find(r => r.file_path === filePath);
+  const row = rows.find((r) => r.file_path === filePath);
   if (!row) return null;
 
   const hash = row.content_hash || 'no_hash';
@@ -226,10 +240,7 @@ export async function* streamUniqueProjectResultJsons(
 
 // ── 血缘结构化存储 ─────────────────────────────────────────────────
 
-async function writeLineageDataViaServer(
-  projectId: string,
-  result: AnalyzeResult,
-): Promise<void> {
+async function writeLineageDataViaServer(projectId: string, result: AnalyzeResult): Promise<void> {
   const nodes: serverDb.LineageNodeRow[] = [];
   const columns: serverDb.LineageColumnRow[] = [];
   const edges: serverDb.LineageEdgeRow[] = [];
@@ -308,10 +319,7 @@ async function writeLineageDataViaServer(
   await serverDb.saveLineageBatch(projectId, nodes, columns, edges);
 }
 
-export async function writeLineageData(
-  projectId: string,
-  result: AnalyzeResult,
-): Promise<void> {
+export async function writeLineageData(projectId: string, result: AnalyzeResult): Promise<void> {
   await writeLineageDataViaServer(projectId, result);
 }
 
@@ -341,9 +349,8 @@ export async function writeTableLevelEdges(projectId: string): Promise<void> {
 async function _writeTableLevelEdgesInternal(
   projectId: string,
   rawNodes: serverDb.LineageNodeRow[],
-  rawEdges: serverDb.LineageEdgeRow[],
+  rawEdges: serverDb.LineageEdgeRow[]
 ): Promise<void> {
-
   // node_id is UNIQUE per (project_id, file_path), NOT globally unique.
   // Same CTE name in different files → same hash node_id.
   // Key by (file_path, node_id) to prevent cross-file contamination.
@@ -386,8 +393,10 @@ async function _writeTableLevelEdgesInternal(
     // Track CTE/intermediate endpoints for union-find merging
     // CTE = endpoint NOT in tableIds (scoped) AND not a column
     if (!stmtCteNodes.has(stmtKey)) stmtCteNodes.set(stmtKey, new Set());
-    if (!tableIds.has(fromKey) && !e.from_id.startsWith('column_')) stmtCteNodes.get(stmtKey)!.add(e.from_id);
-    if (!tableIds.has(toKey) && !e.to_id.startsWith('column_')) stmtCteNodes.get(stmtKey)!.add(e.to_id);
+    if (!tableIds.has(fromKey) && !e.from_id.startsWith('column_'))
+      stmtCteNodes.get(stmtKey)!.add(e.from_id);
+    if (!tableIds.has(toKey) && !e.to_id.startsWith('column_'))
+      stmtCteNodes.get(stmtKey)!.add(e.to_id);
   }
 
   // ── CTE-chain merge: union statements that share CTE nodes ──────────────
@@ -399,10 +408,18 @@ async function _writeTableLevelEdgesInternal(
     let root = x;
     while (ufParent.get(root)! !== root) root = ufParent.get(root)!;
     let cur = x;
-    while (ufParent.get(cur)! !== root) { const n = ufParent.get(cur)!; ufParent.set(cur, root); cur = n; }
+    while (ufParent.get(cur)! !== root) {
+      const n = ufParent.get(cur)!;
+      ufParent.set(cur, root);
+      cur = n;
+    }
     return root;
   }
-  function ufUnion(a: string, b: string): void { const ra = ufFind(a), rb = ufFind(b); if (ra !== rb) ufParent.set(ra, rb); }
+  function ufUnion(a: string, b: string): void {
+    const ra = ufFind(a),
+      rb = ufFind(b);
+    if (ra !== rb) ufParent.set(ra, rb);
+  }
 
   // Build CTE → stmtKeys map — CTE key MUST include script path
   // because the Rust parser reuses CTE node IDs across different files
@@ -428,7 +445,10 @@ async function _writeTableLevelEdgesInternal(
   const mergedWrites = new Map<string, Set<string>>();
   for (const stmtKey of allStmtKeys) {
     const root = ufFind(stmtKey);
-    if (!mergedReads.has(root)) { mergedReads.set(root, new Set()); mergedWrites.set(root, new Set()); }
+    if (!mergedReads.has(root)) {
+      mergedReads.set(root, new Set());
+      mergedWrites.set(root, new Set());
+    }
     for (const r of stmtReads.get(stmtKey) ?? []) mergedReads.get(root)!.add(r);
     for (const w of stmtWrites.get(stmtKey) ?? []) mergedWrites.get(root)!.add(w);
   }
@@ -478,10 +498,15 @@ async function _writeTableLevelEdgesInternal(
     if (groups.length <= 1) continue;
     const parent = groups.map((_, i) => i);
     const find = (i: number): number => {
-      while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; }
+      while (parent[i] !== i) {
+        parent[i] = parent[parent[i]];
+        i = parent[i];
+      }
       return i;
     };
-    const union = (a: number, b: number) => { parent[find(a)] = find(b); };
+    const union = (a: number, b: number) => {
+      parent[find(a)] = find(b);
+    };
     // Build output → group index map, merge when collision
     const outToGroup = new Map<string, number>();
     for (let i = 0; i < groups.length; i++) {
@@ -558,9 +583,9 @@ export async function queryLineageNodes(
 ): Promise<LineageNodeRow[]> {
   let nodes = await serverDb.getLineageNodes(projectId, filePath);
   if (nodeTypes?.length) {
-    nodes = nodes.filter(n => nodeTypes.includes(n.node_type));
+    nodes = nodes.filter((n) => nodeTypes.includes(n.node_type));
   }
-  return nodes.map(n => ({
+  return nodes.map((n) => ({
     nodeId: n.node_id,
     nodeType: n.node_type,
     label: n.label,
@@ -579,9 +604,9 @@ export async function queryLineageColumns(
 ): Promise<LineageColumnRow[]> {
   let cols = await serverDb.getLineageColumns(projectId, filePath);
   if (parentNodeIds?.length) {
-    cols = cols.filter(c => parentNodeIds.includes(c.parent_node_id || ''));
+    cols = cols.filter((c) => parentNodeIds.includes(c.parent_node_id || ''));
   }
-  return cols.map(c => ({
+  return cols.map((c) => ({
     columnId: c.column_id,
     label: c.label,
     qualifiedName: c.qualified_name,
@@ -599,7 +624,7 @@ export async function queryLineageEdges(
   filePath?: string
 ): Promise<LineageEdgeRow[]> {
   const edges = await serverDb.getLineageEdges(projectId, filePath);
-  return edges.map(e => ({
+  return edges.map((e) => ({
     edgeId: e.edge_id,
     fromId: e.from_id,
     toId: e.to_id,
@@ -618,11 +643,11 @@ export async function queryLineageEdges(
  * 从完整的 AnalyzeResult 重新填充 table_level_edges。
  * 一次性操作，数据洞察的搜索精度依赖此表。
  */
-export async function repopulateTableLevelEdges(
-  projectId: string,
-): Promise<number> {
+export async function repopulateTableLevelEdges(projectId: string): Promise<number> {
   await writeTableLevelEdges(projectId);
-  const result = await serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>);
+  const result = await serverDb
+    .loadTableLevelEdges(projectId)
+    .catch(() => [] as Array<[string, string, string]>);
   return result.length;
 }
 
@@ -633,12 +658,10 @@ export async function repopulateTableLevelEdges(
  * 极快（1.1MB 查询 vs 19.8MB 完整 AnalyzeResult）。
  */
 export async function buildGlobalLineageFromNodes(
-  projectId: string,
+  projectId: string
 ): Promise<AnalyzeResult | null> {
   const rawNodes = await getOrLoadNodes(projectId);
-  const tableNodes = rawNodes.filter(
-    (n) => n.node_type === 'table' || n.node_type === 'view',
-  );
+  const tableNodes = rawNodes.filter((n) => n.node_type === 'table' || n.node_type === 'view');
   if (tableNodes.length === 0) return null;
 
   // 去重：qualified_name → 统一 nodeId
@@ -659,7 +682,8 @@ export async function buildGlobalLineageFromNodes(
     const script = n.file_path;
     const stmtKey = `${script}\0${n.statement_index}`;
     const qn = (n.qualified_name ?? n.label).toLowerCase();
-    if (!stmtMap.has(stmtKey)) stmtMap.set(stmtKey, { script, reads: new Set(), writes: new Set() });
+    if (!stmtMap.has(stmtKey))
+      stmtMap.set(stmtKey, { script, reads: new Set(), writes: new Set() });
     const isWrite = n.resolution_source === 'implied';
     if (isWrite) stmtMap.get(stmtKey)!.writes.add(qn);
     else stmtMap.get(stmtKey)!.reads.add(qn);
@@ -834,11 +858,19 @@ export async function readGlobalLineageFromTables(
       const key = `${e.from}->${e.to}`;
       if (!edgeSet.has(key)) {
         edgeSet.add(key);
-        finalEdges.push({ id: `synth_df_${syntheticIdx++}`, from: e.from, to: e.to, type: 'data_flow' });
+        finalEdges.push({
+          id: `synth_df_${syntheticIdx++}`,
+          from: e.from,
+          to: e.to,
+          type: 'data_flow',
+        });
       }
     }
 
-    const stmtMap = new Map<string, { nodes: Node[]; edges: Edge[]; filePath: string; stmtIdx: number }>();
+    const stmtMap = new Map<
+      string,
+      { nodes: Node[]; edges: Edge[]; filePath: string; stmtIdx: number }
+    >();
 
     for (const n of physicalTableNodes) {
       const key = `${n.filePath}::${n.statementIndex}`;
@@ -846,7 +878,9 @@ export async function readGlobalLineageFromTables(
         stmtMap.set(key, { nodes: [], edges: [], filePath: n.filePath, stmtIdx: n.statementIndex });
       }
       stmtMap.get(key)!.nodes.push({
-        id: n.nodeId, type: n.nodeType as 'table' | 'view', label: n.label,
+        id: n.nodeId,
+        type: n.nodeType as 'table' | 'view',
+        label: n.label,
         qualifiedName: n.qualifiedName ?? undefined,
       });
     }
@@ -857,15 +891,19 @@ export async function readGlobalLineageFromTables(
         stmtMap.set(key, { nodes: [], edges: [], filePath: c.filePath, stmtIdx: c.statementIndex });
       }
       stmtMap.get(key)!.nodes.push({
-        id: c.columnId, type: 'column', label: c.label,
+        id: c.columnId,
+        type: 'column',
+        label: c.label,
         qualifiedName: c.qualifiedName ?? undefined,
         expression: c.expression ?? undefined,
       });
     }
 
     const nodeToStmtKey = new Map<string, string>();
-    for (const n of physicalTableNodes) nodeToStmtKey.set(n.nodeId, `${n.filePath}::${n.statementIndex}`);
-    for (const c of physicalColumns) nodeToStmtKey.set(c.columnId, `${c.filePath}::${c.statementIndex}`);
+    for (const n of physicalTableNodes)
+      nodeToStmtKey.set(n.nodeId, `${n.filePath}::${n.statementIndex}`);
+    for (const c of physicalColumns)
+      nodeToStmtKey.set(c.columnId, `${c.filePath}::${c.statementIndex}`);
 
     for (const e of finalEdges) {
       const key = nodeToStmtKey.get(e.from) ?? nodeToStmtKey.get(e.to);
@@ -884,22 +922,32 @@ export async function readGlobalLineageFromTables(
       complexityScore: 0,
     }));
 
-    const globalNodes = [...new Map(physicalTableNodes.map((n) => [n.nodeId, {
-      id: n.nodeId,
-      type: n.nodeType as 'table' | 'view',
-      label: n.label,
-      canonicalName: { name: n.qualifiedName ?? n.label },
-      statementRefs: physicalTableNodes
-        .filter((t) => t.nodeId === n.nodeId)
-        .map((t) => ({ statementIndex: t.statementIndex, nodeId: t.nodeId })),
-    }])).values()];
+    const globalNodes = [
+      ...new Map(
+        physicalTableNodes.map((n) => [
+          n.nodeId,
+          {
+            id: n.nodeId,
+            type: n.nodeType as 'table' | 'view',
+            label: n.label,
+            canonicalName: { name: n.qualifiedName ?? n.label },
+            statementRefs: physicalTableNodes
+              .filter((t) => t.nodeId === n.nodeId)
+              .map((t) => ({ statementIndex: t.statementIndex, nodeId: t.nodeId })),
+          },
+        ])
+      ).values(),
+    ];
 
     return {
       statements,
       globalLineage: {
         nodes: globalNodes,
         edges: finalEdges.map((e) => ({
-          id: e.id, from: e.from, to: e.to, type: e.type as Edge['type'],
+          id: e.id,
+          from: e.from,
+          to: e.to,
+          type: e.type as Edge['type'],
         })),
       },
       issues: [],
@@ -940,14 +988,19 @@ function filterOrphanScripts(
   scriptReads: Map<string, Set<string>>,
   scriptWrites: Map<string, Set<string>>,
   _qnameReaders: Map<string, Set<string>>,
-  _qnameWriters: Map<string, Set<string>>,
+  _qnameWriters: Map<string, Set<string>>
 ): Set<string> {
   const result = new Set<string>();
   for (const script of scripts) {
-    if (preserve.has(script)) { result.add(script); continue; }
+    if (preserve.has(script)) {
+      result.add(script);
+      continue;
+    }
     const reads = scriptReads.get(script) ?? new Set();
     const writes = scriptWrites.get(script) ?? new Set();
-    if (reads.size > 0 || writes.size > 0) { result.add(script); }
+    if (reads.size > 0 || writes.size > 0) {
+      result.add(script);
+    }
   }
   return result;
 }
@@ -959,9 +1012,9 @@ function filterOrphanScripts(
  */
 async function _repairMissingLineageData(
   projectId: string,
-  knownLineagePaths?: Set<string>,
+  knownLineagePaths?: Set<string>
 ): Promise<void> {
-  const lineagePaths = knownLineagePaths ?? await _loadLineagePathsFallback(projectId);
+  const lineagePaths = knownLineagePaths ?? (await _loadLineagePathsFallback(projectId));
 
   const fileResultPaths = await readFileResultPaths(projectId);
   const missing: string[] = [];
@@ -984,25 +1037,60 @@ async function _repairMissingLineageData(
     if (!hasMeaningfulLineage(result)) {
       stalePaths.push(fp);
       stale++;
-      emit({ category: 'self_ref_only', severity: 'warning', script: fp, message: '缓存结果无有效 data_flow，清除 file_results 残留' }, projectId);
+      emit(
+        {
+          category: 'self_ref_only',
+          severity: 'warning',
+          script: fp,
+          message: '缓存结果无有效 data_flow，清除 file_results 残留',
+        },
+        projectId
+      );
       continue;
     }
     try {
       await writeLineageData(projectId, result);
       repaired++;
-      emit({ category: 'repair_ok', severity: 'info', script: fp, message: '补写 lineage 成功' }, projectId);
+      emit(
+        { category: 'repair_ok', severity: 'info', script: fp, message: '补写 lineage 成功' },
+        projectId
+      );
     } catch (err) {
       failed++;
-      emit({ category: 'write_failed', severity: 'error', script: fp, message: '补写 lineage 失败', detail: String(err) }, projectId);
+      emit(
+        {
+          category: 'write_failed',
+          severity: 'error',
+          script: fp,
+          message: '补写 lineage 失败',
+          detail: String(err),
+        },
+        projectId
+      );
     }
   }
   // 清除无血缘的 file_results 残留，避免绿色图标误导
   if (stalePaths.length > 0) {
-    try { await serverDb.deleteProjectFileResults(projectId, stalePaths); } catch { /* non-fatal */ }
+    try {
+      await serverDb.deleteProjectFileResults(projectId, stalePaths);
+    } catch {
+      /* non-fatal */
+    }
   }
   if (repaired > 0) {
-    emit({ category: 'repair_needed', severity: 'warning', message: `已从缓存修复 ${repaired} 个脚本的 lineage 数据${stale > 0 ? `，清除 ${stale} 个残留` : ''}${failed > 0 ? `，${failed} 个失败` : ''}` }, projectId);
-    try { await writeTableLevelEdges(projectId); } catch { /* non-fatal */ }
+    emit(
+      {
+        category: 'repair_needed',
+        severity: 'warning',
+        message: `已从缓存修复 ${repaired} 个脚本的 lineage 数据${stale > 0 ? `，清除 ${stale} 个残留` : ''}${failed > 0 ? `，${failed} 个失败` : ''}`,
+      },
+      projectId
+    );
+    try {
+      await writeTableLevelEdges(projectId);
+    } catch {
+      /* non-fatal */
+    }
   }
 }
 
@@ -1017,7 +1105,16 @@ const _promiseCache = new Map<string, Promise<any>>();
 function _dedupedLoad<T>(key: string, loader: () => Promise<T>): Promise<T> {
   const existing = _promiseCache.get(key);
   if (existing) return existing;
-  const p = loader().then(val => { _promiseCache.delete(key); return val; }, err => { _promiseCache.delete(key); throw err; });
+  const p = loader().then(
+    (val) => {
+      _promiseCache.delete(key);
+      return val;
+    },
+    (err) => {
+      _promiseCache.delete(key);
+      throw err;
+    }
+  );
   _promiseCache.set(key, p);
   return p;
 }
@@ -1028,27 +1125,37 @@ function _dedupedLoad<T>(key: string, loader: () => Promise<T>): Promise<T> {
  */
 export async function initProjectData(projectId: string): Promise<void> {
   if (_tleEnsured.has(projectId) && _repairedSet.has(projectId)) return;
-  
+
   const tasks: Promise<any>[] = [];
-  if (!_nodeCache.has(projectId)) tasks.push(
-    _dedupedLoad(`nodes:${projectId}`, () => serverDb.getLineageNodes(projectId))
-      .then(r => _nodeCache.set(projectId, r))
-  );
-  if (!_tleEdgeCache.has(projectId)) tasks.push(
-    _dedupedLoad(`tleEdges:${projectId}`, () => serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>))
-      .then(r => _tleEdgeCache.set(projectId, r))
-  );
-  if (!_fileResultCache.has(projectId)) tasks.push(
-    _dedupedLoad(`fileResults:${projectId}`, () => serverDb.loadProjectFileResultsLight(projectId))
-      .then(r => _fileResultCache.set(projectId, r))
-  );
+  if (!_nodeCache.has(projectId))
+    tasks.push(
+      _dedupedLoad(`nodes:${projectId}`, () => serverDb.getLineageNodes(projectId)).then((r) =>
+        _nodeCache.set(projectId, r)
+      )
+    );
+  if (!_tleEdgeCache.has(projectId))
+    tasks.push(
+      _dedupedLoad(`tleEdges:${projectId}`, () =>
+        serverDb.loadTableLevelEdges(projectId).catch(() => [] as Array<[string, string, string]>)
+      ).then((r) => _tleEdgeCache.set(projectId, r))
+    );
+  if (!_fileResultCache.has(projectId))
+    tasks.push(
+      _dedupedLoad(`fileResults:${projectId}`, () =>
+        serverDb.loadProjectFileResultsLight(projectId)
+      ).then((r) => _fileResultCache.set(projectId, r))
+    );
   // lineage_edges 只在首次 TLE 计算时加载
   let rawEdges: any[] = [];
-  if (!_tleEnsured.has(projectId)) tasks.push(
-    _dedupedLoad(`edges:${projectId}`, () => serverDb.getLineageEdges(projectId, undefined, 'data_flow'))
-      .then(r => { rawEdges = r; })
-  );
-  
+  if (!_tleEnsured.has(projectId))
+    tasks.push(
+      _dedupedLoad(`edges:${projectId}`, () =>
+        serverDb.getLineageEdges(projectId, undefined, 'data_flow')
+      ).then((r) => {
+        rawEdges = r;
+      })
+    );
+
   await Promise.all(tasks);
 
   // TLE 首次计算
@@ -1058,7 +1165,9 @@ export async function initProjectData(projectId: string): Promise<void> {
     for (const n of rawNodes) lineagePaths.add(n.file_path);
     try {
       await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
     _tleEnsured.add(projectId);
     _repairedSet.add(projectId);
     _repairMissingLineageData(projectId, lineagePaths).catch(() => {});
@@ -1095,7 +1204,7 @@ export async function searchLineageForInsights(
   projectId: string,
   searchTerm: string,
   upstreamDepth: number = 1,
-  downstreamDepth: number = 1,
+  downstreamDepth: number = 1
 ): Promise<AnalyzeResult | null> {
   const term = searchTerm.trim().toLowerCase();
   if (!term) return null;
@@ -1106,7 +1215,8 @@ export async function searchLineageForInsights(
   // ── 1. 从缓存读取 table_level_edges ──
   let tleEdges = _tleEdgeCache.get(projectId);
   if (!tleEdges) {
-    tleEdges = await serverDb.loadTableLevelEdges(projectId)
+    tleEdges = await serverDb
+      .loadTableLevelEdges(projectId)
       .catch(() => [] as Array<[string, string, string]>);
     _tleEdgeCache.set(projectId, tleEdges);
   }
@@ -1135,7 +1245,7 @@ export async function searchLineageForInsights(
 
   // ── 3. 脚本级有向边 ──────────────────────────────────
   const scriptDown = new Map<string, Set<string>>(); // writer → {readers}
-  const scriptUp = new Map<string, Set<string>>();   // reader → {writers}
+  const scriptUp = new Map<string, Set<string>>(); // reader → {writers}
   for (const [script, reads] of scriptReads) {
     for (const qname of reads) {
       if (!qname.includes('.')) continue; // 跳过无 schema 前缀的临时表
@@ -1228,7 +1338,9 @@ export async function searchLineageForInsights(
         }
       }
       if (upstreamDepth >= 2 && upstreamScripts.size > 0) {
-        const q: Array<[string, number]> = [...upstreamScripts].map(s => [s, 1] as [string, number]);
+        const q: Array<[string, number]> = [...upstreamScripts].map(
+          (s) => [s, 1] as [string, number]
+        );
         for (let i = 0; i < q.length; i++) {
           const [s, d] = q[i];
           if (d >= upstreamDepth) continue;
@@ -1252,7 +1364,9 @@ export async function searchLineageForInsights(
         }
       }
       if (downstreamDepth >= 2 && downstreamScripts.size > 0) {
-        const q: Array<[string, number]> = [...downstreamScripts].map(s => [s, 1] as [string, number]);
+        const q: Array<[string, number]> = [...downstreamScripts].map(
+          (s) => [s, 1] as [string, number]
+        );
         for (let i = 0; i < q.length; i++) {
           const [s, d] = q[i];
           if (d >= downstreamDepth) continue;
@@ -1313,7 +1427,7 @@ export async function searchLineageForInsights(
     scriptReads,
     scriptWrites,
     qnameReaders,
-    qnameWriters,
+    qnameWriters
   );
 
   // ── 7. 构建 AnalyzeResult ────────────────────────────
@@ -1328,31 +1442,34 @@ export async function searchLineageForInsights(
     if (loadedPaths.has(script)) continue;
     loadedPaths.add(script);
     loadTasks.push(
-      serverDb.getLineageNodes(projectId, script).then(nodes => {
-        for (const n of nodes) {
-          if (n.node_type !== 'table' && n.node_type !== 'view') continue;
-          const qn = (n.qualified_name ?? n.label).toLowerCase();
-          nodeIdToQn.set(n.node_id, qn);
-          // First script hit: init groups
-          if (!scriptNodeMap.has(script)) {
-            scriptNodeMap.set(script, []);
-            const groups = getOutputGroups(script, projectId);
-            scriptOutputGroups.set(script, groups);
+      serverDb
+        .getLineageNodes(projectId, script)
+        .then((nodes) => {
+          for (const n of nodes) {
+            if (n.node_type !== 'table' && n.node_type !== 'view') continue;
+            const qn = (n.qualified_name ?? n.label).toLowerCase();
+            nodeIdToQn.set(n.node_id, qn);
+            // First script hit: init groups
+            if (!scriptNodeMap.has(script)) {
+              scriptNodeMap.set(script, []);
+              const groups = getOutputGroups(script, projectId);
+              scriptOutputGroups.set(script, groups);
+            }
+            const isWrite = (scriptWrites.get(script) ?? new Set()).has(qn);
+            const isRead = (scriptReads.get(script) ?? new Set()).has(qn);
+            scriptNodeMap.get(script)!.push({
+              id: n.node_id,
+              type: n.node_type as 'table' | 'view',
+              label: n.label,
+              qualifiedName: qn,
+              metadata: {
+                ...(isWrite ? { isCreated: true } : {}),
+                ...(isRead ? { isRead: true } : {}),
+              },
+            });
           }
-          const isWrite = (scriptWrites.get(script) ?? new Set()).has(qn);
-          const isRead = (scriptReads.get(script) ?? new Set()).has(qn);
-          scriptNodeMap.get(script)!.push({
-            id: n.node_id,
-            type: n.node_type as 'table' | 'view',
-            label: n.label,
-            qualifiedName: qn,
-            metadata: {
-              ...(isWrite ? { isCreated: true } : {}),
-              ...(isRead ? { isRead: true } : {}),
-            },
-          });
-        }
-      }).catch(() => {}),
+        })
+        .catch(() => {})
     );
   }
   await Promise.all(loadTasks);
@@ -1433,10 +1550,7 @@ export async function clearProjectLineage(_projectId: string): Promise<void> {
 
 // ── Schema / hierarchy stubs ──────────────────────────────────────
 
-export async function writeSchemaData(
-  _projectId: string,
-  _result: AnalyzeResult
-): Promise<void> {
+export async function writeSchemaData(_projectId: string, _result: AnalyzeResult): Promise<void> {
   // Schema metadata is extracted by Rust backend on schema file import.
 }
 
@@ -1460,7 +1574,7 @@ export async function writeTableFlows(
 export async function writeTableMetadata(
   projectId: string,
   result: AnalyzeResult,
-  dialect?: string,
+  dialect?: string
 ): Promise<void> {
   if (!result.resolvedSchema?.tables?.length) return;
 

@@ -19,7 +19,12 @@ import { ANALYSIS_CACHE_MAX_BYTES } from '../lib/constants';
 import type { TemplateMode } from '../types';
 
 export interface AnalysisWorkerPayload {
-  files?: Array<{ name: string; content: string; isProcedure?: boolean; transformedContent?: string | null }>;
+  files?: Array<{
+    name: string;
+    content: string;
+    isProcedure?: boolean;
+    transformedContent?: string | null;
+  }>;
   fileNames?: string[];
   dialect: Dialect;
   schemaSQL: string;
@@ -179,7 +184,12 @@ async function ensureWasmReady(): Promise<void> {
   wasmReady = true;
 }
 
-type WorkerFile = { name: string; content: string; isProcedure?: boolean; transformedContent?: string | null };
+type WorkerFile = {
+  name: string;
+  content: string;
+  isProcedure?: boolean;
+  transformedContent?: string | null;
+};
 
 function resolveFiles(payload: AnalysisWorkerPayload): WorkerFile[] {
   if (payload.files && payload.files.length > 0) {
@@ -336,9 +346,7 @@ async function runAnalysis(
   for (let bi = 0; bi < batches.length; bi++) {
     const batch = batches[bi];
     const firstFile = batch[0]?.name ?? '';
-    const progress = batches.length > 1
-      ? `批次 ${bi + 1}/${batches.length}`
-      : undefined;
+    const progress = batches.length > 1 ? `批次 ${bi + 1}/${batches.length}` : undefined;
 
     // Send progress with file info
     const completedCount = bi * BATCH_SIZE;
@@ -542,9 +550,24 @@ async function doProgressiveExport(): Promise<void> {
   streamChunkCount = 0;
 
   try {
-    const bytes = await mergeProgressiveExport({ format: format as 'xlsx' | 'csv' | 'json', sheets, compact });
+    const bytes = await mergeProgressiveExport({
+      format: format as 'xlsx' | 'csv' | 'json',
+      sheets,
+      compact,
+    });
     // #region debug-point S:worker-progressive-export-done
-    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"S",location:"analysis.worker.ts:doProgressiveExport:done",msg:`[DEBUG] worker progressive export done format=${format}`,data:{format,byteLength:bytes.length},ts:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7777/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: 'export-csv-failure',
+        runId: 'post-fix',
+        hypothesisId: 'S',
+        location: 'analysis.worker.ts:doProgressiveExport:done',
+        msg: `[DEBUG] worker progressive export done format=${format}`,
+        data: { format, byteLength: bytes.length },
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
     // #endregion
 
     if (format === 'json') {
@@ -560,7 +583,18 @@ async function doProgressiveExport(): Promise<void> {
     }
   } catch (error) {
     // #region debug-point T:worker-progressive-export-catch
-    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"T",location:"analysis.worker.ts:doProgressiveExport:catch",msg:`[DEBUG] worker progressive export catch format=${format}`,data:{format,errorMessage:error instanceof Error ? error.message : String(error)},ts:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7777/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: 'export-csv-failure',
+        runId: 'post-fix',
+        hypothesisId: 'T',
+        location: 'analysis.worker.ts:doProgressiveExport:catch',
+        msg: `[DEBUG] worker progressive export catch format=${format}`,
+        data: { format, errorMessage: error instanceof Error ? error.message : String(error) },
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
     // #endregion
     self.postMessage({
       type: 'export-result' as const,
@@ -656,13 +690,28 @@ self.onmessage = async (event: MessageEvent<AnalysisWorkerRequest>) => {
     if (type === 'export-stream-start') {
       const { exportStartPayload: start } = event.data;
       if (!start) {
-        self.postMessage({ type: 'export-result', requestId, error: 'Missing export-start payload' });
+        self.postMessage({
+          type: 'export-result',
+          requestId,
+          error: 'Missing export-start payload',
+        });
         return;
       }
       await ensureWasmReady();
       mergeProgressiveInit();
       // #region debug-point U:worker-stream-start
-      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"U",location:"analysis.worker.ts:streamStart",msg:`[DEBUG] worker stream start format=${start.format}`,data:{format:start.format},ts:Date.now()})}).catch(()=>{});
+      fetch('http://127.0.0.1:7777/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: 'export-csv-failure',
+          runId: 'post-fix',
+          hypothesisId: 'U',
+          location: 'analysis.worker.ts:streamStart',
+          msg: `[DEBUG] worker stream start format=${start.format}`,
+          data: { format: start.format },
+          ts: Date.now(),
+        }),
+      }).catch(() => {});
       // #endregion
       streamFormat = start.format;
       streamSheets = start.sheets;
@@ -684,10 +733,25 @@ self.onmessage = async (event: MessageEvent<AnalysisWorkerRequest>) => {
         mergeProgressiveAdd(result);
         streamChunkCount++;
         // #region debug-point V:worker-stream-chunk
-        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"V",location:"analysis.worker.ts:streamChunk",msg:"[DEBUG] worker stream chunk merged",data:{chunkCount:streamChunkCount,jsonSize:chunk.resultJson.length},ts:Date.now()})}).catch(()=>{});
+        fetch('http://127.0.0.1:7777/event', {
+          method: 'POST',
+          body: JSON.stringify({
+            sessionId: 'export-csv-failure',
+            runId: 'post-fix',
+            hypothesisId: 'V',
+            location: 'analysis.worker.ts:streamChunk',
+            msg: '[DEBUG] worker stream chunk merged',
+            data: { chunkCount: streamChunkCount, jsonSize: chunk.resultJson.length },
+            ts: Date.now(),
+          }),
+        }).catch(() => {});
         // #endregion
       } catch (e) {
-        self.postMessage({ type: 'export-result', requestId: streamRequestId, error: `Chunk parse error: ${e}` });
+        self.postMessage({
+          type: 'export-result',
+          requestId: streamRequestId,
+          error: `Chunk parse error: ${e}`,
+        });
       }
       return;
     }
@@ -698,7 +762,18 @@ self.onmessage = async (event: MessageEvent<AnalysisWorkerRequest>) => {
         return;
       }
       // #region debug-point W:worker-stream-finish
-      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"export-csv-failure",runId:"post-fix",hypothesisId:"W",location:"analysis.worker.ts:streamFinish",msg:"[DEBUG] worker stream finish received",data:{requestId,streamChunkCount},ts:Date.now()})}).catch(()=>{});
+      fetch('http://127.0.0.1:7777/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: 'export-csv-failure',
+          runId: 'post-fix',
+          hypothesisId: 'W',
+          location: 'analysis.worker.ts:streamFinish',
+          msg: '[DEBUG] worker stream finish received',
+          data: { requestId, streamChunkCount },
+          ts: Date.now(),
+        }),
+      }).catch(() => {});
       // #endregion
       await doProgressiveExport();
       return;
@@ -706,7 +781,11 @@ self.onmessage = async (event: MessageEvent<AnalysisWorkerRequest>) => {
 
     if (type === 'export') {
       if (!exportPayload) {
-        self.postMessage({ type: 'export-result' as const, requestId, error: 'Missing export payload' });
+        self.postMessage({
+          type: 'export-result' as const,
+          requestId,
+          error: 'Missing export payload',
+        });
         return;
       }
 
@@ -731,7 +810,11 @@ self.onmessage = async (event: MessageEvent<AnalysisWorkerRequest>) => {
       }
 
       if (allResults.length === 0) {
-        self.postMessage({ type: 'export-result' as const, requestId, error: 'No results to export' });
+        self.postMessage({
+          type: 'export-result' as const,
+          requestId,
+          error: 'No results to export',
+        });
         return;
       }
 

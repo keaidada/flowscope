@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogContent,
@@ -24,6 +25,7 @@ export function ProcedureRepairDialog({
   originalContent,
   onApply,
 }: ProcedureRepairDialogProps) {
+  const { t } = useTranslation();
   const [transformedContent, setTransformedContent] = useState('');
 
   useEffect(() => {
@@ -50,17 +52,17 @@ export function ProcedureRepairDialog({
         <DialogHeader className="px-4 pt-4 pb-2 shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Wand2 className="h-4 w-4" />
-            存储过程 DML 提取
+            {t('procedure.title')}
           </DialogTitle>
           <DialogDescription>
-            左：原始存储过程（只读） &nbsp; 右：提取的 DML（可编辑） &nbsp; 点击应用后保存为转换结果
+            {t('procedure.desc')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 flex gap-0 min-h-0 px-4 pb-2">
           {/* Left: Original */}
           <div className="flex-1 flex flex-col min-w-0">
-            <div className="text-xs text-muted-foreground mb-1 shrink-0">原始脚本（只读）</div>
+            <div className="text-xs text-muted-foreground mb-1 shrink-0">{t('procedure.original')}</div>
             <textarea
               className="flex-1 w-full resize-none rounded border bg-muted/30 p-2 font-mono text-xs"
               value={originalContent}
@@ -76,27 +78,32 @@ export function ProcedureRepairDialog({
           {/* Right: Transformed */}
           <div className="flex-1 flex flex-col min-w-0">
             <div className="text-xs text-muted-foreground mb-1 shrink-0 flex items-center gap-2">
-              转换结果（可编辑）
-              <Button variant="ghost" size="sm" className="h-5 text-[10px] px-1" onClick={handleReExtract}>
+              {t('procedure.transformed')}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 text-[10px] px-1"
+                onClick={handleReExtract}
+              >
                 <RotateCcw className="h-3 w-3 mr-1" />
-                重新提取
+                {t('procedure.reExtract')}
               </Button>
             </div>
             <textarea
               className="flex-1 w-full resize-none rounded border bg-background p-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               value={transformedContent}
               onChange={(e) => setTransformedContent(e.target.value)}
-              placeholder="未提取到 DML 语句"
+              placeholder={t('procedure.noDml')}
             />
           </div>
         </div>
 
         <DialogFooter className="px-4 pb-3 shrink-0">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button size="sm" onClick={handleApply} disabled={!transformedContent.trim()}>
-            应用
+            {t('procedure.apply')}
           </Button>
         </DialogFooter>
       </DialogContent>

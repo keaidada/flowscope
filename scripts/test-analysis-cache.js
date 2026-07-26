@@ -6,7 +6,9 @@ const __dirname = path.resolve();
 
 (async () => {
   try {
-    const SQL = await initSqlJs({ locateFile: (file) => path.join(__dirname, 'node_modules', 'sql.js', 'dist', file) });
+    const SQL = await initSqlJs({
+      locateFile: (file) => path.join(__dirname, 'node_modules', 'sql.js', 'dist', file),
+    });
     const db = new SQL.Database();
 
     db.run(`CREATE TABLE IF NOT EXISTS lineage_statements (
@@ -70,20 +72,26 @@ const __dirname = path.resolve();
 
     // Simulate writeLineageData
     db.run("DELETE FROM lineage_statements WHERE project_id = 'test' AND file_path = 'a.sql'");
-    const stmt = db.prepare('INSERT OR REPLACE INTO lineage_statements (project_id, file_path, statement_index, statement_type, source_name, sql_text, join_count, complexity_score, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    stmt.run(['test','a.sql',0,'SELECT','a.sql','select 1',0,0,now]);
+    const stmt = db.prepare(
+      'INSERT OR REPLACE INTO lineage_statements (project_id, file_path, statement_index, statement_type, source_name, sql_text, join_count, complexity_score, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    stmt.run(['test', 'a.sql', 0, 'SELECT', 'a.sql', 'select 1', 0, 0, now]);
     stmt.free();
 
-    const nodeIns = db.prepare('INSERT OR REPLACE INTO lineage_nodes (project_id, file_path, node_id, node_type, label, qualified_name, statement_index, resolution_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    nodeIns.run(['test','a.sql','n1','table','db.table1','db.table1',0,'mock']);
+    const nodeIns = db.prepare(
+      'INSERT OR REPLACE INTO lineage_nodes (project_id, file_path, node_id, node_type, label, qualified_name, statement_index, resolution_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    nodeIns.run(['test', 'a.sql', 'n1', 'table', 'db.table1', 'db.table1', 0, 'mock']);
     nodeIns.free();
 
     console.log('writeLineageData simulation OK');
 
     // Simulate writeTableFlows
     db.run("DELETE FROM lineage_table_flows WHERE project_id = 'test' AND file_path = 'a.sql'");
-    const ins = db.prepare('INSERT OR REPLACE INTO lineage_table_flows (project_id, file_path, source_table, target_table) VALUES (?, ?, ?, ?)');
-    ins.run(['test','a.sql','db.table1','db.table2']);
+    const ins = db.prepare(
+      'INSERT OR REPLACE INTO lineage_table_flows (project_id, file_path, source_table, target_table) VALUES (?, ?, ?, ?)'
+    );
+    ins.run(['test', 'a.sql', 'db.table1', 'db.table2']);
     ins.free();
 
     console.log('writeTableFlows simulation OK');

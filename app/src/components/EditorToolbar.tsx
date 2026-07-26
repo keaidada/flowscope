@@ -1,5 +1,21 @@
 import { useState } from 'react';
-import { Play, Loader2, ChevronDown, Braces, Code, Network, WrapText, Wand2, Save, Scissors, Eye, EyeOff, ChevronsDownUp, ChevronsUpDown, XCircle } from 'lucide-react';
+import {
+  Play,
+  Loader2,
+  ChevronDown,
+  Braces,
+  Code,
+  Network,
+  WrapText,
+  Wand2,
+  Save,
+  Scissors,
+  Eye,
+  EyeOff,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  XCircle,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -108,6 +124,7 @@ export function EditorToolbar({
   onCloseTabsToRight,
 }: EditorToolbarProps) {
   const { t } = useTranslation();
+  const isMac = navigator.platform.includes('Mac');
   const activeFile = openFiles?.find((f) => f.id === activeFileId);
   const [selectedForDelete, setSelectedForDelete] = useState<Set<string>>(new Set());
   const sortedFiles = [...(openFiles || [])].sort((a, b) => a.name.localeCompare(b.name));
@@ -128,11 +145,16 @@ export function EditorToolbar({
               </span>
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-[440px] max-w-[90vw] max-h-80 overflow-y-auto">
+            <DropdownMenuContent
+              align="start"
+              className="w-[440px] max-w-[90vw] max-h-80 overflow-y-auto"
+            >
               {/* Sticky action bar at top */}
               <div className="sticky top-0 bg-popover z-10 border-b px-1.5 py-0.5">
                 <div className="flex items-center gap-0.5 whitespace-nowrap">
-                  <span className="text-[10px] font-bold text-muted-foreground shrink-0 pr-1">关闭</span>
+                  <span className="text-[10px] font-bold text-muted-foreground shrink-0 pr-1">
+                    {t('editor.closeTab')}
+                  </span>
                   <DropdownMenuItem
                     className="h-6 text-[10px] text-red-500 cursor-pointer rounded-sm"
                     disabled={selectedForDelete.size === 0}
@@ -142,7 +164,7 @@ export function EditorToolbar({
                       setSelectedForDelete(new Set());
                     }}
                   >
-                    选中 ({selectedForDelete.size})
+                    {t('editor.selectedCount', { count: selectedForDelete.size })}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="h-6 text-[10px] cursor-pointer rounded-sm"
@@ -155,31 +177,63 @@ export function EditorToolbar({
                       }
                     }}
                   >
-                    {selectedForDelete.size === sortedFiles.length ? '取消' : '全选'}
+                    {selectedForDelete.size === sortedFiles.length
+                      ? t('editor.unselect')
+                      : t('editor.selectAll')}
                   </DropdownMenuItem>
                   {activeFileId && onCloseTab && (
-                    <DropdownMenuItem className="h-6 text-[10px] cursor-pointer rounded-sm" onSelect={(e) => { e.preventDefault(); onCloseTab(activeFileId); }}>
-                      当前
+                    <DropdownMenuItem
+                      className="h-6 text-[10px] cursor-pointer rounded-sm"
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        onCloseTab(activeFileId);
+                      }}
+                    >
+                      {t('editor.currentTab')}
                     </DropdownMenuItem>
                   )}
                   {activeFileId && onCloseOtherTabs && (
-                    <DropdownMenuItem className="h-6 text-[10px] cursor-pointer rounded-sm" onSelect={(e) => { e.preventDefault(); onCloseOtherTabs(activeFileId); }}>
-                      其他
+                    <DropdownMenuItem
+                      className="h-6 text-[10px] cursor-pointer rounded-sm"
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        onCloseOtherTabs(activeFileId);
+                      }}
+                    >
+                      {t('editor.otherTabs')}
                     </DropdownMenuItem>
                   )}
                   {activeFileId && onCloseTabsToLeft && (
-                    <DropdownMenuItem className="h-6 text-[10px] cursor-pointer rounded-sm" onSelect={(e) => { e.preventDefault(); onCloseTabsToLeft(activeFileId); }}>
-                      上方
+                    <DropdownMenuItem
+                      className="h-6 text-[10px] cursor-pointer rounded-sm"
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        onCloseTabsToLeft(activeFileId);
+                      }}
+                    >
+                      {t('editor.tabsAbove')}
                     </DropdownMenuItem>
                   )}
                   {activeFileId && onCloseTabsToRight && (
-                    <DropdownMenuItem className="h-6 text-[10px] cursor-pointer rounded-sm" onSelect={(e) => { e.preventDefault(); onCloseTabsToRight(activeFileId); }}>
-                      下方
+                    <DropdownMenuItem
+                      className="h-6 text-[10px] cursor-pointer rounded-sm"
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        onCloseTabsToRight(activeFileId);
+                      }}
+                    >
+                      {t('editor.tabsBelow')}
                     </DropdownMenuItem>
                   )}
                   {onCloseAllTabs && (
-                    <DropdownMenuItem className="h-6 text-[10px] cursor-pointer rounded-sm" onSelect={(e) => { e.preventDefault(); onCloseAllTabs(); }}>
-                      全部
+                    <DropdownMenuItem
+                      className="h-6 text-[10px] cursor-pointer rounded-sm"
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        onCloseAllTabs();
+                      }}
+                    >
+                      {t('editor.allTabs')}
                     </DropdownMenuItem>
                   )}
                 </div>
@@ -197,12 +251,17 @@ export function EditorToolbar({
                     setSelectedForDelete(new Set());
                   }}
                 >
-                  <span data-checkbox className="shrink-0 flex items-center" onClick={(e) => e.stopPropagation()}>
+                  <span
+                    data-checkbox
+                    className="shrink-0 flex items-center"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <Checkbox
                       checked={selectedForDelete.has(f.id)}
                       onCheckedChange={() => {
                         const next = new Set(selectedForDelete);
-                        if (next.has(f.id)) next.delete(f.id); else next.add(f.id);
+                        if (next.has(f.id)) next.delete(f.id);
+                        else next.add(f.id);
                         setSelectedForDelete(next);
                       }}
                     />
@@ -340,17 +399,12 @@ export function EditorToolbar({
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={onFoldAll}
-                >
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onFoldAll}>
                   <ChevronsDownUp className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>全部折叠</p>
+                <p>{t('editor.foldAll')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -359,17 +413,12 @@ export function EditorToolbar({
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={onUnfoldAll}
-                >
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onUnfoldAll}>
                   <ChevronsUpDown className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>全部展开</p>
+                <p>{t('editor.unfoldAll')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -378,17 +427,12 @@ export function EditorToolbar({
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={onOpenEtl}
-                >
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onOpenEtl}>
                   <Wand2 className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>ETL 工具</p>
+                <p>{t('editor.etlTool')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -407,7 +451,7 @@ export function EditorToolbar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>转换存储过程</p>
+                <p>{t('editor.convertProc')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -431,7 +475,7 @@ export function EditorToolbar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>{showTransformed ? '查看原始脚本' : '查看转换结果'}</p>
+                <p>{showTransformed ? t('editor.viewOriginal') : t('editor.viewTransformed')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -440,17 +484,12 @@ export function EditorToolbar({
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={onSave}
-                >
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onSave}>
                   <Save className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>保存 ({navigator.platform.includes('Mac') ? '⌘S' : 'Ctrl+S'})</p>
+                <p>{isMac ? t('editor.saveShortcutMac') : t('editor.saveShortcutWin')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -464,7 +503,9 @@ export function EditorToolbar({
             className="h-[34px] gap-1.5 rounded-full px-3 text-xs font-medium"
           >
             <Network className="h-3.5 w-3.5" />
-            <span>{hasLineageResult ? t('editor.openLineage') : t('editor.runAndShowLineage')}</span>
+            <span>
+              {hasLineageResult ? t('editor.openLineage') : t('editor.runAndShowLineage')}
+            </span>
           </Button>
         )}
         <div className="flex items-center rounded-full overflow-hidden shadow-xs">

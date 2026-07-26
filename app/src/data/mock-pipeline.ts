@@ -342,9 +342,7 @@ export function buildPipelineTasks(): {
 
   for (const lineage of mockLineageData) {
     // 尝试匹配调度信息
-    const schedule = mockScheduleData.find(
-      (s) => s.wedataWorkflow === lineage.workflowName
-    );
+    const schedule = mockScheduleData.find((s) => s.wedataWorkflow === lineage.workflowName);
 
     tasks.push({
       id: String(id++),
@@ -359,9 +357,7 @@ export function buildPipelineTasks(): {
     });
   }
 
-  const taskNames = [...new Set(tasks.map((t) => t.taskName))].sort((a, b) =>
-    a.localeCompare(b)
-  );
+  const taskNames = [...new Set(tasks.map((t) => t.taskName))].sort((a, b) => a.localeCompare(b));
 
   return { tasks, layers: LAYER_DEFS, taskNames };
 }
@@ -381,9 +377,7 @@ export function buildMatrixGrid(
   layers: LayerDef[]
 ): MatrixCell[][] {
   // 初始化空网格
-  const grid: MatrixCell[][] = layers.map((_, y) =>
-    taskNames.map((_, x) => ({ x, y, tasks: [] }))
-  );
+  const grid: MatrixCell[][] = layers.map((_, y) => taskNames.map((_, x) => ({ x, y, tasks: [] })));
 
   for (const task of tasks) {
     const x = taskNames.indexOf(task.taskName);

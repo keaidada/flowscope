@@ -15,14 +15,17 @@ export interface StoredSchemaFile {
 
 /** Save schema files for a project (replaces existing) */
 export async function saveSchemaFiles(projectId: string, files: StoredSchemaFile[]): Promise<void> {
-  await serverDb.saveSchemaFiles(projectId, files.map(f => ({
-    name: f.name,
-    path: f.path,
-    content: f.content,
-    size: new TextEncoder().encode(f.content).length,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  })));
+  await serverDb.saveSchemaFiles(
+    projectId,
+    files.map((f) => ({
+      name: f.name,
+      path: f.path,
+      content: f.content,
+      size: new TextEncoder().encode(f.content).length,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }))
+  );
   // Table/column metadata is extracted by the Rust backend
   // when POST /api/db/schema-files is called.
 }
@@ -30,8 +33,8 @@ export async function saveSchemaFiles(projectId: string, files: StoredSchemaFile
 /** Load schema files for a project */
 export async function loadSchemaFiles(projectId: string): Promise<StoredSchemaFile[]> {
   const files = await serverDb.loadSchemaFiles(projectId);
-  return files.map(f => ({
-    id: f.path,  // use path as stable identifier
+  return files.map((f) => ({
+    id: f.path, // use path as stable identifier
     name: f.name,
     path: f.path,
     content: f.content,

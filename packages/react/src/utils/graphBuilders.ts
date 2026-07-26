@@ -949,7 +949,10 @@ function buildHybridGraph(
 /**
  * Build direct script-to-script graph
  */
-function buildDirectScriptGraph(scriptMap: Map<string, StatementLineageWithSource[]>, useTableHandles: boolean = false): FlowEdge[] {
+function buildDirectScriptGraph(
+  scriptMap: Map<string, StatementLineageWithSource[]>,
+  useTableHandles: boolean = false
+): FlowEdge[] {
   const edges: FlowEdge[] = [];
   const edgeSet = new Set<string>();
 

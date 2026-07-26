@@ -71,10 +71,7 @@ function getNodeComment(node: Node | undefined): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-export function getNodeStatus(
-  incomingCount: number,
-  outgoingCount: number
-): GlobalLineageStatus {
+export function getNodeStatus(incomingCount: number, outgoingCount: number): GlobalLineageStatus {
   if (incomingCount === 0 && outgoingCount === 0) return 'isolated';
   if (incomingCount === 0) return 'source';
   if (outgoingCount === 0) return 'sink';
@@ -91,15 +88,11 @@ export function getImpactScore(
   relatedFilesCount: number,
   status: GlobalLineageStatus
 ): number {
-  const statusBonus =
-    status === 'bridge' ? 8 : status === 'sink' ? 4 : status === 'source' ? 2 : 0;
+  const statusBonus = status === 'bridge' ? 8 : status === 'sink' ? 4 : status === 'source' ? 2 : 0;
   return outgoingCount * 5 + incomingCount * 4 + relatedFilesCount * 2 + statusBonus;
 }
 
-export function sortEntries(
-  entries: TableEntry[],
-  sortKey: GlobalLineageSortKey
-): TableEntry[] {
+export function sortEntries(entries: TableEntry[], sortKey: GlobalLineageSortKey): TableEntry[] {
   return [...entries].sort((a, b) => {
     switch (sortKey) {
       case 'name':
@@ -274,10 +267,7 @@ function buildRelationItem(
 }
 
 /** 构建轻量条目 — 不含上下游详细信息，仅存储 ID 列表 */
-function buildLightweightEntry(
-  nodeId: string,
-  cache: RawGraphCache
-): TableEntry {
+function buildLightweightEntry(nodeId: string, cache: RawGraphCache): TableEntry {
   const node = cache.nodeInfoById.get(nodeId);
   const upstreamIds = cache.incoming.get(nodeId) ?? [];
   const downstreamIds = cache.outgoing.get(nodeId) ?? [];
@@ -306,10 +296,7 @@ function buildLightweightEntry(
 }
 
 /** 为单个条目按需构建完整上下游详情 */
-function buildEntryDetail(
-  entry: TableEntry,
-  cache: RawGraphCache
-): TableEntry {
+function buildEntryDetail(entry: TableEntry, cache: RawGraphCache): TableEntry {
   if (entry.upstream.length > 0 || entry.downstream.length > 0) {
     return entry; // 已经是完整模式
   }
@@ -395,10 +382,7 @@ export function useGlobalLineageData(result: AnalyzeResult | null): GlobalLineag
     });
   }, [cache]);
 
-  const entryMap = useMemo(
-    () => new Map(entries.map((entry) => [entry.nodeId, entry])),
-    [entries]
-  );
+  const entryMap = useMemo(() => new Map(entries.map((entry) => [entry.nodeId, entry])), [entries]);
 
   const stats = useMemo((): GlobalLineageStats => {
     if (!cache) {

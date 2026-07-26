@@ -222,7 +222,7 @@ export function EditorArea({
   const showTransformedRef = useRef(showTransformed);
   showTransformedRef.current = showTransformed;
 
-  const hasTransformedContent = !!(activeFile?.transformedContent);
+  const hasTransformedContent = !!activeFile?.transformedContent;
 
   const displayContent = useMemo(() => {
     if (sqlViewMode === 'resolved' && resolvedSql) {
@@ -232,7 +232,14 @@ export function EditorArea({
       return activeFile?.transformedContent ?? '';
     }
     return activeFile?.content ?? '';
-  }, [sqlViewMode, resolvedSql, activeFile?.content, activeFile?.transformedContent, showTransformed, hasTransformedContent]);
+  }, [
+    sqlViewMode,
+    resolvedSql,
+    activeFile?.content,
+    activeFile?.transformedContent,
+    showTransformed,
+    hasTransformedContent,
+  ]);
 
   const handleContentChange = useCallback(
     (val: string) => {
@@ -264,11 +271,10 @@ export function EditorArea({
     if (activeFile) {
       onRequestOpenLineage?.();
       setActiveTab('lineage');
-      void runAnalysis(activeFile.content, activeFile.path)
-        .catch((err) => {
-          console.error('Manual analysis failed:', err);
-          setError(err instanceof Error ? err.message : 'Failed to run analysis');
-        });
+      void runAnalysis(activeFile.content, activeFile.path).catch((err) => {
+        console.error('Manual analysis failed:', err);
+        setError(err instanceof Error ? err.message : 'Failed to run analysis');
+      });
     }
   }, [activeFile, onRequestOpenLineage, runAnalysis, setActiveTab, setError]);
 
@@ -276,11 +282,12 @@ export function EditorArea({
     if (activeFile) {
       onRequestOpenLineage?.();
       setActiveTab('lineage');
-      void runAnalysis(activeFile.content, activeFile.path, { runModeOverride: 'current' })
-        .catch((err) => {
+      void runAnalysis(activeFile.content, activeFile.path, { runModeOverride: 'current' }).catch(
+        (err) => {
           console.error('Active-file analysis failed:', err);
           setError(err instanceof Error ? err.message : 'Failed to run analysis');
-        });
+        }
+      );
     }
   }, [activeFile, onRequestOpenLineage, runAnalysis, setActiveTab, setError]);
 
@@ -320,9 +327,9 @@ export function EditorArea({
       const content = activeFile.content;
       updateFiles([{ fileId: activeFile.id, content, isProcedure: true, transformedContent }]);
       // Persist to DB
-      upsertProjectFiles(activeProjectId, [{ ...activeFile, isProcedure: true, transformedContent }]).catch(
-        (e) => console.error('Failed to save transformed content:', e)
-      );
+      upsertProjectFiles(activeProjectId, [
+        { ...activeFile, isProcedure: true, transformedContent },
+      ]).catch((e) => console.error('Failed to save transformed content:', e));
     },
     [activeFile, activeProjectId, updateFiles]
   );
@@ -356,7 +363,11 @@ export function EditorArea({
 
   if (!currentProject) {
     return (
-      <div role="status" aria-live="polite" className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5 gap-2">
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5 gap-2"
+      >
         <Loader2 className="h-8 w-8 animate-spin opacity-40" />
       </div>
     );
@@ -376,7 +387,11 @@ export function EditorArea({
   // Show loading spinner while file content is being fetched
   if (activeFile && contentLoading) {
     return (
-      <div role="status" aria-live="polite" className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5 gap-2">
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5 gap-2"
+      >
         <Loader2 className="h-8 w-8 animate-spin opacity-40" />
       </div>
     );
@@ -432,9 +447,11 @@ export function EditorArea({
         hasTransformedContent={hasTransformedContent}
         onFoldAll={() => sqlViewRef.current?.foldAll()}
         onUnfoldAll={() => sqlViewRef.current?.unfoldAll()}
-        openFiles={(currentProject?.openFileIds || [])
-          .map((id) => currentProject?.files.find((f) => f.id === id))
-          .filter(Boolean) as any[]}
+        openFiles={
+          (currentProject?.openFileIds || [])
+            .map((id) => currentProject?.files.find((f) => f.id === id))
+            .filter(Boolean) as any[]
+        }
         activeFileId={currentProject?.activeFileId ?? null}
         onOpenFile={openFile}
         onCloseTab={closeTab}

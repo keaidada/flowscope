@@ -36,8 +36,9 @@ const dialogSizeClasses: Record<DialogSize, string> = {
   full: 'max-w-[90vw] w-[1400px] max-h-[85vh] flex flex-col p-0 gap-0',
 };
 
-interface DialogContentProps
-  extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
+interface DialogContentProps extends React.ComponentPropsWithoutRef<
+  typeof DialogPrimitive.Content
+> {
   size?: DialogSize;
   showCloseButton?: boolean;
 }
@@ -77,10 +78,7 @@ DialogHeader.displayName = 'DialogHeader';
 
 const DialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
-    className={cn(
-      'flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2',
-      className
-    )}
+    className={cn('flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2', className)}
     {...props}
   />
 );

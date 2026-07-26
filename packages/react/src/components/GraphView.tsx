@@ -738,13 +738,14 @@ export function GraphView({
 
       // Layer 3: Inject measured heights from previous render into layout input
       const measuredDims = measuredDimsRef.current;
-      const enrichedNodes = measuredDims.size > 0
-        ? layoutNodes.map((n) => {
-            const mh = measuredDims.get(n.id);
-            if (!mh) return n;
-            return { ...n, data: { ...n.data, _measuredHeight: mh } };
-          })
-        : layoutNodes;
+      const enrichedNodes =
+        measuredDims.size > 0
+          ? layoutNodes.map((n) => {
+              const mh = measuredDims.get(n.id);
+              if (!mh) return n;
+              return { ...n, data: { ...n.data, _measuredHeight: mh } };
+            })
+          : layoutNodes;
 
       // Use worker-based layout for both algorithms to keep UI responsive
       getLayoutedElementsInWorker(enrichedNodes, layoutEdges, direction, effectiveLayoutAlgorithm)
@@ -1128,7 +1129,9 @@ export function GraphView({
             <ToolbarToggleButton
               isActive={!defaultCollapsed}
               onClick={() => actions.setAllNodesCollapsed(!defaultCollapsed)}
-              ariaLabel={defaultCollapsed ? t('graph.expandAllTables') : t('graph.collapseAllTables')}
+              ariaLabel={
+                defaultCollapsed ? t('graph.expandAllTables') : t('graph.collapseAllTables')
+              }
               tooltip={defaultCollapsed ? t('graph.expandAllTables') : t('graph.collapseAllTables')}
               icon={
                 defaultCollapsed ? (
@@ -1143,8 +1146,12 @@ export function GraphView({
             <ToolbarToggleButton
               isActive={showColumnEdges}
               onClick={actions.toggleColumnEdges}
-              ariaLabel={showColumnEdges ? t('graph.showTableConnections') : t('graph.showColumnLineage')}
-              tooltip={showColumnEdges ? t('graph.showTableConnections') : t('graph.showColumnLineage')}
+              ariaLabel={
+                showColumnEdges ? t('graph.showTableConnections') : t('graph.showColumnLineage')
+              }
+              tooltip={
+                showColumnEdges ? t('graph.showTableConnections') : t('graph.showColumnLineage')
+              }
               icon={
                 showColumnEdges ? (
                   <GitBranch className="size-4" strokeWidth={1.5} />

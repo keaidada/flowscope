@@ -48,7 +48,9 @@ export function usePipelineData(result: AnalyzeResult | null): PipelineData {
     for (const stmt of result.statements) {
       const sourceName = stmt.sourceName || '';
       const physical = stmt.nodes.filter(
-        (n) => (n.type === 'table' || n.type === 'view') && (n.resolutionSource || (n.qualifiedName || n.label).includes('.')),
+        (n) =>
+          (n.type === 'table' || n.type === 'view') &&
+          (n.resolutionSource || (n.qualifiedName || n.label).includes('.'))
       );
       const physicalIds = new Set(physical.map((n) => n.id));
       const hasIncoming = new Set<string>();
@@ -74,7 +76,10 @@ export function usePipelineData(result: AnalyzeResult | null): PipelineData {
     const fileWrites0 = new Map<string, Set<string>>();
     for (const info of stmtInfos) {
       const f = info.sourceName;
-      if (!fileReads0.has(f)) { fileReads0.set(f, new Set()); fileWrites0.set(f, new Set()); }
+      if (!fileReads0.has(f)) {
+        fileReads0.set(f, new Set());
+        fileWrites0.set(f, new Set());
+      }
       for (const t of info.reads) fileReads0.get(f)!.add(t);
       for (const t of info.writes) fileWrites0.get(f)!.add(t);
     }
@@ -95,14 +100,17 @@ export function usePipelineData(result: AnalyzeResult | null): PipelineData {
         nodeLabelById.set(node.id as string, node.label as string);
       }
       for (const edge of gl.edges) {
-        const tableName = nodeLabelById.get(edge.from as string) || edge.id as string;
+        const tableName = nodeLabelById.get(edge.from as string) || (edge.id as string);
         const ps = edge.producerStatement;
         const cs = edge.consumerStatement;
         if (ps) {
           const src = idxToSource.get(ps.statementIndex);
           if (src) {
             const f = src || '__unknown__';
-            if (!fileWrites.has(f)) { fileWrites.set(f, new Set()); fileReads.set(f, new Set()); }
+            if (!fileWrites.has(f)) {
+              fileWrites.set(f, new Set());
+              fileReads.set(f, new Set());
+            }
             fileWrites.get(f)!.add(tableName);
           }
         }
@@ -110,7 +118,10 @@ export function usePipelineData(result: AnalyzeResult | null): PipelineData {
           const src = idxToSource.get(cs.statementIndex);
           if (src) {
             const f = src || '__unknown__';
-            if (!fileReads.has(f)) { fileReads.set(f, new Set()); fileWrites.set(f, new Set()); }
+            if (!fileReads.has(f)) {
+              fileReads.set(f, new Set());
+              fileWrites.set(f, new Set());
+            }
             fileReads.get(f)!.add(tableName);
           }
         }
@@ -143,7 +154,10 @@ export function usePipelineData(result: AnalyzeResult | null): PipelineData {
     const layer = new Map<string, number>();
     const bfsQueue: string[] = [];
     for (const [f, deg] of indegree) {
-      if (deg === 0) { layer.set(f, 1); bfsQueue.push(f); }
+      if (deg === 0) {
+        layer.set(f, 1);
+        bfsQueue.push(f);
+      }
     }
     while (bfsQueue.length > 0) {
       const cur = bfsQueue.shift()!;
@@ -158,7 +172,9 @@ export function usePipelineData(result: AnalyzeResult | null): PipelineData {
         }
       }
     }
-    for (const f of allFiles) { if (!layer.has(f)) layer.set(f, 1); }
+    for (const f of allFiles) {
+      if (!layer.has(f)) layer.set(f, 1);
+    }
 
     // ── Build PipelineTask[] ──
     let id = 0;
@@ -185,7 +201,9 @@ export function usePipelineData(result: AnalyzeResult | null): PipelineData {
       return a.taskName.localeCompare(b.taskName);
     });
 
-    const scripts = [...new Set(rawTasks.map((t) => t.taskName))].sort((a, b) => a.localeCompare(b));
+    const scripts = [...new Set(rawTasks.map((t) => t.taskName))].sort((a, b) =>
+      a.localeCompare(b)
+    );
     return { tasks: rawTasks, taskNames: scripts, scripts };
   }, [result]);
 }

@@ -20,7 +20,14 @@ export type {
 export { TableFilterDropdown } from './components/TableFilterDropdown';
 
 // Store and hooks (new Zustand-based)
-export { useLineageStore, useLineage, useLineageState, useLineageActions, createLineageStore, LineageStoreProvider } from './store';
+export {
+  useLineageStore,
+  useLineage,
+  useLineageState,
+  useLineageActions,
+  createLineageStore,
+  LineageStoreProvider,
+} from './store';
 
 export { useGraphSearch } from './hooks/useGraphSearch';
 export { useSearchSuggestions } from './hooks/useSearchSuggestions';

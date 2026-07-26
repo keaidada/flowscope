@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogContent,
@@ -15,7 +16,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, FolderTree, AlertTriangle, XCircle, CheckCircle, Copy, Check } from 'lucide-react';
+import {
+  Loader2,
+  FolderTree,
+  AlertTriangle,
+  XCircle,
+  CheckCircle,
+  Copy,
+  Check,
+} from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Dialect } from '@/lib/dialect-constants';
 import { DIALECT_OPTIONS } from '@/lib/dialect-constants';
@@ -28,17 +37,29 @@ interface ConvertFolderDialogProps {
   totalFileCount: number;
   isConverting: boolean;
   convertProgress: { done: number; total: number } | null;
-  convertResult: { success: number; successPaths: string[]; empty: string[]; errors: string[] } | null;
+  convertResult: {
+    success: number;
+    successPaths: string[];
+    empty: string[];
+    errors: string[];
+  } | null;
   onConfirm: (dialect: Dialect) => void;
 }
 
-function FileListDialog({ open, onOpenChange, title, files, icon }: {
+function FileListDialog({
+  open,
+  onOpenChange,
+  title,
+  files,
+  icon,
+}: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   files: string[];
   icon: 'success' | 'warn' | 'error';
 }) {
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
 
@@ -52,7 +73,8 @@ function FileListDialog({ open, onOpenChange, title, files, icon }: {
   };
   const toggleOne = (i: number) => {
     const next = new Set(selected);
-    if (next.has(i)) next.delete(i); else next.add(i);
+    if (next.has(i)) next.delete(i);
+    else next.add(i);
     setSelected(next);
   };
   const copySelected = async () => {
@@ -77,7 +99,7 @@ function FileListDialog({ open, onOpenChange, title, files, icon }: {
             {title} ({files.length})
             {selected.size > 0 && (
               <span className="text-xs text-muted-foreground font-normal">
-                — 已选 {selected.size}
+                — {t('editor.selectedCount', { count: selected.size })}
               </span>
             )}
           </DialogTitle>
@@ -85,36 +107,46 @@ function FileListDialog({ open, onOpenChange, title, files, icon }: {
 
         <div className="flex items-center gap-2 px-1 pb-1 border-b">
           <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
-          <button className="text-xs text-muted-foreground hover:text-foreground" onClick={toggleAll}>
-            {allSelected ? '取消全选' : '全选'}
+          <button
+            className="text-xs text-muted-foreground hover:text-foreground"
+            onClick={toggleAll}
+          >
+            {allSelected ? t('editor.unselect') : t('editor.selectAll')}
           </button>
           {selected.size > 0 && (
-            <Button variant="ghost" size="sm" className="h-6 ml-auto text-xs" onClick={copySelected}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 ml-auto text-xs"
+              onClick={copySelected}
+            >
               {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-              <span className="ml-1">{copied ? '已复制' : '复制选中'}</span>
+              <span className="ml-1">{copied ? t('editor.copied') : t('editor.copySelected')}</span>
             </Button>
           )}
         </div>
 
         <div className="max-h-[55vh] overflow-y-auto text-xs">
           {files.map((p, i) => (
-            <div
-              key={i}
-              className="flex items-start gap-1.5 py-0.5 px-1 hover:bg-muted/50"
-            >
+            <div key={i} className="flex items-start gap-1.5 py-0.5 px-1 hover:bg-muted/50">
               <Checkbox
                 checked={selected.has(i)}
                 onCheckedChange={() => toggleOne(i)}
                 className="mt-0.5 shrink-0"
               />
-              <span className="font-mono text-muted-foreground break-all cursor-pointer flex-1" onClick={() => toggleOne(i)}>
+              <span
+                className="font-mono text-muted-foreground break-all cursor-pointer flex-1"
+                onClick={() => toggleOne(i)}
+              >
                 {p}
               </span>
             </div>
           ))}
         </div>
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>关闭</Button>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            {t('common.close')}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -132,6 +164,7 @@ export function ConvertFolderDialog({
   convertResult,
   onConfirm,
 }: ConvertFolderDialogProps) {
+  const { t } = useTranslation();
   const [dialect, setDialect] = useState<Dialect>('bigquery');
   const [listType, setListType] = useState<'success' | 'empty' | 'errors' | null>(null);
   const completed = convertProgress && convertProgress.done >= convertProgress.total;
@@ -157,13 +190,16 @@ export function ConvertFolderDialog({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(open) => { if (!isConverting) onOpenChange(open); }}>
+      <Dialog
+        open={open}
+        onOpenChange={(open) => {
+          if (!isConverting) onOpenChange(open);
+        }}
+      >
         <DialogContent size="lg">
           <DialogHeader>
-            <DialogTitle>批量转换存储过程</DialogTitle>
-            <DialogDescription>
-              将目录下所有存储过程提取为纯 DML 语句。
-            </DialogDescription>
+            <DialogTitle>{t('convert.title')}</DialogTitle>
+            <DialogDescription>{t('convert.desc')}</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
@@ -176,18 +212,18 @@ export function ConvertFolderDialog({
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-lg border p-3 text-center">
                   <div className="text-2xl font-bold">{totalFileCount}</div>
-                  <div className="text-xs text-muted-foreground">总文件数</div>
+                  <div className="text-xs text-muted-foreground">{t('convert.totalFiles')}</div>
                 </div>
                 <div className="rounded-lg border p-3 text-center">
                   <div className="text-2xl font-bold text-amber-500">{procedureCount}</div>
-                  <div className="text-xs text-muted-foreground">存储过程</div>
+                  <div className="text-xs text-muted-foreground">{t('convert.procedures')}</div>
                 </div>
               </div>
             )}
 
             {!isConverting && !completed && (
               <div className="space-y-2">
-                <label className="text-sm font-medium">引擎类型</label>
+                <label className="text-sm font-medium">{t('convert.engineType')}</label>
                 <Select value={dialect} onValueChange={(v) => setDialect(v as Dialect)}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
@@ -211,15 +247,19 @@ export function ConvertFolderDialog({
             {(isConverting || completed) && convertProgress && (
               <div className="space-y-2">
                 <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{completed ? '完成' : '转换中...'}</span>
-                  <span>{convertProgress.done} / {convertProgress.total}</span>
+                  <span>{completed ? t('convert.complete') : t('convert.converting')}</span>
+                  <span>
+                    {convertProgress.done} / {convertProgress.total}
+                  </span>
                 </div>
                 <div className="h-2 rounded-full bg-muted overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${
                       completed ? 'bg-green-500' : 'bg-amber-500'
                     }`}
-                    style={{ width: `${convertProgress.total > 0 ? (convertProgress.done / convertProgress.total) * 100 : 0}%` }}
+                    style={{
+                      width: `${convertProgress.total > 0 ? (convertProgress.done / convertProgress.total) * 100 : 0}%`,
+                    }}
                   />
                 </div>
               </div>
@@ -228,37 +268,40 @@ export function ConvertFolderDialog({
             {completed && convertResult && (
               <div className="grid grid-cols-3 gap-2">
                 {convertResult.success > 0
-                  ? resultCard('成功', convertResult.success, 'text-green-600', () => setListType('success'))
-                  : resultCard('成功', convertResult.success, 'text-green-600')
-                }
+                  ? resultCard(t('convert.success'), convertResult.success, 'text-green-600', () =>
+                      setListType('success')
+                    )
+                  : resultCard(t('convert.success'), convertResult.success, 'text-green-600')}
                 {emptyCount > 0
-                  ? resultCard('无 DML', emptyCount, 'text-amber-600', () => setListType('empty'))
-                  : resultCard('无 DML', emptyCount, 'text-amber-600')
-                }
+                  ? resultCard(t('convert.noDml'), emptyCount, 'text-amber-600', () => setListType('empty'))
+                  : resultCard(t('convert.noDml'), emptyCount, 'text-amber-600')}
                 {errorCount > 0
-                  ? resultCard('异常', errorCount, 'text-red-600', () => setListType('errors'))
-                  : resultCard('异常', errorCount, 'text-red-600')
-                }
+                  ? resultCard(t('convert.errors'), errorCount, 'text-red-600', () => setListType('errors'))
+                  : resultCard(t('convert.errors'), errorCount, 'text-red-600')}
               </div>
             )}
           </div>
 
           <DialogFooter>
             {completed ? (
-              <Button onClick={() => onOpenChange(false)}>完成</Button>
+              <Button onClick={() => onOpenChange(false)}>{t('convert.done')}</Button>
             ) : (
               <>
-                <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isConverting}>
-                  取消
+                <Button
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                  disabled={isConverting}
+                >
+                  {t('common.cancel')}
                 </Button>
                 <Button onClick={handleConfirm} disabled={procedureCount === 0 || isConverting}>
                   {isConverting ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      转换中...
+                      {t('convert.converting')}
                     </>
                   ) : (
-                    `转换 ${procedureCount} 个存储过程`
+                    t('convert.convertN', { count: procedureCount })
                   )}
                 </Button>
               </>
@@ -272,17 +315,16 @@ export function ConvertFolderDialog({
           open
           onOpenChange={() => setListType(null)}
           title={
-            listType === 'success' ? '成功转换' :
-            listType === 'empty' ? '未提取到 DML' : '异常'
+            listType === 'success' ? t('convert.success') : listType === 'empty' ? t('convert.noDml') : t('convert.errors')
           }
           files={
-            listType === 'success' ? convertResult.successPaths :
-            listType === 'empty' ? convertResult.empty : convertResult.errors
+            listType === 'success'
+              ? convertResult.successPaths
+              : listType === 'empty'
+                ? convertResult.empty
+                : convertResult.errors
           }
-          icon={
-            listType === 'success' ? 'success' :
-            listType === 'empty' ? 'warn' : 'error'
-          }
+          icon={listType === 'success' ? 'success' : listType === 'empty' ? 'warn' : 'error'}
         />
       )}
     </>

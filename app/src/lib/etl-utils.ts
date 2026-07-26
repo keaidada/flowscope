@@ -37,13 +37,10 @@ function processLine(line: string): string {
   // Step 2: Handle {expr} patterns that contain single quotes
   // e.g. {v_END.strftime('%Y-%m-%d')}   → '{v_END.strftime(''%Y-%m-%d'')}'
   // e.g. '{v_END.strftime('%Y-%m-%d')}' → '{v_END.strftime(''%Y-%m-%d'')}'
-  result = result.replace(
-    /('?)\{([^}]*'[^}]*)\}('?)/g,
-    (_match, _openQuote, content) => {
-      const escaped = content.replace(/'/g, "''");
-      return `'{${escaped}}'`;
-    }
-  );
+  result = result.replace(/('?)\{([^}]*'[^}]*)\}('?)/g, (_match, _openQuote, content) => {
+    const escaped = content.replace(/'/g, "''");
+    return `'{${escaped}}'`;
+  });
 
   return result;
 }
@@ -246,8 +243,10 @@ export function inlineDiff(original: string, processed: string): DiffSegment[] {
 
   // Find common suffix (remaining after prefix)
   let suffixLen = 0;
-  while (suffixLen < minLen - prefixLen &&
-         original[original.length - 1 - suffixLen] === processed[processed.length - 1 - suffixLen]) {
+  while (
+    suffixLen < minLen - prefixLen &&
+    original[original.length - 1 - suffixLen] === processed[processed.length - 1 - suffixLen]
+  ) {
     suffixLen++;
   }
 
@@ -258,7 +257,10 @@ export function inlineDiff(original: string, processed: string): DiffSegment[] {
   const changedStart = prefixLen;
   const changedLen = processed.length - suffixLen - prefixLen;
   if (changedLen > 0) {
-    segments.push({ text: processed.substring(changedStart, changedStart + changedLen), highlight: true });
+    segments.push({
+      text: processed.substring(changedStart, changedStart + changedLen),
+      highlight: true,
+    });
   }
 
   if (suffixLen > 0) {
@@ -306,12 +308,28 @@ function mergePySparkLines(input: string, output: string): MergedLine[] {
       const processed = cleanedBlocks[blockIdx] ?? '';
 
       // Add the spark.sql(...) opening line as removed (always, even if empty)
-      result.push({ lineNum: result.length + 1, removed: true, changed: false, added: false, content: inputLines[block.startLine - 1], segments: [], originalContent: inputLines[block.startLine - 1] });
+      result.push({
+        lineNum: result.length + 1,
+        removed: true,
+        changed: false,
+        added: false,
+        content: inputLines[block.startLine - 1],
+        segments: [],
+        originalContent: inputLines[block.startLine - 1],
+      });
 
       // Add processed SQL lines
       const processedLines = processed.split('\n');
       for (const pl of processedLines) {
-        result.push({ lineNum: result.length + 1, removed: false, changed: true, added: true, content: pl, segments: [{ text: pl, highlight: true }], originalContent: pl });
+        result.push({
+          lineNum: result.length + 1,
+          removed: false,
+          changed: true,
+          added: true,
+          content: pl,
+          segments: [{ text: pl, highlight: true }],
+          originalContent: pl,
+        });
       }
 
       // Skip past this SQL block in input
@@ -321,7 +339,15 @@ function mergePySparkLines(input: string, output: string): MergedLine[] {
     }
 
     // Non-SQL line: always include (empty lines too, to match left textarea)
-    result.push({ lineNum: result.length + 1, removed: true, changed: false, added: false, content: inputLines[i], segments: [], originalContent: inputLines[i] });
+    result.push({
+      lineNum: result.length + 1,
+      removed: true,
+      changed: false,
+      added: false,
+      content: inputLines[i],
+      segments: [],
+      originalContent: inputLines[i],
+    });
     i++;
   }
 
@@ -340,14 +366,38 @@ function mergeDirectLines(input: string, output: string): MergedLine[] {
 
     // If both are same, show as unchanged kept line
     if (inLine === outLine) {
-      result.push({ lineNum: result.length + 1, removed: false, changed: false, added: false, content: outLine, segments: [{ text: outLine, highlight: false }], originalContent: outLine });
+      result.push({
+        lineNum: result.length + 1,
+        removed: false,
+        changed: false,
+        added: false,
+        content: outLine,
+        segments: [{ text: outLine, highlight: false }],
+        originalContent: outLine,
+      });
       continue;
     }
 
     // Different: show original as removed, then processed as changed
     // When output has a line not present in input, mark as added
-    result.push({ lineNum: result.length + 1, removed: true, changed: false, added: false, content: inLine, segments: [], originalContent: inLine });
-    result.push({ lineNum: result.length + 1, removed: false, changed: true, added: inLine === '', content: outLine, segments: inlineDiff(inLine, outLine), originalContent: outLine });
+    result.push({
+      lineNum: result.length + 1,
+      removed: true,
+      changed: false,
+      added: false,
+      content: inLine,
+      segments: [],
+      originalContent: inLine,
+    });
+    result.push({
+      lineNum: result.length + 1,
+      removed: false,
+      changed: true,
+      added: inLine === '',
+      content: outLine,
+      segments: inlineDiff(inLine, outLine),
+      originalContent: outLine,
+    });
   }
 
   return result;

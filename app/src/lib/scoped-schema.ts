@@ -143,7 +143,9 @@ export function buildScopedSchemaSQLForTableNames(
   schemaFiles: StoredSchemaFile[],
   referencedTableNames: string[]
 ): ScopedSchemaMatch {
-  const referencedTableSet = new Set(referencedTableNames.map((tableName) => normalizeIdentifier(tableName)));
+  const referencedTableSet = new Set(
+    referencedTableNames.map((tableName) => normalizeIdentifier(tableName))
+  );
   const matchedTableSet = new Set<string>();
   const matchedBlocks: string[] = [];
   const emittedBlocks = new Set<string>();

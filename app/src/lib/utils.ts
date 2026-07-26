@@ -15,9 +15,7 @@ let _genIdCounter = 0;
 export function genId(): string {
   _genIdCounter += 1;
   return (
-    Date.now().toString(36) +
-    _genIdCounter.toString(36) +
-    Math.random().toString(36).slice(2, 5)
+    Date.now().toString(36) + _genIdCounter.toString(36) + Math.random().toString(36).slice(2, 5)
   );
 }
 

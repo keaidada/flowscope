@@ -15,17 +15,9 @@ import {
   ExternalLink,
   X,
 } from 'lucide-react';
-import {
-  exportToDuckDbSql,
-  exportStreamLazy,
-} from '@/lib/analysis-worker';
-import {
-  streamUniqueProjectResultJsons,
-} from '@/lib/analysis-cache';
-import {
-  projectExportStreamViaBackend,
-  isRestBackendAvailable,
-} from '@/lib/backend-adapter';
+import { exportToDuckDbSql, exportStreamLazy } from '@/lib/analysis-worker';
+import { streamUniqueProjectResultJsons } from '@/lib/analysis-cache';
+import { projectExportStreamViaBackend, isRestBackendAvailable } from '@/lib/backend-adapter';
 import { extractSchemaFromResult } from './AnalysisView';
 import { loadTableLevelEdges } from '@/lib/server-db';
 import {
@@ -94,11 +86,13 @@ function computeLineageFromSchema(result: AnalyzeResult) {
   // Per-script entries for script attribution
   const scriptEntries: Array<{ script: string; inputTable: string; outputTable: string }> = [];
   const scriptSeen = new Set<string>();
-  const scripts = [...new Set(result.statements.map(s => s.sourceName).filter(Boolean))];
+  const scripts = [...new Set(result.statements.map((s) => s.sourceName).filter(Boolean))];
   for (const script of scripts) {
     const miniResult: AnalyzeResult = {
       ...result,
-      statements: result.statements.filter(s => s.sourceName === script) as AnalyzeResult['statements'],
+      statements: result.statements.filter(
+        (s) => s.sourceName === script
+      ) as AnalyzeResult['statements'],
     };
     const miniSchema = extractSchemaFromResult(miniResult, script!);
     for (const table of miniSchema) {
@@ -117,10 +111,10 @@ function computeLineageFromSchema(result: AnalyzeResult) {
 
   // Deduplicate: if a per-script entry already covers the same (input→output) pair,
   // skip the global version of it.
-  const scriptPairKeys = new Set(scriptEntries.map(e => `${e.inputTable}→${e.outputTable}`));
+  const scriptPairKeys = new Set(scriptEntries.map((e) => `${e.inputTable}→${e.outputTable}`));
   return [
     ...scriptEntries,
-    ...entries.filter(e => !scriptPairKeys.has(`${e.inputTable}→${e.outputTable}`)),
+    ...entries.filter((e) => !scriptPairKeys.has(`${e.inputTable}→${e.outputTable}`)),
   ];
 }
 
@@ -234,12 +228,16 @@ export function ExportDialog({
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | undefined>();
   const [imageExportOpen, setImageExportOpen] = useState(false);
-  const [imageExportStatus, setImageExportStatus] = useState<'idle' | 'exporting' | 'done' | 'error'>('idle');
+  const [imageExportStatus, setImageExportStatus] = useState<
+    'idle' | 'exporting' | 'done' | 'error'
+  >('idle');
   const [imageExportMessage, setImageExportMessage] = useState('');
 
   // Sheet selection dialog
   const [sheetDialogOpen, setSheetDialogOpen] = useState(false);
-  const [pendingExportFormat, setPendingExportFormat] = useState<'csv' | 'xlsx' | 'json' | null>(null);
+  const [pendingExportFormat, setPendingExportFormat] = useState<'csv' | 'xlsx' | 'json' | null>(
+    null
+  );
   const [selectedSheets, setSelectedSheets] = useState<Set<SheetKey>>(
     new Set(ALL_SHEETS.map((s) => s.key))
   );
@@ -251,131 +249,144 @@ export function ExportDialog({
    * merge/export happens outside the browser heap. Fallback to the Worker
    * path only when the REST backend is unavailable.
    */
-  const handleSheetExport = useCallback(async (format: 'csv' | 'xlsx' | 'json') => {
-    if (!result && !activeProjectId) return;
-    setIsExporting(true);
-    try {
-      const { filename } = await buildExportFilename(projectName, format);
-      const sheetNames = selectedSheets.size > 0
-        ? Array.from(selectedSheets) as string[]
-        : undefined;
+  const handleSheetExport = useCallback(
+    async (format: 'csv' | 'xlsx' | 'json') => {
+      if (!result && !activeProjectId) return;
+      setIsExporting(true);
+      try {
+        const { filename } = await buildExportFilename(projectName, format);
+        const sheetNames =
+          selectedSheets.size > 0 ? (Array.from(selectedSheets) as string[]) : undefined;
 
-      const onDone = (output: Uint8Array | string) => {
-        if (typeof output === 'string') {
-          downloadBlob(output, filename, 'application/json');
-        } else {
-          const mime = format === 'csv'
-            ? 'application/zip'
-            : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-          downloadBlob(toArrayBuffer(output), filename, mime);
-        }
-        toast.success(`${format.toUpperCase()} export downloaded`);
-      };
-
-      if (activeProjectId) {
-        // 预加载物化表级血缘(table_level_edges,穿透 CTE),injectLineage 优先用;fallback schema 推断
-        let preloadedLineage: Array<{ script: string; inputTable: string; outputTable: string }> | null = null;
-        try {
-          const tlEdges = await loadTableLevelEdges(activeProjectId);
-          if (tlEdges.length > 0) {
-            preloadedLineage = tlEdges.map(([from, to, script]) => ({ script, inputTable: from, outputTable: to }));
+        const onDone = (output: Uint8Array | string) => {
+          if (typeof output === 'string') {
+            downloadBlob(output, filename, 'application/json');
+          } else {
+            const mime =
+              format === 'csv'
+                ? 'application/zip'
+                : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+            downloadBlob(toArrayBuffer(output), filename, mime);
           }
-        } catch {
-          /* fallback to computeLineageFromSchema */
-        }
-        const lineageInjector = (resultJson: string): string => {
-          try {
-            const parsed = JSON.parse(resultJson);
-            parsed.precomputedLineage = preloadedLineage ?? computeLineageFromSchema(parsed);
-            return JSON.stringify(parsed);
-          } catch {
-            return resultJson;
-          }
+          toast.success(`${format.toUpperCase()} export downloaded`);
         };
-        const uniqueResultJsons = streamUniqueProjectResultJsons(activeProjectId);
-        const firstChunk = await uniqueResultJsons.next();
-        if (firstChunk.done) {
-          if (!result) { toast.error('No analysis results to export'); return; }
-          // Stream is empty but result exists in React state.  Serialize it once
-          // and send through the backend to avoid structuredClone OOM via worker postMessage.
-          const restAvailable = await isRestBackendAvailable('');
-          if (restAvailable) {
-            const singleJson = JSON.stringify(result);
-            const output = await projectExportStreamViaBackend(
-              '',
-              (async function* () {
-                yield singleJson;
-              })(),
-              format,
-              { sheets: sheetNames, injectLineage: lineageInjector },
-            );
-            if (!output) {
-              throw new Error('Backend project export failed');
+
+        if (activeProjectId) {
+          // 预加载物化表级血缘(table_level_edges,穿透 CTE),injectLineage 优先用;fallback schema 推断
+          let preloadedLineage: Array<{
+            script: string;
+            inputTable: string;
+            outputTable: string;
+          }> | null = null;
+          try {
+            const tlEdges = await loadTableLevelEdges(activeProjectId);
+            if (tlEdges.length > 0) {
+              preloadedLineage = tlEdges.map(([from, to, script]) => ({
+                script,
+                inputTable: from,
+                outputTable: to,
+              }));
             }
-            onDone(output.data);
-            setSheetDialogOpen(false);
-            return;
+          } catch {
+            /* fallback to computeLineageFromSchema */
           }
-          // no backend — use the original single-result path as last resort
-        } else {
-          const restAvailable = await isRestBackendAvailable('');
-
-          if (restAvailable) {
-            const output = await projectExportStreamViaBackend(
-              '',
-              (async function* () {
-                yield firstChunk.value;
-                yield* uniqueResultJsons;
-              })(),
-              format,
-              { sheets: sheetNames, injectLineage: lineageInjector },
-            );
-            if (!output) {
-              throw new Error('Backend project export failed');
+          const lineageInjector = (resultJson: string): string => {
+            try {
+              const parsed = JSON.parse(resultJson);
+              parsed.precomputedLineage = preloadedLineage ?? computeLineageFromSchema(parsed);
+              return JSON.stringify(parsed);
+            } catch {
+              return resultJson;
             }
-
-            onDone(output.data);
-            setSheetDialogOpen(false);
-            return;
-          }
-
-          const jsonIterator = (async function* () {
-            yield firstChunk.value;
-            yield* uniqueResultJsons;
-          })()[Symbol.asyncIterator]();
-          const output = await exportStreamLazy(
-            async () => {
-              const next = await jsonIterator.next();
-              if (next.done) {
-                return null;
+          };
+          const uniqueResultJsons = streamUniqueProjectResultJsons(activeProjectId);
+          const firstChunk = await uniqueResultJsons.next();
+          if (firstChunk.done) {
+            if (!result) {
+              toast.error('No analysis results to export');
+              return;
+            }
+            // Stream is empty but result exists in React state.  Serialize it once
+            // and send through the backend to avoid structuredClone OOM via worker postMessage.
+            const restAvailable = await isRestBackendAvailable('');
+            if (restAvailable) {
+              const singleJson = JSON.stringify(result);
+              const output = await projectExportStreamViaBackend(
+                '',
+                (async function* () {
+                  yield singleJson;
+                })(),
+                format,
+                { sheets: sheetNames, injectLineage: lineageInjector }
+              );
+              if (!output) {
+                throw new Error('Backend project export failed');
               }
-              return JSON.parse(next.value) as AnalyzeResult;
-            },
-            format,
-            { sheets: sheetNames }
-          );
-          onDone(output);
-          setSheetDialogOpen(false);
+              onDone(output.data);
+              setSheetDialogOpen(false);
+              return;
+            }
+            // no backend — use the original single-result path as last resort
+          } else {
+            const restAvailable = await isRestBackendAvailable('');
+
+            if (restAvailable) {
+              const output = await projectExportStreamViaBackend(
+                '',
+                (async function* () {
+                  yield firstChunk.value;
+                  yield* uniqueResultJsons;
+                })(),
+                format,
+                { sheets: sheetNames, injectLineage: lineageInjector }
+              );
+              if (!output) {
+                throw new Error('Backend project export failed');
+              }
+
+              onDone(output.data);
+              setSheetDialogOpen(false);
+              return;
+            }
+
+            const jsonIterator = (async function* () {
+              yield firstChunk.value;
+              yield* uniqueResultJsons;
+            })()[Symbol.asyncIterator]();
+            const output = await exportStreamLazy(
+              async () => {
+                const next = await jsonIterator.next();
+                if (next.done) {
+                  return null;
+                }
+                return JSON.parse(next.value) as AnalyzeResult;
+              },
+              format,
+              { sheets: sheetNames }
+            );
+            onDone(output);
+            setSheetDialogOpen(false);
+            return;
+          }
+        }
+
+        // Single result fallback
+        if (!result) {
+          toast.error('No analysis results to export');
           return;
         }
+        const output = await exportStreamLazy(async () => result, format, { sheets: sheetNames });
+        onDone(output);
+        setSheetDialogOpen(false);
+      } catch (err) {
+        console.error(`Failed to export ${format.toUpperCase()}:`, err);
+        toast.error(`Failed to export ${format.toUpperCase()}`);
+      } finally {
+        setIsExporting(false);
       }
-
-      // Single result fallback
-      if (!result) { toast.error('No analysis results to export'); return; }
-      const output = await exportStreamLazy(
-        async () => result,
-        format,
-        { sheets: sheetNames }
-      );
-      onDone(output);
-      setSheetDialogOpen(false);
-    } catch (err) {
-      console.error(`Failed to export ${format.toUpperCase()}:`, err);
-      toast.error(`Failed to export ${format.toUpperCase()}`);
-    } finally {
-      setIsExporting(false);
-    }
-  }, [result, activeProjectId, projectName, selectedSheets]);
+    },
+    [result, activeProjectId, projectName, selectedSheets]
+  );
 
   const handleOpenSheetDialog = useCallback((format: 'csv' | 'xlsx' | 'json') => {
     setPendingExportFormat(format);
@@ -686,7 +697,13 @@ export function ExportDialog({
           <DialogHeader>
             <DialogTitle>Select Sheets</DialogTitle>
             <DialogDescription>
-              Choose which datasets to include in the {pendingExportFormat === 'csv' ? 'CSV archive' : pendingExportFormat === 'xlsx' ? 'Excel workbook' : 'JSON file'}.
+              Choose which datasets to include in the{' '}
+              {pendingExportFormat === 'csv'
+                ? 'CSV archive'
+                : pendingExportFormat === 'xlsx'
+                  ? 'Excel workbook'
+                  : 'JSON file'}
+              .
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2 py-2">
@@ -707,10 +724,7 @@ export function ExportDialog({
                   checked={selectedSheets.has(sheet.key)}
                   onCheckedChange={() => toggleSheet(sheet.key)}
                 />
-                <Label
-                  htmlFor={`sheet-${sheet.key}`}
-                  className="cursor-pointer text-sm"
-                >
+                <Label htmlFor={`sheet-${sheet.key}`} className="cursor-pointer text-sm">
                   {sheet.label}
                 </Label>
               </div>
@@ -729,15 +743,22 @@ export function ExportDialog({
       </Dialog>
 
       {/* 图片导出进度弹窗 */}
-      <Dialog open={imageExportOpen} onOpenChange={(open) => {
-        if (!open && imageExportStatus !== 'exporting') {
-          setImageExportOpen(false);
-          setImageExportStatus('idle');
-        }
-      }}>
+      <Dialog
+        open={imageExportOpen}
+        onOpenChange={(open) => {
+          if (!open && imageExportStatus !== 'exporting') {
+            setImageExportOpen(false);
+            setImageExportStatus('idle');
+          }
+        }}
+      >
         <DialogContent size="sm">
           <DialogTitle className="text-center">
-            {imageExportStatus === 'exporting' ? '导出中' : imageExportStatus === 'done' ? '导出完成' : '导出失败'}
+            {imageExportStatus === 'exporting'
+              ? '导出中'
+              : imageExportStatus === 'done'
+                ? '导出完成'
+                : '导出失败'}
           </DialogTitle>
           <DialogDescription className="text-center">
             <div className="flex flex-col items-center gap-4 py-4">

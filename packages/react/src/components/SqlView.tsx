@@ -24,33 +24,33 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const decorationsRef = useRef<string[]>([]);
 
-  useImperativeHandle(ref, () => ({
-    foldAll: () => {
-      editorRef.current?.trigger('fold', 'editor.foldAll', null);
-    },
-    unfoldAll: () => {
-      editorRef.current?.trigger('fold', 'editor.unfoldAll', null);
-    },
-  }), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      foldAll: () => {
+        editorRef.current?.trigger('fold', 'editor.foldAll', null);
+      },
+      unfoldAll: () => {
+        editorRef.current?.trigger('fold', 'editor.unfoldAll', null);
+      },
+    }),
+    []
+  );
 
   const sqlText = isControlled ? value : state.sql;
   const highlightedSpan = isControlled ? (highlightedSpanProp ?? null) : state.highlightedSpan;
 
-  const issueHighlights = useMemo(
-    () => {
-      if (isControlled) return [];
-      return (state.result?.issues ?? [])
-        .filter((issue) => issue.span)
-        .map((issue) => ({
-          from: issue.span!.start,
-          to: issue.span!.end,
-          className: issue.severity === 'error'
-            ? 'error' : issue.severity === 'warning'
-            ? 'warning' : 'info',
-        }));
-    },
-    [state.result, isControlled],
-  );
+  const issueHighlights = useMemo(() => {
+    if (isControlled) return [];
+    return (state.result?.issues ?? [])
+      .filter((issue) => issue.span)
+      .map((issue) => ({
+        from: issue.span!.start,
+        to: issue.span!.end,
+        className:
+          issue.severity === 'error' ? 'error' : issue.severity === 'warning' ? 'warning' : 'info',
+      }));
+  }, [state.result, isControlled]);
 
   const handleMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
@@ -103,7 +103,7 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
       if (!isControlled) actions.setSql(val);
       onChange?.(val);
     },
-    [actions, onChange, isControlled],
+    [actions, onChange, isControlled]
   );
 
   // Apply decorations (issue highlights + active span highlight)
@@ -128,11 +128,12 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
     for (const h of issueHighlights) {
       const startPos = model.getPositionAt(h.from);
       const endPos = model.getPositionAt(h.to);
-      const sevClass = h.className === 'error'
-        ? 'flowscope-sql-highlight-error'
-        : h.className === 'warning'
-        ? 'flowscope-sql-highlight-warning'
-        : 'flowscope-sql-highlight-info';
+      const sevClass =
+        h.className === 'error'
+          ? 'flowscope-sql-highlight-error'
+          : h.className === 'warning'
+            ? 'flowscope-sql-highlight-warning'
+            : 'flowscope-sql-highlight-info';
 
       newDecorations.push({
         range: {
@@ -164,10 +165,7 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
       editor.revealLineInCenter(startPos.lineNumber);
     }
 
-    decorationsRef.current = editor.deltaDecorations(
-      decorationsRef.current,
-      newDecorations,
-    );
+    decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
   }, [highlightedSpan, issueHighlights]);
 
   return (

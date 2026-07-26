@@ -33,7 +33,7 @@ export interface ScriptNodeLayout {
 export function computeScriptNodeLayout(
   outputGroups: OutputGroup[] | undefined,
   tableNamesRead: string[],
-  tableNamesWritten: string[],
+  tableNamesWritten: string[]
 ): ScriptNodeLayout {
   const readHandleY = new Map<string, number>();
   const writeHandleY = new Map<string, number>();
@@ -102,21 +102,30 @@ export function computeScriptNodeLayout(
   const reads = tableNamesRead ?? [];
   const writes = tableNamesWritten ?? [];
   const readY = (i: number) => READ_START + i * ROW;
-  const writeStart = READ_START + SECTION_HEADER_H + Math.max(reads.length, 1) * ROW + GAP_BETWEEN_SECTIONS;
+  const writeStart =
+    READ_START + SECTION_HEADER_H + Math.max(reads.length, 1) * ROW + GAP_BETWEEN_SECTIONS;
   const writeY = (i: number) => writeStart + i * ROW;
 
   for (let i = 0; i < reads.length; i++) readHandleY.set(reads[i], readY(i));
   for (let i = 0; i < writes.length; i++) writeHandleY.set(writes[i], writeY(i));
 
-  const totalHeight = HEADER_H + SECTION_HEADER_H + Math.max(reads.length, 1) * ROW + GAP_BETWEEN_SECTIONS + SECTION_HEADER_H + Math.max(writes.length, 1) * ROW;
+  const totalHeight =
+    HEADER_H +
+    SECTION_HEADER_H +
+    Math.max(reads.length, 1) * ROW +
+    GAP_BETWEEN_SECTIONS +
+    SECTION_HEADER_H +
+    Math.max(writes.length, 1) * ROW;
 
   return {
-    groups: [{
-      inputs: reads.map((qname, i) => ({ qname, y: readY(i) })),
-      outputs: writes.map((qname, i) => ({ qname, y: writeY(i) })),
-      startY: HEADER_H,
-      height: totalHeight - HEADER_H,
-    }],
+    groups: [
+      {
+        inputs: reads.map((qname, i) => ({ qname, y: readY(i) })),
+        outputs: writes.map((qname, i) => ({ qname, y: writeY(i) })),
+        startY: HEADER_H,
+        height: totalHeight - HEADER_H,
+      },
+    ],
     totalHeight,
     readHandleY,
     writeHandleY,
@@ -129,7 +138,7 @@ export function computeScriptNodeLayout(
 export function estimateScriptNodeHeight(
   outputGroups: OutputGroup[] | undefined,
   readCount: number,
-  writeCount: number,
+  writeCount: number
 ): number {
   if (outputGroups && outputGroups.length > 1) {
     let height = HEADER_H;

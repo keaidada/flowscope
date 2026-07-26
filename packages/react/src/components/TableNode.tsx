@@ -299,101 +299,182 @@ function DepthFilterPortal({
   if (!open) return null;
 
   const menuStyle: CSSProperties = {
-    position: 'fixed', zIndex: 9999,
-    backgroundColor: palette.bg, border: `1px solid ${palette.border}`,
-    borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-    padding: '4px 0', minWidth: 100,
+    position: 'fixed',
+    zIndex: 9999,
+    backgroundColor: palette.bg,
+    border: `1px solid ${palette.border}`,
+    borderRadius: 6,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+    padding: '4px 0',
+    minWidth: 100,
   };
 
   const itemStyle: CSSProperties = {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-    padding: '5px 10px', color: palette.text, fontSize: 12,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    padding: '5px 10px',
+    color: palette.text,
+    fontSize: 12,
   };
 
   const subItemStyle: CSSProperties = {
-    display: 'block', width: '100%', textAlign: 'center',
-    background: 'none', border: 'none', cursor: 'pointer',
-    padding: '4px 12px', color: palette.text, fontSize: 11, borderRadius: 3,
+    display: 'block',
+    width: '100%',
+    textAlign: 'center',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    padding: '4px 12px',
+    color: palette.text,
+    fontSize: 11,
+    borderRadius: 3,
   };
 
   const levels = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
   return createPortal(
-    <div ref={menuRef} style={{ position: 'fixed', top: 0, left: 0, zIndex: 9999 }}
+    <div
+      ref={menuRef}
+      style={{ position: 'fixed', top: 0, left: 0, zIndex: 9999 }}
       onClick={(e) => e.stopPropagation()}
-      onMouseLeave={() => onClose()}>
+      onMouseLeave={() => onClose()}
+    >
       {/* 一级菜单 */}
       <div style={{ ...menuStyle, top: pos.top, left: pos.left }}>
-        <button style={itemStyle}
-          onMouseEnter={(e) => { setHoverItem('upstream'); e.currentTarget.style.backgroundColor = `${colors.accent}10`; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+        <button
+          style={itemStyle}
+          onMouseEnter={(e) => {
+            setHoverItem('upstream');
+            e.currentTarget.style.backgroundColor = `${colors.accent}10`;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }}
         >
-          <span>↑ 上游{activeUpDepth !== undefined && activeUpDepth > 0 ? ` (${activeUpDepth})` : activeUpDepth === undefined ? ' (全部)' : ''}</span>
+          <span>
+            ↑ 上游
+            {activeUpDepth !== undefined && activeUpDepth > 0
+              ? ` (${activeUpDepth})`
+              : activeUpDepth === undefined
+                ? ' (全部)'
+                : ''}
+          </span>
           <span style={{ fontSize: 10, opacity: 0.5 }}>▶</span>
         </button>
-        <button style={itemStyle}
-          onMouseEnter={(e) => { setHoverItem('downstream'); e.currentTarget.style.backgroundColor = `${colors.accent}10`; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+        <button
+          style={itemStyle}
+          onMouseEnter={(e) => {
+            setHoverItem('downstream');
+            e.currentTarget.style.backgroundColor = `${colors.accent}10`;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }}
         >
-          <span>↓ 下游{activeDownDepth !== undefined && activeDownDepth > 0 ? ` (${activeDownDepth})` : activeDownDepth === undefined ? ' (全部)' : ''}</span>
+          <span>
+            ↓ 下游
+            {activeDownDepth !== undefined && activeDownDepth > 0
+              ? ` (${activeDownDepth})`
+              : activeDownDepth === undefined
+                ? ' (全部)'
+                : ''}
+          </span>
           <span style={{ fontSize: 10, opacity: 0.5 }}>▶</span>
         </button>
         <div style={{ height: 1, backgroundColor: palette.border, margin: '3px 0' }} />
-        <button style={{ ...itemStyle, color: '#ef4444' }}
-          onMouseEnter={(e) => { setHoverItem(null); e.currentTarget.style.backgroundColor = '#ef444410'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-          onClick={(e) => { e.stopPropagation(); onClear(); }}
-        >清除筛选</button>
+        <button
+          style={{ ...itemStyle, color: '#ef4444' }}
+          onMouseEnter={(e) => {
+            setHoverItem(null);
+            e.currentTarget.style.backgroundColor = '#ef444410';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClear();
+          }}
+        >
+          清除筛选
+        </button>
       </div>
 
       {/* 二级菜单 — 右侧展开 */}
       {hoverItem && (
-        <div style={{
-          ...menuStyle,
-          top: pos.top + (hoverItem === 'downstream' ? 30 : 0),
-          left: pos.left + 104,
-          display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
-          gap: 2,
-          padding: 6,
-          minWidth: 180,
-        }}
+        <div
+          style={{
+            ...menuStyle,
+            top: pos.top + (hoverItem === 'downstream' ? 30 : 0),
+            left: pos.left + 104,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, 1fr)',
+            gap: 2,
+            padding: 6,
+            minWidth: 180,
+          }}
           onMouseEnter={() => setHoverItem(hoverItem)}
           onMouseLeave={() => setHoverItem(null)}
         >
           {levels.map((d) => {
-            const isActive = hoverItem === 'upstream'
-              ? activeUpDepth === d
-              : activeDownDepth === d;
+            const isActive = hoverItem === 'upstream' ? activeUpDepth === d : activeDownDepth === d;
             return (
-              <button key={d} style={{
-                ...subItemStyle,
-                backgroundColor: isActive ? `${colors.accent}30` : 'transparent',
-                color: isActive ? colors.accent : palette.text,
-                fontWeight: isActive ? 700 : 400,
-                borderRadius: 4,
-              }}
-                onClick={(e) => hoverItem === 'upstream'
-                  ? onFilter(e, d, undefined)
-                  : onFilter(e, undefined, d)
+              <button
+                key={d}
+                style={{
+                  ...subItemStyle,
+                  backgroundColor: isActive ? `${colors.accent}30` : 'transparent',
+                  color: isActive ? colors.accent : palette.text,
+                  fontWeight: isActive ? 700 : 400,
+                  borderRadius: 4,
+                }}
+                onClick={(e) =>
+                  hoverItem === 'upstream' ? onFilter(e, d, undefined) : onFilter(e, undefined, d)
                 }
-                onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = `${colors.accent}20`; }}
-                onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent'; }}
-              >{d}</button>
+                onMouseEnter={(e) => {
+                  if (!isActive) e.currentTarget.style.backgroundColor = `${colors.accent}20`;
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                {d}
+              </button>
             );
           })}
-          <button style={{
-            ...subItemStyle, gridColumn: '1 / -1', fontWeight: 600, color: colors.accent,
-            backgroundColor: (hoverItem === 'upstream' ? activeUpDepth === undefined : activeDownDepth === undefined) ? `${colors.accent}30` : 'transparent',
-          }}
-            onClick={(e) => hoverItem === 'upstream'
-              ? onFilter(e, undefined, undefined)
-              : onFilter(e, undefined, undefined)
+          <button
+            style={{
+              ...subItemStyle,
+              gridColumn: '1 / -1',
+              fontWeight: 600,
+              color: colors.accent,
+              backgroundColor: (
+                hoverItem === 'upstream'
+                  ? activeUpDepth === undefined
+                  : activeDownDepth === undefined
+              )
+                ? `${colors.accent}30`
+                : 'transparent',
+            }}
+            onClick={(e) =>
+              hoverItem === 'upstream'
+                ? onFilter(e, undefined, undefined)
+                : onFilter(e, undefined, undefined)
             }
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${colors.accent}20`; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-          >全部</button>
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = `${colors.accent}20`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
+            全部
+          </button>
         </div>
       )}
     </div>,
@@ -444,16 +525,32 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
       // 再次点击同一方向同一深度 → 取消该方向
       if (isSameTable && upDepth !== undefined && currentTableFilter.upstreamDepth === upDepth) {
         if (prevDown && prevDown > 0) {
-          setTableFilter({ selectedTableLabels: new Set([label]), direction: 'both', upstreamDepth: 0, downstreamDepth: prevDown, focusNodeId: id });
+          setTableFilter({
+            selectedTableLabels: new Set([label]),
+            direction: 'both',
+            upstreamDepth: 0,
+            downstreamDepth: prevDown,
+            focusNodeId: id,
+          });
         } else {
           clearTableFilter();
         }
         setDepthMenuOpen(false);
         return;
       }
-      if (isSameTable && downDepth !== undefined && currentTableFilter.downstreamDepth === downDepth) {
+      if (
+        isSameTable &&
+        downDepth !== undefined &&
+        currentTableFilter.downstreamDepth === downDepth
+      ) {
         if (prevUp && prevUp > 0) {
-          setTableFilter({ selectedTableLabels: new Set([label]), direction: 'both', upstreamDepth: prevUp, downstreamDepth: 0, focusNodeId: id });
+          setTableFilter({
+            selectedTableLabels: new Set([label]),
+            direction: 'both',
+            upstreamDepth: prevUp,
+            downstreamDepth: 0,
+            focusNodeId: id,
+          });
         } else {
           clearTableFilter();
         }
@@ -535,7 +632,11 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
               ? `0 0 0 2px ${colors.recursive}20`
               : '0 1px 3px rgba(0,0,0,0.1)',
         overflow: 'hidden',
-        backgroundColor: isFilterTarget ? '#fef3c720' : isHighlighted ? colors.interactive.related : palette.bg,
+        backgroundColor: isFilterTarget
+          ? '#fef3c720'
+          : isHighlighted
+            ? colors.interactive.related
+            : palette.bg,
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       }}
     >
@@ -675,7 +776,7 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
               title={
                 (nodeData as Record<string, unknown>).comment
                   ? `${nodeData.qualifiedName || nodeData.label}\n${(nodeData as Record<string, unknown>).comment}`
-                  : (nodeData.qualifiedName || nodeData.label)
+                  : nodeData.qualifiedName || nodeData.label
               }
             >
               {sanitizeIdentifier(nodeData.label)}
@@ -743,29 +844,40 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
                     setDepthMenuOpen(!depthMenuOpen);
                   }}
                   style={{
-                    background: currentTableFilter.focusNodeId === id
-                      ? `${colors.accent}25`
-                      : 'none',
+                    background:
+                      currentTableFilter.focusNodeId === id ? `${colors.accent}25` : 'none',
                     border: 'none',
                     cursor: 'pointer',
                     padding: 2,
                     display: 'flex',
                     alignItems: 'center',
-                    color: currentTableFilter.focusNodeId === id
-                      ? colors.accent
-                      : palette.textSecondary,
-                    opacity: currentTableFilter.focusNodeId === id
-                      ? 1
-                      : 0.4,
+                    color:
+                      currentTableFilter.focusNodeId === id ? colors.accent : palette.textSecondary,
+                    opacity: currentTableFilter.focusNodeId === id ? 1 : 0.4,
                     borderRadius: 3,
                     transition: 'opacity 0.15s',
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.4'; }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.opacity = '1';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.opacity = '0.4';
+                  }}
                   title="筛选上下游层级"
                 >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <circle cx="12" cy="12" r="1" />
+                    <circle cx="12" cy="5" r="1" />
+                    <circle cx="12" cy="19" r="1" />
                   </svg>
                 </button>
                 <DepthFilterPortal
@@ -774,10 +886,21 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
                   palette={palette}
                   colors={colors}
                   onFilter={handleDepthFilter}
-                  onClear={() => { clearTableFilter(); setDepthMenuOpen(false); }}
+                  onClear={() => {
+                    clearTableFilter();
+                    setDepthMenuOpen(false);
+                  }}
                   onClose={() => setDepthMenuOpen(false)}
-                  activeUpDepth={currentTableFilter.focusNodeId === id ? currentTableFilter.upstreamDepth : undefined}
-                  activeDownDepth={currentTableFilter.focusNodeId === id ? currentTableFilter.downstreamDepth : undefined}
+                  activeUpDepth={
+                    currentTableFilter.focusNodeId === id
+                      ? currentTableFilter.upstreamDepth
+                      : undefined
+                  }
+                  activeDownDepth={
+                    currentTableFilter.focusNodeId === id
+                      ? currentTableFilter.downstreamDepth
+                      : undefined
+                  }
                 />
               </div>
             )}

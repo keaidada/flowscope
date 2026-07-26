@@ -8,8 +8,15 @@
  */
 
 const DML_KEYWORDS = [
-  'SELECT', 'INSERT', 'DELETE', 'MERGE', 'UPDATE',
-  'TRUNCATE', 'WITH', 'CREATE', 'EXPLAIN',
+  'SELECT',
+  'INSERT',
+  'DELETE',
+  'MERGE',
+  'UPDATE',
+  'TRUNCATE',
+  'WITH',
+  'CREATE',
+  'EXPLAIN',
 ] as const;
 
 const isDml = (s: string): boolean =>
@@ -41,11 +48,17 @@ function splitProcedureStatements(body: string): string[] {
       current += ch;
       i++;
       while (i < body.length && body[i] !== quote) {
-        if (body[i] === '\\') { current += body[i]; i++; }
+        if (body[i] === '\\') {
+          current += body[i];
+          i++;
+        }
         current += body[i];
         i++;
       }
-      if (i < body.length) { current += body[i]; i++; }
+      if (i < body.length) {
+        current += body[i];
+        i++;
+      }
       continue;
     }
 
@@ -58,7 +71,10 @@ function splitProcedureStatements(body: string): string[] {
         current += body[i];
         i++;
       }
-      if (i < body.length) { current += body.slice(i, i + 3); i += 3; }
+      if (i < body.length) {
+        current += body.slice(i, i + 3);
+        i += 3;
+      }
       continue;
     }
 
@@ -173,11 +189,31 @@ function replaceFormatPlaceholders(s: string): string {
   while (i < s.length) {
     if (s[i] === '%' && i + 1 < s.length) {
       const next = s[i + 1];
-      if (next === '%') { out += '%'; i += 2; continue; }
-      if ('diuoxX'.includes(next)) { out += '0'; i += 2; continue; }
-      if (next === 's' || next === 'S' || next === 'c') { out += 'x'; i += 2; continue; }
-      if ('feEgG'.includes(next)) { out += '0.0'; i += 2; continue; }
-      if (next === 't' || next === 'T') { out += '2024-01-01'; i += 2; continue; }
+      if (next === '%') {
+        out += '%';
+        i += 2;
+        continue;
+      }
+      if ('diuoxX'.includes(next)) {
+        out += '0';
+        i += 2;
+        continue;
+      }
+      if (next === 's' || next === 'S' || next === 'c') {
+        out += 'x';
+        i += 2;
+        continue;
+      }
+      if ('feEgG'.includes(next)) {
+        out += '0.0';
+        i += 2;
+        continue;
+      }
+      if (next === 't' || next === 'T') {
+        out += '2024-01-01';
+        i += 2;
+        continue;
+      }
     }
     out += s[i];
     i++;
@@ -209,28 +245,53 @@ export function extractBqDml(content: string): string | null {
       let s = stmt.trim();
       if (!s) continue;
 
-      if (isDml(s) && isSqlStatement(s)) { results.push(s); continue; }
+      if (isDml(s) && isSqlStatement(s)) {
+        results.push(s);
+        continue;
+      }
 
       const execSql = extractExecuteImmediateSql(s);
-      if (execSql && isDml(execSql) && isSqlStatement(execSql)) { results.push(execSql); continue; }
+      if (execSql && isDml(execSql) && isSqlStatement(execSql)) {
+        results.push(execSql);
+        continue;
+      }
 
       const setSql = extractSetStmtSql(s);
-      if (setSql && isDml(setSql) && isSqlStatement(setSql)) { results.push(setSql); continue; }
+      if (setSql && isDml(setSql) && isSqlStatement(setSql)) {
+        results.push(setSql);
+        continue;
+      }
 
       // Handle nested BEGIN blocks: strip leading keywords and retry
       let remainder = s;
       while (true) {
         const upper2 = remainder.toUpperCase().trimStart();
         const prefix = upper2.split(/\s+/)[0];
-        if (prefix === 'BEGIN' || prefix === 'IF' || prefix === 'WHILE' || prefix === 'LOOP' || prefix === 'ELSE' || prefix === 'THEN') {
+        if (
+          prefix === 'BEGIN' ||
+          prefix === 'IF' ||
+          prefix === 'WHILE' ||
+          prefix === 'LOOP' ||
+          prefix === 'ELSE' ||
+          prefix === 'THEN'
+        ) {
           const idx = upper2.indexOf(prefix);
           remainder = remainder.slice(idx + prefix.length).trimStart();
           // Try EXECUTE IMMEDIATE on remainder
           const innerExec = extractExecuteImmediateSql(remainder);
-          if (innerExec && isDml(innerExec) && isSqlStatement(innerExec)) { results.push(innerExec); break; }
+          if (innerExec && isDml(innerExec) && isSqlStatement(innerExec)) {
+            results.push(innerExec);
+            break;
+          }
           const innerSet = extractSetStmtSql(remainder);
-          if (innerSet && isDml(innerSet) && isSqlStatement(innerSet)) { results.push(innerSet); break; }
-          if (isDml(remainder) && isSqlStatement(remainder)) { results.push(remainder); break; }
+          if (innerSet && isDml(innerSet) && isSqlStatement(innerSet)) {
+            results.push(innerSet);
+            break;
+          }
+          if (isDml(remainder) && isSqlStatement(remainder)) {
+            results.push(remainder);
+            break;
+          }
           continue;
         }
         break;

@@ -14,9 +14,7 @@ import type {
 
 /** Check if a name looks like a Hive/Spark temp table */
 function isSparkTempTable(name: string): boolean {
-  return name.split('.').some((part) =>
-    part.toUpperCase().startsWith('TEMP_')
-  );
+  return name.split('.').some((part) => part.toUpperCase().startsWith('TEMP_'));
 }
 
 /**
@@ -61,7 +59,10 @@ export function mergeAnalyzeResults(results: AnalyzeResult[]): AnalyzeResult | n
   const allIssues = results.flatMap((r) => r.issues ?? []);
 
   // 合并 resolvedSchema tables
-  const schemaTableMap = new Map<string, NonNullable<AnalyzeResult['resolvedSchema']>['tables'][0]>();
+  const schemaTableMap = new Map<
+    string,
+    NonNullable<AnalyzeResult['resolvedSchema']>['tables'][0]
+  >();
   for (const r of results) {
     for (const table of r.resolvedSchema?.tables ?? []) {
       const key = [table.catalog, table.schema, table.name].filter(Boolean).join('.');
@@ -95,9 +96,7 @@ export function mergeAnalyzeResults(results: AnalyzeResult[]): AnalyzeResult | n
     },
     issues: allIssues,
     summary,
-    resolvedSchema: schemaTableMap.size > 0
-      ? { tables: [...schemaTableMap.values()] }
-      : undefined,
+    resolvedSchema: schemaTableMap.size > 0 ? { tables: [...schemaTableMap.values()] } : undefined,
   };
 }
 
@@ -114,9 +113,7 @@ export function mergeAnalyzeResults(results: AnalyzeResult[]): AnalyzeResult | n
  * 支持格式：--# 程序名称:     XXX.HQL:中文名称
  *          --# 目标表名:     schema.table_name
  */
-export function extractTableComments(
-  fileContents: Map<string, string>
-): Map<string, string> {
+export function extractTableComments(fileContents: Map<string, string>): Map<string, string> {
   const comments = new Map<string, string>();
   for (const [, content] of fileContents) {
     // 提取程序中文名
@@ -150,7 +147,8 @@ export function buildTableLevelLineage(
       if (rst.temporary) {
         temporaryTableNames.add(rst.name);
         if (rst.schema) temporaryTableNames.add(`${rst.schema}.${rst.name}`);
-        if (rst.catalog && rst.schema) temporaryTableNames.add(`${rst.catalog}.${rst.schema}.${rst.name}`);
+        if (rst.catalog && rst.schema)
+          temporaryTableNames.add(`${rst.catalog}.${rst.schema}.${rst.name}`);
       }
     }
   }
@@ -181,7 +179,10 @@ export function buildTableLevelLineage(
   };
 
   // 收集所有物理表（从 statements + globalLineage）
-  const tableMap = new Map<string, { catalog?: string; schema?: string; name: string; nodeId: string; sourceName?: string }>();
+  const tableMap = new Map<
+    string,
+    { catalog?: string; schema?: string; name: string; nodeId: string; sourceName?: string }
+  >();
 
   // 1. 从 statements 中收集
   for (const stmt of result.statements) {
@@ -191,9 +192,20 @@ export function buildTableLevelLineage(
         if (!tableMap.has(qName)) {
           const parts = qName.split('.');
           if (parts.length >= 3) {
-            tableMap.set(qName, { catalog: parts[0], schema: parts[1], name: parts.slice(2).join('.'), nodeId: node.id, sourceName: stmt.sourceName });
+            tableMap.set(qName, {
+              catalog: parts[0],
+              schema: parts[1],
+              name: parts.slice(2).join('.'),
+              nodeId: node.id,
+              sourceName: stmt.sourceName,
+            });
           } else if (parts.length === 2) {
-            tableMap.set(qName, { schema: parts[0], name: parts[1], nodeId: node.id, sourceName: stmt.sourceName });
+            tableMap.set(qName, {
+              schema: parts[0],
+              name: parts[1],
+              nodeId: node.id,
+              sourceName: stmt.sourceName,
+            });
           } else {
             tableMap.set(qName, { name: qName, nodeId: node.id, sourceName: stmt.sourceName });
           }
@@ -263,7 +275,11 @@ export function buildTableLevelLineage(
             const targetNode = nodeById.get(next)!;
             const targetQName = targetNode.qualifiedName || targetNode.label;
             if (srcQName !== targetQName) {
-              flowEdgesWithSource.push({ source: srcQName, target: targetQName, sourceName: stmtSource });
+              flowEdgesWithSource.push({
+                source: srcQName,
+                target: targetQName,
+                sourceName: stmtSource,
+              });
             }
           } else {
             queue.push(next);
@@ -275,9 +291,7 @@ export function buildTableLevelLineage(
 
   // 2b. 从 globalLineage 的跨 statement BFS
   if (result.globalLineage?.edges) {
-    const globalNodeById = new Map(
-      (result.globalLineage.nodes ?? []).map((n) => [n.id, n])
-    );
+    const globalNodeById = new Map((result.globalLineage.nodes ?? []).map((n) => [n.id, n]));
 
     // Which global nodes are physical tables?
     const globalPhysicalIds = new Set<string>();
@@ -356,8 +370,12 @@ export function buildTableLevelLineage(
       qualifiedName: qName,
       metadata: {
         ...(info.sourceName ? { sourceName: info.sourceName } : {}),
-        ...(tableComments?.get(qName.toLowerCase()) ? { comment: tableComments.get(qName.toLowerCase()) } : {}),
-        ...(tableComments?.get(info.name.toLowerCase()) ? { comment: tableComments.get(info.name.toLowerCase()) } : {}),
+        ...(tableComments?.get(qName.toLowerCase())
+          ? { comment: tableComments.get(qName.toLowerCase()) }
+          : {}),
+        ...(tableComments?.get(info.name.toLowerCase())
+          ? { comment: tableComments.get(info.name.toLowerCase()) }
+          : {}),
       },
     });
   }
@@ -414,7 +432,10 @@ export function buildTableLevelLineage(
   const allEdges = statements.flatMap((s) => s.edges);
 
   // 构建 nodeId -> tableMap info 的映射（用于 globalLineage canonicalName）
-  const nodeIdToInfo = new Map<string, { catalog?: string; schema?: string; name: string; sourceName?: string }>();
+  const nodeIdToInfo = new Map<
+    string,
+    { catalog?: string; schema?: string; name: string; sourceName?: string }
+  >();
   for (const [qName, nodeId] of nodeIdMap) {
     const info = tableMap.get(qName);
     if (info) nodeIdToInfo.set(nodeId, info);

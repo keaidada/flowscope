@@ -26,13 +26,16 @@ function ScriptNodeComponent({ data, selected }: NodeProps): JSX.Element {
   const { label, tablesRead, tablesWritten, statementCount, isSelected, isHighlighted } = nodeData;
 
   const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(label).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, [label]);
+  const handleCopy = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(label).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      });
+    },
+    [label]
+  );
 
   // Determine selection state from either prop or data
   const active = selected || isSelected;

@@ -849,10 +849,13 @@ export function AnalysisView({
         return t('analysis.statusSourceMemory');
     }
   }, [resultStatus, t]);
-  const formatStatusTime = useCallback((timestamp: number | null) => {
-    if (!timestamp) return t('analysis.statusTimeUnavailable');
-    return new Date(timestamp).toLocaleString();
-  }, [t]);
+  const formatStatusTime = useCallback(
+    (timestamp: number | null) => {
+      if (!timestamp) return t('analysis.statusTimeUnavailable');
+      return new Date(timestamp).toLocaleString();
+    },
+    [t]
+  );
 
   const buildGraphExportFilename = useCallback(
     (extension: 'png' | 'svg') => {
@@ -1043,16 +1046,24 @@ export function AnalysisView({
       let cancelled = false;
       (async () => {
         try {
-          const nodes = await queryLineageNodesFromDB(activeProjectId, ['table', 'view', 'materialized_view'], activeFilePath);
+          const nodes = await queryLineageNodesFromDB(
+            activeProjectId,
+            ['table', 'view', 'materialized_view'],
+            activeFilePath
+          );
           if (cancelled || !nodes.length) return;
-          const tables: SchemaTable[] = nodes.map(n => ({ name: n.label }));
+          const tables: SchemaTable[] = nodes.map((n) => ({ name: n.label }));
           setPersistedCurrentSchema(tables);
         } catch {}
       })();
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
   }, [currentFileSchema, activeFilePath, activeProjectId]);
-  const effectiveCurrentSchema = currentFileSchema.length ? currentFileSchema : persistedCurrentSchema;
+  const effectiveCurrentSchema = currentFileSchema.length
+    ? currentFileSchema
+    : persistedCurrentSchema;
 
   const globalSchema = useMemo(() => {
     if (!result) return [];
@@ -1301,9 +1312,7 @@ export function AnalysisView({
             <>
               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-3 opacity-70" />
               <h3 className="font-semibold mb-2">{t('analysis.analyzingSql')}</h3>
-              <p className="text-sm max-w-xs mx-auto mb-4">
-                {t('analysis.analyzingDesc')}
-              </p>
+              <p className="text-sm max-w-xs mx-auto mb-4">{t('analysis.analyzingDesc')}</p>
               {/* Progress bar for the building lineage phase */}
               <div className="w-64 mx-auto space-y-1.5">
                 <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
@@ -1314,9 +1323,7 @@ export function AnalysisView({
                 </div>
                 <div className="flex justify-between text-xs">
                   <span>{Math.round(progress)}%</span>
-                  {loadingContext?.batchProgress && (
-                    <span>{loadingContext.batchProgress}</span>
-                  )}
+                  {loadingContext?.batchProgress && <span>{loadingContext.batchProgress}</span>}
                   {typeof loadingContext?.processedFiles === 'number' &&
                     typeof loadingContext?.fileCount === 'number' &&
                     loadingContext.fileCount > 0 && (
@@ -1331,9 +1338,7 @@ export function AnalysisView({
           ) : (
             <>
               <h3 className="font-semibold mb-2">{t('analysis.noResults')}</h3>
-              <p className="text-sm max-w-xs mx-auto">
-                {t('analysis.noResultsDesc')}
-              </p>
+              <p className="text-sm max-w-xs mx-auto">{t('analysis.noResultsDesc')}</p>
             </>
           )}
         </div>

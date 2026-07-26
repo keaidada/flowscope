@@ -502,8 +502,14 @@ interface SidebarSchemaProps {
 // --- Main component ---
 export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
   const { t } = useTranslation();
-  const { currentProject, updateSchemaSQL, activeProjectId, isBackendMode, isReadOnly, backendSchema } =
-    useProject();
+  const {
+    currentProject,
+    updateSchemaSQL,
+    activeProjectId,
+    isBackendMode,
+    isReadOnly,
+    backendSchema,
+  } = useProject();
   const theme = useThemeStore((state) => state.theme);
   const isDark = resolveTheme(theme) === 'dark';
 
@@ -1630,7 +1636,9 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
         <ProgressOverlay
           visible={Boolean(uploadProgress)}
           title={uploadProgress.done ? t('sidebar.uploadDone') : t('sidebar.uploading')}
-          progress={uploadProgress.total > 0 ? (uploadProgress.loaded / uploadProgress.total) * 100 : 0}
+          progress={
+            uploadProgress.total > 0 ? (uploadProgress.loaded / uploadProgress.total) * 100 : 0
+          }
           loaded={uploadProgress.loaded}
           total={uploadProgress.total}
           done={uploadProgress.done}

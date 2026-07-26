@@ -495,10 +495,7 @@ export async function exportCsvArchive(
   return exportCsvBundleFn(requestJson);
 }
 
-export async function exportXlsx(
-  result: AnalyzeResult,
-  sheets?: string[]
-): Promise<Uint8Array> {
+export async function exportXlsx(result: AnalyzeResult, sheets?: string[]): Promise<Uint8Array> {
   await ensureWasmReady();
 
   if (!exportXlsxFn) {
@@ -563,9 +560,7 @@ function buildExportFormatPayload(
  * All statements are combined, indices are renumbered, and the summary is
  * recalculated. The result can be passed to any export function.
  */
-export async function mergeAnalyzeResults(
-  results: AnalyzeResult[]
-): Promise<AnalyzeResult> {
+export async function mergeAnalyzeResults(results: AnalyzeResult[]): Promise<AnalyzeResult> {
   await ensureWasmReady();
 
   if (!mergeAnalyzeResultsFn) {
@@ -627,14 +622,18 @@ export function mergeProgressiveAdd(result: AnalyzeResult): void {
   mergeProgressiveAddFn(JSON.stringify(result));
 }
 
-export async function mergeProgressiveExport(
-  options: { format: 'xlsx' | 'csv' | 'json'; sheets?: string[]; compact?: boolean }
-): Promise<Uint8Array> {
+export async function mergeProgressiveExport(options: {
+  format: 'xlsx' | 'csv' | 'json';
+  sheets?: string[];
+  compact?: boolean;
+}): Promise<Uint8Array> {
   await ensureWasmReady();
   if (!mergeProgressiveExportFn) throw new Error('WASM not initialized');
-  return mergeProgressiveExportFn(JSON.stringify({
-    format: options.format,
-    sheets: options.sheets ?? null,
-    compact: options.compact ?? false,
-  }));
+  return mergeProgressiveExportFn(
+    JSON.stringify({
+      format: options.format,
+      sheets: options.sheets ?? null,
+      compact: options.compact ?? false,
+    })
+  );
 }

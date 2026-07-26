@@ -114,7 +114,8 @@ function searchInFiles(
 
 export function SidebarSearch({ onOpenSchemaFile, onHighlightSpan }: SidebarSearchProps) {
   const { t } = useTranslation();
-  const { currentProject, selectFile, activeProjectId, ensureFilesContent, isContentLoaded } = useProject();
+  const { currentProject, selectFile, activeProjectId, ensureFilesContent, isContentLoaded } =
+    useProject();
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
   const [caseSensitive, setCaseSensitive] = useState(false);

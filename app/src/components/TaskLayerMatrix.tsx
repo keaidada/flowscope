@@ -76,30 +76,41 @@ function TaskCircle({
     >
       <circle cx={0} cy={0} r={size / 2 + 8} fill="transparent" stroke="none" />
       <circle
-        cx={0} cy={0} r={size / 2 + 3}
-        fill="none" stroke={color}
+        cx={0}
+        cy={0}
+        r={size / 2 + 3}
+        fill="none"
+        stroke={color}
         strokeWidth={hovered ? 2 : 0}
         opacity={hovered ? 0.5 : 0}
       />
       <circle
-        cx={0} cy={0} r={size / 2 + 1.5}
-        fill="none" stroke={statusColor}
-        strokeWidth={1.5} opacity={0.8}
+        cx={0}
+        cy={0}
+        r={size / 2 + 1.5}
+        fill="none"
+        stroke={statusColor}
+        strokeWidth={1.5}
+        opacity={0.8}
       />
-      <circle
-        cx={0} cy={0} r={size / 2}
-        fill={color}
-      />
+      <circle cx={0} cy={0} r={size / 2} fill={color} />
       <text
-        x={0} y={0}
-        textAnchor="middle" dominantBaseline="central"
-        fill="white" fontSize={size * 0.45} fontWeight={600}
+        x={0}
+        y={0}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill="white"
+        fontSize={size * 0.45}
+        fontWeight={600}
         style={{ pointerEvents: 'none' }}
       >
-        {task.taskType === 'pyspark' ? 'P'
-          : task.taskType === 'spark_sql' ? 'S'
-          : task.taskType === 'python' ? 'Py'
-          : task.taskType.charAt(0).toUpperCase()}
+        {task.taskType === 'pyspark'
+          ? 'P'
+          : task.taskType === 'spark_sql'
+            ? 'S'
+            : task.taskType === 'python'
+              ? 'Py'
+              : task.taskType.charAt(0).toUpperCase()}
       </text>
     </g>
   );
@@ -196,9 +207,7 @@ function MiniTaskMatrix({
   // 按层级排序（从上到下）
   const sortedLayers = useMemo(() => {
     const active = new Set(columnTasks.keys());
-    return layers
-      .filter((l) => active.has(l.key))
-      .sort((a, b) => a.order - b.order);
+    return layers.filter((l) => active.has(l.key)).sort((a, b) => a.order - b.order);
   }, [layers, columnTasks]);
 
   if (sortedLayers.length === 0) {
@@ -210,7 +219,7 @@ function MiniTaskMatrix({
   }
 
   // 竖向布局：每一层是一行，该层内的任务水平排列
-  const maxCols = Math.max(...sortedLayers.map((l) => (columnTasks.get(l.key)?.length ?? 0)), 1);
+  const maxCols = Math.max(...sortedLayers.map((l) => columnTasks.get(l.key)?.length ?? 0), 1);
   const rows = sortedLayers.length;
   const cols = maxCols;
   const svgW = MINI_AXIS_W + cols * MINI_CELL_W + MINI_PADDING;
@@ -223,7 +232,7 @@ function MiniTaskMatrix({
       const tasks = columnTasks.get(layer.key) ?? [];
       tasks.forEach((t, colIdx) => {
         // 水平居中：如果该行任务数少于 maxCols，从中间开始排
-        const offsetX = (cols - tasks.length) * MINI_CELL_W / 2;
+        const offsetX = ((cols - tasks.length) * MINI_CELL_W) / 2;
         const cx = MINI_AXIS_W + offsetX + colIdx * MINI_CELL_W + MINI_CELL_W / 2;
         const cy = MINI_LABEL_H + rowIdx * MINI_CELL_H + MINI_CELL_H / 2;
         m.set(t.taskName, { cx, cy });
@@ -239,7 +248,7 @@ function MiniTaskMatrix({
       const from = taskCoords.get(e.from);
       const to = taskCoords.get(e.to);
       if (!from || !to) continue;
-      const toRow = sortedLayers.findIndex((l) => l.key === (depGraph.taskByName.get(e.to)?.layer));
+      const toRow = sortedLayers.findIndex((l) => l.key === depGraph.taskByName.get(e.to)?.layer);
       const dx = to.cx - from.cx;
       const dy = to.cy - from.cy;
       const len = Math.sqrt(dx * dx + dy * dy);
@@ -357,11 +366,15 @@ function MiniTaskMatrix({
             <g
               key={`mc-${t.taskName}`}
               className="cursor-pointer"
-              onClick={(e) => { e.stopPropagation(); onClickNode(t.taskName); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClickNode(t.taskName);
+              }}
             >
               {isSelected && (
                 <circle
-                  cx={coord.cx} cy={coord.cy}
+                  cx={coord.cx}
+                  cy={coord.cy}
                   r={MINI_CIRCLE_R + 3}
                   fill="none"
                   stroke={color}
@@ -370,21 +383,29 @@ function MiniTaskMatrix({
                 />
               )}
               <circle
-                cx={coord.cx} cy={coord.cy}
+                cx={coord.cx}
+                cy={coord.cy}
                 r={MINI_CIRCLE_R}
                 fill={color}
                 opacity={isSelected ? 1 : 0.7}
               />
               <text
-                x={coord.cx} y={coord.cy}
-                textAnchor="middle" dominantBaseline="central"
-                fill="white" fontSize={MINI_CIRCLE_R * 0.85} fontWeight={600}
+                x={coord.cx}
+                y={coord.cy}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="white"
+                fontSize={MINI_CIRCLE_R * 0.85}
+                fontWeight={600}
                 style={{ pointerEvents: 'none' }}
               >
-                {t.taskType === 'pyspark' ? 'P'
-                  : t.taskType === 'spark_sql' ? 'S'
-                  : t.taskType === 'python' ? 'Py'
-                  : t.taskType.charAt(0).toUpperCase()}
+                {t.taskType === 'pyspark'
+                  ? 'P'
+                  : t.taskType === 'spark_sql'
+                    ? 'S'
+                    : t.taskType === 'python'
+                      ? 'Py'
+                      : t.taskType.charAt(0).toUpperCase()}
               </text>
               <title>{t.taskName}</title>
             </g>
@@ -474,7 +495,10 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
       const current = queue[head++];
       for (const tb of depGraph.inputsByTask.get(current) ?? []) {
         for (const producer of depGraph.outputByTable.get(tb) ?? []) {
-          if (!visited.has(producer)) { visited.add(producer); queue.push(producer); }
+          if (!visited.has(producer)) {
+            visited.add(producer);
+            queue.push(producer);
+          }
         }
       }
     }
@@ -512,13 +536,19 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
       if (curTask?.outputTable) {
         for (const tb of curTask.outputTable.split(', ').filter(Boolean)) {
           for (const c of depGraph.outputByTable.get(tb) ?? []) {
-            if (!visited.has(c)) { visited.add(c); queue.push(c); }
+            if (!visited.has(c)) {
+              visited.add(c);
+              queue.push(c);
+            }
           }
         }
       }
       for (const tb of depGraph.inputsByTask.get(current) ?? []) {
         for (const p of depGraph.outputByTable.get(tb) ?? []) {
-          if (!visited.has(p)) { visited.add(p); queue.push(p); }
+          if (!visited.has(p)) {
+            visited.add(p);
+            queue.push(p);
+          }
         }
       }
     }
@@ -533,7 +563,9 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
     if (!l) return t;
     if (!t) return l;
     const merged = new Set<string>();
-    for (const n of l) { if (t.has(n)) merged.add(n); }
+    for (const n of l) {
+      if (t.has(n)) merged.add(n);
+    }
     return merged;
   }, [layerConnectedTaskNames, tableSearchTaskNames]);
 
@@ -542,7 +574,9 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
     let lyr = safeLayers;
     if (connectedTaskNames) {
       const active = new Set<string>();
-      for (const t of safeTasks) { if (connectedTaskNames.has(t.taskName)) active.add(t.layer); }
+      for (const t of safeTasks) {
+        if (connectedTaskNames.has(t.taskName)) active.add(t.layer);
+      }
       lyr = lyr.filter((l) => active.has(l.key));
     }
     return lyr;
@@ -563,10 +597,7 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
     });
   }, [safeTasks, filteredLayers, filteredTaskNames]);
 
-  const MAX_COLS = useMemo(
-    () => Math.max(...rows.map((r) => r.cells.length), 1),
-    [rows]
-  );
+  const MAX_COLS = useMemo(() => Math.max(...rows.map((r) => r.cells.length), 1), [rows]);
 
   // ── 层级分页：始终显示所有层级，不折叠 ──
   const maxLayerNum = useMemo(() => {
@@ -611,7 +642,9 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
   // ── 弹窗状态：导航历史栈（最后一项是当前显示的任务） ──
   const [navStack, setNavStack] = useState<string[]>([]);
   const selectedTaskName = navStack.length > 0 ? navStack[navStack.length - 1] : null;
-  const selectedTask = selectedTaskName ? depGraph.taskByName.get(selectedTaskName) ?? null : null;
+  const selectedTask = selectedTaskName
+    ? (depGraph.taskByName.get(selectedTaskName) ?? null)
+    : null;
 
   const pushNav = useCallback((name: string) => {
     setNavStack((prev) => {
@@ -690,7 +723,11 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
       for (const p of producers) {
         if (p === task.taskName) continue;
         addEdge(p, task.taskName, tb);
-        if (!visitedUp.has(p)) { visitedUp.add(p); bfsUpQueue.push(p); upstreamNames.add(p); }
+        if (!visitedUp.has(p)) {
+          visitedUp.add(p);
+          bfsUpQueue.push(p);
+          upstreamNames.add(p);
+        }
       }
     }
 
@@ -704,7 +741,11 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
         for (const p of producers) {
           if (p === cur) continue;
           addEdge(p, cur, tb);
-          if (!visitedUp.has(p)) { visitedUp.add(p); bfsUpQueue.push(p); upstreamNames.add(p); }
+          if (!visitedUp.has(p)) {
+            visitedUp.add(p);
+            bfsUpQueue.push(p);
+            upstreamNames.add(p);
+          }
         }
       }
     }
@@ -721,7 +762,11 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
       for (const c of consumers) {
         if (c === task.taskName) continue;
         addEdge(task.taskName, c, tb);
-        if (!visitedDown.has(c)) { visitedDown.add(c); bfsDownQueue.push(c); downstreamNames.add(c); }
+        if (!visitedDown.has(c)) {
+          visitedDown.add(c);
+          bfsDownQueue.push(c);
+          downstreamNames.add(c);
+        }
       }
     }
 
@@ -735,7 +780,11 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
         for (const c of consumers) {
           if (c === cur) continue;
           addEdge(cur, c, tb);
-          if (!visitedDown.has(c)) { visitedDown.add(c); bfsDownQueue.push(c); downstreamNames.add(c); }
+          if (!visitedDown.has(c)) {
+            visitedDown.add(c);
+            bfsDownQueue.push(c);
+            downstreamNames.add(c);
+          }
         }
       }
     }
@@ -743,7 +792,13 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
     const upstream = Array.from(upstreamNames).sort();
     const downstream = Array.from(downstreamNames).sort();
     const edges = Array.from(edgeSet.values());
-    return { upstream: upstream.map((n) => depGraph.taskByName.get(n)).filter(Boolean) as PipelineTask[], downstream: downstream.map((n) => depGraph.taskByName.get(n)).filter(Boolean) as PipelineTask[], edges };
+    return {
+      upstream: upstream.map((n) => depGraph.taskByName.get(n)).filter(Boolean) as PipelineTask[],
+      downstream: downstream
+        .map((n) => depGraph.taskByName.get(n))
+        .filter(Boolean) as PipelineTask[],
+      edges,
+    };
   }, [selectedTask, depGraph]);
 
   // Compact layout
@@ -783,7 +838,14 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
   const MAX_DEP_LINES = 2000;
   const depLines = useMemo(() => {
     const seen = new Set<string>();
-    const lines: { x1: number; y1: number; x2: number; y2: number; fromName: string; toName: string }[] = [];
+    const lines: {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      fromName: string;
+      toName: string;
+    }[] = [];
     for (const task of safeTasks) {
       if (lines.length >= MAX_DEP_LINES) break;
       const inputs = depGraph.inputsByTask.get(task.taskName);
@@ -873,7 +935,9 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
           >
             <option value="">全部层级</option>
             {safeLayers.map((l) => (
-              <option key={l.key} value={l.key}>{l.label}</option>
+              <option key={l.key} value={l.key}>
+                {l.label}
+              </option>
             ))}
           </select>
 
@@ -913,16 +977,34 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
         </div>
 
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleZoomOut} title="缩小">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={handleZoomOut}
+            title="缩小"
+          >
             <ZoomOut className="h-3.5 w-3.5" />
           </Button>
           <span className="text-[11px] text-muted-foreground w-10 text-center tabular-nums">
             {Math.round(scale * 100)}%
           </span>
-          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleZoomIn} title="放大">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={handleZoomIn}
+            title="放大"
+          >
             <ZoomIn className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleReset} title="重置">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={handleReset}
+            title="重置"
+          >
             <Maximize2 className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -952,11 +1034,7 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
             height: svgH,
           }}
         >
-          <svg
-            width={svgW}
-            height={svgH}
-            className="block"
-          >
+          <svg width={svgW} height={svgH} className="block">
             {/* Arrow marker definition */}
             <defs>
               <marker
@@ -1050,7 +1128,7 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
               const isRelated =
                 highlightedRelatedNames === null ||
                 (highlightedRelatedNames.has((line as any).fromName) &&
-                 highlightedRelatedNames.has((line as any).toName));
+                  highlightedRelatedNames.has((line as any).toName));
               return (
                 <line
                   key={`dep-${i}`}
@@ -1074,7 +1152,8 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
 
                 if (count === 1) {
                   const task = cellTasks[0];
-                  const dimmed = highlightedRelatedNames !== null && !highlightedRelatedNames.has(task.taskName);
+                  const dimmed =
+                    highlightedRelatedNames !== null && !highlightedRelatedNames.has(task.taskName);
                   return (
                     <g key={`t-${x}-${y}`}>
                       <g transform={`translate(${cx}, ${baseY})`}>
@@ -1092,7 +1171,8 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
                 const spacing = CIRCLE_R * 2.5;
                 const startX = -((count - 1) * spacing) / 2;
                 return cellTasks.map((task, i) => {
-                  const dimmed = highlightedRelatedNames !== null && !highlightedRelatedNames.has(task.taskName);
+                  const dimmed =
+                    highlightedRelatedNames !== null && !highlightedRelatedNames.has(task.taskName);
                   return (
                     <g
                       key={`t-${x}-${y}-${i}`}
@@ -1136,10 +1216,25 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
                     {navStack.length > 1 && (
                       <button
                         className="flex-shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors mr-1"
-                        onClick={(e) => { e.stopPropagation(); popNav(); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          popNav();
+                        }}
                         title="返回"
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <polyline points="15 18 9 12 15 6" />
+                        </svg>
                       </button>
                     )}
                     {/* 面包屑 */}
@@ -1166,9 +1261,25 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
                   </div>
                   <button
                     className="flex-shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                    onClick={(e) => { e.stopPropagation(); closeModal(); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeModal();
+                    }}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
                   </button>
                 </div>
 
@@ -1204,13 +1315,19 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
                         : [];
                       return (
                         <div>
-                          <span className="text-muted-foreground whitespace-nowrap">输入表 ({ins.length}):</span>
+                          <span className="text-muted-foreground whitespace-nowrap">
+                            输入表 ({ins.length}):
+                          </span>
                           {ins.length === 0 ? (
-                            <span className="font-mono text-[11px] ml-1 text-muted-foreground">—</span>
+                            <span className="font-mono text-[11px] ml-1 text-muted-foreground">
+                              —
+                            </span>
                           ) : (
                             <div className="mt-0.5 space-y-px max-h-24 overflow-y-auto">
                               {ins.map((t, i) => (
-                                <div key={i} className="font-mono text-[11px] whitespace-nowrap">{t}</div>
+                                <div key={i} className="font-mono text-[11px] whitespace-nowrap">
+                                  {t}
+                                </div>
                               ))}
                             </div>
                           )}
@@ -1223,13 +1340,19 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
                         : [];
                       return (
                         <div>
-                          <span className="text-muted-foreground whitespace-nowrap">输出表 ({outs.length}):</span>
+                          <span className="text-muted-foreground whitespace-nowrap">
+                            输出表 ({outs.length}):
+                          </span>
                           {outs.length === 0 ? (
-                            <span className="font-mono text-[11px] ml-1 text-muted-foreground">—</span>
+                            <span className="font-mono text-[11px] ml-1 text-muted-foreground">
+                              —
+                            </span>
                           ) : (
                             <div className="mt-0.5 space-y-px max-h-24 overflow-y-auto">
                               {outs.map((t, i) => (
-                                <div key={i} className="font-mono text-[11px] whitespace-nowrap">{t}</div>
+                                <div key={i} className="font-mono text-[11px] whitespace-nowrap">
+                                  {t}
+                                </div>
                               ))}
                             </div>
                           )}
@@ -1241,23 +1364,33 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
                         <div className="border-t border-border pt-2 mt-2 space-y-1.5">
                           <div className="flex items-center gap-1.5">
                             <span className="text-muted-foreground">WeData:</span>
-                            <span className="font-mono text-[11px]" style={{ color: STATUS_COLORS[selectedTask.schedule.wedataStatus] }}>
+                            <span
+                              className="font-mono text-[11px]"
+                              style={{ color: STATUS_COLORS[selectedTask.schedule.wedataStatus] }}
+                            >
                               {selectedTask.schedule.wedataStatus}
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5">
                             <span className="text-muted-foreground">Airflow:</span>
-                            <span className="font-mono text-[11px]" style={{ color: STATUS_COLORS[selectedTask.schedule.airflowStatus] }}>
+                            <span
+                              className="font-mono text-[11px]"
+                              style={{ color: STATUS_COLORS[selectedTask.schedule.airflowStatus] }}
+                            >
                               {selectedTask.schedule.airflowStatus}
                             </span>
                           </div>
                           <div className="whitespace-nowrap">
                             <span className="text-muted-foreground">调度:</span>{' '}
-                            <span className="font-mono text-[11px]">{selectedTask.schedule.wedataSchedule}</span>
+                            <span className="font-mono text-[11px]">
+                              {selectedTask.schedule.wedataSchedule}
+                            </span>
                           </div>
                           <div>
                             <span className="text-muted-foreground whitespace-nowrap">脚本:</span>{' '}
-                            <span className="font-mono text-[11px] break-all">{selectedTask.schedule.scriptPath}</span>
+                            <span className="font-mono text-[11px] break-all">
+                              {selectedTask.schedule.scriptPath}
+                            </span>
                           </div>
                           {selectedTask.schedule.scriptChanged && (
                             <div className="text-amber-400 font-semibold">脚本已变更</div>

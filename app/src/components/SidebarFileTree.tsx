@@ -1,13 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
-import {
-  Upload,
-  FolderUp,
-  Plus,
-  Search,
-  FolderPlus,
-  Trash2,
-  CheckSquare,
-} from 'lucide-react';
+import { Upload, FolderUp, Plus, Search, FolderPlus, Trash2, CheckSquare } from 'lucide-react';
 import ProgressOverlay from './ProgressOverlay';
 import { useTranslation } from 'react-i18next';
 import { useProject } from '@/lib/project-store';
@@ -73,7 +65,9 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const [convertDialogOpen, setConvertDialogOpen] = useState(false);
   const [convertTargetPath, setConvertTargetPath] = useState('');
   const [isConvertingFolder, setIsConvertingFolder] = useState(false);
-  const [convertProgress, setConvertProgress] = useState<{ done: number; total: number } | null>(null);
+  const [convertProgress, setConvertProgress] = useState<{ done: number; total: number } | null>(
+    null
+  );
   const [convertResult, setConvertResult] = useState<{
     success: number;
     successPaths: string[];
@@ -124,7 +118,13 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
       const allFiles = Array.from(e.target.files);
 
-      setUploadProgress({ total: allFiles.length, loaded: 0, skipped: 0, done: false, stage: 'reading' });
+      setUploadProgress({
+        total: allFiles.length,
+        loaded: 0,
+        skipped: 0,
+        done: false,
+        stage: 'reading',
+      });
 
       // Phase 1: Accept all text files — skip known binary extensions only
       const supportedFiles: File[] = [];
@@ -180,14 +180,24 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         const contents = await Promise.all(batchFiles.map((f) => f.text()));
 
         // Update in-memory ProjectFile objects
-        const updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null }> = [];
+        const updates: Array<{
+          fileId: string;
+          content: string;
+          isProcedure?: boolean;
+          transformedContent?: string | null;
+        }> = [];
         for (let j = 0; j < batchPFs.length; j++) {
           batchPFs[j].content = contents[j];
           const upper = contents[j].toUpperCase();
           const isProcedure = upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC');
           batchPFs[j].isProcedure = isProcedure;
           batchPFs[j].transformedContent = null;
-          updates.push({ fileId: batchPFs[j].id, content: contents[j], isProcedure, transformedContent: null });
+          updates.push({
+            fileId: batchPFs[j].id,
+            content: contents[j],
+            isProcedure,
+            transformedContent: null,
+          });
         }
 
         // Batch-update React state
@@ -198,11 +208,17 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       }
 
       // Phase 4: Persist to SQLite → OPFS/IndexedDB
-      setUploadProgress({ total: importTotal, loaded: importTotal, skipped, done: false, stage: 'saving' });
+      setUploadProgress({
+        total: importTotal,
+        loaded: importTotal,
+        skipped,
+        done: false,
+        stage: 'saving',
+      });
       try {
         if (currentProject) {
           const allProjectFiles = [
-            ...(currentProject.files.filter((f) => !projectFiles.some((pf) => pf.id === f.id))),
+            ...currentProject.files.filter((f) => !projectFiles.some((pf) => pf.id === f.id)),
             ...projectFiles,
           ];
           await saveProjectFiles(currentProject.id, allProjectFiles);
@@ -233,119 +249,149 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     setConvertDialogOpen(true);
   }, []);
 
-  const handleConvertFolder = useCallback(async (dialect: Dialect) => {
-    if (!currentProject) return;
+  const handleConvertFolder = useCallback(
+    async (dialect: Dialect) => {
+      if (!currentProject) return;
 
-    const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
-    const folderFiles = currentProject.files.filter(f => f.path.startsWith(prefix));
-    const procFiles = folderFiles.filter(f => f.isProcedure);
-    const total = procFiles.length;
+      const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
+      const folderFiles = currentProject.files.filter((f) => f.path.startsWith(prefix));
+      const procFiles = folderFiles.filter((f) => f.isProcedure);
+      const total = procFiles.length;
 
-    if (total === 0) return;
+      if (total === 0) return;
 
-    // For unsupported dialects, mark all as empty (no conversion logic available yet)
-    if (!CONVERT_SUPPORTED_DIALECTS.has(dialect)) {
-      setConvertResult({
-        success: 0,
-        successPaths: [],
-        empty: procFiles.map(f => f.path),
-        errors: [],
-      });
-      setConvertProgress({ done: total, total });
-      return;
-    }
-
-    setIsConvertingFolder(true);
-    setConvertProgress({ done: 0, total });
-
-    try {
-      // Step 1: ensure all procedure files have content loaded
-      const unloadedIds = procFiles.filter(f => !isContentLoaded(f.id)).map(f => f.id);
-      if (unloadedIds.length > 0) {
-        await ensureFilesContent(unloadedIds);
+      // For unsupported dialects, mark all as empty (no conversion logic available yet)
+      if (!CONVERT_SUPPORTED_DIALECTS.has(dialect)) {
+        setConvertResult({
+          success: 0,
+          successPaths: [],
+          empty: procFiles.map((f) => f.path),
+          errors: [],
+        });
+        setConvertProgress({ done: total, total });
+        return;
       }
 
-      // Step 2: load content from DB directly (bypass React state timing)
-      const contentMap = await loadFileContentsBatch(activeProjectId ?? '', procFiles.map(f => f.path));
+      setIsConvertingFolder(true);
+      setConvertProgress({ done: 0, total });
 
-      // Step 3: process and save in batches
-      const BATCH = 50;
-      const savedFiles: ProjectFile[] = [];
-      let successCount = 0;
-      const successPaths: string[] = [];
-      const emptyFiles: string[] = [];
-      const errorFiles: string[] = [];
+      try {
+        // Step 1: ensure all procedure files have content loaded
+        const unloadedIds = procFiles.filter((f) => !isContentLoaded(f.id)).map((f) => f.id);
+        if (unloadedIds.length > 0) {
+          await ensureFilesContent(unloadedIds);
+        }
 
-      for (let i = 0; i < procFiles.length; i += BATCH) {
-        const batch = procFiles.slice(i, i + BATCH);
-        const batchUpdates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null; dialect?: string }> = [];
+        // Step 2: load content from DB directly (bypass React state timing)
+        const contentMap = await loadFileContentsBatch(
+          activeProjectId ?? '',
+          procFiles.map((f) => f.path)
+        );
 
-        for (const f of batch) {
-          try {
-            const content = contentMap.get(f.path) || f.content;
-            if (!content) {
-              emptyFiles.push(f.path);
-              continue;
+        // Step 3: process and save in batches
+        const BATCH = 50;
+        const savedFiles: ProjectFile[] = [];
+        let successCount = 0;
+        const successPaths: string[] = [];
+        const emptyFiles: string[] = [];
+        const errorFiles: string[] = [];
+
+        for (let i = 0; i < procFiles.length; i += BATCH) {
+          const batch = procFiles.slice(i, i + BATCH);
+          const batchUpdates: Array<{
+            fileId: string;
+            content: string;
+            isProcedure?: boolean;
+            transformedContent?: string | null;
+            dialect?: string;
+          }> = [];
+
+          for (const f of batch) {
+            try {
+              const content = contentMap.get(f.path) || f.content;
+              if (!content) {
+                emptyFiles.push(f.path);
+                continue;
+              }
+              const transformedContent = extractDmlFromProcedure(content, dialect);
+              if (!transformedContent) {
+                emptyFiles.push(f.path);
+              } else {
+                successCount++;
+                successPaths.push(f.path);
+              }
+              const updatedFile: ProjectFile = {
+                ...f,
+                content,
+                dialect,
+                isProcedure: true,
+                transformedContent,
+              };
+              savedFiles.push(updatedFile);
+
+              batchUpdates.push({
+                fileId: f.id,
+                content,
+                isProcedure: true,
+                transformedContent,
+                dialect,
+              });
+            } catch (err) {
+              errorFiles.push(`${f.path} (${err instanceof Error ? err.message : String(err)})`);
             }
-            const transformedContent = extractDmlFromProcedure(content, dialect);
-            if (!transformedContent) {
-              emptyFiles.push(f.path);
-            } else {
-              successCount++;
-              successPaths.push(f.path);
-            }
-            const updatedFile: ProjectFile = { ...f, content, dialect, isProcedure: true, transformedContent };
-            savedFiles.push(updatedFile);
+          }
 
-            batchUpdates.push({
-              fileId: f.id,
-              content,
-              isProcedure: true,
-              transformedContent,
-              dialect,
-            });
-          } catch (err) {
-            errorFiles.push(`${f.path} (${err instanceof Error ? err.message : String(err)})`);
+          if (batchUpdates.length > 0) {
+            updateFiles(batchUpdates);
+          }
+          setConvertProgress({ done: Math.min(i + BATCH, total), total });
+          await new Promise((r) => setTimeout(r, 0));
+        }
+
+        setConvertProgress({ done: total, total });
+        setConvertResult({
+          success: successCount,
+          successPaths,
+          empty: emptyFiles,
+          errors: errorFiles,
+        });
+
+        // Step 4: persist to DB
+        if (savedFiles.length > 0) {
+          const project = currentProjectRef.current;
+          if (project) {
+            const CHUNK = 200;
+            for (let i = 0; i < savedFiles.length; i += CHUNK) {
+              await upsertProjectFiles(project.id, savedFiles.slice(i, i + CHUNK));
+            }
           }
         }
-
-        if (batchUpdates.length > 0) {
-          updateFiles(batchUpdates);
-        }
-        setConvertProgress({ done: Math.min(i + BATCH, total), total });
-        await new Promise(r => setTimeout(r, 0));
+      } catch (e) {
+        console.error('Failed to convert procedures:', e);
+      } finally {
+        setIsConvertingFolder(false);
       }
-
-      setConvertProgress({ done: total, total });
-      setConvertResult({ success: successCount, successPaths, empty: emptyFiles, errors: errorFiles });
-
-      // Step 4: persist to DB
-      if (savedFiles.length > 0) {
-        const project = currentProjectRef.current;
-        if (project) {
-          const CHUNK = 200;
-          for (let i = 0; i < savedFiles.length; i += CHUNK) {
-            await upsertProjectFiles(project.id, savedFiles.slice(i, i + CHUNK));
-          }
-        }
-      }
-    } catch (e) {
-      console.error('Failed to convert procedures:', e);
-    } finally {
-      setIsConvertingFolder(false);
-    }
-  }, [currentProject, convertTargetPath, updateFiles, ensureFilesContent, isContentLoaded, activeProjectId]);
+    },
+    [
+      currentProject,
+      convertTargetPath,
+      updateFiles,
+      ensureFilesContent,
+      isContentLoaded,
+      activeProjectId,
+    ]
+  );
 
   const folderProcedureCount = useMemo(() => {
     if (!convertDialogOpen || !currentProject) return 0;
     const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
-    return currentProject.files.filter(f => f.path.startsWith(prefix) && f.isProcedure).length;
+    return currentProject.files.filter((f) => f.path.startsWith(prefix) && f.isProcedure).length;
   }, [convertDialogOpen, currentProject, convertTargetPath]);
 
   const folderTotalCount = useMemo(() => {
     if (!convertDialogOpen || !currentProject) return 0;
     const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
-    return currentProject.files.filter(f => f.path.startsWith(prefix)).length;
+    return currentProject.files.filter((f) => f.path.startsWith(prefix)).length;
   }, [convertDialogOpen, currentProject, convertTargetPath]);
 
   const handleSelectFile = (fileId: string) => {
@@ -391,26 +437,32 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     }
   };
 
-  const isFileIncludedInAnalysis = useCallback((fileId: string) => {
-    if (!currentProject) return false;
-    switch (currentProject.runMode) {
-      case 'all':
-        return true;
-      case 'current':
-        return currentProject.activeFileId === fileId;
-      case 'custom':
-        return currentProject.selectedFileIds?.includes(fileId) ?? false;
-      default:
-        return false;
-    }
-  }, [currentProject]);
+  const isFileIncludedInAnalysis = useCallback(
+    (fileId: string) => {
+      if (!currentProject) return false;
+      switch (currentProject.runMode) {
+        case 'all':
+          return true;
+        case 'current':
+          return currentProject.activeFileId === fileId;
+        case 'custom':
+          return currentProject.selectedFileIds?.includes(fileId) ?? false;
+        default:
+          return false;
+      }
+    },
+    [currentProject]
+  );
 
   // Defer lineage set changes so 3000+ FolderNode re-renders don't block UI
   const deferredLineageIds = useDeferredValue(lineageFileIds);
 
-  const hasLineageFile = useCallback((filePath: string) => {
-    return deferredLineageIds?.has(filePath) ?? false;
-  }, [deferredLineageIds]);
+  const hasLineageFile = useCallback(
+    (filePath: string) => {
+      return deferredLineageIds?.has(filePath) ?? false;
+    },
+    [deferredLineageIds]
+  );
 
   const handleToggleFolderSelection = useCallback(
     (fileIds: string[], select: boolean) => {
@@ -479,7 +531,9 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
             {t('common.files')}
           </span>
           {currentProject.files.length > 0 && (
-            <span className="text-xs text-muted-foreground whitespace-nowrap">({currentProject.files.length})</span>
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              ({currentProject.files.length})
+            </span>
           )}
           {selectedCount > 0 && (
             <span className="text-xs text-muted-foreground whitespace-nowrap">
@@ -724,7 +778,9 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
             onRenameFolder={(oldPath, newName) => renameFolder(oldPath, newName)}
             onDeleteFolder={(folderPath) => {
               // 需要二次确认防止误删
-              if (window.confirm(`确定要删除文件夹 "${folderPath}" 及其所有文件吗？此操作不可撤销。`)) {
+              if (
+                window.confirm(`确定要删除文件夹 "${folderPath}" 及其所有文件吗？此操作不可撤销。`)
+              ) {
                 try {
                   deleteFolder(folderPath);
                 } catch (e) {
@@ -767,10 +823,12 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
             uploadProgress.done
               ? t('sidebar.uploadDone')
               : uploadProgress.stage === 'saving'
-              ? t('sidebar.uploadSaving')
-              : t('sidebar.uploadReading')
+                ? t('sidebar.uploadSaving')
+                : t('sidebar.uploadReading')
           }
-          progress={uploadProgress.total > 0 ? (uploadProgress.loaded / uploadProgress.total) * 100 : 0}
+          progress={
+            uploadProgress.total > 0 ? (uploadProgress.loaded / uploadProgress.total) * 100 : 0
+          }
           loaded={uploadProgress.loaded}
           total={uploadProgress.total}
           done={uploadProgress.done}
@@ -796,7 +854,12 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
       <ConvertFolderDialog
         open={convertDialogOpen}
-        onOpenChange={(open) => { if (!isConvertingFolder) { setConvertDialogOpen(open); if (!open) setConvertProgress(null); } }}
+        onOpenChange={(open) => {
+          if (!isConvertingFolder) {
+            setConvertDialogOpen(open);
+            if (!open) setConvertProgress(null);
+          }
+        }}
         folderPath={convertTargetPath}
         procedureCount={folderProcedureCount}
         totalFileCount={folderTotalCount}

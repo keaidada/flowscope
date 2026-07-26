@@ -190,22 +190,26 @@ function countDirectSubFolders(node: TreeNode): number {
   return count;
 }
 
-const FolderNode = memo(function FolderNode({ node, depth, props, expandedFolders, onToggleFolder, folderFileIdsMap }: FolderNodeProps) {
+const FolderNode = memo(function FolderNode({
+  node,
+  depth,
+  props,
+  expandedFolders,
+  onToggleFolder,
+  folderFileIdsMap,
+}: FolderNodeProps) {
   const isExpanded = expandedFolders.has(node.path);
   const sortedChildren = useMemo(() => sortTreeNodes(Array.from(node.children.values())), [node]);
 
   const fileCount = useMemo(() => countDirectFiles(node), [node]);
 
-  const lineageCount = useMemo(
-    () => {
-      let cnt = 0;
-      for (const child of node.children.values()) {
-        if (child.file && props.hasLineageFile(child.file.path)) cnt++;
-      }
-      return cnt;
-    },
-    [node, props.hasLineageFile]
-  );
+  const lineageCount = useMemo(() => {
+    let cnt = 0;
+    for (const child of node.children.values()) {
+      if (child.file && props.hasLineageFile(child.file.path)) cnt++;
+    }
+    return cnt;
+  }, [node, props.hasLineageFile]);
 
   const subFolderCount = useMemo(() => countDirectSubFolders(node), [node]);
 
@@ -428,7 +432,7 @@ const FolderNode = memo(function FolderNode({ node, depth, props, expandedFolder
       )}
     </div>
   );
-})
+});
 
 /** Flat file list with render limit */
 const FlatFileList = memo(function FlatFileList({
@@ -466,7 +470,7 @@ const FlatFileList = memo(function FlatFileList({
       )}
     </div>
   );
-})
+});
 
 /** Renders folder children with a render limit to avoid blocking the UI */
 const FolderChildren = memo(function FolderChildren({
@@ -516,7 +520,7 @@ const FolderChildren = memo(function FolderChildren({
       )}
     </div>
   );
-})
+});
 
 interface FileNodeProps {
   node: TreeNode;
@@ -648,9 +652,7 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
           className={cn('size-4 shrink-0', isIncluded ? 'text-primary' : 'text-muted-foreground')}
         />
       )}
-      {file.isProcedure && (
-        <SpBadge hasTransformedContent={file.transformedContent !== null} />
-      )}
+      {file.isProcedure && <SpBadge hasTransformedContent={file.transformedContent !== null} />}
       <span className={cn('whitespace-nowrap text-sm', isActive && 'font-semibold text-primary')}>
         {file.name}
       </span>
@@ -727,7 +729,7 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
       )}
     </div>
   );
-})
+});
 
 export function FileTree(props: FileTreeProps) {
   const { files, searchQuery, onContentWidthChange } = props;
@@ -826,10 +828,7 @@ export function FileTree(props: FileTreeProps) {
     });
   };
 
-  const sortedChildren = useMemo(
-    () => sortTreeNodes(Array.from(tree.children.values())),
-    [tree]
-  );
+  const sortedChildren = useMemo(() => sortTreeNodes(Array.from(tree.children.values())), [tree]);
 
   // If no nested structure, render flat list (no need for tree)
   if (!hasNestedStructure) {
@@ -841,21 +840,23 @@ export function FileTree(props: FileTreeProps) {
 
   return (
     <div ref={treeRef} className="p-1 min-w-max" role="tree" aria-label="File tree">
-      {sortedChildren.slice(0, visible).map((node) =>
-        node.file ? (
-          <FileNode key={node.file.id} node={node} depth={0} props={props} />
-        ) : (
-          <FolderNode
-            key={node.path}
-            node={node}
-            depth={0}
-            props={props}
-            expandedFolders={expandedFolders}
-            onToggleFolder={toggleFolder}
-            folderFileIdsMap={folderFileIdsMap}
-          />
-        )
-      )}
+      {sortedChildren
+        .slice(0, visible)
+        .map((node) =>
+          node.file ? (
+            <FileNode key={node.file.id} node={node} depth={0} props={props} />
+          ) : (
+            <FolderNode
+              key={node.path}
+              node={node}
+              depth={0}
+              props={props}
+              expandedFolders={expandedFolders}
+              onToggleFolder={toggleFolder}
+              folderFileIdsMap={folderFileIdsMap}
+            />
+          )
+        )}
       {remaining > 0 && (
         <div
           className="flex items-center gap-1 px-1 py-1 cursor-pointer text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm ml-4"

@@ -83,7 +83,14 @@ export interface InsightsGraph {
  */
 export function convertToInsightsGraph(original: AnalyzeResult): InsightsGraph {
   console.log('[data-mapper] convertToInsightsGraph called');
-  console.log('[data-mapper] statements:', original.statements.length, 'GL nodes:', original.globalLineage?.nodes?.length, 'GL edges:', original.globalLineage?.edges?.length);
+  console.log(
+    '[data-mapper] statements:',
+    original.statements.length,
+    'GL nodes:',
+    original.globalLineage?.nodes?.length,
+    'GL edges:',
+    original.globalLineage?.edges?.length
+  );
   const globalNodes = original.globalLineage?.nodes ?? [];
   const globalEdges = original.globalLineage?.edges ?? [];
 
@@ -150,7 +157,12 @@ export function convertToInsightsGraph(original: AnalyzeResult): InsightsGraph {
     }
   }
 
-  console.log('[data-mapper] scriptToTables size:', scriptToTables.size, 'tableByQName size:', tableByQName.size);
+  console.log(
+    '[data-mapper] scriptToTables size:',
+    scriptToTables.size,
+    'tableByQName size:',
+    tableByQName.size
+  );
 
   // 4. 构建节点和边（使用短数字 ID）
   const insightsNodes: GlobalNode[] = [];
@@ -301,9 +313,7 @@ export function convertToInsightsGraph(original: AnalyzeResult): InsightsGraph {
  */
 export function isInsightsResult(result: AnalyzeResult | null): boolean {
   if (!result?.statements?.length) return false;
-  return result.statements.some(
-    (stmt) => stmt.nodes?.some(
-      (n) => n.metadata?.isInsightsScriptNode || n.metadata?.isInsightsTableNode
-    )
+  return result.statements.some((stmt) =>
+    stmt.nodes?.some((n) => n.metadata?.isInsightsScriptNode || n.metadata?.isInsightsTableNode)
   );
 }

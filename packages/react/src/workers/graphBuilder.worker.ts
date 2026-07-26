@@ -946,7 +946,14 @@ function mergeStatements(statements: StatementLineage[]): StatementLineage {
   } catch (err) {
     console.error('[GraphBuilder Worker] mergeStatements failed:', err);
     // Fallback: return an empty statement to allow the pipeline to continue
-    return { statementIndex: 0, statementType: 'SELECT', nodes: [], edges: [], joinCount: 0, complexityScore: 1 };
+    return {
+      statementIndex: 0,
+      statementType: 'SELECT',
+      nodes: [],
+      edges: [],
+      joinCount: 0,
+      complexityScore: 1,
+    };
   }
 }
 
@@ -1044,7 +1051,6 @@ function createScriptNodes(
   });
 
   return nodes;
-
 }
 function buildDirectScriptGraph(
   scriptMap: Map<string, StatementLineageWithSource[]>,
@@ -1150,7 +1156,9 @@ function buildScriptLevelGraph(
     ? buildDirectScriptGraph(scriptMap, true)
     : buildDirectScriptGraph(scriptMap, false);
   if (showTables && edges.length > 0) {
-    const names = edges.slice(0, 5).map(e => `${(e as any).sourceHandle ?? '-'}→${(e as any).targetHandle ?? '-'}`);
+    const names = edges
+      .slice(0, 5)
+      .map((e) => `${(e as any).sourceHandle ?? '-'}→${(e as any).targetHandle ?? '-'}`);
     console.log(`[GraphBuilder] tableEdges:${edges.length}`, names);
   }
   return { nodes: scriptNodes, edges };

@@ -2,7 +2,10 @@
 // 使用方法：npx tsx scripts/test-insights-mapper.ts
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 
-import { convertToInsightsGraph, isInsightsResult } from '../app/src/components/insights/data-mapper';
+import {
+  convertToInsightsGraph,
+  isInsightsResult,
+} from '../app/src/components/insights/data-mapper';
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
@@ -101,16 +104,10 @@ function testBasicConversion(): void {
   // users 被两个脚本引用，所以表实例数 = 2+1+1 = 4
   // scriptA: users, accounts = 2
   // scriptB: users, orders = 2
-  assert(
-    stats.tableInstanceCount === 4,
-    `表实例数应为 4，实际 ${stats.tableInstanceCount}`
-  );
+  assert(stats.tableInstanceCount === 4, `表实例数应为 4，实际 ${stats.tableInstanceCount}`);
 
   // ownership 边 = 4（每个表实例一条）
-  assert(
-    stats.ownershipEdgeCount === 4,
-    `ownership 边数应为 4，实际 ${stats.ownershipEdgeCount}`
-  );
+  assert(stats.ownershipEdgeCount === 4, `ownership 边数应为 4，实际 ${stats.ownershipEdgeCount}`);
 
   // 跨脚本 data_flow 边：
   // accounts(在A) → users(在A,B)：A→A（跳过），A→B = 1
@@ -180,9 +177,7 @@ function testMergedResultsStatementIndexCollision(): void {
         statementIndex: 0,
         statementType: 'INSERT',
         sourceName: 'etl/fileA.sql',
-        nodes: [
-          { id: 'a1', type: 'table', label: 't1', qualifiedName: 'db.t1' },
-        ],
+        nodes: [{ id: 'a1', type: 'table', label: 't1', qualifiedName: 'db.t1' }],
         edges: [],
         joinCount: 0,
         complexityScore: 1,

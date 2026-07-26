@@ -112,7 +112,15 @@ interface ProjectContextType {
   // File actions for active project
   createFile: (name: string, content?: string, path?: string) => void;
   updateFile: (fileId: string, content: string) => void;
-  updateFiles: (updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null; dialect?: string }>) => void;
+  updateFiles: (
+    updates: Array<{
+      fileId: string;
+      content: string;
+      isProcedure?: boolean;
+      transformedContent?: string | null;
+      dialect?: string;
+    }>
+  ) => void;
   deleteFile: (fileId: string) => void;
   deleteFiles: (fileIds: string[]) => void;
   renameFile: (fileId: string, newName: string) => void;
@@ -190,9 +198,18 @@ const loadProjectsFromStorage = (): Project[] => {
           templateMode: parseTemplateMode(p.templateMode),
           files: [],
           activeFileId: typeof p.activeFileId === 'string' ? p.activeFileId : null,
-          openFileIds: Array.isArray(p.openFileIds) ? p.openFileIds : [p.activeFileId].filter(Boolean),
+          openFileIds: Array.isArray(p.openFileIds)
+            ? p.openFileIds
+            : [p.activeFileId].filter(Boolean),
         };
-        console.log('[init] loadProject:', project.id.slice(0,8), 'activeFileId:', project.activeFileId, 'openFileIds:', project.openFileIds?.length);
+        console.log(
+          '[init] loadProject:',
+          project.id.slice(0, 8),
+          'activeFileId:',
+          project.activeFileId,
+          'openFileIds:',
+          project.openFileIds?.length
+        );
         return project;
       });
     }
@@ -204,25 +221,27 @@ const loadProjectsFromStorage = (): Project[] => {
 
 /** Convert backend ProjectMeta row → frontend Project (files loaded separately). */
 const metaToProject = (m: serverDb.ProjectMeta): Project => {
-  console.log('[init] metaToProject:', m.id.slice(0,8), 'backend_activeFileId:', m.active_file_id);
+  console.log('[init] metaToProject:', m.id.slice(0, 8), 'backend_activeFileId:', m.active_file_id);
   return {
-  id: m.id,
-  name: m.name,
-  dialect: isValidDialect(m.dialect) ? (m.dialect as Dialect) : 'generic',
-  runMode: VALID_RUN_MODES.includes(m.run_mode as RunMode) ? (m.run_mode as RunMode) : 'current',
-  selectedFileIds: (() => {
-    try {
-      const parsed = JSON.parse(m.selected_file_ids);
-      return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
-    } catch {
-      return [];
-    }
-  })(),
-  schemaSQL: m.schema_sql,
-  templateMode: parseTemplateMode(m.template_mode),
-  files: [],
-  activeFileId: m.active_file_id,
-      openFileIds: [],
+    id: m.id,
+    name: m.name,
+    dialect: isValidDialect(m.dialect) ? (m.dialect as Dialect) : 'generic',
+    runMode: VALID_RUN_MODES.includes(m.run_mode as RunMode) ? (m.run_mode as RunMode) : 'current',
+    selectedFileIds: (() => {
+      try {
+        const parsed = JSON.parse(m.selected_file_ids);
+        return Array.isArray(parsed)
+          ? parsed.filter((id): id is string => typeof id === 'string')
+          : [];
+      } catch {
+        return [];
+      }
+    })(),
+    schemaSQL: m.schema_sql,
+    templateMode: parseTemplateMode(m.template_mode),
+    files: [],
+    activeFileId: m.active_file_id,
+    openFileIds: [],
   };
 };
 
@@ -241,7 +260,7 @@ const saveProjectSettingsToStorage = (projects: Project[]) => {
       runMode: p.runMode,
       selectedFileIds: p.selectedFileIds,
       activeFileId: p.activeFileId,
-        openFileIds: p.openFileIds || [],
+      openFileIds: p.openFileIds || [],
     }));
     localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(settings));
     // 同步到后端(db 为 source of truth),debounced
@@ -552,8 +571,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
                 p.activeFileId && loaded.files.some((file) => file.id === p.activeFileId)
                   ? p.activeFileId
                   : p.activeFileId === null
-                  ? null
-                  : loaded.files[0]?.id || null;
+                    ? null
+                    : loaded.files[0]?.id || null;
               const validSelectedFileIds = (p.selectedFileIds || []).filter((fileId) =>
                 loaded.files.some((file) => file.id === fileId)
               );
@@ -563,7 +582,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
                 activeFileId: validActiveFileId,
                 selectedFileIds: validSelectedFileIds,
                 runMode:
-                  p.runMode === 'custom' && validSelectedFileIds.length === 0 ? 'current' : p.runMode,
+                  p.runMode === 'custom' && validSelectedFileIds.length === 0
+                    ? 'current'
+                    : p.runMode,
               };
             })
           );
@@ -587,7 +608,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   // In backend mode, default to backend project unless user selected a valid local project
   const effectiveActiveProjectId = isBackendMode
-    ? (activeProjectId && projects.some((p) => p.id === activeProjectId) ? activeProjectId : BACKEND_PROJECT_ID)
+    ? activeProjectId && projects.some((p) => p.id === activeProjectId)
+      ? activeProjectId
+      : BACKEND_PROJECT_ID
     : activeProjectId;
 
   const currentProjectRaw =
@@ -599,10 +622,16 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       activeFileIdOverride && currentProjectRaw.files.some((f) => f.id === activeFileIdOverride)
         ? activeFileIdOverride
         : currentProjectRaw.activeFileId;
-    console.log('[currentProject] raw.id:', currentProjectRaw.id.slice(0,8),
-      'raw.activeFileId:', currentProjectRaw.activeFileId,
-      'override:', activeFileIdOverride,
-      'effective:', effectiveActiveFileId);
+    console.log(
+      '[currentProject] raw.id:',
+      currentProjectRaw.id.slice(0, 8),
+      'raw.activeFileId:',
+      currentProjectRaw.activeFileId,
+      'override:',
+      activeFileIdOverride,
+      'effective:',
+      effectiveActiveFileId
+    );
     return effectiveActiveFileId !== currentProjectRaw.activeFileId
       ? { ...currentProjectRaw, activeFileId: effectiveActiveFileId }
       : currentProjectRaw;
@@ -639,7 +668,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     (id: string) => {
       setProjects((prev) => prev.filter((p) => p.id !== id));
       deleteProjectFiles(id); // Clean up IndexedDB
-      serverDb.deleteProject(id).catch((e) => console.error('Failed to delete project from backend:', e));
+      serverDb
+        .deleteProject(id)
+        .catch((e) => console.error('Failed to delete project from backend:', e));
       if (activeProjectId === id) {
         setActiveProjectId(null);
       }
@@ -960,7 +991,15 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateFiles = useCallback(
-    (updates: Array<{ fileId: string; content: string; isProcedure?: boolean; transformedContent?: string | null; dialect?: string }>) => {
+    (
+      updates: Array<{
+        fileId: string;
+        content: string;
+        isProcedure?: boolean;
+        transformedContent?: string | null;
+        dialect?: string;
+      }>
+    ) => {
       if (!activeProjectId || updates.length === 0) return;
 
       const updatesMap = new Map(updates.map((u) => [u.fileId, u]));
@@ -1045,9 +1084,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         const project = prev.find((p) => p.id === activeProjectId);
         if (!project) return prev;
 
-        const deletedPaths = project.files
-          .filter((f) => idsSet.has(f.id))
-          .map((f) => f.path);
+        const deletedPaths = project.files.filter((f) => idsSet.has(f.id)).map((f) => f.path);
         const remainingFiles = project.files.filter((f) => !idsSet.has(f.id));
 
         const currentActive = activeFileIdOverride || project.activeFileId;
@@ -1089,9 +1126,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
       const lastSlashIndex = file.path.lastIndexOf('/');
       const newPath =
-        lastSlashIndex === -1
-          ? newName
-          : `${file.path.slice(0, lastSlashIndex + 1)}${newName}`;
+        lastSlashIndex === -1 ? newName : `${file.path.slice(0, lastSlashIndex + 1)}${newName}`;
 
       // Server-side rename (metadata-only, preserves content in DB)
       renameProjectFile(activeProjectId, file.path, newPath, newName, false);
@@ -1156,8 +1191,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           const remaining = p.files.filter(
             (f) => f.path !== folderPath && !f.path.startsWith(prefix)
           );
-          const newActiveFileId =
-            remaining.some((f) => f.id === p.activeFileId) ? p.activeFileId : remaining[0]?.id ?? null;
+          const newActiveFileId = remaining.some((f) => f.id === p.activeFileId)
+            ? p.activeFileId
+            : (remaining[0]?.id ?? null);
           return {
             ...p,
             files: remaining,
@@ -1223,9 +1259,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         prev.map((p) => {
           if (p.id !== activeProjectId) return p;
           const remaining = (p.openFileIds || []).filter((id) => id !== fileId);
-          const newActive = p.activeFileId === fileId
-            ? remaining[remaining.length - 1] || null
-            : p.activeFileId;
+          const newActive =
+            p.activeFileId === fileId ? remaining[remaining.length - 1] || null : p.activeFileId;
           setActiveFileIdOverride(newActive);
           return { ...p, activeFileId: newActive, openFileIds: remaining };
         })
@@ -1283,7 +1318,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   const closeAllTabs = useCallback(() => {
     if (!activeProjectId) return;
-    console.log('[closeAllTabs] clearing tabs for project:', activeProjectId.slice(0,8));
+    console.log('[closeAllTabs] clearing tabs for project:', activeProjectId.slice(0, 8));
     setActiveFileIdOverride(null);
     setProjects((prev) => {
       const next = prev.map((p) => {
@@ -1293,11 +1328,16 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       console.log('[closeAllTabs] saved activeFileId=null, openFileIds=[] to localStorage');
       // Eagerly save to localStorage + sync to backend so refresh picks up empty state
       try {
-        const settings = next.map(p => ({
-          id: p.id, name: p.name, dialect: p.dialect,
-          templateMode: p.templateMode, schemaSQL: p.schemaSQL,
-          runMode: p.runMode, selectedFileIds: p.selectedFileIds,
-          activeFileId: p.activeFileId, openFileIds: p.openFileIds || [],
+        const settings = next.map((p) => ({
+          id: p.id,
+          name: p.name,
+          dialect: p.dialect,
+          templateMode: p.templateMode,
+          schemaSQL: p.schemaSQL,
+          runMode: p.runMode,
+          selectedFileIds: p.selectedFileIds,
+          activeFileId: p.activeFileId,
+          openFileIds: p.openFileIds || [],
         }));
         localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(settings));
         // Verify write
@@ -1305,10 +1345,19 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         if (verify) {
           const vp = JSON.parse(verify);
           for (const v of vp) {
-            console.log('[closeAllTabs] verify localStorage:', v.id?.slice(0,8), 'activeFileId:', v.activeFileId, 'openFileIds:', v.openFileIds?.length);
+            console.log(
+              '[closeAllTabs] verify localStorage:',
+              v.id?.slice(0, 8),
+              'activeFileId:',
+              v.activeFileId,
+              'openFileIds:',
+              v.openFileIds?.length
+            );
           }
         }
-      } catch(e) { console.error('[closeAllTabs] localStorage write failed:', e); }
+      } catch (e) {
+        console.error('[closeAllTabs] localStorage write failed:', e);
+      }
       scheduleBackendProjectSync(next);
       return next;
     });

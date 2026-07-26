@@ -92,7 +92,12 @@ export interface FileValidationResult {
 export interface AnalysisContext {
   description: string;
   fileCount: number;
-  files: Array<{ name: string; content: string; isProcedure?: boolean; transformedContent?: string | null }>;
+  files: Array<{
+    name: string;
+    content: string;
+    isProcedure?: boolean;
+    transformedContent?: string | null;
+  }>;
 }
 
 /** Valid template mode values for runtime validation */
