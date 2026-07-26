@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect, createContext, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SqlView } from '@pondpilot/flowscope-react';
 import {
@@ -14,7 +14,6 @@ import {
   FileCode,
   X,
   WrapText,
-  GripVertical,
   Plus,
   Pencil,
 } from 'lucide-react';
@@ -31,6 +30,77 @@ import { cn, genId } from '@/lib/utils';
 import { BINARY_EXTENSIONS } from '@/lib/constants';
 import { saveSchemaFiles, loadSchemaFiles } from '@/lib/schema-storage';
 import { onSchemaFileSelect } from '@/lib/schema-events';
+
+// --- Schema context for split-panel layout ---
+interface SchemaCtx {
+  schemaFiles: SchemaFile[];
+  activeFileId: string | null;
+  activeFile: SchemaFile | undefined;
+  expandedFolders: Set<string>;
+  selectedFileIds: Set<string>;
+  activeFolderPath: string;
+  activeParentFolder: string;
+  search: string;
+  isReadOnly: boolean;
+  isBackendMode: boolean;
+  tree: TreeNode;
+  sortedRootChildren: TreeNode[];
+  filteredFiles: SchemaFile[];
+  allSelected: boolean;
+  isCreatingFile: boolean;
+  isCreatingFolder: boolean;
+  newFileName: string;
+  newFolderName: string;
+  confirmBatchDelete: boolean;
+  schemaHighlightSpan: { start: number; end: number } | null;
+  lineWrapping: boolean;
+  treePanelWidth: number;
+  isResizing: boolean;
+  isDark: boolean;
+  uploadProgress: { total: number; loaded: number; skipped: number; done: boolean } | null;
+  // Refs
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  folderInputRef: React.RefObject<HTMLInputElement | null>;
+  fileNameInputRef: React.RefObject<HTMLInputElement | null>;
+  folderNameInputRef: React.RefObject<HTMLInputElement | null>;
+  treeContentRef: React.RefObject<HTMLDivElement | null>;
+  // Setters / actions
+  setSearch: (v: string) => void;
+  setNewFileName: (v: string) => void;
+  setNewFolderName: (v: string) => void;
+  setIsCreatingFile: (v: boolean) => void;
+  setIsCreatingFolder: (v: boolean) => void;
+  setConfirmBatchDelete: (v: boolean) => void;
+  setLineWrapping: React.Dispatch<React.SetStateAction<boolean>>;
+  setTreePanelWidth: React.Dispatch<React.SetStateAction<number>>;
+  setIsResizing: (v: boolean) => void;
+  setActiveFolderPath: (v: string) => void;
+  handleSelectFile: (id: string | null | ((prev: string | null) => string | null)) => void;
+  handleToggleFolder: (path: string) => void;
+  handleEditorChange: (value: string) => void;
+  handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  handleFolderUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  handleDeleteFile: (fileId: string) => void;
+  handleRenameFile: (fileId: string, newName: string) => void;
+  handleRenameFolder: (oldPath: string, newName: string) => void;
+  handleCreateFile: () => void;
+  handleCreateFolder: () => void;
+  handleDoubleClickCreateFile: (folderPath: string) => void;
+  handleCreateFolderInFolder: (parentPath: string) => void;
+  handleSelectAll: () => void;
+  handleBatchDeleteClick: () => void;
+  handleConfirmBatchDelete: () => void;
+  handleToggleSelection: (ids: string[], select: boolean) => void;
+  handleResizeStart: (e: React.MouseEvent) => void;
+  setActiveFileId: (updater: string | null | ((prev: string | null) => string | null)) => void;
+}
+
+const SchemaContext = createContext<SchemaCtx | null>(null);
+function useSchemaCtx() {
+  const ctx = useContext(SchemaContext);
+  if (!ctx) throw new Error('useSchemaCtx must be used within SchemaProvider');
+  return ctx;
+}
 
 // --- Schema file model ---
 interface SchemaFile {
@@ -499,8 +569,8 @@ interface SidebarSchemaProps {
   onContentWidthChange?: (widthPx: number) => void;
 }
 
-// --- Main component ---
-export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
+// --- Schema provider (holds all state, renders children via context) ---
+export function SchemaProvider({ children, onContentWidthChange }: { children: React.ReactNode; onContentWidthChange?: (widthPx: number) => void }) {
   const { t } = useTranslation();
   const {
     currentProject,
@@ -1220,9 +1290,70 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
     [setSchemaFiles, setExpandedFolders]
   );
 
+  const ctxValue: SchemaCtx = {
+    schemaFiles,
+    activeFileId,
+    activeFile,
+    expandedFolders,
+    selectedFileIds,
+    activeFolderPath,
+    activeParentFolder,
+    search,
+    isReadOnly,
+    isBackendMode,
+    tree,
+    sortedRootChildren,
+    filteredFiles,
+    allSelected,
+    isCreatingFile,
+    isCreatingFolder,
+    newFileName,
+    newFolderName,
+    confirmBatchDelete,
+    schemaHighlightSpan,
+    lineWrapping,
+    treePanelWidth,
+    isResizing,
+    isDark,
+    uploadProgress,
+    fileInputRef,
+    folderInputRef,
+    fileNameInputRef,
+    folderNameInputRef,
+    treeContentRef,
+    setSearch,
+    setNewFileName,
+    setNewFolderName,
+    setIsCreatingFile,
+    setIsCreatingFolder,
+    setConfirmBatchDelete,
+    setLineWrapping,
+    setTreePanelWidth,
+    setIsResizing,
+    setActiveFolderPath,
+    handleSelectFile,
+    handleToggleFolder,
+    handleEditorChange,
+    handleFileUpload,
+    handleFolderUpload,
+    handleDeleteFile,
+    handleRenameFile,
+    handleRenameFolder,
+    handleCreateFile,
+    handleCreateFolder,
+    handleDoubleClickCreateFile,
+    handleCreateFolderInFolder,
+    handleSelectAll,
+    handleBatchDeleteClick,
+    handleConfirmBatchDelete,
+    handleToggleSelection,
+    handleResizeStart,
+    setActiveFileId,
+  };
+
   return (
-    <div className="flex flex-col h-full bg-background relative">
-      {/* Hidden file inputs */}
+    <SchemaContext.Provider value={ctxValue}>
+      {/* Hidden file inputs — rendered once at provider level */}
       <input
         ref={fileInputRef}
         type="file"
@@ -1238,6 +1369,34 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
         onChange={handleFolderUpload}
         {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
       />
+      {children}
+    </SchemaContext.Provider>
+  );
+}
+
+// --- Tree panel (left sidebar) ---
+export function SidebarSchemaTreePanel() {
+  const { t } = useTranslation();
+  const ctx = useSchemaCtx();
+  const {
+    schemaFiles, selectedFileIds, confirmBatchDelete, isReadOnly,
+    allSelected, isCreatingFile, isCreatingFolder, newFileName, newFolderName,
+    activeParentFolder, search, activeFolderPath, activeFileId,
+    sortedRootChildren, expandedFolders,
+    fileNameInputRef, folderNameInputRef, treeContentRef,
+  } = ctx;
+  const {
+    setSearch, setNewFileName, setNewFolderName, setIsCreatingFile, setIsCreatingFolder,
+    setConfirmBatchDelete, handleSelectFile, handleDeleteFile, handleRenameFile,
+    setActiveFolderPath, handleToggleFolder, handleDoubleClickCreateFile,
+    handleCreateFolderInFolder, handleRenameFolder, handleToggleSelection,
+    handleSelectAll, handleBatchDeleteClick, handleConfirmBatchDelete,
+    handleCreateFile, handleCreateFolder,
+  } = ctx;
+  const { fileInputRef, folderInputRef, uploadProgress } = ctx;
+
+  return (
+    <div className="flex flex-col h-full bg-background relative">
 
       {/* Header toolbar */}
       <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
@@ -1508,128 +1667,54 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
         </div>
       )}
 
-      <div className="flex-1 min-h-0 flex overflow-hidden">
-        {/* File tree - fills all space when no file selected, fixed left pane when preview shown */}
-        <div
-          className={cn(
-            'overflow-auto shrink-0 min-h-0 border-r bg-background',
-            !activeFile && 'flex-1 border-r-0'
-          )}
-          style={activeFile ? { width: treePanelWidth } : undefined}
-        >
-          {schemaFiles.length === 0 ? (
-            <div className="px-3 py-4 text-xs text-muted-foreground text-center">
-              {isBackendMode ? t('schemaEditor.viewDesc') : t('schemaEditor.emptyHint')}
-            </div>
-          ) : (
-            <div ref={treeContentRef} className="py-1 min-w-max">
-              {sortedRootChildren.map((child) =>
-                child.file ? (
-                  <SchemaFileNode
-                    key={child.file.id}
-                    node={child}
-                    depth={0}
-                    activeFileId={activeFileId}
-                    onSelect={handleSelectFile}
-                    onDelete={handleDeleteFile}
-                    onRenameFile={handleRenameFile}
-                    onSelectFolder={setActiveFolderPath}
-                    selectedFileIds={selectedFileIds}
-                    onToggleSelection={handleToggleSelection}
-                  />
-                ) : (
-                  <SchemaFolderNode
-                    key={child.path}
-                    node={child}
-                    depth={0}
-                    activeFileId={activeFileId}
-                    activeFolderPath={activeFolderPath}
-                    onSelect={handleSelectFile}
-                    onDelete={handleDeleteFile}
-                    expandedFolders={expandedFolders}
-                    onToggleFolder={handleToggleFolder}
-                    onSelectFolder={setActiveFolderPath}
-                    onDoubleClickFolder={handleDoubleClickCreateFile}
-                    onCreateFolderInFolder={handleCreateFolderInFolder}
-                    onRenameFolder={handleRenameFolder}
-                    onRenameFile={handleRenameFile}
-                    selectedFileIds={selectedFileIds}
-                    onToggleSelection={handleToggleSelection}
-                  />
-                )
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Resize handle + SQL preview — only shown when a file is selected */}
-        {activeFile && (
-          <>
-            <div
-              className={cn(
-                'w-2 border-x bg-muted/30 cursor-ew-resize flex items-center justify-center shrink-0',
-                'hover:bg-muted/50 transition-colors',
-                isResizing && 'bg-muted/50'
-              )}
-              onMouseDown={handleResizeStart}
-            >
-              <GripVertical className="w-4 h-4 text-muted-foreground/50" />
-            </div>
-
-            <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
-              <div className="flex flex-col h-full">
-                <div className="flex items-center justify-between px-3 py-2 border-b h-[44px] shrink-0 bg-muted/30 overflow-hidden gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1 text-sm text-muted-foreground">
-                    <FileCode className="h-4 w-4 shrink-0" />
-                    <span className="truncate font-medium text-foreground">{activeFile.path}</span>
-                  </div>
-                  <TooltipProvider delayDuration={300}>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className={`h-7 w-7 ${lineWrapping ? 'bg-muted' : ''}`}
-                            onClick={() => setLineWrapping((prev) => !prev)}
-                          >
-                            <WrapText className="h-3.5 w-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">
-                          <p>{lineWrapping ? t('schemaEditor.nowrap') : t('schemaEditor.wrap')}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => setActiveFileId(null)}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </TooltipProvider>
-                </div>
-                <div className="flex-1 min-h-0 overflow-hidden">
-                  <SqlView
-                    value={activeFile.content}
-                    onChange={isReadOnly ? undefined : handleEditorChange}
-                    className="h-full text-sm"
-                    editable={!isReadOnly}
-                    isDark={isDark}
-                    lineWrapping={lineWrapping}
-                    highlightedSpan={schemaHighlightSpan}
-                  />
-                </div>
-              </div>
-            </div>
-          </>
+      {/* Tree — fills the sidebar panel */}
+      <div className="flex-1 min-h-0 overflow-auto bg-background">
+        {schemaFiles.length === 0 ? (
+          <div className="px-3 py-4 text-xs text-muted-foreground text-center">
+            {ctx.isBackendMode ? t('schemaEditor.viewDesc') : t('schemaEditor.emptyHint')}
+          </div>
+        ) : (
+          <div ref={treeContentRef} className="py-1 min-w-max">
+            {sortedRootChildren.map((child) =>
+              child.file ? (
+                <SchemaFileNode
+                  key={child.file.id}
+                  node={child}
+                  depth={0}
+                  activeFileId={activeFileId}
+                  onSelect={handleSelectFile}
+                  onDelete={handleDeleteFile}
+                  onRenameFile={handleRenameFile}
+                  onSelectFolder={setActiveFolderPath}
+                  selectedFileIds={selectedFileIds}
+                  onToggleSelection={handleToggleSelection}
+                />
+              ) : (
+                <SchemaFolderNode
+                  key={child.path}
+                  node={child}
+                  depth={0}
+                  activeFileId={activeFileId}
+                  activeFolderPath={activeFolderPath}
+                  onSelect={handleSelectFile}
+                  onDelete={handleDeleteFile}
+                  expandedFolders={expandedFolders}
+                  onToggleFolder={handleToggleFolder}
+                  onSelectFolder={setActiveFolderPath}
+                  onDoubleClickFolder={handleDoubleClickCreateFile}
+                  onCreateFolderInFolder={handleCreateFolderInFolder}
+                  onRenameFolder={handleRenameFolder}
+                  onRenameFile={handleRenameFile}
+                  selectedFileIds={selectedFileIds}
+                  onToggleSelection={handleToggleSelection}
+                />
+              )
+            )}
+          </div>
         )}
       </div>
 
       {/* Upload progress overlay */}
-      {/* Unified progress overlay (reused by AnalysisView too) */}
       {uploadProgress && (
         <ProgressOverlay
           visible={Boolean(uploadProgress)}
@@ -1643,5 +1728,91 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
         />
       )}
     </div>
+  );
+}
+
+// --- Editor panel (right side) ---
+export function SidebarSchemaEditorPanel() {
+  const { t } = useTranslation();
+  const ctx = useSchemaCtx();
+  const {
+    activeFile, isReadOnly, isDark, lineWrapping, schemaHighlightSpan,
+    handleEditorChange, setLineWrapping, setActiveFileId,
+  } = ctx;
+
+  if (!activeFile) {
+    return (
+      <div className="flex items-center justify-center h-full text-sm text-muted-foreground bg-background">
+        <div className="text-center">
+          <FileCode className="h-10 w-10 mx-auto mb-2 opacity-30" />
+          <p>{t('schemaEditor.selectFile')}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full bg-background">
+      <div className="flex items-center justify-between px-3 py-2 border-b h-[44px] shrink-0 bg-muted/30 overflow-hidden gap-2">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1 text-sm text-muted-foreground">
+          <FileCode className="h-4 w-4 shrink-0" />
+          <span className="truncate font-medium text-foreground">{activeFile.path}</span>
+        </div>
+        <TooltipProvider delayDuration={300}>
+          <div className="flex items-center gap-2 shrink-0">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`h-7 w-7 ${lineWrapping ? 'bg-muted' : ''}`}
+                  onClick={() => setLineWrapping((prev) => !prev)}
+                >
+                  <WrapText className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>{lineWrapping ? t('schemaEditor.nowrap') : t('schemaEditor.wrap')}</p>
+              </TooltipContent>
+            </Tooltip>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setActiveFileId(null)}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </TooltipProvider>
+      </div>
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <SqlView
+          value={activeFile.content}
+          onChange={isReadOnly ? undefined : handleEditorChange}
+          className="h-full text-sm"
+          editable={!isReadOnly}
+          isDark={isDark}
+          lineWrapping={lineWrapping}
+          highlightedSpan={schemaHighlightSpan}
+        />
+      </div>
+    </div>
+  );
+}
+
+// --- Legacy wrapper: full self-contained layout (tree + editor side by side) ---
+export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
+  return (
+    <SchemaProvider onContentWidthChange={onContentWidthChange}>
+      <div className="flex h-full">
+        <div className="flex-1 min-w-0">
+          <SidebarSchemaTreePanel />
+        </div>
+        <div className="flex-1 min-w-0 border-l">
+          <SidebarSchemaEditorPanel />
+        </div>
+      </div>
+    </SchemaProvider>
   );
 }

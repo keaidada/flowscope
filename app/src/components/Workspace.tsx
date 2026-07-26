@@ -20,7 +20,11 @@ import { EditorArea } from './EditorArea';
 import { AnalysisView } from './AnalysisView';
 import { SidebarFileTree } from './SidebarFileTree';
 import { SidebarSearch } from './SidebarSearch';
-import { SidebarSchema } from './SidebarSchema';
+import {
+  SidebarSchemaTreePanel,
+  SidebarSchemaEditorPanel,
+} from './SidebarSchema';
+import { SchemaProvider } from './SidebarSchema';
 import { ActivityBar } from './ActivityBar';
 import type { SidebarView } from './ActivityBar';
 import { LayoutModeToggle } from './LayoutModeToggle';
@@ -755,9 +759,29 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
                 {/* Main area with optional resizable sidebar */}
                 <div ref={sidebarLayoutRef} className="flex-1 min-w-0">
+                  {sidebarView === 'schema' ? (
+                    /* Schema layout: tree + editor in separate panels (like Files) */
+                    <SchemaProvider>
+                      <ResizablePanelGroup direction="horizontal" className="h-full">
+                        <ResizablePanel
+                          ref={sidebarPanelRef}
+                          defaultSize={sidebarDefaultSize}
+                          minSize={10}
+                          maxSize={50}
+                          className="overflow-hidden flex flex-col"
+                        >
+                          <SidebarSchemaTreePanel />
+                        </ResizablePanel>
+                        <ResizableHandle />
+                        <ResizablePanel defaultSize={100 - sidebarDefaultSize} minSize={40}>
+                          <SidebarSchemaEditorPanel />
+                        </ResizablePanel>
+                      </ResizablePanelGroup>
+                    </SchemaProvider>
+                  ) : (
                   <ResizablePanelGroup direction="horizontal" className="h-full">
                     {/* Sidebar (collapsible & resizable) */}
-                    {sidebarView && sidebarView !== 'schema' && (
+                    {sidebarView && (
                       <>
                         <ResizablePanel
                           ref={sidebarPanelRef}
@@ -788,23 +812,20 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                     {/* Main panels area */}
                     <ResizablePanel
                       defaultSize={
-                        sidebarView && sidebarView !== 'schema' ? 100 - sidebarDefaultSize : 100
+                        sidebarView ? 100 - sidebarDefaultSize : 100
                       }
                       minSize={40}
                     >
-                      {sidebarView === 'schema' ? (
-                        <SidebarSchema />
-                      ) : (
-                        editorOpen && (
-                          <EditorArea
-                            backendReady={backendReady}
-                            analysis={analysis}
-                            onRequestOpenLineage={() => setLineageWorkspaceOpen(true)}
-                          />
-                        )
+                      {editorOpen && (
+                        <EditorArea
+                          backendReady={backendReady}
+                          analysis={analysis}
+                          onRequestOpenLineage={() => setLineageWorkspaceOpen(true)}
+                        />
                       )}
                     </ResizablePanel>
                   </ResizablePanelGroup>
+                  )}
                 </div>
 
                 <Sheet open={lineageWorkspaceOpen} onOpenChange={setLineageWorkspaceOpen}>
