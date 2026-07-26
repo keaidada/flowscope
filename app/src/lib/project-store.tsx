@@ -194,7 +194,7 @@ const loadProjectsFromStorage = (): Project[] => {
         };
         console.log('[init] loadProject:', project.id.slice(0,8), 'activeFileId:', project.activeFileId, 'openFileIds:', project.openFileIds?.length);
         return project;
-      }));
+      });
     }
   } catch (error) {
     console.error('Failed to load projects from storage:', error);
