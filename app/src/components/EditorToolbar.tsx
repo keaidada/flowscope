@@ -122,7 +122,7 @@ export function EditorToolbar({
               {activeFile?.isProcedure && (
                 <span className={cn(
                   'text-[9px] px-1 py-px rounded shrink-0 font-medium',
-                  activeFile.transformedContent
+                  activeFile.transformedContent !== null
                     ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                     : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                 )}>
@@ -222,7 +222,7 @@ export function EditorToolbar({
                   {f.isProcedure && (
                     <span className={cn(
                       'text-[9px] px-1 py-px rounded shrink-0 font-medium',
-                      f.transformedContent
+                      f.transformedContent !== null
                         ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                         : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                     )}>
