@@ -1690,7 +1690,49 @@ fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
             continue;
         }
 
+        // Rewrite Hive INSERT OVERWRITE TABLE ... PARTITION(...) to standard INSERT INTO
+        // sqlparser-rs doesn't support the Hive-specific INSERT OVERWRITE syntax.
+        if upper.starts_with("INSERT OVERWRITE TABLE") {
+            let mut sanitized = line.to_string();
+            // Replace OVERWRITE with INTO
+            sanitized = sanitized.replace("INSERT OVERWRITE TABLE", "INSERT INTO");
+            // Strip PARTITION(col='val') clause
+            if let Some(idx) = sanitized.find("PARTITION (") {
+                sanitized = format!("{}-- hive partition{}", &sanitized[..idx], &sanitized[idx + "PARTITION (".len()..]);
+            } else if let Some(idx) = sanitized.find("PARTITION(") {
+                sanitized = format!("{}-- hive partition{}", &sanitized[..idx], &sanitized[idx + "PARTITION(".len()..]);
+            }
+            out_lines.push(sanitized);
+            changed = true;
+            continue;
+        }
+
         out_lines.push(line.to_string());
+    }
+
+    // Post-process: handle Hive WITH...INSERT pattern.
+    // sqlparser-rs doesn't support WITH clause before INSERT.
+    // Strategy: comment out the WITH and CTE definitions, keep only INSERT blocks.
+    let result = out_lines.join("\n");
+    let upper = result.to_uppercase();
+
+    if (upper.starts_with("WITH ") || upper.contains("\nWITH "))
+        && upper.contains("INSERT ")
+    {
+        let mut new_lines: Vec<String> = Vec::new();
+        for line in result.lines() {
+            let t = line.trim().to_uppercase();
+            if t.starts_with("INSERT ") {
+                new_lines.push(line.to_string());
+            } else if !t.is_empty() && !t.starts_with("--") {
+                new_lines.push(format!("-- {}", line));
+            } else {
+                new_lines.push(line.to_string());
+            }
+        }
+        if new_lines.iter().any(|l| l.trim().to_uppercase().starts_with("INSERT ")) {
+            return Some(new_lines.join("\n"));
+        }
     }
 
     if changed {
