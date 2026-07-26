@@ -1690,17 +1690,32 @@ fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
             continue;
         }
 
-        // Rewrite Hive INSERT OVERWRITE TABLE ... PARTITION(...) to standard INSERT INTO
-        // sqlparser-rs doesn't support the Hive-specific INSERT OVERWRITE syntax.
-        if upper.starts_with("INSERT OVERWRITE TABLE") {
+        // Rewrite Hive INSERT INTO TABLE / INSERT OVERWRITE TABLE to standard INSERT INTO
+        // sqlparser-rs doesn't understand the Hive-specific 'TABLE' keyword.
+        if upper.starts_with("INSERT OVERWRITE TABLE")
+            || upper.starts_with("INSERT INTO TABLE")
+            || upper.starts_with("INSERT TABLE")
+        {
             let mut sanitized = line.to_string();
-            // Replace OVERWRITE with INTO
-            sanitized = sanitized.replace("INSERT OVERWRITE TABLE", "INSERT INTO");
+            // Replace TABLE keyword (case-insensitive combinations)
+            for (from, to) in &[
+                ("INSERT OVERWRITE TABLE", "INSERT INTO"),
+                ("insert overwrite table", "INSERT INTO"),
+                ("Insert Overwrite Table", "INSERT INTO"),
+                ("INSERT INTO TABLE", "INSERT INTO"),
+                ("insert into table", "INSERT INTO"),
+                ("Insert Into Table", "INSERT INTO"),
+                ("INSERT TABLE", "INSERT INTO"),
+                ("insert table", "INSERT INTO"),
+                ("Insert Table", "INSERT INTO"),
+            ] {
+                sanitized = sanitized.replace(from, to);
+            }
             // Strip PARTITION(col='val') clause
-            if let Some(idx) = sanitized.find("PARTITION (") {
-                sanitized = format!("{}-- hive partition{}", &sanitized[..idx], &sanitized[idx + "PARTITION (".len()..]);
-            } else if let Some(idx) = sanitized.find("PARTITION(") {
-                sanitized = format!("{}-- hive partition{}", &sanitized[..idx], &sanitized[idx + "PARTITION(".len()..]);
+            if let Some(pi) = sanitized.to_uppercase().find("PARTITION (") {
+                sanitized = format!("{}-- hive partition{}", &sanitized[..pi], &sanitized[pi + "PARTITION (".len()..]);
+            } else if let Some(pi) = sanitized.to_uppercase().find("PARTITION(") {
+                sanitized = format!("{}-- hive partition{}", &sanitized[..pi], &sanitized[pi + "PARTITION(".len()..]);
             }
             out_lines.push(sanitized);
             changed = true;
@@ -1710,33 +1725,53 @@ fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
         out_lines.push(line.to_string());
     }
 
-    // Post-process: handle Hive WITH...INSERT pattern.
-    // sqlparser-rs doesn't support WITH clause before INSERT.
-    // Strategy: comment out the WITH and CTE definitions, keep only INSERT blocks.
-    let result = out_lines.join("\n");
-    let upper = result.to_uppercase();
-
-    if (upper.starts_with("WITH ") || upper.contains("\nWITH "))
-        && upper.contains("INSERT ")
-    {
-        let mut new_lines: Vec<String> = Vec::new();
-        for line in result.lines() {
-            let t = line.trim().to_uppercase();
-            if t.starts_with("INSERT ") {
-                new_lines.push(line.to_string());
-            } else if !t.is_empty() && !t.starts_with("--") {
-                new_lines.push(format!("-- {}", line));
-            } else {
-                new_lines.push(line.to_string());
+    // Post-process: add semicolons between adjacent INSERT blocks
+    let mut result_lines: Vec<String> = Vec::new();
+    let mut prev_was_insert = false;
+    for line in out_lines.iter() {
+        let t = line.trim().to_uppercase();
+        if t.starts_with("INSERT ") {
+            if prev_was_insert {
+                result_lines.push(String::from(";"));
             }
+            prev_was_insert = true;
+        } else if !t.is_empty() {
+            prev_was_insert = false;
         }
-        if new_lines.iter().any(|l| l.trim().to_uppercase().starts_with("INSERT ")) {
-            return Some(new_lines.join("\n"));
+        result_lines.push(line.clone());
+    }
+    let result = result_lines.join("\n");
+    
+    // Post-process: handle Hive WITH...INSERT pattern.
+    let result_upper = result.to_uppercase();
+    
+    if let Some(with_start) = result_upper.find("WITH ") {
+        if let Some(insert_start) = result_upper.find("INSERT ") {
+            if with_start < insert_start {
+                // Comment out each line in the WITH clause
+                let before = &result[..with_start];
+                let cte_block = &result[with_start..insert_start];
+                let after = &result[insert_start..];
+                
+                let mut out = String::new();
+                out.push_str(before);
+                for line in cte_block.lines() {
+                    if line.trim().is_empty() {
+                        out.push_str(line);
+                    } else {
+                        out.push_str("-- ");
+                        out.push_str(line);
+                    }
+                    out.push('\n');
+                }
+                out.push_str(after);
+                return Some(out);
+            }
         }
     }
 
-    if changed {
-        Some(out_lines.join("\n"))
+    if changed || result != out_lines.join("\n") {
+        Some(result)
     } else {
         None
     }

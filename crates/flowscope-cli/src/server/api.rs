@@ -90,6 +90,8 @@ pub(crate) struct AnalyzeRequest {
     sql: String,
     #[serde(default)]
     files: Option<Vec<flowscope_core::FileSource>>,
+    #[serde(default)]
+    dialect: Option<String>,
     #[serde(default, alias = "sourceName")]
     source_name: Option<String>,
     #[serde(default)]
@@ -229,10 +231,30 @@ pub(crate) async fn analyze(
     #[cfg(feature = "templating")]
     let template_config = resolve_template_config(payload.template_mode.as_deref(), state.as_ref());
 
+    let dialect = payload.dialect.as_deref()
+        .and_then(|d| match d.to_lowercase().as_str() {
+            "generic" => Some(flowscope_core::Dialect::Generic),
+            "hive" => Some(flowscope_core::Dialect::Hive),
+            "bigquery" => Some(flowscope_core::Dialect::Bigquery),
+            "mysql" => Some(flowscope_core::Dialect::Mysql),
+            "postgresql" | "postgres" => Some(flowscope_core::Dialect::Postgres),
+            "sqlite" => Some(flowscope_core::Dialect::Sqlite),
+            "snowflake" => Some(flowscope_core::Dialect::Snowflake),
+            "mssql" | "sqlserver" => Some(flowscope_core::Dialect::Mssql),
+            "redshift" => Some(flowscope_core::Dialect::Redshift),
+            "ansi" => Some(flowscope_core::Dialect::Ansi),
+            "clickhouse" => Some(flowscope_core::Dialect::Clickhouse),
+            "databricks" => Some(flowscope_core::Dialect::Databricks),
+            "duckdb" => Some(flowscope_core::Dialect::Duckdb),
+            "oracle" => Some(flowscope_core::Dialect::Oracle),
+            _ => None,
+        })
+        .unwrap_or(state.config.dialect);
+    
     let request = flowscope_core::AnalyzeRequest {
         sql: payload.sql,
         files: payload.files,
-        dialect: state.config.dialect,
+        dialect,
         source_name: payload.source_name.clone(),
         options,
         schema,
