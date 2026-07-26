@@ -82,6 +82,67 @@ git clone https://github.com/keaidada/flowscope.git
 cd flowscope
 ```
 
+## 数据库初始化
+
+FlowScope 使用 SQLite，**首次启动自动创建**（`open_db()` → `migrate()` → `create_tables()`），无需手动初始化。
+
+### 自动初始化流程
+
+```
+flowscope --serve 启动
+  └─ open_db("./app/flowscope.db")
+       ├─ PRAGMA journal_mode = WAL
+       ├─ PRAGMA foreign_keys = ON
+       ├─ migrate()          ← 按 PRAGMA user_version 逐版本迁移 (v0→v1→...→v5)
+       └─ create_tables()    ← CREATE TABLE IF NOT EXISTS (14 张表)
+```
+
+### 手动初始化（可选）
+
+如果需要在启动前预建数据库（如 CI 环境或容器构建时）：
+
+```bash
+# 创建 app 目录（数据库默认路径 ./app/flowscope.db）
+mkdir -p ./app
+
+# 启动一次即自动建库，然后 Ctrl+C 退出
+./target/release/flowscope --serve --port 3000 &
+sleep 2 && kill %1
+
+# 验证
+sqlite3 ./app/flowscope.db ".tables"
+sqlite3 ./app/flowscope.db "SELECT name FROM pragma_table_info('projects');"
+```
+
+### 数据库迁移版本
+
+| 版本 | 说明 |
+|------|------|
+| v0 → v1 | 时间字段从 INTEGER (Unix ms) → TEXT (RFC3339) |
+| v1 → v2 | 添加 `file_name`, `dir_path` 列 |
+| v2 → v3 | 添加 `script_name`, `dir_path` 到 `table_level_edges` |
+| v3 → v4 | 添加 `project_directories` 表 + `dir_id` 列 |
+| v4 → v5 | 添加 `lineage_anomalies` 表 + 软删除支持 |
+
+### 数据库配置
+
+| PRAGMA | 值 | 说明 |
+|--------|-----|------|
+| `journal_mode` | WAL | Write-Ahead Logging，并发读写 |
+| `synchronous` | NORMAL | 平衡性能与安全 |
+| `foreign_keys` | ON | 外键约束（`column_metadata` → `table_metadata` CASCADE） |
+| `cache_size` | -200000 | 200MB 内存缓存 |
+| `temp_store` | MEMORY | 临时表存内存 |
+| `wal_autocheckpoint` | 1000 | 每 1000 页自动 checkpoint |
+
+### 自定义数据库路径
+
+```bash
+# CLI 启动时指定（代码里暂未暴露 --db-path 参数，默认 ./app/flowscope.db）
+# 可通过环境变量或修改代码实现：
+FLOWSCOPE_DB=./data/custom.db ./target/release/flowscope --serve --port 3000
+```
+
 ## 部署方式
 
 ### 方式一：开发模式（前后端分离）
@@ -146,23 +207,42 @@ mkdir -p "$LOG_DIR"
 echo "=== FlowScope 一键部署 ==="
 
 # Step 1: Precheck
-echo "[1/5] 环境检查..."
+echo "[1/6] 环境检查..."
 bash scripts/precheck.sh
 
 # Step 2: 安装依赖
-echo "[2/5] 安装依赖..."
+echo "[2/6] 安装依赖..."
 yarn install --frozen-lockfile
 
 # Step 3: 构建 WASM
-echo "[3/5] 构建 WASM..."
+echo "[3/6] 构建 WASM..."
 just build-wasm-dev
 
 # Step 4: 构建 CLI（含嵌入式前端）
-echo "[4/5] 构建 CLI..."
+echo "[4/6] 构建 CLI..."
 just build-cli-serve
 
-# Step 5: 启动服务
-echo "[5/5] 启动服务..."
+# Step 5: 初始化数据库（首次部署自动建库 + 迁移）
+echo "[5/6] 初始化数据库..."
+mkdir -p "$WATCH_DIR"
+# 启动一次让 open_db() 自动建库，验证后停止
+./target/release/flowscope --serve --port "$PORT" &
+TMP_PID=$!
+sleep 2
+if curl -sf "http://127.0.0.1:$PORT/api/health" | grep -q "ok"; then
+    echo "  数据库初始化成功"
+    TABLES=$(sqlite3 "$WATCH_DIR/flowscope.db" "SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "?")
+    echo "  表数量: $TABLES"
+    kill $TMP_PID 2>/dev/null
+    wait $TMP_PID 2>/dev/null
+else
+    echo "  ❌ 数据库初始化失败"
+    kill $TMP_PID 2>/dev/null
+    exit 1
+fi
+
+# Step 6: 启动服务
+echo "[6/6] 启动服务..."
 if [ -f "$PID_FILE" ] && kill -0 "$(cat $PID_FILE)" 2>/dev/null; then
     echo "  停止旧进程..."
     kill "$(cat $PID_FILE)"

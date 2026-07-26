@@ -56,9 +56,18 @@ DB="./app/flowscope.db"
 if [ -f "$DB" ]; then
     SIZE=$(du -h "$DB" | cut -f1)
     TABLES=$(sqlite3 "$DB" "SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "?")
-    echo "  ✅ $DB ($SIZE, $TABLES 张表)"
+    VER=$(sqlite3 "$DB" "PRAGMA user_version;" 2>/dev/null || echo "?")
+    echo "  ✅ $DB ($SIZE, $TABLES 张表, schema v$VER)"
+    # 验证关键表存在
+    for tbl in projects project_files lineage_nodes lineage_edges table_level_edges; do
+        COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM $tbl WHERE status=1;" 2>/dev/null || echo "ERR")
+        if [ "$COUNT" = "ERR" ]; then
+            echo "  ❌ 表 $tbl 不存在或查询失败"
+            FAIL=$((FAIL + 1))
+        fi
+    done
 else
-    echo "  ℹ️  数据库不存在（首次运行会自动创建）"
+    echo "  ℹ️  数据库不存在（首次启动会自动创建: open_db → migrate → create_tables）"
 fi
 
 echo ""
