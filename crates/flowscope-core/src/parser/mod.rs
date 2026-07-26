@@ -1743,30 +1743,71 @@ fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
     let result = result_lines.join("\n");
     
     // Post-process: handle Hive WITH...INSERT pattern.
+    // Hive allows WITH at top level before multiple INSERTs, which sqlparser-rs
+    // doesn't support. Convert: WITH cte (...) INSERT ... SELECT ... INSERT ... SELECT ...
+    // to: INSERT ... WITH cte (...) SELECT ... \n INSERT ... WITH cte (...) SELECT ...
     let result_upper = result.to_uppercase();
     
     if let Some(with_start) = result_upper.find("WITH ") {
-        if let Some(insert_start) = result_upper.find("INSERT ") {
-            if with_start < insert_start {
-                // Comment out each line in the WITH clause
-                let before = &result[..with_start];
-                let cte_block = &result[with_start..insert_start];
-                let after = &result[insert_start..];
-                
-                let mut out = String::new();
-                out.push_str(before);
-                for line in cte_block.lines() {
-                    if line.trim().is_empty() {
-                        out.push_str(line);
-                    } else {
-                        out.push_str("-- ");
-                        out.push_str(line);
-                    }
-                    out.push('\n');
+        if let Some(first_insert) = result_upper[with_start..].find("INSERT ") {
+            let first_insert = with_start + first_insert;
+            
+            // Extract the WITH clause text (WITH ... up to but not including the first INSERT)
+            let with_clause = result[with_start..first_insert].trim().to_string();
+            
+            // Find all INSERT positions in the text after the WITH clause
+            let rest = &result[first_insert..];
+            let rest_upper = rest.to_uppercase();
+            let mut insert_positions: Vec<usize> = vec![0]; // First INSERT is at position 0 in `rest`
+            let mut pos = 1;
+            while let Some(next) = rest_upper[pos..].find("INSERT ") {
+                pos += next;
+                // Only treat as separate INSERT if it's preceded by whitespace/paren/line end
+                if pos > 0 {
+                    insert_positions.push(pos);
                 }
-                out.push_str(after);
-                return Some(out);
+                pos += 1;
             }
+            
+            // For each INSERT block, inject the WITH clause after the INSERT INTO ... clause
+            // but before the SELECT/DATA statement. The WITH goes right after column list.
+            let mut out = String::new();
+            for i in 0..insert_positions.len() {
+                let block_start = insert_positions[i];
+                let block_end = if i + 1 < insert_positions.len() {
+                    insert_positions[i + 1]
+                } else {
+                    rest.len()
+                };
+                let block = &rest[block_start..block_end];
+                
+                if i > 0 {
+                    out.push_str("\n;");
+                }
+                
+                // Find where to insert WITH: after the INSERT INTO ... clause
+                // Look for SELECT keyword to determine insertion point
+                let block_upper = block.to_uppercase();
+                if let Some(select_pos) = block_upper.find("\nSELECT ") {
+                    // Insert WITH clause before SELECT
+                    out.push_str(&block[..select_pos]);
+                    out.push('\n');
+                    out.push_str(&with_clause);
+                    out.push_str(&block[select_pos..]);
+                } else if let Some(select_pos) = block_upper.find("SELECT ") {
+                    // SELECT is on the same line or first line after column list
+                    // Insert the WITH clause between column list and SELECT
+                    let insert_point = select_pos;
+                    out.push_str(&block[..insert_point]);
+                    out.push('\n');
+                    out.push_str(&with_clause);
+                    out.push('\n');
+                    out.push_str(&block[insert_point..]);
+                } else {
+                    out.push_str(block);
+                }
+            }
+            return Some(out);
         }
     }
 

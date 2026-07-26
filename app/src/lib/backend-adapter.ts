@@ -85,6 +85,7 @@ export class RestBackendAdapter implements BackendAdapter {
           isProcedure: f.isProcedure || false,
           transformedContent: f.transformedContent || null,
         })),
+        dialect: payload.dialect,
         hide_ctes: payload.hideCTEs,
         enable_column_lineage: payload.enableColumnLineage,
         enable_linting: payload.enableLinting ?? false,
