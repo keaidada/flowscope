@@ -551,6 +551,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
               const validActiveFileId =
                 p.activeFileId && loaded.files.some((file) => file.id === p.activeFileId)
                   ? p.activeFileId
+                  : p.activeFileId === null
+                  ? null
                   : loaded.files[0]?.id || null;
               const validSelectedFileIds = (p.selectedFileIds || []).filter((fileId) =>
                 loaded.files.some((file) => file.id === fileId)
