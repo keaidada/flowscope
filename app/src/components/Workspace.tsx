@@ -594,22 +594,24 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
 
         {/* Header Actions */}
         <div className="flex items-center gap-1">
-          <LayoutModeToggle
-            sidebarOpen={sidebarView !== null}
-            editorOpen={editorOpen}
-            onToggleSidebar={() => setSidebarView(sidebarView ? null : 'files')}
-            onToggleEditor={() => setEditorOpen(!editorOpen)}
-            onToggleAll={() => {
-              const allOpen = sidebarView !== null && editorOpen;
-              if (allOpen) {
-                setSidebarView(null);
-                setEditorOpen(false);
-              } else {
-                setSidebarView('files');
-                setEditorOpen(true);
-              }
-            }}
-          />
+          {!globalLineageOpen && (
+            <LayoutModeToggle
+              sidebarOpen={sidebarView !== null}
+              editorOpen={editorOpen}
+              onToggleSidebar={() => setSidebarView(sidebarView ? null : 'files')}
+              onToggleEditor={() => setEditorOpen(!editorOpen)}
+              onToggleAll={() => {
+                const allOpen = sidebarView !== null && editorOpen;
+                if (allOpen) {
+                  setSidebarView(null);
+                  setEditorOpen(false);
+                } else {
+                  setSidebarView('files');
+                  setEditorOpen(true);
+                }
+              }}
+            />
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-8 w-8">
