@@ -187,7 +187,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
           const isProcedure = upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC');
           batchPFs[j].isProcedure = isProcedure;
           batchPFs[j].transformedContent = null;
-          updates.push({ fileId: batchPFs[j].id, content: contents[j], isProcedure });
+          updates.push({ fileId: batchPFs[j].id, content: contents[j], isProcedure, transformedContent: null });
         }
 
         // Batch-update React state

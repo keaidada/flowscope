@@ -35,7 +35,7 @@ export async function loadProjectFiles(projectId: string): Promise<ProjectFile[]
     size: f.size,
     dialect: (f as any).dialect || '',
     isProcedure: (f as any).is_procedure ? true : false,
-    transformedContent: (f as any).transformed_content || '',
+    transformedContent: (f as any).transformed_content || null,
   }));
 }
 

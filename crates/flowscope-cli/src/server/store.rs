@@ -1006,12 +1006,13 @@ pub fn save_project_files_batch(
     if is_first {
         tx.execute("DELETE FROM project_files WHERE project_id = ?1", params![project_id])?;
     }
+    let now = chrono::Local::now().to_rfc3339();
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
+            "INSERT OR REPLACE INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?12), COALESCE(NULLIF(?11, ''), ?12))"
         )?;
         for f in files {
-            stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, f.dialect, f.is_procedure, f.transformed_content, f.created_at, f.updated_at])?;
+            stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, f.dialect, f.is_procedure, f.transformed_content, f.created_at, f.updated_at, now])?;
         }
     }
     tx.commit()?;

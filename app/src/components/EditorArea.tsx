@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from 'react';
-import { Loader2, AlertCircle, FileX, FileCode } from 'lucide-react';
+import { Loader2, AlertCircle, FileX, FileCode, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { SqlView, useLineageState } from '@pondpilot/flowscope-react';
@@ -448,10 +448,17 @@ export function EditorArea({
         <div
           role="alert"
           aria-live="assertive"
-          className="flex items-start gap-2.5 px-4 py-3 text-sm border-b bg-destructive/10 border-destructive/30 border-l-4 border-l-destructive text-destructive"
+          className="flex items-start gap-2.5 px-4 py-3 text-sm border-b bg-destructive/10 border-destructive/30 border-l-4 border-l-destructive text-destructive max-h-[40vh] overflow-y-auto"
         >
           <AlertCircle className="h-5 w-5 mt-0.5 shrink-0" />
           <div className="flex-1 whitespace-pre-wrap font-medium">{error}</div>
+          <button
+            className="shrink-0 p-1 rounded hover:bg-destructive/20 transition-colors"
+            onClick={() => analysis.setError(null)}
+            aria-label={t('common.dismiss')}
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
 

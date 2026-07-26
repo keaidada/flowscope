@@ -2,6 +2,7 @@
   "common": {
     "run": "Run",
     "close": "Close",
+    "dismiss": "Dismiss",
     "cancel": "Cancel",
     "save": "Save",
     "delete": "Delete",

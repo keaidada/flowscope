@@ -2,6 +2,7 @@
   "common": {
     "run": "运行",
     "close": "关闭",
+    "dismiss": "关闭提示",
     "cancel": "取消",
     "save": "保存",
     "delete": "删除",
