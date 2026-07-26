@@ -445,8 +445,12 @@ export function EditorArea({
       />
 
       {error && (
-        <div className="flex items-start gap-2.5 px-4 py-3 text-sm border-b" style={{ backgroundColor: '#fef2f2', borderColor: '#f87171', borderLeft: '4px solid #ef4444', color: '#991b1b' }}>
-          <AlertCircle className="h-5 w-5 mt-0.5 shrink-0" style={{ color: '#ef4444' }} />
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex items-start gap-2.5 px-4 py-3 text-sm border-b bg-destructive/10 border-destructive/30 border-l-4 border-l-destructive text-destructive"
+        >
+          <AlertCircle className="h-5 w-5 mt-0.5 shrink-0" />
           <div className="flex-1 whitespace-pre-wrap font-medium">{error}</div>
         </div>
       )}

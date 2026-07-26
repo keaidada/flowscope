@@ -83,7 +83,7 @@ export function ProcedureRepairDialog({
               </Button>
             </div>
             <textarea
-              className="flex-1 w-full resize-none rounded border p-2 font-mono text-xs"
+              className="flex-1 w-full resize-none rounded border bg-background p-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               value={transformedContent}
               onChange={(e) => setTransformedContent(e.target.value)}
               placeholder="未提取到 DML 语句"

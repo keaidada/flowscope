@@ -26,6 +26,7 @@ import { isValidDialect, DIALECT_OPTIONS } from '@/lib/project-store';
 import type { TemplateMode } from '@/types';
 import { isValidTemplateMode, TEMPLATE_MODE_OPTIONS } from '@/types';
 import { cn } from '@/lib/utils';
+import { SpBadge } from './SpBadge';
 
 export type SqlViewMode = 'template' | 'resolved';
 
@@ -120,14 +121,7 @@ export function EditorToolbar({
             <DropdownMenuTrigger className="flex items-center gap-1.5 h-7 px-2 text-sm rounded hover:bg-muted/50 min-w-0 max-w-[320px]">
               <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
               {activeFile?.isProcedure && (
-                <span className={cn(
-                  'text-[9px] px-1 py-px rounded shrink-0 font-medium',
-                  activeFile.transformedContent !== null
-                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                    : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                )}>
-                  SP
-                </span>
+                <SpBadge hasTransformedContent={activeFile.transformedContent !== null} />
               )}
               <span className="truncate font-medium text-foreground text-xs">
                 {activeFile?.name || '—'}
@@ -220,14 +214,7 @@ export function EditorToolbar({
                     )}
                   </span>
                   {f.isProcedure && (
-                    <span className={cn(
-                      'text-[9px] px-1 py-px rounded shrink-0 font-medium',
-                      f.transformedContent !== null
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                        : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                    )}>
-                      SP
-                    </span>
+                    <SpBadge hasTransformedContent={f.transformedContent !== null} />
                   )}
                   <span className="truncate flex-1">{f.name}</span>
                   {onCloseTab && (
@@ -337,7 +324,7 @@ export function EditorToolbar({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={`h-7 w-7 ${lineWrapping ? 'bg-muted' : ''}`}
+                  className={cn('h-7 w-7', lineWrapping && 'bg-muted')}
                   onClick={() => onLineWrappingChange(!lineWrapping)}
                 >
                   <WrapText className="h-3.5 w-3.5" />
@@ -432,7 +419,7 @@ export function EditorToolbar({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={`h-7 w-7 ${showTransformed ? 'bg-amber-500/10 text-amber-600' : ''}`}
+                  className={cn('h-7 w-7', showTransformed && 'bg-amber-500/10 text-amber-600')}
                   onClick={onToggleTransformed}
                   disabled={!hasTransformedContent}
                 >

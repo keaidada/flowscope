@@ -16,6 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { SpBadge } from './SpBadge';
 import type { ProjectFile } from '@/lib/project-store';
 
 /** Max children to render at once in a folder before showing "load more" */
@@ -648,19 +649,12 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
         />
       )}
       {file.isProcedure && (
-        <span className={cn(
-          'text-[9px] px-1 py-px rounded shrink-0 font-medium',
-          file.transformedContent !== null
-            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-            : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-        )}>
-          SP
-        </span>
+        <SpBadge hasTransformedContent={file.transformedContent !== null} />
       )}
-      <span className={cn('whitespace-nowrap text-sm', isActive && 'font-semibold italic')}>
+      <span className={cn('whitespace-nowrap text-sm', isActive && 'font-semibold text-primary')}>
         {file.name}
       </span>
-      <span className="text-[10px] text-muted-foreground/60 shrink-0 tabular-nums">
+      <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
         {formatFileSize(file.size ?? file.content.length)}
       </span>
       {/* Hide rename/delete actions in read-only mode */}
