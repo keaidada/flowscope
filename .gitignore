@@ -81,3 +81,4 @@ flowscope.db
 .gstack/
 .dbg/
 debug-export-crash.md
+app/flowscope.db.bak

@@ -537,9 +537,9 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 cache_key        TEXT    NOT NULL UNIQUE,
                 result_json      TEXT    NOT NULL,
                 size_bytes       INTEGER NOT NULL,
+                last_accessed_at TEXT    NOT NULL DEFAULT '',
                 created_at       TEXT    NOT NULL DEFAULT '',
                 updated_at       TEXT    NOT NULL DEFAULT '',
-                last_accessed_at TEXT    NOT NULL DEFAULT '',
                 status           INTEGER NOT NULL DEFAULT 1
             );",
         "project_file_results" => "
@@ -681,7 +681,8 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 selected_file_ids TEXT    NOT NULL DEFAULT '[]',
                 active_file_id    TEXT,
                 created_at        TEXT    NOT NULL DEFAULT '',
-                updated_at        TEXT    NOT NULL DEFAULT ''
+                updated_at        TEXT    NOT NULL DEFAULT '',
+                status            INTEGER NOT NULL DEFAULT 1
             );",
         "view_states" => "
             CREATE TABLE view_states (
@@ -689,7 +690,8 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 project_id  TEXT    NOT NULL UNIQUE,
                 state_json  TEXT    NOT NULL,
                 created_at  TEXT    NOT NULL DEFAULT '',
-                updated_at  TEXT    NOT NULL DEFAULT ''
+                updated_at  TEXT    NOT NULL DEFAULT '',
+                status      INTEGER NOT NULL DEFAULT 1
             );",
         "table_level_edges" => "
             CREATE TABLE table_level_edges (
@@ -701,6 +703,8 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 script_name TEXT    NOT NULL DEFAULT '',
                 dir_path    TEXT    NOT NULL DEFAULT '',
                 created_at  TEXT    NOT NULL DEFAULT '',
+                updated_at  TEXT    NOT NULL DEFAULT '',
+                status      INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, from_table, to_table, script)
             );",
         _ => panic!("create_table_sql_for: unknown table '{table}'"),
@@ -756,13 +760,13 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             content             TEXT    NOT NULL DEFAULT '',
             language            TEXT    NOT NULL DEFAULT 'sql',
             size                INTEGER NOT NULL DEFAULT 0,
+            dir_id              TEXT    NOT NULL DEFAULT '',
             dialect             TEXT    NOT NULL DEFAULT '',
             is_procedure        INTEGER NOT NULL DEFAULT 0,
             transformed_content TEXT    NOT NULL DEFAULT '',
             created_at          TEXT    NOT NULL DEFAULT '',
             updated_at          TEXT    NOT NULL DEFAULT '',
             status              INTEGER NOT NULL DEFAULT 1,
-            dir_id              TEXT    NOT NULL DEFAULT '',
             UNIQUE(project_id, path)
         );
 
@@ -775,9 +779,9 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             level        INTEGER NOT NULL DEFAULT 0,
             file_count   INTEGER NOT NULL DEFAULT 0,
             child_count  INTEGER NOT NULL DEFAULT 0,
-            status       INTEGER NOT NULL DEFAULT 1,
             created_at   TEXT    NOT NULL DEFAULT '',
             updated_at   TEXT    NOT NULL DEFAULT '',
+            status       INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (project_id, id)
         );
 
@@ -799,9 +803,9 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             cache_key        TEXT    NOT NULL UNIQUE,
             result_json      TEXT    NOT NULL,
             size_bytes       INTEGER NOT NULL,
+            last_accessed_at TEXT    NOT NULL DEFAULT '',
             created_at       TEXT    NOT NULL DEFAULT '',
             updated_at       TEXT    NOT NULL DEFAULT '',
-            last_accessed_at TEXT    NOT NULL DEFAULT '',
             status           INTEGER NOT NULL DEFAULT 1
         );
 
