@@ -232,17 +232,19 @@ export function resolvedSchemaToSQL(
     return '-- No resolved schema available';
   }
 
-  // Only show imported (user-provided) non-temporary tables
+  // Show imported (user-provided) and implied (inferred from SQL) tables
   const matchedTables = resolvedSchema.tables.filter(
-    (t) => !t.temporary && t.origin === 'imported'
+    (t) => !t.temporary && (t.origin === 'imported' || t.origin === 'implied')
   );
 
   if (matchedTables.length === 0) {
-    return '-- No imported schema tables matched in current analysis\n-- Import schema DDL files via the Schema sidebar (left panel)';
+    return '-- No schema tables found in current analysis\n-- Import schema DDL files via the Schema sidebar (left panel)';
   }
 
+  const importedCount = matchedTables.filter((t) => t.origin === 'imported').length;
+  const impliedCount = matchedTables.filter((t) => t.origin === 'implied').length;
   const lines: string[] = [
-    `-- Matched Schema (${matchedTables.length} imported tables used in current analysis)`,
+    `-- Resolved Schema (${importedCount} imported, ${impliedCount} inferred)`,
     '',
   ];
 
