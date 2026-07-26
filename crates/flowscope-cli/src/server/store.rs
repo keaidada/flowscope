@@ -1019,7 +1019,7 @@ pub fn save_project_files_batch(
     let now = chrono::Local::now().to_rfc3339();
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?12), COALESCE(NULLIF(?11, ''), ?12))"
+            "INSERT OR REPLACE INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?12), COALESCE(NULLIF(?11, ''), ?12), 1)"
         )?;
         for f in files {
             stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, f.dialect, f.is_procedure, f.transformed_content, f.created_at, f.updated_at, now])?;
@@ -1191,8 +1191,8 @@ pub fn upsert_project_files(
     let tx = conn.unchecked_transaction()?;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at, dir_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?13), COALESCE(NULLIF(?11, ''), ?13), ?12)
+            "INSERT INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at, status, dir_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?13), COALESCE(NULLIF(?11, ''), ?13), 1, ?12)
              ON CONFLICT(project_id, path) DO UPDATE SET
              name = excluded.name,
              content = excluded.content,
@@ -1202,6 +1202,7 @@ pub fn upsert_project_files(
              is_procedure = excluded.is_procedure,
              transformed_content = excluded.transformed_content,
              updated_at = COALESCE(NULLIF(excluded.updated_at, ''), ?13),
+             status = excluded.status,
              dir_id = excluded.dir_id"
         )?;
         for f in files {
@@ -1597,7 +1598,7 @@ pub fn save_schema_files(
     tx.execute("DELETE FROM schema_files WHERE project_id = ?1", params![project_id])?;
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO schema_files (project_id, name, path, content, size, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+            "INSERT OR REPLACE INTO schema_files (project_id, name, path, content, size, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)"
         )?;
         for f in files {
             stmt.execute(params![project_id, f.name, f.path, f.content, f.size, f.created_at, f.updated_at])?;
@@ -1901,15 +1902,15 @@ pub fn save_lineage_batch(
 
     let now = chrono::Local::now().to_rfc3339();
     const CHUNK: usize = 500;
-    let row12 = "(?,?,?,?,?,?,?,?,?,?,?,?)";
+    let row13 = "(?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
-    // nodes (12 cols: +file_name, +dir_path)
+    // nodes (13 cols: +file_name, +dir_path, +status)
     for chunk in nodes.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO lineage_nodes (project_id, file_path, file_name, dir_path, node_id, node_type, label, qualified_name, statement_index, resolution_source, created_at, updated_at) VALUES {}",
-            (0..chunk.len()).map(|_| row12).collect::<Vec<_>>().join(",")
+            "INSERT OR REPLACE INTO lineage_nodes (project_id, file_path, file_name, dir_path, node_id, node_type, label, qualified_name, statement_index, resolution_source, created_at, updated_at, status) VALUES {}",
+            (0..chunk.len()).map(|_| row13).collect::<Vec<_>>().join(",")
         );
-        let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 12);
+        let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 13);
         for n in chunk {
             let (fn_, dp) = split_file_path(&n.file_path);
             p.push(Box::new(project_id.to_string()));
@@ -1924,18 +1925,19 @@ pub fn save_lineage_batch(
             p.push(Box::new(n.resolution_source.clone()));
             p.push(Box::new(now.clone()));
             p.push(Box::new(now.clone()));
+            p.push(Box::new(1));
         }
         let p_refs: Vec<&dyn ToSql> = p.iter().map(|b| b.as_ref()).collect();
         tx.execute(&sql, params_from_iter(p_refs))?;
     }
 
-    // columns (12 cols: +file_name, +dir_path)
+    // columns (13 cols: +file_name, +dir_path, +status)
     for chunk in columns.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO lineage_columns (project_id, file_path, file_name, dir_path, column_id, label, qualified_name, parent_node_id, expression, statement_index, created_at, updated_at) VALUES {}",
-            (0..chunk.len()).map(|_| row12).collect::<Vec<_>>().join(",")
+            "INSERT OR REPLACE INTO lineage_columns (project_id, file_path, file_name, dir_path, column_id, label, qualified_name, parent_node_id, expression, statement_index, created_at, updated_at, status) VALUES {}",
+            (0..chunk.len()).map(|_| row13).collect::<Vec<_>>().join(",")
         );
-        let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 12);
+        let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 13);
         for c in chunk {
             let (fn_, dp) = split_file_path(&c.file_path);
             p.push(Box::new(project_id.to_string()));
@@ -1950,18 +1952,19 @@ pub fn save_lineage_batch(
             p.push(Box::new(c.statement_index));
             p.push(Box::new(now.clone()));
             p.push(Box::new(now.clone()));
+            p.push(Box::new(1));
         }
         let p_refs: Vec<&dyn ToSql> = p.iter().map(|b| b.as_ref()).collect();
         tx.execute(&sql, params_from_iter(p_refs))?;
     }
 
-    // edges (12 cols: +file_name, +dir_path)
+    // edges (13 cols: +file_name, +dir_path, +status)
     for chunk in edges.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO lineage_edges (project_id, file_path, file_name, dir_path, edge_id, from_id, to_id, edge_type, expression, statement_index, created_at, updated_at) VALUES {}",
-            (0..chunk.len()).map(|_| row12).collect::<Vec<_>>().join(",")
+            "INSERT OR REPLACE INTO lineage_edges (project_id, file_path, file_name, dir_path, edge_id, from_id, to_id, edge_type, expression, statement_index, created_at, updated_at, status) VALUES {}",
+            (0..chunk.len()).map(|_| row13).collect::<Vec<_>>().join(",")
         );
-        let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 12);
+        let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 13);
         for e in chunk {
             let (fn_, dp) = split_file_path(&e.file_path);
             p.push(Box::new(project_id.to_string()));
@@ -1976,6 +1979,7 @@ pub fn save_lineage_batch(
             p.push(Box::new(e.statement_index));
             p.push(Box::new(now.clone()));
             p.push(Box::new(now.clone()));
+            p.push(Box::new(1));
         }
         let p_refs: Vec<&dyn ToSql> = p.iter().map(|b| b.as_ref()).collect();
         tx.execute(&sql, params_from_iter(p_refs))?;
