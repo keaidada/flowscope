@@ -582,7 +582,7 @@ export function ExportDialog({
     }
   }, [result, projectName, schemaInput]);
 
-  if (!result) {
+  if (!result && !activeProjectId) {
     return null;
   }
 
