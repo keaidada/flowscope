@@ -631,7 +631,16 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
           data-testid={`file-checkbox-${file.id}`}
         />
       )}
-      {hasLineage ? (
+      {file.isProcedure ? (
+        <span className={cn(
+          'text-[9px] px-1 py-px rounded shrink-0 font-medium',
+          file.transformedContent
+            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+            : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+        )}>
+          SP
+        </span>
+      ) : hasLineage ? (
         <TooltipProvider delayDuration={300}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -650,16 +659,6 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
       <span className={cn('whitespace-nowrap text-sm', isActive && 'font-semibold italic')}>
         {file.name}
       </span>
-      {file.isProcedure && (
-        <span className={cn(
-          'text-[9px] px-1 py-px rounded shrink-0 font-medium',
-          file.transformedContent
-            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-            : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-        )}>
-          SP
-        </span>
-      )}
       <span className="text-[10px] text-muted-foreground/60 shrink-0 tabular-nums">
         {formatFileSize(file.size ?? file.content.length)}
       </span>
