@@ -106,9 +106,27 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     setNewFolderName('');
   };
 
+  // Determine upload directory from active file or explicit target
+  const getUploadDir = (): string | undefined => {
+    // Priority 1: explicitly set target (from folder hover upload button)
+    if (uploadTargetDirRef.current) return uploadTargetDirRef.current;
+    // Priority 2: parent directory of the active file
+    const activeFileId = currentProject?.activeFileId;
+    if (activeFileId) {
+      const activeFile = currentProject?.files.find((f) => f.id === activeFileId);
+      if (activeFile) {
+        const lastSlash = activeFile.path.lastIndexOf('/');
+        if (lastSlash > 0) return activeFile.path.substring(0, lastSlash);
+      }
+    }
+    // Priority 3: root
+    return undefined;
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      importFiles(e.target.files, uploadTargetDirRef.current || undefined);
+      const targetDir = getUploadDir();
+      importFiles(e.target.files, targetDir);
     }
     uploadTargetDirRef.current = null;
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -119,6 +137,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       if (!e.target.files || e.target.files.length === 0) return;
 
       const allFiles = Array.from(e.target.files);
+      const targetDir = getUploadDir();
 
       setUploadProgress({
         total: allFiles.length,
@@ -157,10 +176,13 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       // Phase 2: Create file entries with empty content — instant UI display
       const projectFiles: ProjectFile[] = supportedFiles.map((file) => {
         const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+        const rawPath = relativePath || file.name;
+        // Prepend target directory if set
+        const path = targetDir ? `${targetDir}/${rawPath}` : rawPath;
         return {
           id: genId(),
           name: file.name,
-          path: relativePath || file.name,
+          path,
           content: '',
           language: getFileLanguage(file.name),
         };
