@@ -735,8 +735,6 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                     focusNodeId={globalFocusNodeId}
                     onFocusApplied={() => setGlobalFocusNodeId(undefined)}
                     loading={globalLineageLoading}
-                    projectName={currentProject?.name}
-                    activeProjectId={activeProjectId}
                   />
                 ) : globalLineageLoading ? (
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
