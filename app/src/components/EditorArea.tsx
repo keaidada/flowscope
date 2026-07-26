@@ -356,8 +356,8 @@ export function EditorArea({
 
   if (!currentProject) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5">
-        <Loader2 className="h-6 w-6 animate-spin opacity-50" />
+      <div role="status" aria-live="polite" className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5 gap-2">
+        <Loader2 className="h-8 w-8 animate-spin opacity-40" />
       </div>
     );
   }
@@ -365,10 +365,10 @@ export function EditorArea({
   // Read-only project (Server Files) with no files — show empty state instead of spinner
   if (!activeFile && isReadOnly) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5">
-        <FileX className="h-8 w-8 opacity-40 mb-2" />
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5 gap-2">
+        <FileX className="h-8 w-8 opacity-40" />
         <p className="text-sm font-medium">{t('editor.noServerFiles')}</p>
-        <p className="text-xs mt-1 opacity-70">{t('editor.noServerFilesDesc')}</p>
+        <p className="text-xs opacity-70">{t('editor.noServerFilesDesc')}</p>
       </div>
     );
   }
@@ -376,8 +376,8 @@ export function EditorArea({
   // Show loading spinner while file content is being fetched
   if (activeFile && contentLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5">
-        <Loader2 className="h-6 w-6 animate-spin opacity-50" />
+      <div role="status" aria-live="polite" className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/5 gap-2">
+        <Loader2 className="h-8 w-8 animate-spin opacity-40" />
       </div>
     );
   }
@@ -480,7 +480,7 @@ export function EditorArea({
           />
         </ErrorBoundary>
         {isReadOnly && (
-          <div className="absolute top-2 right-5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-muted/80 text-muted-foreground rounded border">
+          <div className="absolute top-2 left-2 z-10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-muted/80 text-muted-foreground rounded border">
             {t('common.readOnly')}
           </div>
         )}
