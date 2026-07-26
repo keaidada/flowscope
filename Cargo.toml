@@ -12,7 +12,7 @@ version = "1.0.0"
 authors = ["PondPilot Team"]
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/pondpilot/flowscope"
+repository = "https://github.com/keaidada/flowscope"
 
 [workspace.dependencies]
 flowscope-core = { version = "1.0.0", path = "crates/flowscope-core", default-features = false }

@@ -15,7 +15,7 @@ Thank you for your interest in contributing to FlowScope! This document provides
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/pondpilot/flowscope.git
+git clone https://github.com/keaidada/flowscope.git
 cd flowscope
 ```
 

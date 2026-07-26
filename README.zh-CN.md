@@ -1,6 +1,6 @@
 # FlowScope
 
-[![CI](https://github.com/pondpilot/flowscope/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pondpilot/flowscope/actions/workflows/ci.yml)
+[![CI](https://github.com/keaidada/flowscope/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/keaidada/flowscope/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/pondpilot/flowscope/graph/badge.svg)](https://codecov.io/gh/pondpilot/flowscope)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.82+-orange.svg)](https://www.rust-lang.org)

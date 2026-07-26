@@ -1,6 +1,6 @@
 # FlowScope Chrome 扩展版
 
-基于 [FlowScope](https://github.com/pondpilot/flowscope) 开发的 Chrome 浏览器扩展，提供隐私优先的 SQL 血缘分析能力，所有分析完全在浏览器本地运行。
+基于 [FlowScope](https://github.com/keaidada/flowscope) 开发的 Chrome 浏览器扩展，提供隐私优先的 SQL 血缘分析能力，所有分析完全在浏览器本地运行。
 
 ## 功能特性
 
