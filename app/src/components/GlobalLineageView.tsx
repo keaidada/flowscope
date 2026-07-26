@@ -7,6 +7,7 @@ import { Button } from './ui/button';
 import { GlobalLineageListView } from './GlobalLineageListView';
 import { TaskLayerMatrix } from './TaskLayerMatrix';
 import { InsightsGraphView } from './insights/InsightsGraphView';
+import { ExportDialog } from './ExportDialog';
 import { useGlobalLineageData } from '@/hooks/useGlobalLineageData';
 import { usePipelineData } from '@/hooks/usePipelineData';
 import type { LayerDef } from '@/types/pipeline-matrix';
@@ -21,6 +22,8 @@ interface GlobalLineageViewProps {
   onFocusApplied?: () => void;
   className?: string;
   loading?: boolean;
+  projectName?: string;
+  activeProjectId?: string | null;
 }
 
 export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
@@ -31,6 +34,8 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
   onFocusApplied,
   className,
   loading,
+  projectName,
+  activeProjectId,
 }) => {
   const { t } = useTranslation();
   const lineageActions = useLineageActions();
@@ -113,14 +118,23 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
             {t('globalLineageList.insightsView', '数据洞察')}
           </Button>
         </div>
-        {result && (
-          <div className="text-xs text-muted-foreground">
-            {t('globalLineageList.summary', {
-              tables: result.summary.tableCount,
-              flows: result.globalLineage?.edges?.length ?? 0,
-            })}
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {result && (
+            <div className="text-xs text-muted-foreground">
+              {t('globalLineageList.summary', {
+                tables: result.summary.tableCount,
+                flows: result.globalLineage?.edges?.length ?? 0,
+              })}
+            </div>
+          )}
+          {result && projectName && (
+            <ExportDialog
+              result={result}
+              projectName={projectName}
+              activeProjectId={activeProjectId}
+            />
+          )}
+        </div>
       </div>
 
       {/* Content */}
