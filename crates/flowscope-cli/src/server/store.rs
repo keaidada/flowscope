@@ -1255,6 +1255,15 @@ pub fn delete_project_files_by_paths(
             stmt.execute(params![project_id, path, now])?;
         }
     }
+    // Cascade soft-delete to table_level_edges (uses 'script' column, not 'file_path')
+    {
+        let mut stmt = tx.prepare(
+            "UPDATE table_level_edges SET status = 0, updated_at = ?3 WHERE project_id = ?1 AND script = ?2 AND status = 1"
+        )?;
+        for path in paths {
+            stmt.execute(params![project_id, path, now])?;
+        }
+    }
     tx.commit()?;
     rebuild_directories_for_project(conn, project_id)?;
     Ok(())
