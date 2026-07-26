@@ -350,7 +350,10 @@ impl<'a> Analyzer<'a> {
         } else if !is_known {
             Some(ResolutionSource::Unknown)
         } else {
-            None
+            // Table is "known" (produced by earlier statement or permissive mode)
+            // but not in the schema registry. Mark as Implied so the frontend
+            // recognizes it as a physical table.
+            Some(ResolutionSource::Implied)
         }
     }
 
