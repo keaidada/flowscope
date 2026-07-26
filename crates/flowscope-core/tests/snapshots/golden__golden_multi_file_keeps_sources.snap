@@ -18,7 +18,8 @@ expression: cleaned
           "id": "table_b1180f6188cee2e2",
           "type": "table",
           "label": "alpha_table",
-          "qualifiedName": "alpha_table"
+          "qualifiedName": "alpha_table",
+          "resolutionSource": "implied"
         }
       ],
       "edges": [
@@ -47,7 +48,8 @@ expression: cleaned
           "id": "table_8d1cecbc26a50f36",
           "type": "table",
           "label": "beta_table",
-          "qualifiedName": "beta_table"
+          "qualifiedName": "beta_table",
+          "resolutionSource": "implied"
         }
       ],
       "edges": [
@@ -105,7 +107,8 @@ expression: cleaned
             "statementIndex": 1,
             "nodeId": "table_8d1cecbc26a50f36"
           }
-        ]
+        ],
+        "resolutionSource": "implied"
       },
       {
         "id": "table_b1180f6188cee2e2",
@@ -119,7 +122,8 @@ expression: cleaned
             "statementIndex": 0,
             "nodeId": "table_b1180f6188cee2e2"
           }
-        ]
+        ],
+        "resolutionSource": "implied"
       }
     ],
     "edges": [

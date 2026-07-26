@@ -37,7 +37,8 @@ expression: cleaned
           "id": "table_1d63721b3610a67f",
           "type": "table",
           "label": "employees",
-          "qualifiedName": "employees"
+          "qualifiedName": "employees",
+          "resolutionSource": "implied"
         }
       ],
       "edges": [
@@ -148,7 +149,8 @@ expression: cleaned
             "statementIndex": 0,
             "nodeId": "table_1d63721b3610a67f"
           }
-        ]
+        ],
+        "resolutionSource": "implied"
       }
     ],
     "edges": [
