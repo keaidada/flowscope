@@ -174,22 +174,26 @@ const loadProjectsFromStorage = (): Project[] => {
     const saved = localStorage.getItem(STORAGE_KEYS.PROJECTS);
     if (saved) {
       const parsed = JSON.parse(saved);
-      return parsed.map((p: Partial<Project>) => ({
-        id: p.id || genId(),
-        name: p.name || 'Untitled',
-        dialect: p.dialect || 'generic',
-        runMode:
-          typeof p.runMode === 'string' && VALID_RUN_MODES.includes(p.runMode as RunMode)
-            ? (p.runMode as RunMode)
-            : ('current' as RunMode),
-        selectedFileIds: Array.isArray(p.selectedFileIds)
-          ? p.selectedFileIds.filter((id): id is string => typeof id === 'string')
-          : [],
-        schemaSQL: p.schemaSQL || '',
-        templateMode: parseTemplateMode(p.templateMode),
-        files: [], // Files are loaded from DuckDB asynchronously
-        activeFileId: typeof p.activeFileId === 'string' ? p.activeFileId : null,
-        openFileIds: Array.isArray(p.openFileIds) ? p.openFileIds : [p.activeFileId].filter(Boolean),
+      return parsed.map((p: Partial<Project>) => {
+        const project = {
+          id: p.id || genId(),
+          name: p.name || 'Untitled',
+          dialect: p.dialect || 'generic',
+          runMode:
+            typeof p.runMode === 'string' && VALID_RUN_MODES.includes(p.runMode as RunMode)
+              ? (p.runMode as RunMode)
+              : ('current' as RunMode),
+          selectedFileIds: Array.isArray(p.selectedFileIds)
+            ? p.selectedFileIds.filter((id): id is string => typeof id === 'string')
+            : [],
+          schemaSQL: p.schemaSQL || '',
+          templateMode: parseTemplateMode(p.templateMode),
+          files: [],
+          activeFileId: typeof p.activeFileId === 'string' ? p.activeFileId : null,
+          openFileIds: Array.isArray(p.openFileIds) ? p.openFileIds : [p.activeFileId].filter(Boolean),
+        };
+        console.log('[init] loadProject:', project.id.slice(0,8), 'activeFileId:', project.activeFileId, 'openFileIds:', project.openFileIds?.length);
+        return project;
       }));
     }
   } catch (error) {
@@ -199,7 +203,9 @@ const loadProjectsFromStorage = (): Project[] => {
 };
 
 /** Convert backend ProjectMeta row → frontend Project (files loaded separately). */
-const metaToProject = (m: serverDb.ProjectMeta): Project => ({
+const metaToProject = (m: serverDb.ProjectMeta): Project => {
+  console.log('[init] metaToProject:', m.id.slice(0,8), 'backend_activeFileId:', m.active_file_id);
+  return {
   id: m.id,
   name: m.name,
   dialect: isValidDialect(m.dialect) ? (m.dialect as Dialect) : 'generic',
@@ -217,7 +223,8 @@ const metaToProject = (m: serverDb.ProjectMeta): Project => ({
   files: [],
   activeFileId: m.active_file_id,
       openFileIds: [],
-});
+  };
+};
 
 /**
  * Persist project settings to localStorage (lightweight, sync).
@@ -1270,12 +1277,14 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   const closeAllTabs = useCallback(() => {
     if (!activeProjectId) return;
+    console.log('[closeAllTabs] clearing tabs for project:', activeProjectId.slice(0,8));
     setActiveFileIdOverride(null);
     setProjects((prev) => {
       const next = prev.map((p) => {
         if (p.id !== activeProjectId) return p;
         return { ...p, activeFileId: null, openFileIds: [] };
       });
+      console.log('[closeAllTabs] saved activeFileId=null, openFileIds=[] to localStorage');
       // Eagerly save to localStorage + sync to backend so refresh picks up empty state
       try {
         const settings = next.map(p => ({
@@ -1285,7 +1294,15 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           activeFileId: p.activeFileId, openFileIds: p.openFileIds || [],
         }));
         localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(settings));
-      } catch {}
+        // Verify write
+        const verify = localStorage.getItem(STORAGE_KEYS.PROJECTS);
+        if (verify) {
+          const vp = JSON.parse(verify);
+          for (const v of vp) {
+            console.log('[closeAllTabs] verify localStorage:', v.id?.slice(0,8), 'activeFileId:', v.activeFileId, 'openFileIds:', v.openFileIds?.length);
+          }
+        }
+      } catch(e) { console.error('[closeAllTabs] localStorage write failed:', e); }
       scheduleBackendProjectSync(next);
       return next;
     });
