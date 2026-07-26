@@ -434,3 +434,7 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
   frontend's `activeFileId: null`. The sync via `scheduleBackendProjectSync` is
   debounced (500ms) and may not complete before refresh. Fix: on backend project
   load, prefer localStorage `activeFileId` when it's newer/different from server.
+
+- **AI 对话功能**: 后续需要添加 AI 对话 (chat) 功能，让用户可以通过对话方式
+  查询和理解 SQL 血缘关系。可能的方向：基于当前选中脚本/表/字段上下文，
+  回答血缘相关问题；自然语言转 SQL；SQL 解释与优化建议。
