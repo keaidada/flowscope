@@ -104,6 +104,7 @@ export interface ProjectFileMeta {
   language: string;
   size: number;
   is_procedure: number;
+  has_transformed_content: number;
   created_at: string;
   updated_at: string;
 }
