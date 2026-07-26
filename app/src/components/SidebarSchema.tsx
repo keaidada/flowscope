@@ -1327,7 +1327,6 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
                       size="icon"
                       className="h-6 w-6"
                       onClick={() => {
-                        setActiveFolderPath('');
                         setIsCreatingFile(true);
                         setIsCreatingFolder(false);
                       }}
@@ -1337,6 +1336,25 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
                     <p>{t('common.new')}</p>
+                  </TooltipContent>
+                </Tooltip>
+                {/* New folder */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => {
+                        setIsCreatingFolder(true);
+                        setIsCreatingFile(false);
+                      }}
+                    >
+                      <FolderPlus className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p>{t('sidebar.newFolder')}</p>
                   </TooltipContent>
                 </Tooltip>
                 {/* Upload files */}
@@ -1369,26 +1387,6 @@ export function SidebarSchema({ onContentWidthChange }: SidebarSchemaProps) {
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
                     <p>{t('schemaEditor.importFolder')}</p>
-                  </TooltipContent>
-                </Tooltip>
-                {/* New folder */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => {
-                        setActiveFolderPath('');
-                        setIsCreatingFolder(true);
-                        setIsCreatingFile(false);
-                      }}
-                    >
-                      <FolderPlus className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    <p>{t('sidebar.newFolder')}</p>
                   </TooltipContent>
                 </Tooltip>
               </>
