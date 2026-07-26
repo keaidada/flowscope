@@ -612,6 +612,14 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
               }}
             />
           )}
+          {currentProject && (
+            <ExportDialog
+              result={result}
+              projectName={currentProject.name}
+              graphRef={graphContainerRef}
+              activeProjectId={activeProjectId}
+            />
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -621,12 +629,6 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
             <DropdownMenuContent align="end">
               {currentProject && (
                 <>
-                  <ExportDialog
-                    result={result}
-                    projectName={currentProject.name}
-                    graphRef={graphContainerRef}
-                    activeProjectId={activeProjectId}
-                  />
                   {!isReadOnly && (
                     <DropdownMenuItem onClick={() => setShareDialogOpen(true)}>
                       <Share2 className="h-4 w-4 mr-2" />
