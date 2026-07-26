@@ -493,11 +493,38 @@ impl<'a> Analyzer<'a> {
         self.tracker
             .record_produced(&canonical, ctx.statement_index);
 
+        // Capture projection checkpoint before analyzing source query
+        let projection_checkpoint = ctx.projection_checkpoint();
+
         // Analyze source - visit the full Query to handle CTEs defined inside the INSERT source.
         // When the SQL is written as `INSERT INTO t WITH cte AS (...) SELECT ...`,
         // the WITH clause is nested inside the source Query (not at statement level).
         if let Some(ref source_query) = insert.source {
             self.analyze_query(ctx, source_query, Some(&target_id));
+        }
+
+        // Infer schema for the INSERT target table from the SELECT projection,
+        // but only if the table doesn't already have a schema (from CREATE TABLE or imported).
+        if !self.schema.is_ddl_seeded(&canonical) && !self.schema.is_imported(&canonical) {
+            let projection_columns = ctx.take_output_columns_since(projection_checkpoint);
+            if !projection_columns.is_empty() {
+                let output_columns: Vec<crate::types::ColumnSchema> = projection_columns
+                    .iter()
+                    .map(|col| crate::types::ColumnSchema {
+                        name: col.name.clone(),
+                        data_type: col.data_type.clone(),
+                        is_primary_key: None,
+                        foreign_key: None,
+                    })
+                    .collect();
+                self.register_implied_schema(
+                    ctx,
+                    &canonical,
+                    output_columns,
+                    false,
+                    "INSERT",
+                );
+            }
         }
     }
 
