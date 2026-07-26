@@ -57,3 +57,8 @@ FlowScope code is released under Apache-2.0 unless stated otherwise. The `app/` 
 
 - `publishing.md`
   NPM publishing flow for `@pondpilot/flowscope-core`.
+
+### Ops (部署运维)
+
+- [`ops/`](./ops/README.md)
+  部署、安装、运维脚本指南（precheck、一键部署、服务管理、健康检查、just 命令速查）。
