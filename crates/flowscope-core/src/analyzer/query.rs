@@ -342,6 +342,17 @@ impl<'a> Analyzer<'a> {
         canonical: &str,
         is_known: bool,
     ) -> Option<ResolutionSource> {
+        // TODO: Connect to external metadata catalog (e.g. Hive Metastore, Glue,
+        //       DataHub, or SQL DDL files) to populate table schemas with actual
+        //       column definitions. Currently, columns are inferred from SQL usage
+        //       only, which misses:
+        //       1. DDL-defined columns not referenced in SQL (e.g. usr_click_rate)
+        //       2. Cross-statement derived-table alias conflicts where schemas
+        //          from one statement leak into another via resolvedSchema
+        //       3. Full column lists for tables where only a subset of columns
+        //          are used in the current script
+        //       Importing real metadata would also enable column-level data type
+        //       validation and primary/foreign key detection.
         if let Some(entry) = self.schema.get(canonical) {
             match entry.origin {
                 SchemaOrigin::Imported => Some(ResolutionSource::Imported),
