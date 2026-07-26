@@ -10,6 +10,7 @@ import {
   Trash2,
   Plus,
   Scissors,
+  Upload,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -62,6 +63,8 @@ interface FileTreeProps {
   isReadOnly?: boolean;
   /** Called when user clicks the "+" button on a folder row — receives the folder path */
   onCreateFileInFolder?: (folderPath: string) => void;
+  /** Called when user clicks the upload button on a folder row — receives the folder path */
+  onUploadToFolder?: (folderPath: string) => void;
   /** Called when user clicks the folder+ button on a folder row — receives the folder path */
   onCreateFolderInFolder?: (folderPath: string) => void;
   /** Called when user confirms renaming a folder */
@@ -366,6 +369,18 @@ const FolderNode = memo(function FolderNode({
                 title="New file"
               >
                 <Plus className="size-3" />
+              </button>
+            )}
+            {props.onUploadToFolder && (
+              <button
+                className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onUploadToFolder!(node.path);
+                }}
+                title="Upload to this folder"
+              >
+                <Upload className="size-3" />
               </button>
             )}
             {props.onCreateFolderInFolder && (

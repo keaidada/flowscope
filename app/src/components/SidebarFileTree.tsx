@@ -83,6 +83,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const renameInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const folderNameInputRef = useRef<HTMLInputElement>(null);
+  const uploadTargetDirRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (renamingFileId && renameInputRef.current) {
@@ -107,8 +108,9 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      importFiles(e.target.files);
+      importFiles(e.target.files, uploadTargetDirRef.current || undefined);
     }
+    uploadTargetDirRef.current = null;
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -748,6 +750,10 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
                 '',
                 `${folderPath}/${DEFAULT_FILE_NAMES.NEW_QUERY}`
               );
+            }}
+            onUploadToFolder={(folderPath) => {
+              uploadTargetDirRef.current = folderPath;
+              fileInputRef.current?.click();
             }}
             onCreateFolderInFolder={(folderPath) => {
               if (!currentProject) return;

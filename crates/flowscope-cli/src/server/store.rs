@@ -1020,7 +1020,7 @@ pub fn save_project_files_batch(
     let now = chrono::Local::now().to_rfc3339();
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?12), COALESCE(NULLIF(?11, ''), ?12), 1)"
+            "INSERT INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?12), COALESCE(NULLIF(?11, ''), ?12), 1) ON CONFLICT(project_id, path) DO UPDATE SET name=excluded.name, content=excluded.content, language=excluded.language, size=excluded.size, dialect=excluded.dialect, is_procedure=excluded.is_procedure, transformed_content=excluded.transformed_content, updated_at=COALESCE(NULLIF(excluded.updated_at, ''), ?12), status=1"
         )?;
         for f in files {
             stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, f.dialect, f.is_procedure, f.transformed_content, f.created_at, f.updated_at, now])?;
@@ -1415,9 +1415,13 @@ fn rebuild_directories_for_project(conn: &Connection, project_id: &str) -> Resul
     let tx = conn.unchecked_transaction()?;
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO project_directories
+            "INSERT INTO project_directories
              (id, project_id, parent_id, name, path, level, file_count, child_count, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?9)"
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?9)
+             ON CONFLICT(project_id, id) DO UPDATE SET
+             parent_id=excluded.parent_id, name=excluded.name, path=excluded.path, level=excluded.level,
+             file_count=excluded.file_count, child_count=excluded.child_count,
+             updated_at=excluded.updated_at, status=1"
         )?;
         for (dir_path, (parent_path, file_count)) in &dir_map {
             let name = dir_path.rsplit('/').next().unwrap_or(dir_path);
@@ -1452,7 +1456,7 @@ fn default_status() -> i32 { 1 }
 
 pub fn save_project(conn: &Connection, p: &ProjectRow) -> Result<(), rusqlite::Error> {
     conn.execute(
-        "INSERT OR REPLACE INTO projects (id, name, dialect, run_mode, template_mode, schema_sql, selected_file_ids, active_file_id, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO projects (id, name, dialect, run_mode, template_mode, schema_sql, selected_file_ids, active_file_id, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) ON CONFLICT(id) DO UPDATE SET name=excluded.name, dialect=excluded.dialect, run_mode=excluded.run_mode, template_mode=excluded.template_mode, schema_sql=excluded.schema_sql, selected_file_ids=excluded.selected_file_ids, active_file_id=excluded.active_file_id, updated_at=excluded.updated_at, status=excluded.status",
         params![p.id, p.name, p.dialect, p.run_mode, p.template_mode, p.schema_sql, p.selected_file_ids, p.active_file_id, p.created_at, p.updated_at, p.status],
     )?;
     Ok(())
@@ -1506,7 +1510,7 @@ pub fn save_view_state(
 ) -> Result<(), rusqlite::Error> {
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
-        "INSERT OR REPLACE INTO view_states (project_id, state_json, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, 1)",
+        "INSERT INTO view_states (project_id, state_json, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, 1) ON CONFLICT(project_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at, status=1",
         params![project_id, state_json, now, now],
     )?;
     Ok(())
@@ -1591,7 +1595,7 @@ pub fn save_table_level_edges(
     let row_ph = "(?,?,?,?,?,?,?,?,?)";
     for chunk in edges.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO table_level_edges (project_id, from_table, to_table, script, script_name, dir_path, created_at, updated_at, status) VALUES {}",
+            "INSERT INTO table_level_edges (project_id, from_table, to_table, script, script_name, dir_path, created_at, updated_at, status) VALUES {} ON CONFLICT(project_id, from_table, to_table, script) DO UPDATE SET from_table=excluded.from_table, to_table=excluded.to_table, script_name=excluded.script_name, dir_path=excluded.dir_path, updated_at=excluded.updated_at, status=excluded.status",
             (0..chunk.len()).map(|_| row_ph).collect::<Vec<_>>().join(",")
         );
         let mut p: Vec<std::boxed::Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 9);
@@ -1644,7 +1648,7 @@ pub fn save_schema_files(
     tx.execute("UPDATE schema_files SET status = 0, updated_at = ?2 WHERE project_id = ?1 AND status = 1", params![project_id, now])?;
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO schema_files (project_id, name, path, content, size, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)"
+            "INSERT INTO schema_files (project_id, name, path, content, size, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1) ON CONFLICT(project_id, path) DO UPDATE SET name=excluded.name, content=excluded.content, size=excluded.size, updated_at=excluded.updated_at, status=1"
         )?;
         for f in files {
             stmt.execute(params![project_id, f.name, f.path, f.content, f.size, f.created_at, f.updated_at])?;
@@ -1702,7 +1706,7 @@ pub fn set_cache(
 ) -> Result<(), rusqlite::Error> {
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
-        "INSERT OR REPLACE INTO analysis_cache (cache_key, result_json, size_bytes, created_at, updated_at, last_accessed_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+        "INSERT INTO analysis_cache (cache_key, result_json, size_bytes, created_at, updated_at, last_accessed_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1) ON CONFLICT(cache_key) DO UPDATE SET result_json=excluded.result_json, size_bytes=excluded.size_bytes, updated_at=excluded.updated_at, last_accessed_at=excluded.last_accessed_at, status=1",
         params![cache_key, result_json, result_json.len() as i64, now, now, now],
     )?;
     Ok(())
@@ -1730,7 +1734,7 @@ pub fn set_file_result(
     let now = chrono::Local::now().to_rfc3339();
     let (file_name, dir_path) = split_file_path(file_path);
     conn.execute(
-        "INSERT OR REPLACE INTO project_file_results (project_id, file_path, file_name, dir_path, result_json, content_hash, size_bytes, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
+        "INSERT INTO project_file_results (project_id, file_path, file_name, dir_path, result_json, content_hash, size_bytes, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1) ON CONFLICT(project_id, file_path) DO UPDATE SET file_name=excluded.file_name, dir_path=excluded.dir_path, result_json=excluded.result_json, content_hash=excluded.content_hash, size_bytes=excluded.size_bytes, updated_at=excluded.updated_at, status=1",
         params![project_id, file_path, file_name, dir_path, result_json, content_hash, result_json.len() as i64, now, now],
     )?;
     Ok(())
@@ -1956,7 +1960,7 @@ pub fn save_lineage_batch(
     // nodes (13 cols: +file_name, +dir_path, +status)
     for chunk in nodes.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO lineage_nodes (project_id, file_path, file_name, dir_path, node_id, node_type, label, qualified_name, statement_index, resolution_source, created_at, updated_at, status) VALUES {}",
+            "INSERT INTO lineage_nodes (project_id, file_path, file_name, dir_path, node_id, node_type, label, qualified_name, statement_index, resolution_source, created_at, updated_at, status) VALUES {} ON CONFLICT(project_id, file_path, node_id) DO UPDATE SET node_type=excluded.node_type, label=excluded.label, qualified_name=excluded.qualified_name, statement_index=excluded.statement_index, resolution_source=excluded.resolution_source, file_name=excluded.file_name, dir_path=excluded.dir_path, updated_at=excluded.updated_at, status=excluded.status",
             (0..chunk.len()).map(|_| row13).collect::<Vec<_>>().join(",")
         );
         let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 13);
@@ -1983,7 +1987,7 @@ pub fn save_lineage_batch(
     // columns (13 cols: +file_name, +dir_path, +status)
     for chunk in columns.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO lineage_columns (project_id, file_path, file_name, dir_path, column_id, label, qualified_name, parent_node_id, expression, statement_index, created_at, updated_at, status) VALUES {}",
+            "INSERT INTO lineage_columns (project_id, file_path, file_name, dir_path, column_id, label, qualified_name, parent_node_id, expression, statement_index, created_at, updated_at, status) VALUES {} ON CONFLICT(project_id, file_path, column_id) DO UPDATE SET label=excluded.label, qualified_name=excluded.qualified_name, parent_node_id=excluded.parent_node_id, expression=excluded.expression, statement_index=excluded.statement_index, file_name=excluded.file_name, dir_path=excluded.dir_path, updated_at=excluded.updated_at, status=excluded.status",
             (0..chunk.len()).map(|_| row13).collect::<Vec<_>>().join(",")
         );
         let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 13);
@@ -2010,7 +2014,7 @@ pub fn save_lineage_batch(
     // edges (13 cols: +file_name, +dir_path, +status)
     for chunk in edges.chunks(CHUNK) {
         let sql = format!(
-            "INSERT OR REPLACE INTO lineage_edges (project_id, file_path, file_name, dir_path, edge_id, from_id, to_id, edge_type, expression, statement_index, created_at, updated_at, status) VALUES {}",
+            "INSERT INTO lineage_edges (project_id, file_path, file_name, dir_path, edge_id, from_id, to_id, edge_type, expression, statement_index, created_at, updated_at, status) VALUES {} ON CONFLICT(project_id, file_path, edge_id) DO UPDATE SET from_id=excluded.from_id, to_id=excluded.to_id, edge_type=excluded.edge_type, expression=excluded.expression, statement_index=excluded.statement_index, file_name=excluded.file_name, dir_path=excluded.dir_path, updated_at=excluded.updated_at, status=excluded.status",
             (0..chunk.len()).map(|_| row13).collect::<Vec<_>>().join(",")
         );
         let mut p: Vec<Box<dyn ToSql>> = Vec::with_capacity(chunk.len() * 13);

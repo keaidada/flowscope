@@ -150,7 +150,7 @@ interface ProjectContextType {
   updateSchemaSQL: (projectId: string, schemaSQL: string) => void;
 
   // Import/Export
-  importFiles: (files: FileList | File[]) => Promise<void>;
+  importFiles: (files: FileList | File[], targetDir?: string) => Promise<void>;
   replaceWithFiles: (files: FileList | File[]) => Promise<void>;
   /** Directly add pre-built ProjectFile objects (no file reading needed) */
   addFilesDirectly: (files: ProjectFile[]) => void;
@@ -1373,7 +1373,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const importFiles = useCallback(
-    async (fileList: FileList | File[]) => {
+    async (fileList: FileList | File[], targetDir?: string) => {
       if (!activeProjectId) return;
 
       const newFiles: ProjectFile[] = [];
@@ -1388,7 +1388,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         }
         const content = await file.text();
         const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-        const path = relativePath || file.name;
+        const rawPath = relativePath || file.name;
+        // If targetDir is specified, prepend it to the path
+        const path = targetDir ? `${targetDir}/${rawPath}` : rawPath;
 
         const upper = content.toUpperCase();
         const isProcedure = upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC');
