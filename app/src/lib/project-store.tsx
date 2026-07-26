@@ -597,6 +597,10 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       activeFileIdOverride && currentProjectRaw.files.some((f) => f.id === activeFileIdOverride)
         ? activeFileIdOverride
         : currentProjectRaw.activeFileId;
+    console.log('[currentProject] raw.id:', currentProjectRaw.id.slice(0,8),
+      'raw.activeFileId:', currentProjectRaw.activeFileId,
+      'override:', activeFileIdOverride,
+      'effective:', effectiveActiveFileId);
     return effectiveActiveFileId !== currentProjectRaw.activeFileId
       ? { ...currentProjectRaw, activeFileId: effectiveActiveFileId }
       : currentProjectRaw;
