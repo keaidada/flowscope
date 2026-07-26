@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogDescription,
@@ -152,13 +153,13 @@ export function KeyboardShortcutsDialog({
           </div>
         </div>
 
-        <div className="border-t pt-3 mt-auto">
-          <p className="text-xs text-muted-foreground text-center">
+        <DialogFooter className="border-t pt-3 mt-auto">
+          <p className="text-xs text-muted-foreground text-center flex-1">
             Press{' '}
             <kbd className="px-1 py-0.5 text-[10px] bg-muted rounded border font-mono">Esc</kbd>{' '}
             {t('shortcuts.toClose')}
           </p>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
