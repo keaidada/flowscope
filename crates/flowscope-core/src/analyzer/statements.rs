@@ -503,6 +503,33 @@ impl<'a> Analyzer<'a> {
             self.analyze_query(ctx, source_query, Some(&target_id));
         }
 
+        // Register source table schemas from column nodes.
+        // Bare column refs (SELECT id FROM user) don't have table qualifiers,
+        // so source_table_columns may be empty. Infer from column nodes instead.
+        let target_canonical = canonical.clone();
+        let mut inferred_source_cols: std::collections::HashMap<String, std::collections::HashMap<String, Option<String>>> = std::collections::HashMap::new();
+        for node in &ctx.nodes {
+            if node.node_type == crate::types::NodeType::Column {
+                if let Some(ref qn) = node.qualified_name {
+                    if let Some(idx) = qn.rfind('.') {
+                        let table_qn = &qn[..idx];
+                        let col_name = &qn[idx + 1..];
+                        if table_qn != &target_canonical {
+                            inferred_source_cols
+                                .entry(table_qn.to_string())
+                                .or_default()
+                                .insert(col_name.to_string(), None);
+                        }
+                    }
+                }
+            }
+        }
+        for (table, cols) in &inferred_source_cols {
+            for (col, dt) in cols {
+                ctx.record_source_column(table, col, dt.clone());
+            }
+        }
+
         // Infer schema for the INSERT target table from the SELECT projection,
         // but only if the table doesn't already have a schema (from CREATE TABLE or imported).
         if !self.schema.is_ddl_seeded(&canonical) && !self.schema.is_imported(&canonical) {
