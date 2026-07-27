@@ -788,6 +788,8 @@
     "upstream": "Upstream",
     "downstream": "Downstream",
     "filterScripts": "Filter scripts",
+    "filterLayer": "L{{n}} Filter",
+    "searchInLayer": "Search this layer...",
     "toggleAll": "Toggle all",
     "clear": "Clear",
     "focused": "Focused"

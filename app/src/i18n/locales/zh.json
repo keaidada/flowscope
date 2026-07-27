@@ -788,6 +788,8 @@
     "upstream": "上游",
     "downstream": "下游",
     "filterScripts": "筛选脚本",
+    "filterLayer": "L{{n}} 筛选",
+    "searchInLayer": "搜索本层...",
     "toggleAll": "全选/全不选",
     "clear": "清除",
     "focused": "已聚焦"

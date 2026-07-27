@@ -36,8 +36,6 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
 } from './ui/dropdown-menu';
 
 // ============================================================================
@@ -63,7 +61,6 @@ const CARD_GAP = 12;
 const CANVAS_PADDING_X = 40;
 const CANVAS_PADDING_Y = 24;
 const HEADER_HEIGHT = 40;
-const DETAIL_PANEL_WIDTH = 420;
 
 // ============================================================================
 // Helpers
@@ -103,6 +100,8 @@ export function LayeredFlowDiagram({
   const [showCyclePanel, setShowCyclePanel] = useState(false);
   // Per-layer focused scripts. When non-empty, only these + their upstream/downstream are visible.
   const [focusedNodes, setFocusedNodes] = useState<Set<string>>(new Set());
+  // Search text within the layer filter dropdown
+  const [layerFilterSearch, setLayerFilterSearch] = useState('');
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -537,84 +536,125 @@ export function LayeredFlowDiagram({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent
                           align="end"
-                          className="max-h-[60vh] w-64 overflow-y-auto"
+                          className="w-64 p-0"
                           onClick={(e) => e.stopPropagation()}
+                          onCloseAutoFocus={(e) => e.preventDefault()}
                         >
-                          <DropdownMenuLabel className="flex items-center justify-between">
-                            <span>
-                              {t('layeredFlow.filterScripts', '筛选脚本')} ({layout.nodes.length})
+                          {/* Header with count + clear */}
+                          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                            <span className="text-xs font-semibold">
+                              {t('layeredFlow.filterLayer', 'L{{n}} 筛选', { n: layerIdx + 1 })}{' '}
+                              ({bucket.length})
                             </span>
-                            {focusedNodes.size > 0 && (
+                            {focusedInLayer > 0 && (
                               <button
                                 type="button"
-                                onClick={clearFocus}
+                                onClick={() => {
+                                  for (const id of bucketIds) {
+                                    if (focusedNodes.has(id)) toggleFocusNode(id);
+                                  }
+                                }}
                                 className="text-[10px] text-primary hover:underline"
                               >
-                                {t('layeredFlow.clear', '清除')} ({focusedNodes.size})
+                                {t('layeredFlow.clear', '清除')} ({focusedInLayer})
                               </button>
                             )}
-                          </DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-                          {/* All scripts grouped by layer — global filter */}
-                          {layerBuckets.map((layerBucket, lIdx) => {
-                            const color = getLayerColor(lIdx);
-                            const layerFocused = layerBucket.filter((n) =>
-                              focusedNodes.has(n.id),
-                            ).length;
-                            return (
-                              <div key={`filter-layer-${lIdx}`}>
-                                {/* Layer subheader with select-all toggle */}
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const ids = layerBucket.map((n) => n.id);
-                                    const allSelected = ids.every((id) =>
-                                      focusedNodes.has(id),
-                                    );
-                                    setFocusedNodes((cur) => {
-                                      const next = new Set(cur);
-                                      if (allSelected) {
-                                        for (const id of ids) next.delete(id);
-                                      } else {
-                                        for (const id of ids) next.add(id);
-                                      }
-                                      return next;
-                                    });
-                                  }}
-                                  className="flex w-full items-center gap-1.5 border-b border-border/40 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide hover:bg-muted"
-                                  style={{ color: color.border }}
-                                >
-                                  {layerBucket.every((n) => focusedNodes.has(n.id)) ? (
-                                    <CheckSquare className="h-3 w-3" />
-                                  ) : (
-                                    <Square className="h-3 w-3" />
-                                  )}
-                                  <span>
-                                    L{lIdx + 1} ({layerFocused}/{layerBucket.length})
-                                  </span>
-                                </button>
-                                {/* Scripts in this layer */}
-                                {layerBucket.map((n) => {
-                                  const isFocused = focusedNodes.has(n.id);
-                                  return (
-                                    <button
-                                      type="button"
-                                      key={n.id}
-                                      onClick={() => toggleFocusNode(n.id)}
-                                      className="flex w-full items-center gap-2 px-3 py-1 text-left text-xs hover:bg-muted"
-                                    >
-                                      {isFocused ? (
-                                        <CheckSquare className="h-3 w-3 flex-shrink-0 text-primary" />
-                                      ) : (
-                                        <Square className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                                      )}
-                                      <span className="truncate">{basename(n.label)}</span>
-                                    </button>
-                                  );
-                                })}
+                          </div>
+                          {/* Select-all toggle */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const allSelected = bucketIds.every((id) =>
+                                focusedNodes.has(id),
+                              );
+                              setFocusedNodes((cur) => {
+                                const next = new Set(cur);
+                                if (allSelected) {
+                                  for (const id of bucketIds) next.delete(id);
+                                } else {
+                                  for (const id of bucketIds) next.add(id);
+                                }
+                                return next;
+                              });
+                            }}
+                            className="flex w-full items-center gap-2 border-b border-border px-3 py-1.5 text-[11px] hover:bg-muted"
+                          >
+                            {bucket.every((n) => focusedNodes.has(n.id)) ? (
+                              <CheckSquare className="h-3.5 w-3.5 text-primary" />
+                            ) : (
+                              <Square className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
+                            <span>
+                              {t('layeredFlow.toggleAll', '全选/全不选')} ({focusedInLayer}/
+                              {bucket.length})
+                            </span>
+                          </button>
+                          {/* Search input */}
+                          <div className="relative border-b border-border">
+                            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+                            <input
+                              type="text"
+                              value={layerFilterSearch}
+                              onChange={(e) => setLayerFilterSearch(e.target.value)}
+                              placeholder={t('layeredFlow.searchInLayer', '搜索本层...')}
+                              className="w-full border-none bg-transparent py-1.5 pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none"
+                              onClick={(e) => e.stopPropagation()}
+                              onKeyDown={(e) => e.stopPropagation()}
+                            />
+                            {layerFilterSearch && (
+                              <button
+                                type="button"
+                                onClick={() => setLayerFilterSearch('')}
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                          {/* Script list (filtered by search) */}
+                          <div className="max-h-60 overflow-y-auto">
+                            {bucket
+                              .filter((n) => {
+                                if (!layerFilterSearch.trim()) return true;
+                                const q = layerFilterSearch.toLowerCase();
+                                return (
+                                  n.id.toLowerCase().includes(q) ||
+                                  n.label.toLowerCase().includes(q) ||
+                                  basename(n.label).toLowerCase().includes(q)
+                                );
+                              })
+                              .map((n) => {
+                                const isFocused = focusedNodes.has(n.id);
+                                return (
+                                  <button
+                                    type="button"
+                                    key={n.id}
+                                    onClick={() => toggleFocusNode(n.id)}
+                                    className="flex w-full items-center gap-2 px-3 py-1 text-left text-xs hover:bg-muted"
+                                  >
+                                    {isFocused ? (
+                                      <CheckSquare className="h-3 w-3 flex-shrink-0 text-primary" />
+                                    ) : (
+                                      <Square className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                                    )}
+                                    <span className="truncate">{basename(n.label)}</span>
+                                  </button>
+                                );
+                              })}
+                            {bucket.filter((n) => {
+                              if (!layerFilterSearch.trim()) return true;
+                              const q = layerFilterSearch.toLowerCase();
+                              return (
+                                n.id.toLowerCase().includes(q) ||
+                                n.label.toLowerCase().includes(q) ||
+                                basename(n.label).toLowerCase().includes(q)
+                              );
+                            }).length === 0 && (
+                              <div className="px-3 py-4 text-center text-[11px] text-muted-foreground/60">
+                                {t('layeredFlow.noMatches', '无匹配项')}
                               </div>
-                            );
-                          })}
+                            )}
+                          </div>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -842,10 +882,10 @@ function DetailPanel({
       {/* Click-outside catcher */}
       <div className="absolute inset-0 z-20" onClick={onClose} />
 
-      {/* Panel */}
+      {/* Panel — auto-fit width, no horizontal scroll */}
       <div
         className="absolute right-0 top-0 z-30 flex h-full flex-col border-l border-border bg-background shadow-2xl"
-        style={{ width: `${DETAIL_PANEL_WIDTH}px` }}
+        style={{ width: 'max-content', minWidth: '360px', maxWidth: '60%' }}
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
@@ -867,8 +907,8 @@ function DetailPanel({
           </button>
         </div>
 
-        {/* Body — each item on a single line; horizontal scroll if needed */}
-        <div className="flex-1 overflow-auto p-4 text-xs">
+        {/* Body — auto-width, vertical scroll only */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 text-xs">
           {/* Layer badge */}
           <div className="mb-4 flex items-center gap-2">
             <span
@@ -897,7 +937,7 @@ function DetailPanel({
               <ul className="space-y-1">
                 {node.writes.map((w) => (
                   <li key={w}>
-                    <code className="block whitespace-nowrap rounded bg-primary/10 px-2 py-1 font-mono text-[11px] text-primary">
+                    <code className="block break-all rounded bg-primary/10 px-2 py-1 font-mono text-[11px] text-primary">
                       {w}
                     </code>
                   </li>
@@ -914,7 +954,7 @@ function DetailPanel({
               <ul className="space-y-1">
                 {node.reads.map((r) => (
                   <li key={r}>
-                    <code className="block whitespace-nowrap rounded bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                    <code className="block break-all rounded bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">
                       {r}
                     </code>
                   </li>
@@ -936,10 +976,10 @@ function DetailPanel({
                     <button
                       type="button"
                       onClick={() => onSelectNode(e.from)}
-                      className="flex w-full items-center gap-2 whitespace-nowrap rounded px-2 py-1 text-left font-mono text-[11px] hover:bg-muted"
+                      className="block w-full break-all rounded px-2 py-1 text-left font-mono text-[11px] hover:bg-muted"
                     >
                       <span className="text-foreground">{e.from}</span>
-                      <span className="text-muted-foreground">→ {e.viaTable}</span>
+                      <span className="text-muted-foreground"> → {e.viaTable}</span>
                     </button>
                   </li>
                 ))}
@@ -960,10 +1000,10 @@ function DetailPanel({
                     <button
                       type="button"
                       onClick={() => onSelectNode(e.to)}
-                      className="flex w-full items-center gap-2 whitespace-nowrap rounded px-2 py-1 text-left font-mono text-[11px] hover:bg-muted"
+                      className="block w-full break-all rounded px-2 py-1 text-left font-mono text-[11px] hover:bg-muted"
                     >
                       <span className="text-foreground">{e.to}</span>
-                      <span className="text-muted-foreground">via {e.viaTable}</span>
+                      <span className="text-muted-foreground"> via {e.viaTable}</span>
                     </button>
                   </li>
                 ))}
