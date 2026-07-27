@@ -109,6 +109,8 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
   // Hide arrows during scroll for performance
   const [isScrolling, setIsScrolling] = useState(false);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Arrow display mode: auto=hide when >100 edges, none=always hide, all=always show
+  const [arrowDisplay, setArrowDisplay] = useState<'auto' | 'none' | 'all'>('auto');
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -269,6 +271,14 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     ).length;
     return { totalEdges, brokenEdges, liveEdges, isolated, totalNodes: layout.nodes.length };
   }, [layout]);
+
+  // Arrow visibility: auto=hide when >100 edges unless focus filter active
+  const showArrows = useMemo(() => {
+    if (arrowDisplay === 'none') return false;
+    if (arrowDisplay === 'all') return true;
+    if (focusVisibleSet !== null) return true;
+    return diagnostics.liveEdges <= 100;
+  }, [arrowDisplay, focusVisibleSet, diagnostics.liveEdges]);
 
   // ── Arrow path computation ─────────────────────────────────────────────
   const recomputeArrows = useCallback(() => {
@@ -737,8 +747,45 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                           </div>
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    </div>
-                  </div>
+        </div>
+
+        {/* Arrow display toggle */}
+        {diagnostics.liveEdges > 100 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex items-center gap-1 rounded-md border border-input px-2.5 py-1 text-[11px] font-medium hover:bg-muted"
+              >
+                <span className="text-muted-foreground">
+                  {arrowDisplay === 'auto' ? '线 ▸ 自动' : arrowDisplay === 'none' ? '线 ▸ 关闭' : '线 ▸ 全部'}
+                </span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              {(
+                [
+                  ['auto', '自动（聚焦时显示）'],
+                  ['none', '始终隐藏'],
+                  ['all', '始终显示'],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setArrowDisplay(v)}
+                  className={cn(
+                    'flex w-full items-center px-3 py-1.5 text-xs hover:bg-muted',
+                    arrowDisplay === v && 'font-semibold text-primary',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
 
                   {/* Body */}
                   <div
@@ -815,7 +862,8 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
               );
             })}
 
-            {/* SVG arrows — hidden during scroll for performance */}
+            {/* SVG arrows — hidden during scroll or when >100 edges in auto mode */}
+            {showArrows && (
             <svg
               className="pointer-events-none absolute left-0 top-0 h-full w-full"
               style={{ zIndex: 1, opacity: isScrolling ? 0 : 1, transition: 'opacity 150ms' }}
@@ -912,6 +960,7 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                 );
               })}
             </svg>
+            )}
           </div>
         </div>
 
