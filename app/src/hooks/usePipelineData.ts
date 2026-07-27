@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import type { PipelineTask, TaskSchedule } from '@/types/pipeline-matrix';
-import { loadTableLevelEdges } from '@/lib/server-db';
+import { loadTableLevelEdges, saveTableLevelEdges } from '@/lib/server-db';
 import { useProject } from '@/lib/project-store';
 
 const EMPTY_SCHEDULE: TaskSchedule = {
@@ -37,6 +37,71 @@ export interface PipelineData {
 
 function normalize(s: string): string {
   return s.toLowerCase().trim();
+}
+
+/**
+ * Compute table_level_edges from AnalyzeResult when DB is empty.
+ * Uses globalLineage producerStatement/consumerStatement for accurate direction.
+ * Returns [from_table, to_table, script] tuples.
+ */
+function computeTleFromResult(result: AnalyzeResult): Array<[string, string, string]> {
+  const gl = result.globalLineage;
+  if (!gl) return [];
+
+  const idxToSource = new Map<number, string>();
+  for (let i = 0; i < result.statements.length; i++) {
+    const src = result.statements[i].sourceName || '';
+    if (src) idxToSource.set(i, src);
+  }
+  const nodeLabelById = new Map<string, string>();
+  for (const node of gl.nodes) {
+    nodeLabelById.set(node.id as string, node.label as string);
+  }
+
+  // Collect per-script reads/writes
+  const scriptReads = new Map<string, Set<string>>();
+  const scriptWrites = new Map<string, Set<string>>();
+  for (const edge of gl.edges) {
+    const tableName = normalize(nodeLabelById.get(edge.from as string) || (edge.id as string));
+    const ps = edge.producerStatement;
+    const cs = edge.consumerStatement;
+    if (ps) {
+      const src = idxToSource.get(ps.statementIndex);
+      if (src) {
+        if (!scriptWrites.has(src)) scriptWrites.set(src, new Set());
+        scriptWrites.get(src)!.add(tableName);
+      }
+    }
+    if (cs) {
+      const src = idxToSource.get(cs.statementIndex);
+      if (src) {
+        if (!scriptReads.has(src)) scriptReads.set(src, new Set());
+        scriptReads.get(src)!.add(tableName);
+      }
+    }
+  }
+
+  // Build [from_table, to_table, script] edges
+  const edges: Array<[string, string, string]> = [];
+  const allScripts = new Set([...scriptReads.keys(), ...scriptWrites.keys()]);
+  for (const script of allScripts) {
+    const reads = scriptReads.get(script) ?? new Set<string>();
+    const writes = scriptWrites.get(script) ?? new Set<string>();
+    // For each read table, pair with each write table (simplified: any read→any write)
+    for (const r of reads) {
+      for (const w of writes) {
+        edges.push([r, w, script]);
+      }
+    }
+    // Scripts with only reads or only writes
+    if (writes.size === 0) {
+      for (const r of reads) edges.push([r, '-', script]);
+    }
+    if (reads.size === 0) {
+      for (const w of writes) edges.push(['-', w, script]);
+    }
+  }
+  return edges;
 }
 
 function buildDagFromMaps(
@@ -127,16 +192,29 @@ export function usePipelineData(result: AnalyzeResult | null): PipelineData {
 
   // Fetch table_level_edges from server (authoritative source)
   const [tleEdges, setTleEdges] = useState<Array<[string, string, string]>>([]);
+  const [, setTleLoading] = useState(true);
   useEffect(() => {
     if (!activeProjectId) return;
     let cancelled = false;
+    setTleLoading(true);
     loadTableLevelEdges(activeProjectId)
-      .then((edges) => {
-        if (!cancelled) setTleEdges(edges);
+      .then(async (edges) => {
+        if (cancelled) return;
+        if (edges.length === 0 && result) {
+          // table_level_edges not populated yet — compute from result and save
+          const computed = computeTleFromResult(result);
+          if (computed.length > 0) {
+            saveTableLevelEdges(activeProjectId, computed).catch(() => {});
+            setTleEdges(computed);
+          }
+        } else {
+          setTleEdges(edges);
+        }
+        setTleLoading(false);
       })
-      .catch(() => {});
+      .catch(() => setTleLoading(false));
     return () => { cancelled = true; };
-  }, [activeProjectId]);
+  }, [activeProjectId, result]);
 
   return useMemo(() => {
     if (!result || !result.statements || result.statements.length === 0) {
