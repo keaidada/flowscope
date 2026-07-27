@@ -181,8 +181,20 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     if (!selected) return null;
     const up = reachable(selected, 'up');
     const down = reachable(selected, 'down');
-    return new Set([selected, ...up, ...down]);
-  }, [selected, reachable]);
+    const chain = new Set([selected, ...up, ...down]);
+
+    // Debug: log chain + edges when card is clicked
+    if (process.env.NODE_ENV !== 'production') {
+      const directUp = layout.edges.filter((e) => !e.isBroken && e.to === selected);
+      const directDown = layout.edges.filter((e) => !e.isBroken && e.from === selected);
+      console.log('[LayeredFlowDiagram] Clicked:', selected);
+      console.log('  Direct upstream edges:', directUp.map((e) => `${e.from} → ${e.to} (via ${e.viaTable})`));
+      console.log('  Direct downstream edges:', directDown.map((e) => `${e.from} → ${e.to} (via ${e.viaTable})`));
+      console.log('  Full chain (' + chain.size + '):', [...chain].sort());
+    }
+
+    return chain;
+  }, [selected, reachable, layout.edges]);
 
   // ── Focus visible set: when focusedNodes non-empty, only these + their upstream/downstream are visible ──
   const focusVisibleSet = useMemo(() => {
