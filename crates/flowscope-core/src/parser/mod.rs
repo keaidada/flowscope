@@ -122,10 +122,9 @@ pub fn parse_sql_with_dialect_output(
                 }
             }
 
-            // ClickHouse FINAL: ClickHouse allows `FROM table FINAL alias` as a table
-            // modifier, which sqlparser-rs does not support. Strip it before re-parsing.
+            // ClickHouse sanitizer: strip FINAL keyword + CREATE TABLE engine clauses
             if matches!(dialect, Dialect::Clickhouse) || matches!(dialect, Dialect::Generic) {
-                if let Some(sanitized_sql) = strip_clickhouse_final(sql) {
+                if let Some(sanitized_sql) = sanitize_clickhouse_sql(sql) {
                     if let Ok(statements) =
                         Parser::parse_sql(sqlparser_dialect.as_ref(), &sanitized_sql)
                     {
@@ -264,8 +263,76 @@ fn sanitize_trailing_comma_before_from(sql: &str) -> Option<String> {
 ///
 /// ClickHouse DDL allows `FROM table_name FINAL alias` but sqlparser-rs does not
 /// recognize FINAL as a keyword. This strips it so the parser can proceed.
+/// Sanitize ClickHouse SQL: strip FINAL keyword + CREATE TABLE engine clauses.
+fn sanitize_clickhouse_sql(sql: &str) -> Option<String> {
+    let mut result = strip_clickhouse_create_table_clauses(sql);
+    if let Some(ref mut s) = result {
+        if let Some(stripped) = strip_clickhouse_final(s) {
+            *s = stripped;
+        }
+    } else {
+        result = strip_clickhouse_final(sql);
+    }
+    result
+}
+
+/// Strip ClickHouse CREATE TABLE clauses: ENGINE, PARTITION BY, ORDER BY,
+/// SETTINGS, TTL, SAMPLE BY that appear after the closing `)` of the column list.
+fn strip_clickhouse_create_table_clauses(sql: &str) -> Option<String> {
+    let upper = sql.to_uppercase();
+    if !upper.contains("ENGINE") && !upper.contains("PARTITION BY") {
+        return None;
+    }
+    let lines: Vec<&str> = sql.lines().collect();
+    let mut out: Vec<&str> = Vec::new();
+    let mut changed = false;
+    let mut paren_depth: i32 = 0;
+    let mut in_create_table = false;
+
+    for line in &lines {
+        let trimmed = line.trim();
+        let trimmed_upper = trimmed.to_uppercase();
+
+        // Track parenthesis depth for CREATE TABLE column lists
+        paren_depth += line.matches('(').count() as i32 - line.matches(')').count() as i32;
+
+        // Detect CREATE TABLE start
+        if trimmed_upper.starts_with("CREATE") && trimmed_upper.contains("TABLE") {
+            in_create_table = true;
+        }
+
+        // After CREATE TABLE's closing `)`, strip ClickHouse engine clauses
+        if in_create_table && paren_depth <= 0 {
+            if trimmed_upper.starts_with("ENGINE")
+                || trimmed_upper.starts_with("PARTITION BY")
+                || trimmed_upper.starts_with("ORDER BY")
+                || trimmed_upper.starts_with("SETTINGS")
+                || trimmed_upper.starts_with("TTL")
+                || trimmed_upper.starts_with("SAMPLE BY")
+                || trimmed_upper.starts_with("PRIMARY KEY")
+            {
+                changed = true;
+                continue;
+            }
+            // End of CREATE TABLE statement
+            if trimmed.ends_with(';') {
+                in_create_table = false;
+            }
+        }
+
+        out.push(line);
+    }
+
+    if changed {
+        Some(out.join("\n"))
+    } else {
+        None
+    }
+}
+
 fn strip_clickhouse_final(sql: &str) -> Option<String> {
-    if !sql.contains("FINAL") {
+    // Case-insensitive check for the keyword FINAL
+    if !sql.to_uppercase().contains("FINAL") {
         return None;
     }
     let bytes = sql.as_bytes();
