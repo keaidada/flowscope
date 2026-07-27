@@ -125,6 +125,15 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     return buckets;
   }, [layout]);
 
+  // Node → layer index for cross-layer detection
+  const nodeLayer = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const [i, bucket] of layerBuckets.entries()) {
+      for (const n of bucket) map.set(n.id, i);
+    }
+    return map;
+  }, [layerBuckets]);
+
   // ── Reachability for highlight ─────────────────────────────────────────
   const reachable = useCallback(
     (id: string, dir: 'up' | 'down'): Set<string> => {
@@ -324,11 +333,20 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
   const toggleFocusNode = useCallback((id: string) => {
     setFocusedNodes((cur) => {
       const next = new Set(cur);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+        return next;
+      }
+      // If adding from a different layer than current focuses, clear all first
+      const nl = nodeLayer.get(id);
+      if (nl !== undefined && cur.size > 0) {
+        const curLayer = nodeLayer.get([...cur][0]);
+        if (curLayer !== undefined && curLayer !== nl) return new Set([id]);
+      }
+      next.add(id);
       return next;
     });
-  }, []);
+  }, [nodeLayer]);
 
   const clearFocus = useCallback(() => setFocusedNodes(new Set()), []);
 
