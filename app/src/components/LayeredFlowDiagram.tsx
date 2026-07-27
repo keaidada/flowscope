@@ -63,7 +63,7 @@ const CARD_GAP = 12;
 const CANVAS_PADDING_X = 40;
 const CANVAS_PADDING_Y = 24;
 const HEADER_HEIGHT = 40;
-const DETAIL_PANEL_WIDTH = 320;
+const DETAIL_PANEL_WIDTH = 420;
 
 // ============================================================================
 // Helpers
@@ -357,9 +357,9 @@ export function LayeredFlowDiagram({
   }
 
   return (
-    <div className={cn('relative flex h-full w-full flex-col bg-background', className)}>
+    <div className={cn('absolute inset-0 flex flex-col bg-background', className)}>
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 border-b border-border bg-muted/10 px-4 py-2">
+      <div className="flex flex-shrink-0 items-center gap-3 border-b border-border bg-muted/10 px-4 py-2">
         <div className="flex items-baseline gap-3">
           <span className="text-sm font-semibold">
             {t('layeredFlow.title', '分层流程图')}
@@ -464,11 +464,12 @@ export function LayeredFlowDiagram({
         </div>
       )}
 
-      {/* ── Canvas (absolute fill + overflow scroll) ────────────────────── */}
+      {/* ── Canvas wrapper (positioning context for scroll + detail panel) ── */}
       <div className="relative min-h-0 flex-1">
+        {/* Scrollable canvas */}
         <div
           ref={scrollRef}
-          className="absolute inset-0 overflow-auto"
+          className="h-full w-full overflow-auto"
           onClick={clearSelection}
         >
           <div
@@ -477,8 +478,6 @@ export function LayeredFlowDiagram({
             style={{
               width: `${canvasWidth}px`,
               height: `${canvasHeight}px`,
-              minWidth: '100%',
-              minHeight: '100%',
             }}
           >
             {/* Layer columns — iterates over display order (compact when filter is active) */}
@@ -796,7 +795,7 @@ export function LayeredFlowDiagram({
       </div>
 
       {/* Hint bar */}
-      <div className="flex items-center justify-center gap-3 border-t border-border bg-muted/10 px-4 py-1.5 text-[10px] text-muted-foreground">
+      <div className="flex flex-shrink-0 items-center justify-center gap-3 border-t border-border bg-muted/10 px-4 py-1.5 text-[10px] text-muted-foreground">
         <span>
           {t('layeredFlow.hintHover', '悬停查看上下游')} ·{' '}
           {t('layeredFlow.hintClick', '点击查看详情')} ·{' '}
@@ -843,14 +842,15 @@ function DetailPanel({
         style={{ width: `${DETAIL_PANEL_WIDTH}px` }}
       >
         {/* Header */}
-        {/* Header */}
         <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
             <div
               className="h-3 w-3 flex-shrink-0 rounded-sm"
               style={{ background: color.border }}
             />
-            <span className="truncate text-sm font-semibold">{basename(node.label)}</span>
+            <span className="break-all text-sm font-semibold leading-tight">
+              {basename(node.label)}
+            </span>
           </div>
           <button
             type="button"

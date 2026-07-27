@@ -194,9 +194,10 @@ export function buildScriptGraph(tasks: PipelineTask[]): Graph {
         continue; // exact match found, skip fallback
       }
       // 2. Fallback: short-name match (e.g., read "users" matches write "db.users")
+      //    ONLY when unambiguous (exactly 1 producer has this short name) to avoid false edges
       const short = shortName(readTable);
       const fallbackProducers = shortProducers.get(short);
-      if (fallbackProducers) {
+      if (fallbackProducers && fallbackProducers.size === 1) {
         for (const producerId of fallbackProducers) {
           addEdge(producerId, consumerId, readTable);
         }
