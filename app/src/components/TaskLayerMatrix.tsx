@@ -801,38 +801,50 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
     };
   }, [selectedTask, depGraph]);
 
-  // Compact layout — wider horizontal (sparse), tighter vertical (compact)
-  const CELL_W = 160;
-  const CELL_H = 40;
-  const AXIS_W = 90;
-  const AXIS_H = 12;
+  // Compact layout
+  const CELL_W = 96;
+  const CELL_H = 44;
+  const AXIS_W = 60;
+  const AXIS_H = 8;
   const CIRCLE_R = 13;
   const PADDING = 48;
 
-  const svgW = AXIS_W + MAX_COLS * CELL_W + PADDING;
-  const svgH = AXIS_H + visibleRows.length * CELL_H + PADDING;
+  const svgW = AXIS_W + visibleLayerCount * CELL_W + PADDING;
+  const svgH = AXIS_H + Math.max(safeTaskNames.length, 10) * CELL_H + PADDING;
 
-  // ── Coordinate map ──
+  // ── Coordinate map (transposed: layers = columns L→R, scripts = rows T↓B) ──
   type Coord = { cx: number; cy: number; layerIdx: number; colIdx: number; subIdx: number };
   const coordMap = useMemo(() => {
     const map = new Map<string, Coord[]>();
+    // Group tasks by layer, then assign vertical positions within each layer column
+    const layerScripts = new Map<string, string[]>();
+    for (const task of safeTasks) {
+      if (!filteredTaskNames.includes(task.taskName)) continue;
+      if (!layerScripts.has(task.layer)) layerScripts.set(task.layer, []);
+      const arr = layerScripts.get(task.layer)!;
+      if (!arr.includes(task.taskName)) arr.push(task.taskName);
+    }
     const layerKeys = filteredLayers.map((l) => l.key);
-    rows.forEach((row, y) => {
-      row.cells.forEach((cellTasks, x) => {
-        if (cellTasks.length === 0) return;
-        const layerIdx = layerKeys.indexOf(row.layer.key);
-        const spacing = CIRCLE_R * 2.5;
-        const startX = -((cellTasks.length - 1) * spacing) / 2;
-        cellTasks.forEach((task, i) => {
-          const cx = AXIS_W + x * CELL_W + CELL_W / 2 + startX + i * spacing;
-          const cy = AXIS_H + y * CELL_H + CELL_H / 2;
-          if (!map.has(task.taskName)) map.set(task.taskName, []);
-          map.get(task.taskName)!.push({ cx, cy, layerIdx, colIdx: x, subIdx: i });
+    // Assign positions: X = layer column, Y = script row within layer
+
+    for (let li = 0; li < layerKeys.length; li++) {
+      const layerKey = layerKeys[li];
+      const scripts = layerScripts.get(layerKey) ?? [];
+      const colX = AXIS_W + li * CELL_W + CELL_W / 2;
+      scripts.forEach((scriptName, si) => {
+        const cy = AXIS_H + si * CELL_H + CELL_H / 2;
+        if (!map.has(scriptName)) map.set(scriptName, []);
+        map.get(scriptName)!.push({
+          cx: colX,
+          cy,
+          layerIdx: li,
+          colIdx: li,
+          subIdx: si,
         });
       });
-    });
+    }
     return map;
-  }, [rows, filteredLayers]);
+  }, [safeTasks, filteredLayers, filteredTaskNames, AXIS_W, CELL_W, CELL_H, AXIS_H]);
 
   // ── Dependency lines with arrow markers ──
   const MAX_DEP_LINES = 2000;
@@ -1050,26 +1062,26 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
               </marker>
             </defs>
 
-            {/* 行背景 */}
-            {visibleRows.map((row, y) => (
+            {/* 列背景 (layers = vertical bands) */}
+            {visibleRows.map((row, x) => (
               <rect
                 key={`bg-${row.layer.key}`}
-                x={AXIS_W}
-                y={AXIS_H + y * CELL_H}
-                width={MAX_COLS * CELL_W}
-                height={CELL_H}
+                x={AXIS_W + x * CELL_W}
+                y={AXIS_H}
+                width={CELL_W}
+                height={Math.max(safeTaskNames.length, 10) * CELL_H}
                 fill={getLayerBg(row.layer.key)}
               />
             ))}
 
-            {/* 水平分隔线 */}
-            {visibleRows.map((_, y) => (
+            {/* 垂直分隔线 */}
+            {visibleRows.map((_, x) => (
               <line
-                key={`h-${y}`}
-                x1={AXIS_W}
-                y1={AXIS_H + y * CELL_H}
-                x2={AXIS_W + MAX_COLS * CELL_W}
-                y2={AXIS_H + y * CELL_H}
+                key={`v-${x}`}
+                x1={AXIS_W + x * CELL_W}
+                y1={AXIS_H}
+                x2={AXIS_W + x * CELL_W}
+                y2={AXIS_H + Math.max(safeTaskNames.length, 10) * CELL_H}
                 stroke="hsl(var(--border))"
                 strokeWidth={0.5}
               />
@@ -1083,27 +1095,13 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
               strokeWidth={0.5}
             />
 
-            {/* 垂直分隔线 */}
-            {Array.from({ length: MAX_COLS + 1 }, (_, x) => (
-              <line
-                key={`v-${x}`}
-                x1={AXIS_W + x * CELL_W}
-                y1={AXIS_H}
-                x2={AXIS_W + x * CELL_W}
-                y2={AXIS_H + visibleRows.length * CELL_H}
-                stroke="hsl(var(--border))"
-                strokeWidth={0.5}
-              />
-            ))}
-
-            {/* Y 轴 — 逻辑层级 */}
-            {visibleRows.map((row, y) => (
-              <g key={`y-${row.layer.key}`}>
+            {/* X 轴 — 逻辑层级 (column headers, rotated) */}
+            {visibleRows.map((row, x) => (
+              <g key={`x-${row.layer.key}`}>
                 <text
-                  x={AXIS_W / 2}
-                  y={AXIS_H + y * CELL_H + CELL_H / 2}
+                  x={AXIS_W + x * CELL_W + CELL_W / 2}
+                  y={AXIS_H - 2}
                   textAnchor="middle"
-                  dominantBaseline="central"
                   fontSize={11}
                   fontWeight={700}
                   fill="currentColor"
