@@ -534,17 +534,21 @@ function computeLayeredLayoutImpl(tasks: PipelineTask[]): LayeredLayout {
   // Enforce left-to-right: guarantee non-broken edges never go right-to-left
   layerMap = enforceFlowDirection(graph, breakSet, layerMap);
 
-  // Force isolated nodes (no non-broken edges) to layer 0
+  // Force isolated nodes (no non-broken edges) to layer 0, shift others right
+  const isolatedIds = new Set<string>();
   for (const [id] of graph.nodes) {
     const outIdxs = graph.out.get(id) ?? [];
     const inIdxs = graph.in.get(id) ?? [];
     const hasLiveEdge =
       outIdxs.some((i) => !breakSet.has(i)) || inIdxs.some((i) => !breakSet.has(i));
-    if (!hasLiveEdge) layerMap.set(id, 0);
+    if (!hasLiveEdge) {
+      isolatedIds.add(id);
+      layerMap.set(id, 0);
+    } else {
+      // Shift non-isolated nodes right by 1 to make room for isolated at L0
+      layerMap.set(id, (layerMap.get(id) ?? 0) + 1);
+    }
   }
-
-  // Shift non-isolated nodes: if any non-isolated node is at layer 0, bump
-  // isolated nodes can stay at 0. Non-isolated source nodes also at 0 is fine.
 
   // Build output nodes
   const outNodes: LayeredNode[] = [];
