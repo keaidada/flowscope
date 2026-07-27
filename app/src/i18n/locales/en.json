@@ -761,5 +761,30 @@
     "match case": "match case",
     "regexp": "regexp",
     "by word": "by word"
+  },
+  "layeredFlow": {
+    "title": "Layered Flow",
+    "scripts": "scripts",
+    "dependencies": "deps",
+    "layers": "layers",
+    "layer": "Layer",
+    "empty": "No script dependencies to display",
+    "emptyHint": "Run analysis first, or verify that scripts contain parseable input/output tables",
+    "searchPlaceholder": "Search script/table...",
+    "noMatches": "No matches",
+    "reads": "in",
+    "writes": "out",
+    "fanOut": "fan-out",
+    "hintHover": "Hover to highlight lineage",
+    "hintClick": "Click to pin highlight",
+    "hintLegend": "Card left border color = layer",
+    "cycleTooltip": "Cyclic dependencies detected; some edges were auto-broken",
+    "cycleCount": "{{count}} cycle(s) broken",
+    "cycleTitle": "Cyclic dependencies detected (the following edges were broken to enforce left-to-right flow)",
+    "viaTable": "via",
+    "isolated": "isolated",
+    "inCycle": "in cycle",
+    "upstream": "Upstream",
+    "downstream": "Downstream"
   }
 }

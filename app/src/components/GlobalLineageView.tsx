@@ -5,7 +5,7 @@ import { GraphErrorBoundary, GraphView, useLineageActions } from '@pondpilot/flo
 import { useTranslation } from 'react-i18next';
 import { Button } from './ui/button';
 import { GlobalLineageListView } from './GlobalLineageListView';
-import { TaskLayerMatrix } from './TaskLayerMatrix';
+import { LayeredFlowDiagram } from './LayeredFlowDiagram';
 import { InsightsGraphView } from './insights/InsightsGraphView';
 import { useGlobalLineageData } from '@/hooks/useGlobalLineageData';
 import { usePipelineData } from '@/hooks/usePipelineData';
@@ -160,7 +160,7 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
           />
         )}
         {mode === 'matrix' && (
-          <TaskLayerMatrix
+          <LayeredFlowDiagram
             className="h-full w-full"
             tasks={pipelineTasks}
             taskNames={pipelineTaskNames}

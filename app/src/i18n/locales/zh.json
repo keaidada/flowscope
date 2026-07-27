@@ -761,5 +761,30 @@
     "match case": "区分大小写",
     "regexp": "正则表达式",
     "by word": "全词匹配"
+  },
+  "layeredFlow": {
+    "title": "分层流程图",
+    "scripts": "脚本",
+    "dependencies": "依赖",
+    "layers": "层",
+    "layer": "层",
+    "empty": "暂无可显示的脚本依赖关系",
+    "emptyHint": "请先运行分析，或确认脚本包含可解析的输入/输出表",
+    "searchPlaceholder": "搜索脚本/表名...",
+    "noMatches": "无匹配项",
+    "reads": "读",
+    "writes": "写",
+    "fanOut": "出度",
+    "hintHover": "悬停查看上下游",
+    "hintClick": "点击固定高亮",
+    "hintLegend": "卡片左边框颜色 = 层级",
+    "cycleTooltip": "检测到循环依赖，已自动断开部分边",
+    "cycleCount": "断环 {{count}} 处",
+    "cycleTitle": "检测到循环依赖（已断开以下边以保证从左到右的数据流）",
+    "viaTable": "通过",
+    "isolated": "孤立",
+    "inCycle": "环中",
+    "upstream": "上游",
+    "downstream": "下游"
   }
 }

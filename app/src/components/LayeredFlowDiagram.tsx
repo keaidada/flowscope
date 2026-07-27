@@ -1,0 +1,772 @@
+// ============================================================================
+// LayeredFlowDiagram.tsx
+//
+// Left-to-right layered DAG view replacing TaskLayerMatrix.
+//
+//   - Columns = topological layers (computed via longest path)
+//   - Cards   = scripts (minimal: just script name; click for details)
+//   - Arrows  = script→script dependencies (bezier curves)
+//   - Red dashed arrows = edges broken to enforce DAG
+//
+// Scroll: canvas uses absolute positioning to guarantee overflow scrolling.
+// ============================================================================
+
+import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Search, X, AlertTriangle, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import type { PipelineTask, LayerDef } from '@/types/pipeline-matrix';
+import {
+  computeLayeredLayout,
+  getLayerColor,
+  type LayeredLayout,
+  type LayeredNode,
+} from '@/lib/layered-layout';
+
+// ============================================================================
+// Props
+// ============================================================================
+
+interface LayeredFlowDiagramProps {
+  tasks: PipelineTask[];
+  taskNames: string[];
+  /** Ignored — layers are recomputed from the actual graph. */
+  layers: LayerDef[];
+  className?: string;
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const COLUMN_WIDTH = 220;
+const COLUMN_GAP = 60;
+const CARD_HEIGHT = 56;
+const CARD_GAP = 12;
+const CANVAS_PADDING_X = 40;
+const CANVAS_PADDING_Y = 24;
+const HEADER_HEIGHT = 40;
+const DETAIL_PANEL_WIDTH = 320;
+
+// ============================================================================
+// Component
+// ============================================================================
+
+export function LayeredFlowDiagram({
+  tasks,
+  taskNames: _taskNames,
+  layers: _layers,
+  className,
+}: LayeredFlowDiagramProps) {
+  const { t } = useTranslation();
+  const safeTasks = tasks ?? [];
+
+  // ── Layered layout ─────────────────────────────────────────────────────
+  const layout: LayeredLayout = useMemo(
+    () => computeLayeredLayout(safeTasks),
+    [safeTasks],
+  );
+
+  // ── UI state ───────────────────────────────────────────────────────────
+  const [search, setSearch] = useState('');
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [showCyclePanel, setShowCyclePanel] = useState(false);
+
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const [arrowPaths, setArrowPaths] = useState<
+    Array<{ key: string; d: string; from: string; to: string; broken: boolean }>
+  >([]);
+
+  // ── Group nodes by layer ───────────────────────────────────────────────
+  const layerBuckets = useMemo(() => {
+    const buckets: LayeredNode[][] = Array.from({ length: layout.layerCount }, () => []);
+    for (const n of layout.nodes) {
+      if (buckets[n.computedLayer]) buckets[n.computedLayer].push(n);
+      else buckets[n.computedLayer] = [n];
+    }
+    for (const b of buckets) b.sort((a, b) => a.id.localeCompare(b.id));
+    return buckets;
+  }, [layout]);
+
+  // ── Reachability for highlight ─────────────────────────────────────────
+  const reachable = useCallback(
+    (id: string, dir: 'up' | 'down'): Set<string> => {
+      const result = new Set<string>();
+      const queue = [id];
+      const seen = new Set<string>([id]);
+      while (queue.length) {
+        const cur = queue.shift()!;
+        for (const e of layout.edges) {
+          if (e.isBroken) continue;
+          const next = dir === 'down' ? (e.from === cur ? e.to : null) : e.to === cur ? e.from : null;
+          if (next && !seen.has(next)) {
+            seen.add(next);
+            result.add(next);
+            queue.push(next);
+          }
+        }
+      }
+      return result;
+    },
+    [layout.edges],
+  );
+
+  const highlightSet = useMemo(() => {
+    const activeId = selected ?? hovered;
+    if (!activeId) return null;
+    const up = reachable(activeId, 'up');
+    const down = reachable(activeId, 'down');
+    return new Set([activeId, ...up, ...down]);
+  }, [selected, hovered, reachable]);
+
+  // ── Search filter ──────────────────────────────────────────────────────
+  const searchLower = search.trim().toLowerCase();
+  const matchesSearch = useCallback(
+    (n: LayeredNode) => {
+      if (!searchLower) return true;
+      return (
+        n.id.toLowerCase().includes(searchLower) ||
+        n.label.toLowerCase().includes(searchLower) ||
+        n.reads.some((r) => r.toLowerCase().includes(searchLower)) ||
+        n.writes.some((w) => w.toLowerCase().includes(searchLower))
+      );
+    },
+    [searchLower],
+  );
+
+  // ── Diagnostics ────────────────────────────────────────────────────────
+  const diagnostics = useMemo(() => {
+    const totalEdges = layout.edges.length;
+    const brokenEdges = layout.edges.filter((e) => e.isBroken).length;
+    const liveEdges = totalEdges - brokenEdges;
+    const isolated = layout.nodes.filter(
+      (n) => !layout.edges.some((e) => !e.isBroken && (e.from === n.id || e.to === n.id)),
+    ).length;
+    return { totalEdges, brokenEdges, liveEdges, isolated, totalNodes: layout.nodes.length };
+  }, [layout]);
+
+  // ── Arrow path computation ─────────────────────────────────────────────
+  const recomputeArrows = useCallback(() => {
+    const canvasEl = canvasRef.current;
+    if (!canvasEl) return;
+    const c = canvasEl.getBoundingClientRect();
+    const newPaths: typeof arrowPaths = [];
+
+    for (const e of layout.edges) {
+      const fromEl = cardRefs.current.get(e.from);
+      const toEl = cardRefs.current.get(e.to);
+      if (!fromEl || !toEl) continue;
+      const fr = fromEl.getBoundingClientRect();
+      const tr = toEl.getBoundingClientRect();
+      const x1 = fr.right - c.left;
+      const y1 = fr.top + fr.height / 2 - c.top;
+      const x2 = tr.left - c.left;
+      const y2 = tr.top + tr.height / 2 - c.top;
+      const dx = x2 - x1;
+      const cp1x = x1 + dx * 0.5;
+      const cp2x = x2 - dx * 0.5;
+      const d = `M ${x1} ${y1} C ${cp1x} ${y1}, ${cp2x} ${y2}, ${x2} ${y2}`;
+      newPaths.push({
+        key: `${e.from}__${e.to}__${e.viaTable}`,
+        d,
+        from: e.from,
+        to: e.to,
+        broken: !!e.isBroken,
+      });
+    }
+    setArrowPaths(newPaths);
+  }, [layout.edges]);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(recomputeArrows);
+    return () => cancelAnimationFrame(id);
+  }, [recomputeArrows, layout, layerBuckets]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => recomputeArrows());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [recomputeArrows]);
+
+  // ── Canvas dimensions ──────────────────────────────────────────────────
+  const canvasWidth = useMemo(
+    () =>
+      Math.max(
+        layout.layerCount * (COLUMN_WIDTH + COLUMN_GAP) - COLUMN_GAP + CANVAS_PADDING_X * 2,
+        800,
+      ),
+    [layout.layerCount],
+  );
+
+  const canvasHeight = useMemo(() => {
+    let maxStackHeight = 0;
+    for (const bucket of layerBuckets) {
+      const h = bucket.length * CARD_HEIGHT + Math.max(0, bucket.length - 1) * CARD_GAP;
+      if (h > maxStackHeight) maxStackHeight = h;
+    }
+    return maxStackHeight + HEADER_HEIGHT + CANVAS_PADDING_Y * 2;
+  }, [layerBuckets]);
+
+  // ── Handlers ───────────────────────────────────────────────────────────
+  const handleCardHover = useCallback((id: string | null) => setHovered(id), []);
+  const handleCardClick = useCallback((id: string) => setSelected(id), []);
+  const clearSelection = useCallback(() => {
+    setSelected(null);
+    setHovered(null);
+  }, []);
+
+  // ── Selected node details ──────────────────────────────────────────────
+  const selectedNode = selected ? layout.nodes.find((n) => n.id === selected) : null;
+  const selectedEdges = useMemo(() => {
+    if (!selected) return { upstream: [], downstream: [] };
+    return {
+      upstream: layout.edges.filter((e) => !e.isBroken && e.to === selected),
+      downstream: layout.edges.filter((e) => !e.isBroken && e.from === selected),
+    };
+  }, [selected, layout.edges]);
+
+  // ── Empty state ────────────────────────────────────────────────────────
+  if (layout.nodes.length === 0) {
+    return (
+      <div className={cn('flex h-full w-full items-center justify-center', className)}>
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground">
+            {t('layeredFlow.empty', '暂无可显示的脚本依赖关系')}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground/70">
+            {t(
+              'layeredFlow.emptyHint',
+              '请先运行分析，或确认脚本包含可解析的输入/输出表',
+            )}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn('relative flex h-full w-full flex-col bg-background', className)}>
+      {/* ── Toolbar ─────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 border-b border-border bg-muted/10 px-4 py-2">
+        <div className="flex items-baseline gap-3">
+          <span className="text-sm font-semibold">
+            {t('layeredFlow.title', '分层流程图')}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {diagnostics.totalNodes} {t('layeredFlow.scripts', '脚本')} ·{' '}
+            {diagnostics.liveEdges} {t('layeredFlow.dependencies', '依赖')} ·{' '}
+            {layout.layerCount} {t('layeredFlow.layers', '层')}
+            {diagnostics.isolated > 0 && (
+              <span className="ml-1 text-amber-500">
+                · {diagnostics.isolated} {t('layeredFlow.isolated', '孤立')}
+              </span>
+            )}
+          </span>
+        </div>
+
+        <div className="flex-1" />
+
+        {/* Cycle warning chip */}
+        {layout.cycleWarning && (
+          <button
+            type="button"
+            onClick={() => setShowCyclePanel((v) => !v)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors',
+              'border-amber-500/40 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20',
+              'dark:border-amber-500/30 dark:text-amber-400 dark:hover:bg-amber-500/20',
+            )}
+            title={t('layeredFlow.cycleTooltip', '检测到循环依赖，已自动断开部分边')}
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            <span>
+              {t('layeredFlow.cycleCount', '断环 {{count}} 处', {
+                count: layout.cycleWarning.count,
+              })}
+            </span>
+            {showCyclePanel ? (
+              <ChevronUp className="h-3 w-3" />
+            ) : (
+              <ChevronDown className="h-3 w-3" />
+            )}
+          </button>
+        )}
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('layeredFlow.searchPlaceholder', '搜索脚本/表名...')}
+            className={cn(
+              'h-7 w-56 rounded-md border border-input bg-background pl-7 pr-7 text-xs',
+              'placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+            )}
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Cycle expandable panel */}
+      {layout.cycleWarning && showCyclePanel && (
+        <div className="border-b border-amber-500/20 bg-amber-500/5 px-4 py-2 text-xs">
+          <div className="mb-1 font-medium text-amber-700 dark:text-amber-400">
+            {t(
+              'layeredFlow.cycleTitle',
+              '检测到循环依赖（已断开以下边以保证从左到右的数据流）',
+            )}
+          </div>
+          <ul className="space-y-1">
+            {layout.cycleWarning.brokenEdges.map((e) => (
+              <li key={`${e.from}__${e.to}__${e.viaTable}`} className="font-mono text-[11px]">
+                <span className="text-foreground">{e.from}</span>
+                <span className="mx-1 text-muted-foreground">→</span>
+                <span className="text-foreground">{e.to}</span>
+                <span className="ml-2 text-muted-foreground">
+                  ({t('layeredFlow.viaTable', '通过')} {e.viaTable})
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* ── Canvas (absolute fill + overflow scroll) ────────────────────── */}
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scrollRef}
+          className="absolute inset-0 overflow-auto"
+          onClick={clearSelection}
+        >
+          <div
+            ref={canvasRef}
+            className="relative"
+            style={{
+              width: `${canvasWidth}px`,
+              height: `${canvasHeight}px`,
+              minWidth: '100%',
+              minHeight: '100%',
+            }}
+          >
+            {/* Layer columns */}
+            {layerBuckets.map((bucket, layerIdx) => {
+              const color = getLayerColor(layerIdx);
+              const visibleNodes = bucket.filter(matchesSearch);
+              return (
+                <div
+                  key={`layer-${layerIdx}`}
+                  className="absolute flex flex-col"
+                  style={{
+                    left: `${CANVAS_PADDING_X + layerIdx * (COLUMN_WIDTH + COLUMN_GAP)}px`,
+                    top: `${CANVAS_PADDING_Y}px`,
+                    width: `${COLUMN_WIDTH}px`,
+                  }}
+                >
+                  {/* Header */}
+                  <div
+                    className="flex items-center justify-between rounded-t-lg border-x border-t px-3 py-2 text-xs font-semibold"
+                    style={{
+                      background: color.bg,
+                      borderColor: color.border,
+                      color: color.text,
+                      borderBottom: `2px solid ${color.border}`,
+                      height: `${HEADER_HEIGHT}px`,
+                    }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span
+                        className="flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold"
+                        style={{ background: 'rgba(255,255,255,0.1)' }}
+                      >
+                        L{layerIdx + 1}
+                      </span>
+                      {t('layeredFlow.layer', '层')} {layerIdx + 1}
+                    </span>
+                    <span className="text-[10px] opacity-70">
+                      {visibleNodes.length}/{bucket.length}
+                    </span>
+                  </div>
+
+                  {/* Body */}
+                  <div
+                    className="flex flex-col gap-3 rounded-b-xl border-x border-b p-2"
+                    style={{
+                      background: `${color.bg}66`,
+                      borderColor: color.border,
+                      minHeight: `${CARD_HEIGHT}px`,
+                    }}
+                  >
+                    {visibleNodes.length === 0 && (
+                      <div className="py-4 text-center text-[11px] text-muted-foreground/60">
+                        {t('layeredFlow.noMatches', '无匹配项')}
+                      </div>
+                    )}
+                    {visibleNodes.map((node) => {
+                      const isHighlighted = highlightSet?.has(node.id) ?? false;
+                      const isDimmed = highlightSet && !isHighlighted;
+                      const isSelected = selected === node.id;
+                      const isCycle = node.isInCycle;
+                      const fanOut = layout.edges.filter(
+                        (e) => !e.isBroken && e.from === node.id,
+                      ).length;
+                      const fanIn = layout.edges.filter(
+                        (e) => !e.isBroken && e.to === node.id,
+                      ).length;
+                      return (
+                        <div
+                          key={node.id}
+                          ref={(el) => {
+                            cardRefs.current.set(node.id, el);
+                          }}
+                          onMouseEnter={() => handleCardHover(node.id)}
+                          onMouseLeave={() => handleCardHover(null)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCardClick(node.id);
+                          }}
+                          className={cn(
+                            'group relative flex cursor-pointer items-center justify-between rounded-md border bg-card px-3 transition-all',
+                            'hover:-translate-y-0.5 hover:shadow-md',
+                            isSelected
+                              ? 'border-primary shadow-md ring-2 ring-primary/60'
+                              : isHighlighted
+                                ? 'border-primary/60 shadow-sm'
+                                : 'border-border',
+                            isDimmed && 'opacity-30',
+                          )}
+                          style={{
+                            borderLeft: `3px solid ${color.border}`,
+                            height: `${CARD_HEIGHT}px`,
+                          }}
+                          title={node.label}
+                        >
+                          {/* Script name (only visible content) */}
+                          <span className="truncate text-xs font-medium">{node.label}</span>
+
+                          {/* Right indicators (compact) */}
+                          <div className="flex flex-shrink-0 items-center gap-1.5">
+                            {isCycle && (
+                              <AlertTriangle className="h-3 w-3 text-amber-500" />
+                            )}
+                            {(fanIn > 0 || fanOut > 0) && (
+                              <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground">
+                                {fanIn}→{node.label.split('.')[0]}→{fanOut}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* SVG arrows */}
+            <svg
+              className="pointer-events-none absolute left-0 top-0 h-full w-full"
+              style={{ zIndex: 1 }}
+            >
+              <defs>
+                <marker
+                  id="layered-arrow-default"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(139,148,158,0.55)" />
+                </marker>
+                <marker
+                  id="layered-arrow-highlight"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="hsl(var(--primary))" />
+                </marker>
+                <marker
+                  id="layered-arrow-broken"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b" />
+                </marker>
+              </defs>
+              {arrowPaths.map((p) => {
+                const touched =
+                  highlightSet && (highlightSet.has(p.from) || highlightSet.has(p.to));
+                const isOnHighlightPath =
+                  highlightSet && highlightSet.has(p.from) && highlightSet.has(p.to);
+                let stroke = 'rgba(139,148,158,0.35)';
+                let strokeWidth = 1.5;
+                let marker = 'url(#layered-arrow-default)';
+                let opacity = 1;
+
+                if (p.broken) {
+                  stroke = '#f59e0b';
+                  strokeWidth = 1.5;
+                  marker = 'url(#layered-arrow-broken)';
+                } else if (isOnHighlightPath) {
+                  stroke = 'hsl(var(--primary))';
+                  strokeWidth = 2.5;
+                  marker = 'url(#layered-arrow-highlight)';
+                } else if (highlightSet && touched) {
+                  stroke = 'hsl(var(--primary) / 0.6)';
+                  strokeWidth = 2;
+                  marker = 'url(#layered-arrow-highlight)';
+                } else if (highlightSet) {
+                  opacity = 0.15;
+                }
+
+                return (
+                  <path
+                    key={p.key}
+                    d={p.d}
+                    fill="none"
+                    stroke={stroke}
+                    strokeWidth={strokeWidth}
+                    markerEnd={marker}
+                    opacity={opacity}
+                    strokeDasharray={p.broken ? '5 3' : undefined}
+                  />
+                );
+              })}
+            </svg>
+          </div>
+        </div>
+
+        {/* ── Detail panel (right side drawer on card click) ────────────── */}
+        {selectedNode && (
+          <DetailPanel
+            node={selectedNode}
+            upstreamEdges={selectedEdges.upstream}
+            downstreamEdges={selectedEdges.downstream}
+            layerCount={layout.layerCount}
+            onClose={() => setSelected(null)}
+            onSelectNode={(id) => setSelected(id)}
+          />
+        )}
+      </div>
+
+      {/* Hint bar */}
+      <div className="flex items-center justify-center gap-3 border-t border-border bg-muted/10 px-4 py-1.5 text-[10px] text-muted-foreground">
+        <span>
+          {t('layeredFlow.hintHover', '悬停查看上下游')} ·{' '}
+          {t('layeredFlow.hintClick', '点击查看详情')} ·{' '}
+          {t('layeredFlow.hintLegend', '卡片左边框颜色 = 层级')}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Detail panel (right side, slides in on card click)
+// ============================================================================
+
+interface DetailPanelProps {
+  node: LayeredNode;
+  upstreamEdges: Array<{ from: string; viaTable: string }>;
+  downstreamEdges: Array<{ to: string; viaTable: string }>;
+  layerCount: number;
+  onClose: () => void;
+  onSelectNode: (id: string) => void;
+}
+
+function DetailPanel({
+  node,
+  upstreamEdges,
+  downstreamEdges,
+  layerCount,
+  onClose,
+  onSelectNode,
+}: DetailPanelProps) {
+  const { t } = useTranslation();
+  const color = getLayerColor(node.computedLayer);
+
+  return (
+    <>
+      {/* Click-outside catcher */}
+      <div className="absolute inset-0 z-20" onClick={onClose} />
+
+      {/* Panel */}
+      <div
+        className="absolute right-0 top-0 z-30 flex h-full flex-col border-l border-border bg-background shadow-2xl"
+        style={{ width: `${DETAIL_PANEL_WIDTH}px` }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <div
+              className="h-3 w-3 flex-shrink-0 rounded-sm"
+              style={{ background: color.border }}
+            />
+            <span className="truncate text-sm font-semibold">{node.label}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-4 text-xs">
+          {/* Layer badge */}
+          <div className="mb-4 flex items-center gap-2">
+            <span
+              className="rounded-md px-2 py-1 text-[11px] font-semibold"
+              style={{
+                background: color.bg,
+                color: color.text,
+                border: `1px solid ${color.border}`,
+              }}
+            >
+              {t('layeredFlow.layer', '层')} {node.computedLayer + 1} / {layerCount}
+            </span>
+            {node.isInCycle && (
+              <span className="flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-[11px] text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-3 w-3" />
+                {t('layeredFlow.inCycle', '环中')}
+              </span>
+            )}
+          </div>
+
+          {/* Writes */}
+          <Section title={t('layeredFlow.writes', '写入') + ` (${node.writes.length})`}>
+            {node.writes.length === 0 ? (
+              <Empty />
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {node.writes.map((w) => (
+                  <code
+                    key={w}
+                    className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] text-primary"
+                  >
+                    {w}
+                  </code>
+                ))}
+              </div>
+            )}
+          </Section>
+
+          {/* Reads */}
+          <Section title={t('layeredFlow.reads', '读取') + ` (${node.reads.length})`}>
+            {node.reads.length === 0 ? (
+              <Empty />
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {node.reads.map((r) => (
+                  <code
+                    key={r}
+                    className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                  >
+                    {r}
+                  </code>
+                ))}
+              </div>
+            )}
+          </Section>
+
+          {/* Upstream */}
+          <Section
+            title={`${t('layeredFlow.upstream', '上游')} (${upstreamEdges.length})`}
+          >
+            {upstreamEdges.length === 0 ? (
+              <Empty />
+            ) : (
+              <ul className="space-y-1">
+                {upstreamEdges.map((e) => (
+                  <li key={`${e.from}-${e.viaTable}`}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectNode(e.from)}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-muted"
+                    >
+                      <span className="truncate font-mono text-[11px] text-foreground">
+                        {e.from}
+                      </span>
+                      <span className="ml-auto truncate text-[10px] text-muted-foreground">
+                        → {e.viaTable}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+
+          {/* Downstream */}
+          <Section
+            title={`${t('layeredFlow.downstream', '下游')} (${downstreamEdges.length})`}
+          >
+            {downstreamEdges.length === 0 ? (
+              <Empty />
+            ) : (
+              <ul className="space-y-1">
+                {downstreamEdges.map((e) => (
+                  <li key={`${e.to}-${e.viaTable}`}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectNode(e.to)}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-muted"
+                    >
+                      <span className="truncate font-mono text-[11px] text-foreground">
+                        {e.to}
+                      </span>
+                      <span className="ml-auto truncate text-[10px] text-muted-foreground">
+                        via {e.viaTable}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-4">
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Empty() {
+  return <div className="text-[11px] text-muted-foreground/60">—</div>;
+}
