@@ -69,14 +69,12 @@ const DETAIL_PANEL_WIDTH = 320;
 // Helpers
 // ============================================================================
 
-/** Extract just the file name (last path segment, no extension). */
+/** Extract just the file name (last path segment). Extension preserved. */
 function basename(path: string): string {
   if (!path) return path;
   // Handle both / and \ as path separators
   const parts = path.split(/[/\\]/);
-  const last = parts[parts.length - 1];
-  // Strip common SQL/script extensions
-  return last.replace(/\.(sql|hql|ddl|prc|sp|proc|js|py|sh)$/i, '') || last;
+  return parts[parts.length - 1] || path;
 }
 
 // ============================================================================
@@ -186,6 +184,23 @@ export function LayeredFlowDiagram({
     [searchLower],
   );
 
+  // ── Compact buckets: drop empty layers when focus/search is active ──────
+  // Maps display index (0,1,2...) → original layer index, skipping empties
+  const compactMap = useMemo(() => {
+    const map: Array<{ origIdx: number; bucket: LayeredNode[] }> = [];
+    for (let i = 0; i < layerBuckets.length; i++) {
+      const visibleNodes = layerBuckets[i].filter(
+        (n) => matchesSearch(n) && isVisibleDueToFocus(n.id),
+      );
+      if (visibleNodes.length > 0) {
+        map.push({ origIdx: i, bucket: layerBuckets[i] });
+      }
+    }
+    return map;
+  }, [layerBuckets, matchesSearch, isVisibleDueToFocus]);
+
+  const isCompactMode = focusVisibleSet !== null || search.trim() !== '';
+
   // ── Diagnostics ────────────────────────────────────────────────────────
   const diagnostics = useMemo(() => {
     const totalEdges = layout.edges.length;
@@ -243,23 +258,32 @@ export function LayeredFlowDiagram({
   }, [recomputeArrows]);
 
   // ── Canvas dimensions ──────────────────────────────────────────────────
+  // Effective column count (compact when filter is active)
+  const effectiveLayerCount = isCompactMode ? compactMap.length : layout.layerCount;
+
   const canvasWidth = useMemo(
     () =>
       Math.max(
-        layout.layerCount * (COLUMN_WIDTH + COLUMN_GAP) - COLUMN_GAP + CANVAS_PADDING_X * 2,
+        effectiveLayerCount * (COLUMN_WIDTH + COLUMN_GAP) -
+          COLUMN_GAP +
+          CANVAS_PADDING_X * 2,
         800,
       ),
-    [layout.layerCount],
+    [effectiveLayerCount],
   );
 
   const canvasHeight = useMemo(() => {
     let maxStackHeight = 0;
-    for (const bucket of layerBuckets) {
-      const h = bucket.length * CARD_HEIGHT + Math.max(0, bucket.length - 1) * CARD_GAP;
+    const bucketsToMeasure = isCompactMode
+      ? compactMap.map((c) => c.bucket)
+      : layerBuckets;
+    for (const bucket of bucketsToMeasure) {
+      // Account for variable-height cards (cards may wrap if name is long)
+      const h = bucket.length * (CARD_HEIGHT + 20) + Math.max(0, bucket.length - 1) * CARD_GAP;
       if (h > maxStackHeight) maxStackHeight = h;
     }
     return maxStackHeight + HEADER_HEIGHT + CANVAS_PADDING_Y * 2;
-  }, [layerBuckets]);
+  }, [layerBuckets, compactMap, isCompactMode]);
 
   // ── Handlers ───────────────────────────────────────────────────────────
   const handleCardHover = useCallback((id: string | null) => setHovered(id), []);
@@ -457,8 +481,18 @@ export function LayeredFlowDiagram({
               minHeight: '100%',
             }}
           >
-            {/* Layer columns */}
-            {layerBuckets.map((bucket, layerIdx) => {
+            {/* Layer columns — iterates over display order (compact when filter is active) */}
+            {(isCompactMode
+              ? compactMap.map((c, i) => ({ bucket: c.bucket, layerIdx: c.origIdx, displayIdx: i }))
+              : layerBuckets.map((bucket, layerIdx) => ({ bucket, layerIdx, displayIdx: layerIdx }))
+            ).map(({ bucket, layerIdx, displayIdx }) => {
+              // In compact mode, completely skip layers with no visible nodes
+              if (isCompactMode) {
+                const visN = bucket.filter(
+                  (n) => matchesSearch(n) && isVisibleDueToFocus(n.id),
+                );
+                if (visN.length === 0) return null;
+              }
               const color = getLayerColor(layerIdx);
               const visibleNodes = bucket.filter(
                 (n) => matchesSearch(n) && isVisibleDueToFocus(n.id),
@@ -470,7 +504,7 @@ export function LayeredFlowDiagram({
                   key={`layer-${layerIdx}`}
                   className="absolute flex flex-col"
                   style={{
-                    left: `${CANVAS_PADDING_X + layerIdx * (COLUMN_WIDTH + COLUMN_GAP)}px`,
+                    left: `${CANVAS_PADDING_X + displayIdx * (COLUMN_WIDTH + COLUMN_GAP)}px`,
                     top: `${CANVAS_PADDING_Y}px`,
                     width: `${COLUMN_WIDTH}px`,
                   }}
@@ -619,7 +653,7 @@ export function LayeredFlowDiagram({
                             handleCardClick(node.id);
                           }}
                           className={cn(
-                            'group relative flex cursor-pointer items-center justify-between rounded-md border bg-card px-3 transition-all',
+                            'group relative flex cursor-pointer items-center justify-between gap-2 rounded-md border bg-card px-3 py-2 transition-all',
                             'hover:-translate-y-0.5 hover:shadow-md',
                             isSelected
                               ? 'border-primary shadow-md ring-2 ring-primary/60'
@@ -630,17 +664,17 @@ export function LayeredFlowDiagram({
                           )}
                           style={{
                             borderLeft: `3px solid ${color.border}`,
-                            height: `${CARD_HEIGHT}px`,
+                            minHeight: `${CARD_HEIGHT}px`,
                           }}
                           title={node.label}
                         >
-                          {/* Script name (basename only, no path) */}
-                          <span className="truncate text-xs font-medium">
+                          {/* Script name — full, allowed to wrap */}
+                          <span className="break-all text-xs font-medium leading-tight">
                             {basename(node.label)}
                           </span>
 
                           {/* Right indicators (compact) */}
-                          <div className="flex flex-shrink-0 items-center gap-1.5">
+                          <div className="flex flex-shrink-0 flex-col items-end gap-1">
                             {isCycle && (
                               <AlertTriangle className="h-3 w-3 text-amber-500" />
                             )}
@@ -809,8 +843,9 @@ function DetailPanel({
         style={{ width: `${DETAIL_PANEL_WIDTH}px` }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div className="flex items-center gap-2 min-w-0">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2">
             <div
               className="h-3 w-3 flex-shrink-0 rounded-sm"
               style={{ background: color.border }}
@@ -826,8 +861,8 @@ function DetailPanel({
           </button>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto p-4 text-xs">
+        {/* Body — each item on a single line; horizontal scroll if needed */}
+        <div className="flex-1 overflow-auto p-4 text-xs">
           {/* Layer badge */}
           <div className="mb-4 flex items-center gap-2">
             <span
@@ -856,7 +891,7 @@ function DetailPanel({
               <ul className="space-y-1">
                 {node.writes.map((w) => (
                   <li key={w}>
-                    <code className="block rounded bg-primary/10 px-2 py-1 font-mono text-[11px] text-primary">
+                    <code className="block whitespace-nowrap rounded bg-primary/10 px-2 py-1 font-mono text-[11px] text-primary">
                       {w}
                     </code>
                   </li>
@@ -873,7 +908,7 @@ function DetailPanel({
               <ul className="space-y-1">
                 {node.reads.map((r) => (
                   <li key={r}>
-                    <code className="block rounded bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                    <code className="block whitespace-nowrap rounded bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">
                       {r}
                     </code>
                   </li>
@@ -895,14 +930,10 @@ function DetailPanel({
                     <button
                       type="button"
                       onClick={() => onSelectNode(e.from)}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-muted"
+                      className="flex w-full items-center gap-2 whitespace-nowrap rounded px-2 py-1 text-left font-mono text-[11px] hover:bg-muted"
                     >
-                      <span className="truncate font-mono text-[11px] text-foreground">
-                        {e.from}
-                      </span>
-                      <span className="ml-auto truncate text-[10px] text-muted-foreground">
-                        → {e.viaTable}
-                      </span>
+                      <span className="text-foreground">{e.from}</span>
+                      <span className="text-muted-foreground">→ {e.viaTable}</span>
                     </button>
                   </li>
                 ))}
@@ -923,14 +954,10 @@ function DetailPanel({
                     <button
                       type="button"
                       onClick={() => onSelectNode(e.to)}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-muted"
+                      className="flex w-full items-center gap-2 whitespace-nowrap rounded px-2 py-1 text-left font-mono text-[11px] hover:bg-muted"
                     >
-                      <span className="truncate font-mono text-[11px] text-foreground">
-                        {e.to}
-                      </span>
-                      <span className="ml-auto truncate text-[10px] text-muted-foreground">
-                        via {e.viaTable}
-                      </span>
+                      <span className="text-foreground">{e.to}</span>
+                      <span className="text-muted-foreground">via {e.viaTable}</span>
                     </button>
                   </li>
                 ))}
