@@ -286,11 +286,11 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     return diagnostics.liveEdges <= 100;
   }, [arrowDisplay, focusVisibleSet, diagnostics.liveEdges]);
 
-  // ── Highlighted card count ─────────────────────────────────────────────
+  // ── Highlighted card count (click or hover) ────────────────────────────
   const highlightedCardCount = useMemo(() => {
-    if (!selectionChainSet) return 0;
-    return selectionChainSet.size;
-  }, [selectionChainSet]);
+    if (!highlightSet) return 0;
+    return highlightSet.size;
+  }, [highlightSet]);
   // ── Arrow path computation ─────────────────────────────────────────────
   const recomputeArrows = useCallback(() => {
     const canvasEl = canvasRef.current;
