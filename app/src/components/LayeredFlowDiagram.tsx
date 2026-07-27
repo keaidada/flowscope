@@ -1128,15 +1128,12 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
 
                 if (p.broken) {
                   stroke = '#f59e0b';
-                  strokeWidth = 1.25;
                   marker = 'url(#layered-arrow-broken)';
                 } else if (isOnHighlightPath) {
                   stroke = 'hsl(var(--primary))';
-                  strokeWidth = 1.5;
                   marker = 'url(#layered-arrow-highlight)';
                 } else if (highlightSet && touched) {
                   stroke = 'hsl(var(--primary) / 0.45)';
-                  strokeWidth = 1.25;
                   marker = 'url(#layered-arrow-highlight)';
                 } else if (highlightSet) {
                   opacity = 0.08;
