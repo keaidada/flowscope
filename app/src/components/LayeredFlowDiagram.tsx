@@ -954,6 +954,12 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                       const isDimmed = highlightSet && !isHighlighted;
                       const isSelected = selected === node.id;
                       const isCycle = node.isInCycle;
+                      const fanOut = layout.edges.filter(
+                        (e) => !e.isBroken && e.from === node.id,
+                      ).length;
+                      const fanIn = layout.edges.filter(
+                        (e) => !e.isBroken && e.to === node.id,
+                      ).length;
                       return (
                         <div
                           key={node.id}
@@ -990,10 +996,15 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                             {basename(node.label)}
                           </span>
 
-                          {/* Cycle indicator */}
+                          {/* Right indicators */}
                           <div className="flex flex-shrink-0 flex-col items-end gap-1">
                             {isCycle && (
                               <AlertTriangle className="h-3 w-3 text-amber-500" />
+                            )}
+                            {(fanIn > 0 || fanOut > 0) && (
+                              <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground">
+                                {fanIn}→{fanOut}
+                              </span>
                             )}
                           </div>
                         </div>
