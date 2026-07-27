@@ -25,6 +25,7 @@ import {
   Square,
   Copy,
   Check,
+  Download,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { PipelineTask } from '@/types/pipeline-matrix';
@@ -478,6 +479,46 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     });
   }, []);
 
+  // Export current layout data as CSV
+  const handleExportCsv = useCallback(() => {
+    const rows = layout.nodes.map((n) => {
+      const fanOut = layout.edges.filter((e) => !e.isBroken && e.from === n.id).length;
+      const fanIn = layout.edges.filter((e) => !e.isBroken && e.to === n.id).length;
+      return {
+        layer: n.computedLayer,
+        script: n.label,
+        reads: n.reads.join('; '),
+        writes: n.writes.join('; '),
+        upstream: fanIn,
+        downstream: fanOut,
+      };
+    });
+    rows.sort((a, b) => a.layer - b.layer || a.script.localeCompare(b.script));
+
+    const header = ['层级(Layer)', '脚本名(Script)', '读取表(Reads)', '写入表(Writes)', '上游数(Upstream)', '下游数(Downstream)'];
+    const csvLines = [header.join(',')];
+    for (const r of rows) {
+      const cells = [
+        r.layer,
+        `"${r.script.replace(/"/g, '""')}"`,
+        `"${r.reads.replace(/"/g, '""')}"`,
+        `"${r.writes.replace(/"/g, '""')}"`,
+        r.upstream,
+        r.downstream,
+      ];
+      csvLines.push(cells.join(','));
+    }
+
+    const csv = '\uFEFF' + csvLines.join('\n'); // BOM for Excel UTF-8
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `matrix-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [layout]);
+
   // Focused nodes count within a given layer
   const focusedCountInLayer = useCallback(
     (allIds: string[]) => allIds.filter((id) => focusedNodes.has(id)).length,
@@ -687,6 +728,17 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
             ↑{impactStats.upstream} ↓{impactStats.downstream} · {impactStats.tables} 表
           </span>
         )}
+
+        {/* Export CSV */}
+        <button
+          type="button"
+          onClick={handleExportCsv}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="导出 CSV"
+        >
+          <Download className="h-3 w-3" />
+          CSV
+        </button>
           <DropdownMenuContent align="end" className="w-40 max-h-[60vh] overflow-y-auto">
             <div className="border-b border-border px-3 py-1.5 text-[11px] font-semibold">
               高亮链分布
