@@ -215,6 +215,9 @@
   },
   "analysis": {
     "analyzingSql": "Analyzing SQL",
+    "emptyState": {
+      "runAnalysis": "Run analysis first to generate lineage data"
+    },
     "tooManyNodesForGraph": "Lineage contains {{count}} nodes (exceeds graph render limit of {{limit}}). Switched to matrix view. Use list view for full details.",
     "analyzingDesc": "Building lineage, schema, and issue details for the current analysis run.",
     "loadingCurrentFile": "Current file",
