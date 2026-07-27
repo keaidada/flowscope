@@ -247,7 +247,7 @@ export function LayeredFlowDiagram({
   useEffect(() => {
     const id = requestAnimationFrame(recomputeArrows);
     return () => cancelAnimationFrame(id);
-  }, [recomputeArrows, layout, layerBuckets]);
+  }, [recomputeArrows, layout, layerBuckets, focusedNodes, search, isCompactMode, compactMap]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -302,22 +302,6 @@ export function LayeredFlowDiagram({
       return next;
     });
   }, []);
-
-  const toggleFocusLayer = useCallback(
-    (_layerIdx: number, allIds: string[]) => {
-      setFocusedNodes((cur) => {
-        const allSelected = allIds.every((id) => cur.has(id));
-        const next = new Set(cur);
-        if (allSelected) {
-          for (const id of allIds) next.delete(id);
-        } else {
-          for (const id of allIds) next.add(id);
-        }
-        return next;
-      });
-    },
-    [],
-  );
 
   const clearFocus = useCallback(() => setFocusedNodes(new Set()), []);
 
@@ -553,60 +537,82 @@ export function LayeredFlowDiagram({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent
                           align="end"
-                          className="max-h-80 w-56 overflow-y-auto"
+                          className="max-h-[60vh] w-64 overflow-y-auto"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <DropdownMenuLabel className="flex items-center justify-between">
                             <span>
-                              {t('layeredFlow.filterScripts', '筛选脚本')} ({bucket.length})
+                              {t('layeredFlow.filterScripts', '筛选脚本')} ({layout.nodes.length})
                             </span>
-                            {focusedInLayer > 0 && (
+                            {focusedNodes.size > 0 && (
                               <button
                                 type="button"
-                                onClick={() => {
-                                  for (const id of bucketIds) {
-                                    if (focusedNodes.has(id)) toggleFocusNode(id);
-                                  }
-                                }}
+                                onClick={clearFocus}
                                 className="text-[10px] text-primary hover:underline"
                               >
-                                {t('layeredFlow.clear', '清除')}
+                                {t('layeredFlow.clear', '清除')} ({focusedNodes.size})
                               </button>
                             )}
                           </DropdownMenuLabel>
                           <DropdownMenuSeparator />
-                          <button
-                            type="button"
-                            onClick={() => toggleFocusLayer(layerIdx, bucketIds)}
-                            className="flex w-full items-center gap-2 px-2 py-1.5 text-xs hover:bg-muted"
-                          >
-                            {bucket.every((id) => focusedNodes.has(id.id)) ? (
-                              <CheckSquare className="h-3.5 w-3.5 text-primary" />
-                            ) : (
-                              <Square className="h-3.5 w-3.5 text-muted-foreground" />
-                            )}
-                            <span>
-                              {t('layeredFlow.toggleAll', '全选/全不选')} ({focusedInLayer}/
-                              {bucket.length})
-                            </span>
-                          </button>
-                          <DropdownMenuSeparator />
-                          {bucket.map((n) => {
-                            const isFocused = focusedNodes.has(n.id);
+                          {/* All scripts grouped by layer — global filter */}
+                          {layerBuckets.map((layerBucket, lIdx) => {
+                            const color = getLayerColor(lIdx);
+                            const layerFocused = layerBucket.filter((n) =>
+                              focusedNodes.has(n.id),
+                            ).length;
                             return (
-                              <button
-                                type="button"
-                                key={n.id}
-                                onClick={() => toggleFocusNode(n.id)}
-                                className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted"
-                              >
-                                {isFocused ? (
-                                  <CheckSquare className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
-                                ) : (
-                                  <Square className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                                )}
-                                <span className="truncate">{basename(n.label)}</span>
-                              </button>
+                              <div key={`filter-layer-${lIdx}`}>
+                                {/* Layer subheader with select-all toggle */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const ids = layerBucket.map((n) => n.id);
+                                    const allSelected = ids.every((id) =>
+                                      focusedNodes.has(id),
+                                    );
+                                    setFocusedNodes((cur) => {
+                                      const next = new Set(cur);
+                                      if (allSelected) {
+                                        for (const id of ids) next.delete(id);
+                                      } else {
+                                        for (const id of ids) next.add(id);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className="flex w-full items-center gap-1.5 border-b border-border/40 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide hover:bg-muted"
+                                  style={{ color: color.border }}
+                                >
+                                  {layerBucket.every((n) => focusedNodes.has(n.id)) ? (
+                                    <CheckSquare className="h-3 w-3" />
+                                  ) : (
+                                    <Square className="h-3 w-3" />
+                                  )}
+                                  <span>
+                                    L{lIdx + 1} ({layerFocused}/{layerBucket.length})
+                                  </span>
+                                </button>
+                                {/* Scripts in this layer */}
+                                {layerBucket.map((n) => {
+                                  const isFocused = focusedNodes.has(n.id);
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={n.id}
+                                      onClick={() => toggleFocusNode(n.id)}
+                                      className="flex w-full items-center gap-2 px-3 py-1 text-left text-xs hover:bg-muted"
+                                    >
+                                      {isFocused ? (
+                                        <CheckSquare className="h-3 w-3 flex-shrink-0 text-primary" />
+                                      ) : (
+                                        <Square className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                                      )}
+                                      <span className="truncate">{basename(n.label)}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             );
                           })}
                         </DropdownMenuContent>
