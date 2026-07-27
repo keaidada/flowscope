@@ -23,6 +23,8 @@ import {
   Filter,
   CheckSquare,
   Square,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { PipelineTask } from '@/types/pipeline-matrix';
@@ -117,6 +119,8 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
   const [arrowDisplay, setArrowDisplay] = useState<'auto' | 'none' | 'all'>('auto');
   // Agile mode: on=hide non-chain cards on click, off=keep all but highlight chain
   const [agileMode, setAgileMode] = useState(true);
+  // Copied script name feedback
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -444,6 +448,15 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
   }, [nodeLayer]);
 
   const clearFocus = useCallback(() => setFocusedNodes(new Set()), []);
+
+  // Copy script name to clipboard
+  const handleCopyName = useCallback((e: React.MouseEvent, name: string) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(name).then(() => {
+      setCopiedId(name);
+      setTimeout(() => setCopiedId(null), 1500);
+    });
+  }, []);
 
   // Focused nodes count within a given layer
   const focusedCountInLayer = useCallback(
@@ -1015,11 +1028,25 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                             {isCycle && (
                               <AlertTriangle className="h-3 w-3 text-amber-500" />
                             )}
-                            {(fanIn > 0 || fanOut > 0) && (
-                              <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground">
-                                {fanIn}→{fanOut}
-                              </span>
-                            )}
+                            <div className="flex items-center gap-1">
+                              {(fanIn > 0 || fanOut > 0) && (
+                                <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground">
+                                  {fanIn}→{fanOut}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => handleCopyName(e, basename(node.label))}
+                                className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                                title={t('layeredFlow.copyName', '复制脚本名')}
+                              >
+                                {copiedId === basename(node.label) ? (
+                                  <Check className="h-3 w-3 text-green-500" />
+                                ) : (
+                                  <Copy className="h-3 w-3" />
+                                )}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
