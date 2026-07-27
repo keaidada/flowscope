@@ -172,11 +172,10 @@ function calculateNodeHeight(data: NodeData | undefined): number {
 
   let height = NODE_HEIGHT_BASE;
 
-  // Add height for columns — capped at COLUMN_MAX_HEIGHT so layout stays compact
+  // Add height for columns
   const columnCount = data.columns?.length || 0;
   if (columnCount > 0) {
-    const rawHeight = columnCount * NODE_HEIGHT_PER_COLUMN;
-    height += Math.min(rawHeight, 500);
+    height += columnCount * NODE_HEIGHT_PER_COLUMN;
   }
 
   // Add height for filters section
