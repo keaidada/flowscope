@@ -139,6 +139,15 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         }
       }
 
+      // Check if ALL files are empty (whitespace only)
+      const nonEmptyFiles = files.filter((f) => f.content.trim().length > 0);
+      if (nonEmptyFiles.length === 0) {
+        return {
+          valid: false,
+          error: t('analysis.errors.allFilesEmpty', '所有脚本内容为空，无需解析'),
+        };
+      }
+
       return { valid: true };
     },
     []
@@ -651,6 +660,22 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         const validation = validateFiles(context.files);
         if (!validation.valid) {
           setError(validation.error || t('analysis.errors.validationFailed'));
+          return;
+        }
+
+        // Filter out empty files (whitespace-only content) — skip analysis for them
+        const emptyFileNames: string[] = [];
+        context.files = context.files.filter((f: { name: string; content: string; path?: string }) => {
+          if (f.content.trim().length === 0) {
+            emptyFileNames.push(f.path ?? f.name);
+            return false;
+          }
+          return true;
+        });
+        if (emptyFileNames.length > 0) {
+          console.log(`[useAnalysis] Skipped ${emptyFileNames.length} empty file(s):`, emptyFileNames);
+        }
+        if (context.files.length === 0) {
           return;
         }
 
