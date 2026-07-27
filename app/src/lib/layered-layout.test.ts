@@ -304,6 +304,31 @@ describe('enforceFlowDirection', () => {
     expect(result.get('B')).toBe(1);
     expect(result.get('C')).toBe(2);
   });
+
+it('caps iterations when residual cycles remain (regression guard)', () => {
+    // Graph where breaking 1 edge still leaves a cycle.
+    // The residual cycle cannot be fixed by direction enforcement alone,
+    // but the iteration cap (graph.nodes.size) prevents infinite loops.
+    const g = buildScriptGraph([
+      task('A', 'C_out', 'A_out'),
+      task('B', 'A_out', 'B_out'),
+      task('C', 'B_out', 'C_out'),
+      task('D', 'C_out', 'D_out'),
+      task('E', 'D_out', 'A_out'),
+    ]);
+    // Break A→B, leaving B→C→D→E→B as a residual cycle
+    const sccs = findSCCs(g);
+    const breaks = pickBreakEdges(g, sccs);
+    expect(breaks.size).toBe(1);
+
+    // All stuck at layer 0 (Kahn can't start)
+    const rawLayers = longestPathLayers(g, breaks);
+    for (const [, l] of rawLayers) expect(l).toBe(0);
+
+    const result = enforceFlowDirection(g, breaks, rawLayers);
+    // Should complete within node-count iterations (not infinite loop)
+    expect(result.size).toBe(5);
+  });
 });
 
 // ============================================================================

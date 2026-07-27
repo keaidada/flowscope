@@ -217,7 +217,7 @@ export function buildScriptGraph(tasks: PipelineTask[]): Graph {
  * Returns an array of SCCs; each SCC is a list of node ids.
  * Single-node SCCs (no self-loop) are also returned; callers filter by size>1.
  */
-export function findSCCs(graph: Graph): string[][] {
+export function findSCCs(graph: Graph, skipEdges?: Set<number>): string[][] {
   const indexCounter = { v: 0 };
   const stack: string[] = [];
   const onStack = new Set<string>();
@@ -225,11 +225,17 @@ export function findSCCs(graph: Graph): string[][] {
   const lowlink = new Map<string, number>();
   const result: string[][] = [];
 
+  // Pre-compute live outgoing edges (excluding skipped edges)
+  const liveOut = new Map<string, number[]>();
+  for (const [id, idxs] of graph.out.entries()) {
+    liveOut.set(id, skipEdges ? idxs.filter((i) => !skipEdges.has(i)) : [...idxs]);
+  }
+
   // Iterative Tarjan using explicit recursion stack frames.
   // Each frame: { nodeId, neighborIter (iterator over out-edges) }
   type Frame = {
     nodeId: string;
-    outEdgeIdx: number; // current position in graph.out[nodeId]
+    outEdgeIdx: number; // current position in liveOut[nodeId]
   };
 
   for (const startNode of graph.nodes.keys()) {
@@ -249,7 +255,7 @@ export function findSCCs(graph: Graph): string[][] {
         onStack.add(v);
       }
 
-      const outIdxs = graph.out.get(v) ?? [];
+      const outIdxs = liveOut.get(v) ?? [];
       let advanced = false;
 
       while (frame.outEdgeIdx < outIdxs.length) {
@@ -447,43 +453,28 @@ export function enforceFlowDirection(
   layers: Map<string, number>,
 ): Map<string, number> {
   const result = new Map(layers);
-  let fixed = false;
 
-  for (const [, idxs] of graph.out.entries()) {
-    for (const edgeIdx of idxs) {
-      if (brokenEdges.has(edgeIdx)) continue;
-      const e = graph.edges[edgeIdx];
-      const fromLayer = result.get(e.from) ?? 0;
-      const toLayer = result.get(e.to) ?? 0;
-      if (toLayer <= fromLayer) {
-        result.set(e.to, fromLayer + 1);
-        fixed = true;
-      }
-    }
-  }
-
-  if (fixed) {
-    // A single pass may not suffice if the violation cascades (A→B and B→C
-    // both at layer 0). Run a full longest-path recomputation from the fixed
-    // layers to propagate correctly.
-    const queue: string[] = [];
-    for (const [id, l] of result) {
-      const liveIncoming = (graph.in.get(id) ?? []).filter(
-        (i) => !brokenEdges.has(i),
-      ).length;
-      if (liveIncoming === 0 || l === 0) queue.push(id);
-    }
-
-    let head = 0;
-    while (head < queue.length) {
-      const v = queue[head++];
-      const vLayer = result.get(v) ?? 0;
-      const outs = (graph.out.get(v) ?? []).filter((i) => !brokenEdges.has(i));
-      for (const edgeIdx of outs) {
+  // Iteratively fix right-to-left violations until stable.
+  // Each iteration scans all non-broken edges and bumps toLayer → fromLayer + 1
+  // when a reverse or flat edge is found. Converges because layers are bounded.
+  // Cap iterations at node count to catch residual cycles (broken edges may not
+  // fully eliminate an SCC, leaving an infinite bump loop).
+  let fixed = true;
+  let iter = 0;
+  const maxIter = graph.nodes.size;
+  while (fixed && iter < maxIter) {
+    fixed = false;
+    iter++;
+    for (const [, idxs] of graph.out.entries()) {
+      for (const edgeIdx of idxs) {
+        if (brokenEdges.has(edgeIdx)) continue;
         const e = graph.edges[edgeIdx];
-        const candidate = vLayer + 1;
-        const cur = result.get(e.to) ?? 0;
-        if (candidate > cur) result.set(e.to, candidate);
+        const fromLayer = result.get(e.from) ?? 0;
+        const toLayer = result.get(e.to) ?? 0;
+        if (toLayer <= fromLayer) {
+          result.set(e.to, fromLayer + 1);
+          fixed = true;
+        }
       }
     }
   }
@@ -509,14 +500,19 @@ export function computeLayeredLayout(tasks: PipelineTask[]): LayeredLayout {
     return { nodes: [], edges: [], layerCount: 1 };
   }
 
-  // Detect cycles
-  const sccs = findSCCs(graph);
-  const breakSet = pickBreakEdges(graph, sccs);
-
-  // Mark cycle nodes
-  const cycleNodes = new Set<string>();
-  for (const c of sccs) {
-    if (c.length >= 2) for (const id of c) cycleNodes.add(id);
+  // Iteratively break cycles: find SCCs in the residual graph (excluding
+  // already-broken edges), break one edge per SCC, repeat until acyclic.
+  const breakSet = new Set<number>();
+  const allCycleNodes = new Set<string>();
+  while (true) {
+    const sccs = findSCCs(graph, breakSet);
+    const nonTrivial = sccs.filter((c) => c.length >= 2);
+    if (nonTrivial.length === 0) break;
+    for (const c of nonTrivial) {
+      for (const id of c) allCycleNodes.add(id);
+    }
+    const newBreaks = pickBreakEdges(graph, nonTrivial);
+    for (const b of newBreaks) breakSet.add(b);
   }
 
   // Compute layers
@@ -534,7 +530,7 @@ export function computeLayeredLayout(tasks: PipelineTask[]): LayeredLayout {
     outNodes.push({
       ...node,
       computedLayer: l,
-      isInCycle: cycleNodes.has(id) || undefined,
+      isInCycle: allCycleNodes.has(id) || undefined,
     });
   }
 
@@ -557,7 +553,7 @@ export function computeLayeredLayout(tasks: PipelineTask[]): LayeredLayout {
     layout.cycleWarning = {
       count: brokenEdges.length,
       brokenEdges,
-      cycleNodes: Array.from(cycleNodes),
+      cycleNodes: Array.from(allCycleNodes),
     };
   }
 
