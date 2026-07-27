@@ -13,7 +13,17 @@
 
 import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, X, AlertTriangle, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
+import {
+  Search,
+  X,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  XCircle,
+  Filter,
+  CheckSquare,
+  Square,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { PipelineTask, LayerDef } from '@/types/pipeline-matrix';
 import {
@@ -22,6 +32,13 @@ import {
   type LayeredLayout,
   type LayeredNode,
 } from '@/lib/layered-layout';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from './ui/dropdown-menu';
 
 // ============================================================================
 // Props
@@ -49,6 +66,20 @@ const HEADER_HEIGHT = 40;
 const DETAIL_PANEL_WIDTH = 320;
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/** Extract just the file name (last path segment, no extension). */
+function basename(path: string): string {
+  if (!path) return path;
+  // Handle both / and \ as path separators
+  const parts = path.split(/[/\\]/);
+  const last = parts[parts.length - 1];
+  // Strip common SQL/script extensions
+  return last.replace(/\.(sql|hql|ddl|prc|sp|proc|js|py|sh)$/i, '') || last;
+}
+
+// ============================================================================
 // Component
 // ============================================================================
 
@@ -72,6 +103,8 @@ export function LayeredFlowDiagram({
   const [hovered, setHovered] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [showCyclePanel, setShowCyclePanel] = useState(false);
+  // Per-layer focused scripts. When non-empty, only these + their upstream/downstream are visible.
+  const [focusedNodes, setFocusedNodes] = useState<Set<string>>(new Set());
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -121,6 +154,22 @@ export function LayeredFlowDiagram({
     const down = reachable(activeId, 'down');
     return new Set([activeId, ...up, ...down]);
   }, [selected, hovered, reachable]);
+
+  // ── Focus visible set: when focusedNodes non-empty, only these + their upstream/downstream are visible ──
+  const focusVisibleSet = useMemo(() => {
+    if (focusedNodes.size === 0) return null;
+    const result = new Set<string>(focusedNodes);
+    for (const id of focusedNodes) {
+      for (const u of reachable(id, 'up')) result.add(u);
+      for (const d of reachable(id, 'down')) result.add(d);
+    }
+    return result;
+  }, [focusedNodes, reachable]);
+
+  const isVisibleDueToFocus = useCallback(
+    (nodeId: string) => !focusVisibleSet || focusVisibleSet.has(nodeId),
+    [focusVisibleSet],
+  );
 
   // ── Search filter ──────────────────────────────────────────────────────
   const searchLower = search.trim().toLowerCase();
@@ -220,6 +269,40 @@ export function LayeredFlowDiagram({
     setHovered(null);
   }, []);
 
+  // ── Focus (per-layer script filter) ────────────────────────────────────
+  const toggleFocusNode = useCallback((id: string) => {
+    setFocusedNodes((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleFocusLayer = useCallback(
+    (_layerIdx: number, allIds: string[]) => {
+      setFocusedNodes((cur) => {
+        const allSelected = allIds.every((id) => cur.has(id));
+        const next = new Set(cur);
+        if (allSelected) {
+          for (const id of allIds) next.delete(id);
+        } else {
+          for (const id of allIds) next.add(id);
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  const clearFocus = useCallback(() => setFocusedNodes(new Set()), []);
+
+  // Focused nodes count within a given layer
+  const focusedCountInLayer = useCallback(
+    (allIds: string[]) => allIds.filter((id) => focusedNodes.has(id)).length,
+    [focusedNodes],
+  );
+
   // ── Selected node details ──────────────────────────────────────────────
   const selectedNode = selected ? layout.nodes.find((n) => n.id === selected) : null;
   const selectedEdges = useMemo(() => {
@@ -265,6 +348,17 @@ export function LayeredFlowDiagram({
               <span className="ml-1 text-amber-500">
                 · {diagnostics.isolated} {t('layeredFlow.isolated', '孤立')}
               </span>
+            )}
+            {focusedNodes.size > 0 && (
+              <button
+                type="button"
+                onClick={clearFocus}
+                className="ml-2 inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/25"
+              >
+                <Filter className="h-2.5 w-2.5" />
+                {t('layeredFlow.focused', '已聚焦')} {focusedNodes.size}
+                <X className="h-2.5 w-2.5" />
+              </button>
             )}
           </span>
         </div>
@@ -366,7 +460,11 @@ export function LayeredFlowDiagram({
             {/* Layer columns */}
             {layerBuckets.map((bucket, layerIdx) => {
               const color = getLayerColor(layerIdx);
-              const visibleNodes = bucket.filter(matchesSearch);
+              const visibleNodes = bucket.filter(
+                (n) => matchesSearch(n) && isVisibleDueToFocus(n.id),
+              );
+              const bucketIds = bucket.map((n) => n.id);
+              const focusedInLayer = focusedCountInLayer(bucketIds);
               return (
                 <div
                   key={`layer-${layerIdx}`}
@@ -379,27 +477,108 @@ export function LayeredFlowDiagram({
                 >
                   {/* Header */}
                   <div
-                    className="flex items-center justify-between rounded-t-lg border-x border-t px-3 py-2 text-xs font-semibold"
+                    className="flex items-center justify-between rounded-t-lg border-x border-t px-2 py-1.5 text-xs font-semibold"
                     style={{
                       background: color.bg,
                       borderColor: color.border,
                       color: color.text,
                       borderBottom: `2px solid ${color.border}`,
-                      height: `${HEADER_HEIGHT}px`,
+                      minHeight: `${HEADER_HEIGHT}px`,
                     }}
                   >
-                    <span className="flex items-center gap-2">
+                    <span className="flex items-center gap-1.5">
                       <span
-                        className="flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold"
+                        className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[10px] font-bold"
                         style={{ background: 'rgba(255,255,255,0.1)' }}
                       >
                         L{layerIdx + 1}
                       </span>
-                      {t('layeredFlow.layer', '层')} {layerIdx + 1}
+                      <span className="truncate">
+                        {t('layeredFlow.layer', '层')} {layerIdx + 1}
+                      </span>
                     </span>
-                    <span className="text-[10px] opacity-70">
-                      {visibleNodes.length}/{bucket.length}
-                    </span>
+                    <div className="flex flex-shrink-0 items-center gap-1">
+                      <span className="text-[10px] opacity-70">
+                        {visibleNodes.length}/{bucket.length}
+                      </span>
+                      {/* Per-layer filter dropdown */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={(e) => e.stopPropagation()}
+                            className={cn(
+                              'flex h-5 w-5 items-center justify-center rounded transition-colors',
+                              focusedInLayer > 0
+                                ? 'bg-primary/30 text-primary'
+                                : 'hover:bg-white/10',
+                            )}
+                            title={t('layeredFlow.filterScripts', '筛选脚本')}
+                          >
+                            <Filter className="h-3 w-3" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          className="max-h-80 w-56 overflow-y-auto"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <DropdownMenuLabel className="flex items-center justify-between">
+                            <span>
+                              {t('layeredFlow.filterScripts', '筛选脚本')} ({bucket.length})
+                            </span>
+                            {focusedInLayer > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  for (const id of bucketIds) {
+                                    if (focusedNodes.has(id)) toggleFocusNode(id);
+                                  }
+                                }}
+                                className="text-[10px] text-primary hover:underline"
+                              >
+                                {t('layeredFlow.clear', '清除')}
+                              </button>
+                            )}
+                          </DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          <button
+                            type="button"
+                            onClick={() => toggleFocusLayer(layerIdx, bucketIds)}
+                            className="flex w-full items-center gap-2 px-2 py-1.5 text-xs hover:bg-muted"
+                          >
+                            {bucket.every((id) => focusedNodes.has(id.id)) ? (
+                              <CheckSquare className="h-3.5 w-3.5 text-primary" />
+                            ) : (
+                              <Square className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
+                            <span>
+                              {t('layeredFlow.toggleAll', '全选/全不选')} ({focusedInLayer}/
+                              {bucket.length})
+                            </span>
+                          </button>
+                          <DropdownMenuSeparator />
+                          {bucket.map((n) => {
+                            const isFocused = focusedNodes.has(n.id);
+                            return (
+                              <button
+                                type="button"
+                                key={n.id}
+                                onClick={() => toggleFocusNode(n.id)}
+                                className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted"
+                              >
+                                {isFocused ? (
+                                  <CheckSquare className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
+                                ) : (
+                                  <Square className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                                )}
+                                <span className="truncate">{basename(n.label)}</span>
+                              </button>
+                            );
+                          })}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
 
                   {/* Body */}
@@ -455,8 +634,10 @@ export function LayeredFlowDiagram({
                           }}
                           title={node.label}
                         >
-                          {/* Script name (only visible content) */}
-                          <span className="truncate text-xs font-medium">{node.label}</span>
+                          {/* Script name (basename only, no path) */}
+                          <span className="truncate text-xs font-medium">
+                            {basename(node.label)}
+                          </span>
 
                           {/* Right indicators (compact) */}
                           <div className="flex flex-shrink-0 items-center gap-1.5">
@@ -465,7 +646,7 @@ export function LayeredFlowDiagram({
                             )}
                             {(fanIn > 0 || fanOut > 0) && (
                               <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground">
-                                {fanIn}→{node.label.split('.')[0]}→{fanOut}
+                                {fanIn}→{fanOut}
                               </span>
                             )}
                           </div>
@@ -518,6 +699,13 @@ export function LayeredFlowDiagram({
                 </marker>
               </defs>
               {arrowPaths.map((p) => {
+                // Hide edges outside focus-visible set
+                if (
+                  focusVisibleSet &&
+                  (!focusVisibleSet.has(p.from) || !focusVisibleSet.has(p.to))
+                ) {
+                  return null;
+                }
                 const touched =
                   highlightSet && (highlightSet.has(p.from) || highlightSet.has(p.to));
                 const isOnHighlightPath =
@@ -578,6 +766,7 @@ export function LayeredFlowDiagram({
         <span>
           {t('layeredFlow.hintHover', '悬停查看上下游')} ·{' '}
           {t('layeredFlow.hintClick', '点击查看详情')} ·{' '}
+          {t('layeredFlow.hintFilter', '点击右上角漏斗筛选本层脚本')} ·{' '}
           {t('layeredFlow.hintLegend', '卡片左边框颜色 = 层级')}
         </span>
       </div>
@@ -626,7 +815,7 @@ function DetailPanel({
               className="h-3 w-3 flex-shrink-0 rounded-sm"
               style={{ background: color.border }}
             />
-            <span className="truncate text-sm font-semibold">{node.label}</span>
+            <span className="truncate text-sm font-semibold">{basename(node.label)}</span>
           </div>
           <button
             type="button"
@@ -664,16 +853,15 @@ function DetailPanel({
             {node.writes.length === 0 ? (
               <Empty />
             ) : (
-              <div className="flex flex-wrap gap-1.5">
+              <ul className="space-y-1">
                 {node.writes.map((w) => (
-                  <code
-                    key={w}
-                    className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] text-primary"
-                  >
-                    {w}
-                  </code>
+                  <li key={w}>
+                    <code className="block rounded bg-primary/10 px-2 py-1 font-mono text-[11px] text-primary">
+                      {w}
+                    </code>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
           </Section>
 
@@ -682,16 +870,15 @@ function DetailPanel({
             {node.reads.length === 0 ? (
               <Empty />
             ) : (
-              <div className="flex flex-wrap gap-1.5">
+              <ul className="space-y-1">
                 {node.reads.map((r) => (
-                  <code
-                    key={r}
-                    className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-                  >
-                    {r}
-                  </code>
+                  <li key={r}>
+                    <code className="block rounded bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                      {r}
+                    </code>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
           </Section>
 

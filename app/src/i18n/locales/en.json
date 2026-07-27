@@ -776,7 +776,8 @@
     "writes": "out",
     "fanOut": "fan-out",
     "hintHover": "Hover to highlight lineage",
-    "hintClick": "Click to pin highlight",
+    "hintClick": "Click for details",
+    "hintFilter": "Click the funnel icon to filter this layer",
     "hintLegend": "Card left border color = layer",
     "cycleTooltip": "Cyclic dependencies detected; some edges were auto-broken",
     "cycleCount": "{{count}} cycle(s) broken",
@@ -785,6 +786,10 @@
     "isolated": "isolated",
     "inCycle": "in cycle",
     "upstream": "Upstream",
-    "downstream": "Downstream"
+    "downstream": "Downstream",
+    "filterScripts": "Filter scripts",
+    "toggleAll": "Toggle all",
+    "clear": "Clear",
+    "focused": "Focused"
   }
 }

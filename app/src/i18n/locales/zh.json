@@ -776,7 +776,8 @@
     "writes": "写",
     "fanOut": "出度",
     "hintHover": "悬停查看上下游",
-    "hintClick": "点击固定高亮",
+    "hintClick": "点击查看详情",
+    "hintFilter": "点击右上角漏斗筛选本层脚本",
     "hintLegend": "卡片左边框颜色 = 层级",
     "cycleTooltip": "检测到循环依赖，已自动断开部分边",
     "cycleCount": "断环 {{count}} 处",
@@ -785,6 +786,10 @@
     "isolated": "孤立",
     "inCycle": "环中",
     "upstream": "上游",
-    "downstream": "下游"
+    "downstream": "下游",
+    "filterScripts": "筛选脚本",
+    "toggleAll": "全选/全不选",
+    "clear": "清除",
+    "focused": "已聚焦"
   }
 }
