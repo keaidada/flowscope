@@ -20,7 +20,7 @@ import { useColors, useIsDarkMode } from '../hooks/useColors';
 import type { AggregationInfo } from '@pondpilot/flowscope-core';
 
 // Virtualization thresholds
-const COLUMN_VIRTUALIZATION_THRESHOLD = 20;
+const COLUMN_VIRTUALIZATION_THRESHOLD = 999999; // disabled — always render all columns
 const COLUMN_ROW_HEIGHT = 24;
 
 interface AggregationIndicatorProps {
