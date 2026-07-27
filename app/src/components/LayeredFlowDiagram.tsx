@@ -317,7 +317,7 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     result.sort((a, b) => a.layer - b.layer);
     return result;
   }, [highlightSet, nodeLayer]);
-  // ── Arrow path computation ─────────────────────────────────────────────
+  // ── Arrow path computation (only for visible cards) ────────────────────
   const recomputeArrows = useCallback(() => {
     const canvasEl = canvasRef.current;
     if (!canvasEl) return;
@@ -325,6 +325,8 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     const newPaths: typeof arrowPaths = [];
 
     for (const e of layout.edges) {
+      // Only draw arrows between cards that are actually visible
+      if (!isVisibleDueToFocus(e.from) || !isVisibleDueToFocus(e.to)) continue;
       const fromEl = cardRefs.current.get(e.from);
       const toEl = cardRefs.current.get(e.to);
       if (!fromEl || !toEl) continue;
@@ -347,12 +349,12 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
       });
     }
     setArrowPaths(newPaths);
-  }, [layout.edges]);
+  }, [layout.edges, isVisibleDueToFocus]);
 
   useEffect(() => {
     const id = requestAnimationFrame(recomputeArrows);
     return () => cancelAnimationFrame(id);
-  }, [recomputeArrows, layout, layerBuckets, focusedNodes, search, isCompactMode, compactMap]);
+  }, [recomputeArrows, layout, layerBuckets, focusedNodes, search, isCompactMode, compactMap, selected, hovered]);
 
   useEffect(() => {
     const el = scrollRef.current;
