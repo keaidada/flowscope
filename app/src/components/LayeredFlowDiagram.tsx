@@ -837,25 +837,25 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                   highlightSet && (highlightSet.has(p.from) || highlightSet.has(p.to));
                 const isOnHighlightPath =
                   highlightSet && highlightSet.has(p.from) && highlightSet.has(p.to);
-                let stroke = 'rgba(139,148,158,0.35)';
-                let strokeWidth = 1.5;
+                let stroke = 'rgba(139,148,158,0.22)';
+                let strokeWidth = 1;
                 let marker = 'url(#layered-arrow-default)';
                 let opacity = 1;
 
                 if (p.broken) {
                   stroke = '#f59e0b';
-                  strokeWidth = 1.5;
+                  strokeWidth = 1.25;
                   marker = 'url(#layered-arrow-broken)';
                 } else if (isOnHighlightPath) {
                   stroke = 'hsl(var(--primary))';
-                  strokeWidth = 2.5;
+                  strokeWidth = 1.5;
                   marker = 'url(#layered-arrow-highlight)';
                 } else if (highlightSet && touched) {
-                  stroke = 'hsl(var(--primary) / 0.6)';
-                  strokeWidth = 2;
+                  stroke = 'hsl(var(--primary) / 0.45)';
+                  strokeWidth = 1.25;
                   marker = 'url(#layered-arrow-highlight)';
                 } else if (highlightSet) {
-                  opacity = 0.15;
+                  opacity = 0.08;
                 }
 
                 return (
