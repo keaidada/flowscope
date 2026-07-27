@@ -331,6 +331,8 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     for (const e of layout.edges) {
       // Only draw arrows between cards that are actually visible
       if (!isVisibleDueToFocus(e.from) || !isVisibleDueToFocus(e.to)) continue;
+      // When highlighting (hover/select), only draw arrows between highlighted cards
+      if (highlightSet && (!highlightSet.has(e.from) || !highlightSet.has(e.to))) continue;
       const fromEl = cardRefs.current.get(e.from);
       const toEl = cardRefs.current.get(e.to);
       if (!fromEl || !toEl) continue;
@@ -353,7 +355,7 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
       });
     }
     setArrowPaths(newPaths);
-  }, [layout.edges, isVisibleDueToFocus]);
+  }, [layout.edges, isVisibleDueToFocus, highlightSet]);
 
   useEffect(() => {
     const id = requestAnimationFrame(recomputeArrows);
