@@ -108,6 +108,8 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
   const [focusedNodes, setFocusedNodes] = useState<Set<string>>(new Set());
   // Search text within the layer filter dropdown
   const [layerFilterSearch, setLayerFilterSearch] = useState('');
+  // Search text within the global focused dropdown
+  const [focusSearch, setFocusSearch] = useState('');
   // Hide arrows during scroll for performance
   const [isScrolling, setIsScrolling] = useState(false);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -505,7 +507,7 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                     {t('layeredFlow.focused', '已聚焦')} {focusedNodes.size}
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-72 max-h-[60vh] overflow-hidden flex flex-col">
+                <DropdownMenuContent align="start" className="w-80 max-h-[70vh] overflow-hidden flex flex-col">
                   <div className="flex items-center justify-between border-b border-border px-3 py-2">
                     <span className="text-xs font-semibold">
                       {t('layeredFlow.focusedScripts', '已聚焦脚本')} ({focusedNodes.size})
@@ -518,18 +520,65 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                       {t('layeredFlow.clearAll', '清除全部')}
                     </button>
                   </div>
-                  <div className="max-h-[40vh] overflow-y-auto">
-                    {Array.from(focusedNodes).sort().map((id) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => toggleFocusNode(id)}
-                        className="flex w-full items-center justify-between px-3 py-1.5 text-xs hover:bg-muted"
-                      >
-                        <span className="truncate">{basename(id)}</span>
-                        <X className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                      </button>
-                    ))}
+                  {/* Search */}
+                  <div className="border-b border-border px-2 py-1">
+                    <input
+                      type="text"
+                      value={focusSearch}
+                      onChange={(e) => setFocusSearch(e.target.value)}
+                      placeholder={t('layeredFlow.searchScripts', '搜索脚本...')}
+                      className="w-full rounded border border-input bg-background px-2 py-1 text-[11px] placeholder:text-muted-foreground focus:outline-none"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                  {/* All scripts with checkboxes */}
+                  <div className="max-h-[50vh] overflow-y-auto">
+                    {layout.nodes
+                      .filter((n) => {
+                        if (!focusSearch.trim()) return true;
+                        const q = focusSearch.toLowerCase();
+                        return (
+                          n.id.toLowerCase().includes(q) ||
+                          n.label.toLowerCase().includes(q) ||
+                          basename(n.label).toLowerCase().includes(q)
+                        );
+                      })
+                      .sort((a, b) => a.id.localeCompare(b.id))
+                      .map((n) => {
+                        const isFocused = focusedNodes.has(n.id);
+                        return (
+                          <button
+                            key={n.id}
+                            type="button"
+                            onClick={() => toggleFocusNode(n.id)}
+                            className="flex w-full items-center gap-2 px-3 py-1 text-left text-[11px] hover:bg-muted"
+                          >
+                            {isFocused ? (
+                              <CheckSquare className="h-3 w-3 flex-shrink-0 text-primary" />
+                            ) : (
+                              <Square className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                            )}
+                            <span className="truncate">{basename(n.label)}</span>
+                            <span className="ml-auto flex-shrink-0 text-[9px] text-muted-foreground">
+                              L{n.computedLayer + 1}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    {layout.nodes.filter((n) => {
+                      if (!focusSearch.trim()) return true;
+                      const q = focusSearch.toLowerCase();
+                      return (
+                        n.id.toLowerCase().includes(q) ||
+                        n.label.toLowerCase().includes(q) ||
+                        basename(n.label).toLowerCase().includes(q)
+                      );
+                    }).length === 0 && (
+                      <div className="px-3 py-4 text-center text-[11px] text-muted-foreground/60">
+                        {t('layeredFlow.noMatches', '无匹配项')}
+                      </div>
+                    )}
                   </div>
                 </DropdownMenuContent>
               </DropdownMenu>
