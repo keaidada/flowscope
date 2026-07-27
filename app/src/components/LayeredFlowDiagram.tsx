@@ -596,12 +596,14 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                                 focusedNodes.has(id),
                               );
                               setFocusedNodes((cur) => {
-                                const next = new Set(cur);
                                 if (allSelected) {
+                                  const next = new Set(cur);
                                   for (const id of bucketIds) next.delete(id);
-                                } else {
-                                  for (const id of bucketIds) next.add(id);
+                                  return next;
                                 }
+                                // When adding, clear other layers' focuses first
+                                const next = new Set<string>();
+                                for (const id of bucketIds) next.add(id);
                                 return next;
                               });
                             }}
