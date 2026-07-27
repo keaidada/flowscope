@@ -316,7 +316,7 @@ export function findSCCs(graph: Graph, skipEdges?: Set<number>): string[][] {
  *   2. Tiebreak by largest originalLayerNum of `from`.
  *   3. Final tiebreak by alphabetical (from, to, viaTable) for stable output.
  */
-export function pickBreakEdges(graph: Graph, sccs: string[][]): Set<number> {
+export function pickBreakEdges(graph: Graph, sccs: string[][], existingBroken?: Set<number>): Set<number> {
   const breakSet = new Set<number>();
 
   for (const component of sccs) {
@@ -328,6 +328,7 @@ export function pickBreakEdges(graph: Graph, sccs: string[][]): Set<number> {
     for (const nodeId of component) {
       const outIdxs = graph.out.get(nodeId) ?? [];
       for (const edgeIdx of outIdxs) {
+        if (existingBroken?.has(edgeIdx)) continue;
         const e = graph.edges[edgeIdx];
         if (!members.has(e.to)) continue;
         const fromLayer = graph.nodes.get(e.from)?.originalLayerNum ?? 0;
@@ -511,7 +512,8 @@ export function computeLayeredLayout(tasks: PipelineTask[]): LayeredLayout {
     for (const c of nonTrivial) {
       for (const id of c) allCycleNodes.add(id);
     }
-    const newBreaks = pickBreakEdges(graph, nonTrivial);
+    const newBreaks = pickBreakEdges(graph, nonTrivial, breakSet);
+    if (newBreaks.size === 0) break;
     for (const b of newBreaks) breakSet.add(b);
   }
 
