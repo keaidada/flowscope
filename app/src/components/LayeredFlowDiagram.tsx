@@ -187,6 +187,25 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     return result;
   }, [focusedNodes, reachable]);
 
+  // Separate upstream/downstream sets for cross-cutting edge filtering
+  const filterUpstreamOnly = useMemo(() => {
+    if (focusedNodes.size === 0) return null;
+    const result = new Set<string>();
+    for (const id of focusedNodes) {
+      for (const u of reachable(id, 'up')) result.add(u);
+    }
+    return result;
+  }, [focusedNodes, reachable]);
+
+  const filterDownstreamOnly = useMemo(() => {
+    if (focusedNodes.size === 0) return null;
+    const result = new Set<string>();
+    for (const id of focusedNodes) {
+      for (const d of reachable(id, 'down')) result.add(d);
+    }
+    return result;
+  }, [focusedNodes, reachable]);
+
   const isVisibleDueToFocus = useCallback(
     (nodeId: string) => {
       if (focusVisibleSet && !focusVisibleSet.has(nodeId)) return false;
@@ -843,6 +862,16 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                   (!arrowVisibleSet.has(p.from) || !arrowVisibleSet.has(p.to))
                 ) {
                   return null;
+                }
+                // Hide cross-cutting edges: upstream→downstream that skip focused nodes
+                if (filterUpstreamOnly && filterDownstreamOnly) {
+                  const fUp = filterUpstreamOnly.has(p.from);
+                  const fDown = filterDownstreamOnly.has(p.from);
+                  const tUp = filterUpstreamOnly.has(p.to);
+                  const tDown = filterDownstreamOnly.has(p.to);
+                  if ((fUp && !fDown && tDown && !tUp) || (fDown && !fUp && tUp && !tDown)) {
+                    return null;
+                  }
                 }
                 const touched =
                   highlightSet && (highlightSet.has(p.from) || highlightSet.has(p.to));
