@@ -115,6 +115,8 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Arrow display mode: auto=hide when >100 edges, none=always hide, all=always show
   const [arrowDisplay, setArrowDisplay] = useState<'auto' | 'none' | 'all'>('auto');
+  // Agile mode: on=hide non-chain cards on click, off=keep all but highlight chain
+  const [agileMode, setAgileMode] = useState(true);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -215,23 +217,23 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
   const isVisibleDueToFocus = useCallback(
     (nodeId: string) => {
       if (focusVisibleSet && !focusVisibleSet.has(nodeId)) return false;
-      if (selectionChainSet && !selectionChainSet.has(nodeId)) return false;
+      if (agileMode && selectionChainSet && !selectionChainSet.has(nodeId)) return false;
       return true;
     },
-    [focusVisibleSet, selectionChainSet],
+    [focusVisibleSet, selectionChainSet, agileMode],
   );
 
   // ── Combined arrow visibility: intersection of focusVisibleSet and selectionChainSet ──
   const arrowVisibleSet = useMemo(() => {
-    if (focusVisibleSet === null && selectionChainSet === null) return null;
+    if (focusVisibleSet === null && (agileMode ? selectionChainSet === null : true)) return null;
     const result = new Set<string>();
     for (const n of layout.nodes) {
       const inFocus = !focusVisibleSet || focusVisibleSet.has(n.id);
-      const inChain = !selectionChainSet || selectionChainSet.has(n.id);
+      const inChain = !agileMode || !selectionChainSet || selectionChainSet.has(n.id);
       if (inFocus && inChain) result.add(n.id);
     }
     return result;
-  }, [focusVisibleSet, selectionChainSet, layout.nodes]);
+  }, [focusVisibleSet, selectionChainSet, layout.nodes, agileMode]);
 
   // ── Search filter ──────────────────────────────────────────────────────
   const searchLower = search.trim().toLowerCase();
@@ -590,6 +592,32 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
         </div>
 
         <div className="flex-1" />
+
+        {/* Agile mode toggle */}
+        <button
+          type="button"
+          onClick={() => setAgileMode((v) => !v)}
+          className={cn(
+            'rounded border px-2 py-0.5 text-[10px] font-medium',
+            agileMode
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-input bg-muted/50 text-muted-foreground',
+          )}
+        >
+          {agileMode ? '敏捷' : '全览'}
+        </button>
+
+        {/* Visible card count */}
+        <span className="text-[10px] text-muted-foreground">
+          {(() => {
+            let cnt = 0;
+            for (const n of layout.nodes) {
+              if (matchesSearch(n) && isVisibleDueToFocus(n.id)) cnt++;
+            }
+            return cnt;
+          })()}
+          /{layout.nodes.length} 卡片
+        </span>
 
         {/* Cycle warning chip */}
         {layout.cycleWarning && (
