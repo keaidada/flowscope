@@ -495,15 +495,44 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
               </span>
             )}
             {focusedNodes.size > 0 && (
-              <button
-                type="button"
-                onClick={clearFocus}
-                className="ml-2 inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/25"
-              >
-                <Filter className="h-2.5 w-2.5" />
-                {t('layeredFlow.focused', '已聚焦')} {focusedNodes.size}
-                <X className="h-2.5 w-2.5" />
-              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/20"
+                  >
+                    <Filter className="h-2.5 w-2.5" />
+                    {t('layeredFlow.focused', '已聚焦')} {focusedNodes.size}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-72 max-h-[60vh] overflow-hidden flex flex-col">
+                  <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                    <span className="text-xs font-semibold">
+                      {t('layeredFlow.focusedScripts', '已聚焦脚本')} ({focusedNodes.size})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={clearFocus}
+                      className="text-[10px] text-muted-foreground hover:text-foreground"
+                    >
+                      {t('layeredFlow.clearAll', '清除全部')}
+                    </button>
+                  </div>
+                  <div className="max-h-[40vh] overflow-y-auto">
+                    {Array.from(focusedNodes).sort().map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => toggleFocusNode(id)}
+                        className="flex w-full items-center justify-between px-3 py-1.5 text-xs hover:bg-muted"
+                      >
+                        <span className="truncate">{basename(id)}</span>
+                        <X className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                      </button>
+                    ))}
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </span>
         </div>
