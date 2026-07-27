@@ -106,6 +106,9 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
   const [focusedNodes, setFocusedNodes] = useState<Set<string>>(new Set());
   // Search text within the layer filter dropdown
   const [layerFilterSearch, setLayerFilterSearch] = useState('');
+  // Hide arrows during scroll for performance
+  const [isScrolling, setIsScrolling] = useState(false);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -292,6 +295,22 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     ro.observe(el);
     return () => ro.disconnect();
   }, [recomputeArrows]);
+
+  // Hide arrows during scroll for smooth scrolling
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (!isScrolling) setIsScrolling(true);
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+      scrollTimerRef.current = setTimeout(() => setIsScrolling(false), 150);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    };
+  }, []);
 
   // ── Canvas dimensions ──────────────────────────────────────────────────
   // Effective column count (compact when filter is active)
@@ -539,20 +558,14 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                 >
                   {/* Header */}
                   <div
-                    className="flex items-center justify-between rounded-t-lg border-x border-t px-2 py-1.5 text-xs font-semibold"
+                    className="flex items-center justify-between border bg-card px-2 py-1.5 text-xs font-semibold"
                     style={{
-                      background: color.bg,
-                      borderColor: color.border,
-                      color: color.text,
-                      borderBottom: `2px solid ${color.border}`,
+                      borderLeft: `4px solid ${color.border}`,
                       minHeight: `${HEADER_HEIGHT}px`,
                     }}
                   >
                     <span className="flex items-center gap-1.5">
-                      <span
-                        className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[10px] font-bold"
-                        style={{ background: 'rgba(255,255,255,0.1)' }}
-                      >
+                      <span className="text-xs font-mono text-muted-foreground">
                         L{layerIdx + 1}
                       </span>
                       <span className="truncate">
@@ -710,9 +723,8 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
 
                   {/* Body */}
                   <div
-                    className="flex flex-col gap-3 rounded-b-xl border-x border-b p-2"
+                    className="flex flex-col gap-2 border-l border-b border-r p-2"
                     style={{
-                      background: `${color.bg}66`,
                       borderColor: color.border,
                       minHeight: `${CARD_HEIGHT}px`,
                     }}
@@ -746,14 +758,13 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                             handleCardClick(node.id);
                           }}
                           className={cn(
-                            'group relative flex cursor-pointer items-center justify-between gap-2 rounded-md border bg-card px-3 py-2 transition-all',
-                            'hover:-translate-y-0.5 hover:shadow-md',
+                            'group relative flex cursor-pointer items-center justify-between gap-2 rounded border bg-card px-3 py-2',
                             isSelected
-                              ? 'border-primary shadow-md ring-2 ring-primary/60'
+                              ? 'border-primary shadow-sm'
                               : isHighlighted
-                                ? 'border-primary/60 shadow-sm'
+                                ? 'border-primary/50'
                                 : 'border-border',
-                            isDimmed && 'opacity-30',
+                            isDimmed && 'opacity-25',
                           )}
                           style={{
                             borderLeft: `3px solid ${color.border}`,
@@ -785,10 +796,10 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
               );
             })}
 
-            {/* SVG arrows */}
+            {/* SVG arrows — hidden during scroll for performance */}
             <svg
               className="pointer-events-none absolute left-0 top-0 h-full w-full"
-              style={{ zIndex: 1 }}
+              style={{ zIndex: 1, opacity: isScrolling ? 0 : 1, transition: 'opacity 150ms' }}
             >
               <defs>
                 <marker
