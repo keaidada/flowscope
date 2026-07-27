@@ -56,7 +56,7 @@ export const UI_CONSTANTS = {
   SEARCH_MIN_WIDTH: 240,
 
   /** Maximum height in pixels for column lists in table nodes */
-  COLUMN_MAX_HEIGHT: 1000,
+  COLUMN_MAX_HEIGHT: 500,
 
   /** Z-index for highlighted edges */
   HIGHLIGHTED_EDGE_Z_INDEX: 1000,
