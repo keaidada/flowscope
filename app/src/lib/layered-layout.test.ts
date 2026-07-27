@@ -451,4 +451,24 @@ describe('computeLayeredLayout', () => {
     );
     expect(r1.edges).toEqual(r2.edges);
   });
+
+it('breaks multi-cycle graph until fully acyclic', () => {
+    // SCC {E, F, G}: E→F→E and E→G→E via shared tables.
+    // Breaking 1 edge (E→F) leaves E→G→E as a residual cycle.
+    // Iterative cycle breaking must break a 2nd edge (E→G) to make it acyclic.
+    const r = computeLayeredLayout([
+      task('D', '', 't_d'),
+      task('E', 't_d', 't_e'),
+      task('F', 't_e', 't_d'),
+      task('G', 't_e', 't_d'),
+    ]);
+    const nodeMap = new Map(r.nodes.map((n) => [n.id, n.computedLayer]));
+    for (const e of r.edges) {
+      if (!e.isBroken) {
+        expect(nodeMap.get(e.to)!).toBeGreaterThan(nodeMap.get(e.from)!);
+      }
+    }
+    expect(r.cycleWarning).toBeDefined();
+    expect(r.cycleWarning!.count).toBe(2);
+  });
 });
