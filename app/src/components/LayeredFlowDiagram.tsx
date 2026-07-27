@@ -164,17 +164,16 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     return new Set([selected, ...up, ...down]);
   }, [selected, reachable]);
 
-  // ── Focus visible set: focused nodes + direct upstream/downstream (1 step) ──
+  // ── Focus visible set: when focusedNodes non-empty, only these + their upstream/downstream are visible ──
   const focusVisibleSet = useMemo(() => {
     if (focusedNodes.size === 0) return null;
     const result = new Set<string>(focusedNodes);
-    for (const e of layout.edges) {
-      if (e.isBroken) continue;
-      if (focusedNodes.has(e.from)) result.add(e.to);
-      if (focusedNodes.has(e.to)) result.add(e.from);
+    for (const id of focusedNodes) {
+      for (const u of reachable(id, 'up')) result.add(u);
+      for (const d of reachable(id, 'down')) result.add(d);
     }
     return result;
-  }, [focusedNodes, layout.edges]);
+  }, [focusedNodes, reachable]);
 
   const isVisibleDueToFocus = useCallback(
     (nodeId: string) => {
