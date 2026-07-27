@@ -101,6 +101,8 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
   const [search, setSearch] = useState('');
   const [hovered, setHovered] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // Detail panel shown on double-click (separate from click-to-highlight)
+  const [detailNodeId, setDetailNodeId] = useState<string | null>(null);
   const [showCyclePanel, setShowCyclePanel] = useState(false);
   // Per-layer focused scripts. When non-empty, only these + their upstream/downstream are visible.
   const [focusedNodes, setFocusedNodes] = useState<Set<string>>(new Set());
@@ -371,10 +373,18 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
 
   // ── Handlers ───────────────────────────────────────────────────────────
   const handleCardHover = useCallback((id: string | null) => setHovered(id), []);
-  const handleCardClick = useCallback((id: string) => setSelected(id), []);
+  const handleCardClick = useCallback((id: string) => {
+    setSelected(id);
+    setDetailNodeId(null);
+  }, []);
+  const handleCardDoubleClick = useCallback((id: string) => {
+    setSelected(id);
+    setDetailNodeId(id);
+  }, []);
   const clearSelection = useCallback(() => {
     setSelected(null);
     setHovered(null);
+    setDetailNodeId(null);
   }, []);
 
   // ── Focus (per-layer script filter) ────────────────────────────────────
@@ -404,15 +414,15 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     [focusedNodes],
   );
 
-  // ── Selected node details ──────────────────────────────────────────────
-  const selectedNode = selected ? layout.nodes.find((n) => n.id === selected) : null;
-  const selectedEdges = useMemo(() => {
-    if (!selected) return { upstream: [], downstream: [] };
+  // ── Detail panel state (double-click) ──────────────────────────────────
+  const detailNode = detailNodeId ? layout.nodes.find((n) => n.id === detailNodeId) : null;
+  const detailEdges = useMemo(() => {
+    if (!detailNodeId) return { upstream: [], downstream: [] };
     return {
-      upstream: layout.edges.filter((e) => !e.isBroken && e.to === selected),
-      downstream: layout.edges.filter((e) => !e.isBroken && e.from === selected),
+      upstream: layout.edges.filter((e) => !e.isBroken && e.to === detailNodeId),
+      downstream: layout.edges.filter((e) => !e.isBroken && e.from === detailNodeId),
     };
-  }, [selected, layout.edges]);
+  }, [detailNodeId, layout.edges]);
 
   // ── Empty state ────────────────────────────────────────────────────────
   if (layout.nodes.length === 0) {
@@ -820,6 +830,10 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                             e.stopPropagation();
                             handleCardClick(node.id);
                           }}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            handleCardDoubleClick(node.id);
+                          }}
                           className={cn(
                             'group relative flex cursor-pointer items-center justify-between gap-2 rounded border bg-card px-3 py-2',
                             isSelected
@@ -962,14 +976,14 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
         </div>
 
         {/* ── Detail panel (right side drawer on card click) ────────────── */}
-        {selectedNode && (
+        {detailNode && (
           <DetailPanel
-            node={selectedNode}
-            upstreamEdges={selectedEdges.upstream}
-            downstreamEdges={selectedEdges.downstream}
+            node={detailNode}
+            upstreamEdges={detailEdges.upstream}
+            downstreamEdges={detailEdges.downstream}
             layerCount={layout.layerCount}
-            onClose={() => setSelected(null)}
-            onSelectNode={(id) => setSelected(id)}
+            onClose={() => setDetailNodeId(null)}
+            onSelectNode={(id) => setDetailNodeId(id)}
           />
         )}
       </div>
@@ -977,8 +991,8 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
       {/* Hint bar */}
       <div className="flex flex-shrink-0 items-center justify-center gap-3 border-t border-border bg-muted/10 px-4 py-1.5 text-[10px] text-muted-foreground">
         <span>
-          {t('layeredFlow.hintHover', '悬停查看上下游')} ·{' '}
-          {t('layeredFlow.hintClick', '点击查看详情')} ·{' '}
+          {t('layeredFlow.hintClick', '单击高亮关联链')} ·{' '}
+          {t('layeredFlow.hintDoubleClick', '双击查看详情')} ·{' '}
           {t('layeredFlow.hintFilter', '点击右上角漏斗筛选本层脚本')} ·{' '}
           {t('layeredFlow.hintLegend', '卡片左边框颜色 = 层级')}
         </span>
