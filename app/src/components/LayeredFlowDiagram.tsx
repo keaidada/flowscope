@@ -147,6 +147,14 @@ export function LayeredFlowDiagram({
     return new Set([activeId, ...up, ...down]);
   }, [selected, hovered, reachable]);
 
+  // ── Selection chain set: when a card is selected, only its up/down chain stays visible ──
+  const selectionChainSet = useMemo(() => {
+    if (!selected) return null;
+    const up = reachable(selected, 'up');
+    const down = reachable(selected, 'down');
+    return new Set([selected, ...up, ...down]);
+  }, [selected, reachable]);
+
   // ── Focus visible set: when focusedNodes non-empty, only these + their upstream/downstream are visible ──
   const focusVisibleSet = useMemo(() => {
     if (focusedNodes.size === 0) return null;
@@ -159,8 +167,12 @@ export function LayeredFlowDiagram({
   }, [focusedNodes, reachable]);
 
   const isVisibleDueToFocus = useCallback(
-    (nodeId: string) => !focusVisibleSet || focusVisibleSet.has(nodeId),
-    [focusVisibleSet],
+    (nodeId: string) => {
+      if (focusVisibleSet && !focusVisibleSet.has(nodeId)) return false;
+      if (selectionChainSet && !selectionChainSet.has(nodeId)) return false;
+      return true;
+    },
+    [focusVisibleSet, selectionChainSet],
   );
 
   // ── Search filter ──────────────────────────────────────────────────────
