@@ -308,6 +308,24 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     return highlightSet.size;
   }, [highlightSet]);
 
+  // ── Hover/select impact stats ──────────────────────────────────────────
+  const impactStats = useMemo(() => {
+    const activeId = selected ?? hovered;
+    if (!activeId) return null;
+    const up = reachable(activeId, 'up');
+    const down = reachable(activeId, 'down');
+    const tables = new Set<string>();
+    const nodeMap = new Map(layout.nodes.map((n) => [n.id, n]));
+    for (const id of [activeId, ...up, ...down]) {
+      const n = nodeMap.get(id);
+      if (n) {
+        for (const r of n.reads) tables.add(r.toLowerCase());
+        for (const w of n.writes) tables.add(w.toLowerCase());
+      }
+    }
+    return { upstream: up.size, downstream: down.size, tables: tables.size };
+  }, [selected, hovered, reachable, layout.nodes]);
+
   // Per-layer breakdown of highlighted cards
   const highlightedByLayer = useMemo(() => {
     const result: Array<{ layer: number; count: number }> = [];
@@ -615,7 +633,7 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                             )}
                             <span className="truncate">{basename(n.label)}</span>
                             <span className="ml-auto flex-shrink-0 text-[9px] text-muted-foreground">
-                              L{n.computedLayer + 1}
+                              L{n.computedLayer}
                             </span>
                           </button>
                         );
@@ -662,6 +680,13 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
               {highlightedCardCount || 0}/{layout.nodes.length} 卡片
             </button>
           </DropdownMenuTrigger>
+
+        {/* Impact stats on hover/select */}
+        {impactStats && (
+          <span className="text-[10px] text-muted-foreground">
+            ↑{impactStats.upstream} ↓{impactStats.downstream} · {impactStats.tables} 表
+          </span>
+        )}
           <DropdownMenuContent align="end" className="w-40 max-h-[60vh] overflow-y-auto">
             <div className="border-b border-border px-3 py-1.5 text-[11px] font-semibold">
               高亮链分布
@@ -810,10 +835,10 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                   >
                     <span className="flex items-center gap-1.5">
                       <span className="text-xs font-mono text-muted-foreground">
-                        L{layerIdx + 1}
+                        L{layerIdx}
                       </span>
                       <span className="truncate">
-                        {t('layeredFlow.layer', '层')} {layerIdx + 1}
+                        {t('layeredFlow.layer', '层')} {layerIdx}
                       </span>
                     </span>
                     <div className="flex flex-shrink-0 items-center gap-1">
@@ -846,7 +871,7 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                           {/* Header with count + clear */}
                           <div className="flex items-center justify-between border-b border-border px-3 py-2">
                             <span className="text-xs font-semibold">
-                              {t('layeredFlow.filterLayer', 'L{{n}} 筛选', { n: layerIdx + 1 })}{' '}
+                              {t('layeredFlow.filterLayer', 'L{{n}} 筛选', { n: layerIdx })}{' '}
                               ({bucket.length})
                             </span>
                             {focusedInLayer > 0 && (
@@ -1249,7 +1274,7 @@ function DetailPanel({
                 border: `1px solid ${color.border}`,
               }}
             >
-              {t('layeredFlow.layer', '层')} {node.computedLayer + 1} / {layerCount}
+              {t('layeredFlow.layer', '层')} {node.computedLayer} / {layerCount - 1}
             </span>
             {node.isInCycle && (
               <span className="flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-[11px] text-amber-600 dark:text-amber-400">
