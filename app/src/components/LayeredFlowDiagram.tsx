@@ -291,6 +291,20 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     if (!highlightSet) return 0;
     return highlightSet.size;
   }, [highlightSet]);
+
+  // Per-layer breakdown of highlighted cards
+  const highlightedByLayer = useMemo(() => {
+    const result: Array<{ layer: number; count: number }> = [];
+    if (!highlightSet) return result;
+    const map = new Map<number, number>();
+    for (const id of highlightSet) {
+      const l = nodeLayer.get(id);
+      if (l !== undefined) map.set(l, (map.get(l) ?? 0) + 1);
+    }
+    for (const [l, c] of map) result.push({ layer: l, count: c });
+    result.sort((a, b) => a.layer - b.layer);
+    return result;
+  }, [highlightSet, nodeLayer]);
   // ── Arrow path computation ─────────────────────────────────────────────
   const recomputeArrows = useCallback(() => {
     const canvasEl = canvasRef.current;
@@ -613,9 +627,30 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
         </button>
 
         {/* Visible card count */}
-        <span className="text-[10px] text-muted-foreground">
-          {highlightedCardCount || 0}/{layout.nodes.length} 卡片
-        </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" className="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground">
+              {highlightedCardCount || 0}/{layout.nodes.length} 卡片
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40 max-h-[60vh] overflow-y-auto">
+            <div className="border-b border-border px-3 py-1.5 text-[11px] font-semibold">
+              高亮链分布
+            </div>
+            {highlightedByLayer.length === 0 ? (
+              <div className="px-3 py-4 text-center text-[11px] text-muted-foreground/60">
+                悬停或单击卡片查看
+              </div>
+            ) : (
+              highlightedByLayer.map(({ layer, count }) => (
+                <div key={layer} className="flex items-center justify-between px-3 py-1 text-[11px]">
+                  <span>L{layer + 1}</span>
+                  <span className="font-mono">{count}</span>
+                </div>
+              ))
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* Cycle warning chip */}
         {layout.cycleWarning && (
