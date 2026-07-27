@@ -102,12 +102,6 @@ function normalizeTable(name: string): string {
   return name.toLowerCase().trim();
 }
 
-/** Get the "short" form (last segment after dot) for fallback matching. */
-function shortName(name: string): string {
-  const parts = name.split('.');
-  return parts[parts.length - 1].toLowerCase().trim();
-}
-
 /** Parse "L3" / "layer2" / "physical" etc. → numeric prefix; returns undefined if no number. */
 function parseLayerNum(layer: string | undefined): number | undefined {
   if (!layer) return undefined;
@@ -125,8 +119,6 @@ export function buildScriptGraph(tasks: PipelineTask[]): Graph {
   const nodes = new Map<string, LayeredNode>();
   // Primary index: normalized full name → producers
   const tableProducers = new Map<string, Set<string>>();
-  // Fallback index: short name (after last dot) → producers (for unqualified reads)
-  const shortProducers = new Map<string, Set<string>>();
 
   // First pass: register nodes + record producers
   for (const task of tasks) {
@@ -153,13 +145,6 @@ export function buildScriptGraph(tasks: PipelineTask[]): Graph {
       const norm = normalizeTable(t);
       if (!tableProducers.has(norm)) tableProducers.set(norm, new Set());
       tableProducers.get(norm)!.add(id);
-
-      const short = shortName(t);
-      // Only index by short name if it's actually shorter (i.e., original had a dot)
-      if (short !== norm) {
-        if (!shortProducers.has(short)) shortProducers.set(short, new Set());
-        shortProducers.get(short)!.add(id);
-      }
     }
   }
 
@@ -185,20 +170,11 @@ export function buildScriptGraph(tasks: PipelineTask[]): Graph {
   for (const [consumerId, node] of nodes) {
     for (const readTable of node.reads) {
       const norm = normalizeTable(readTable);
-      // 1. Try exact (normalized) match first
+      // Exact (normalized) match only — no short-name fallback to avoid
+      // false edges between tables with same name in different schemas
       const directProducers = tableProducers.get(norm);
       if (directProducers) {
         for (const producerId of directProducers) {
-          addEdge(producerId, consumerId, readTable);
-        }
-        continue; // exact match found, skip fallback
-      }
-      // 2. Fallback: short-name match (e.g., read "users" matches write "db.users")
-      //    ONLY when unambiguous (exactly 1 producer has this short name) to avoid false edges
-      const short = shortName(readTable);
-      const fallbackProducers = shortProducers.get(short);
-      if (fallbackProducers && fallbackProducers.size === 1) {
-        for (const producerId of fallbackProducers) {
           addEdge(producerId, consumerId, readTable);
         }
       }

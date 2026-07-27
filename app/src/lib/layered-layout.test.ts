@@ -88,35 +88,21 @@ describe('buildScriptGraph', () => {
     expect(g.edges).toHaveLength(0);
   });
 
-  it('short-name fallback when unambiguous', () => {
-    // A writes "db.users", B reads "users" — unmatched by full name, but
-    // short name "users" has exactly 1 producer (A) → edge created
+  it('no short-name fallback — different schemas are different tables', () => {
+    // A writes "db.users", B reads "users" — no match (full name differs)
     const g = buildScriptGraph([task('A', '', 'db.users'), task('B', 'users', '')]);
-    expect(g.edges).toHaveLength(1);
-    expect(g.edges[0]).toMatchObject({ from: 'A', to: 'B' });
-  });
-
-  it('short-name fallback skipped when ambiguous', () => {
-    // A and C both write different tables with short name "users"
-    // B reads "users" — can't tell which one → no edge
-    const g = buildScriptGraph([
-      task('A', '', 'db.users'),
-      task('C', '', 'other.users'),
-      task('B', 'users', ''),
-    ]);
     expect(g.edges).toHaveLength(0);
   });
 
-  it('full-name match takes priority over short-name', () => {
-    // A writes "users", C writes "db.users". B reads "db.users" — full name
-    // matches C exactly, so C→B, not A→B (even though A also writes "users")
+  it('same short name in different schemas — no false edge', () => {
     const g = buildScriptGraph([
-      task('A', '', 'users'),
-      task('C', '', 'db.users'),
-      task('B', 'db.users', ''),
+      task('A', '', 'db1.users'),
+      task('C', '', 'db2.users'),
+      task('B', 'db1.users', ''),
     ]);
+    // Only A→B (exact match on db1.users), not C→B
     expect(g.edges).toHaveLength(1);
-    expect(g.edges[0]).toMatchObject({ from: 'C', to: 'B' });
+    expect(g.edges[0]).toMatchObject({ from: 'A', to: 'B' });
   });
 
   it('diamond: A→B→D and A→C→D', () => {
