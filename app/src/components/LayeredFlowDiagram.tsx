@@ -286,6 +286,14 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
     return diagnostics.liveEdges <= 100;
   }, [arrowDisplay, focusVisibleSet, diagnostics.liveEdges]);
 
+  // ── Visible card count ─────────────────────────────────────────────────
+  const visibleCardCount = useMemo(() => {
+    let cnt = 0;
+    for (const n of layout.nodes) {
+      if (matchesSearch(n) && isVisibleDueToFocus(n.id)) cnt++;
+    }
+    return cnt;
+  }, [layout.nodes, matchesSearch, isVisibleDueToFocus]);
   // ── Arrow path computation ─────────────────────────────────────────────
   const recomputeArrows = useCallback(() => {
     const canvasEl = canvasRef.current;
@@ -609,14 +617,7 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
 
         {/* Visible card count */}
         <span className="text-[10px] text-muted-foreground">
-          {(() => {
-            let cnt = 0;
-            for (const n of layout.nodes) {
-              if (matchesSearch(n) && isVisibleDueToFocus(n.id)) cnt++;
-            }
-            return cnt;
-          })()}
-          /{layout.nodes.length} 卡片
+          {visibleCardCount}/{layout.nodes.length} 卡片
         </span>
 
         {/* Cycle warning chip */}
