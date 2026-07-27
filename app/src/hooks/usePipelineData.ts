@@ -89,6 +89,10 @@ export function usePipelineData(result: AnalyzeResult | null): PipelineData {
     const fileReads = new Map(fileReads0);
     const fileWrites = new Map(fileWrites0);
 
+    /** Track which tables globalLineage classifies as read/write per file (authoritative). */
+    const glReadTables = new Map<string, Set<string>>();
+    const glWriteTables = new Map<string, Set<string>>();
+
     if (gl) {
       const idxToSource = new Map<number, string>();
       for (let i = 0; i < result.statements.length; i++) {
@@ -112,6 +116,8 @@ export function usePipelineData(result: AnalyzeResult | null): PipelineData {
               fileReads.set(f, new Set());
             }
             fileWrites.get(f)!.add(tableName);
+            if (!glWriteTables.has(f)) glWriteTables.set(f, new Set());
+            glWriteTables.get(f)!.add(tableName);
           }
         }
         if (cs) {
@@ -123,7 +129,25 @@ export function usePipelineData(result: AnalyzeResult | null): PipelineData {
               fileWrites.set(f, new Set());
             }
             fileReads.get(f)!.add(tableName);
+            if (!glReadTables.has(f)) glReadTables.set(f, new Set());
+            glReadTables.get(f)!.add(tableName);
           }
+        }
+      }
+
+      // Clean up conflicts: globalLineage is authoritative. If a table is
+      // classified as READ by GL but appears in fileWrites (from heuristic),
+      // remove it from fileWrites. Same for vice-versa.
+      for (const [f, reads] of glReadTables) {
+        const writes = fileWrites.get(f);
+        if (writes) {
+          for (const t of reads) writes.delete(t);
+        }
+      }
+      for (const [f, writes] of glWriteTables) {
+        const reads = fileReads.get(f);
+        if (reads) {
+          for (const t of writes) reads.delete(t);
         }
       }
     }
