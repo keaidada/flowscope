@@ -441,6 +441,40 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
           <span className="text-sm font-semibold">
             {t('layeredFlow.title', '分层流程图')}
           </span>
+          {/* Arrow display toggle */}
+          {diagnostics.liveEdges > 100 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center gap-1 rounded border border-input px-2 py-0.5 text-[10px] font-medium hover:bg-muted"
+                >
+                  {arrowDisplay === 'auto' ? '线:自动' : arrowDisplay === 'none' ? '线:关' : '线:开'}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-44">
+                {(
+                  [
+                    ['auto', '自动（聚焦时显示）'],
+                    ['none', '始终隐藏'],
+                    ['all', '始终显示'],
+                  ] as const
+                ).map(([v, label]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setArrowDisplay(v)}
+                    className={cn(
+                      'flex w-full items-center px-3 py-1.5 text-xs hover:bg-muted',
+                      arrowDisplay === v && 'font-semibold text-primary',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <span className="text-xs text-muted-foreground">
             {diagnostics.totalNodes} {t('layeredFlow.scripts', '脚本')} ·{' '}
             {diagnostics.liveEdges} {t('layeredFlow.dependencies', '依赖')} ·{' '}
@@ -748,46 +782,9 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                         </DropdownMenuContent>
                       </DropdownMenu>
         </div>
-
-        {/* Arrow display toggle */}
-        {diagnostics.liveEdges > 100 && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex items-center gap-1 rounded-md border border-input px-2.5 py-1 text-[11px] font-medium hover:bg-muted"
-              >
-                <span className="text-muted-foreground">
-                  {arrowDisplay === 'auto' ? '线 ▸ 自动' : arrowDisplay === 'none' ? '线 ▸ 关闭' : '线 ▸ 全部'}
-                </span>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              {(
-                [
-                  ['auto', '自动（聚焦时显示）'],
-                  ['none', '始终隐藏'],
-                  ['all', '始终显示'],
-                ] as const
-              ).map(([v, label]) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setArrowDisplay(v)}
-                  className={cn(
-                    'flex w-full items-center px-3 py-1.5 text-xs hover:bg-muted',
-                    arrowDisplay === v && 'font-semibold text-primary',
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
       </div>
 
-                  {/* Body */}
+      {/* Body */}
                   <div
                     className="flex flex-col gap-2 border-l border-b border-r p-2"
                     style={{
