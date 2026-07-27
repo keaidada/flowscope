@@ -373,17 +373,17 @@ describe('computeLayeredLayout', () => {
     expect(result.nodes[0].computedLayer).toBe(0);
   });
 
-  it('linear chain (non-isolated shift +1)', () => {
+  it('linear chain (non-isolated shift +1, sink to rightmost)', () => {
     const result = computeLayeredLayout([task('A', '', 'X'), task('B', 'X', 'Y'), task('C', 'Y', '')]);
     expect(result.nodes).toHaveLength(3);
     const map = new Map(result.nodes.map((n) => [n.id, n.computedLayer]));
     expect(map.get('A')).toBe(1);
     expect(map.get('B')).toBe(2);
-    expect(map.get('C')).toBe(3);
-    expect(result.layerCount).toBe(4);
+    expect(map.get('C')).toBe(4); // sink → rightmost
+    expect(result.layerCount).toBe(5);
   });
 
-  it('diamond: layers correct (non-isolated shift +1)', () => {
+  it('diamond: layers correct (sink to rightmost)', () => {
     const result = computeLayeredLayout([
       task('A', '', 'X'),
       task('B', 'X', 'Y'),
@@ -394,8 +394,8 @@ describe('computeLayeredLayout', () => {
     expect(map.get('A')).toBe(1);
     expect(map.get('B')).toBe(2);
     expect(map.get('C')).toBe(2);
-    expect(map.get('D')).toBe(3);
-    expect(result.layerCount).toBe(4);
+    expect(map.get('D')).toBe(4); // sink → rightmost
+    expect(result.layerCount).toBe(5);
   });
 
   it('cycle detected and broken; broken edge marked', () => {
@@ -429,8 +429,7 @@ describe('computeLayeredLayout', () => {
     }
   });
 
-  it('layers correctly for wide fan-in (shift +1)', () => {
-    // Many sources → one sink
+  it('layers correctly for wide fan-in (sink to rightmost)', () => {
     const tasks = ['A', 'B', 'C', 'D'].map((id) => task(id, '', 'X'));
     tasks.push(task('Sink', 'X', ''));
     const result = computeLayeredLayout(tasks);
@@ -439,10 +438,10 @@ describe('computeLayeredLayout', () => {
     expect(map.get('B')).toBe(1);
     expect(map.get('C')).toBe(1);
     expect(map.get('D')).toBe(1);
-    expect(map.get('Sink')).toBe(2);
+    expect(map.get('Sink')).toBe(3); // sink → rightmost
   });
 
-  it('layers correctly for fan-out (shift +1)', () => {
+  it('layers correctly for fan-out (sinks to rightmost)', () => {
     const tasks = [task('Source', '', 'X')];
     for (const id of ['A', 'B', 'C']) {
       tasks.push(task(id, 'X', ''));
@@ -450,20 +449,19 @@ describe('computeLayeredLayout', () => {
     const result = computeLayeredLayout(tasks);
     const map = new Map(result.nodes.map((n) => [n.id, n.computedLayer]));
     expect(map.get('Source')).toBe(1);
-    expect(map.get('A')).toBe(2);
-    expect(map.get('B')).toBe(2);
-    expect(map.get('C')).toBe(2);
+    expect(map.get('A')).toBe(3); // sink → rightmost
+    expect(map.get('B')).toBe(3);
+    expect(map.get('C')).toBe(3);
   });
 
   it('handles large graphs without error', () => {
     const tasks: PipelineTask[] = [];
-    // 50-node chain
     for (let i = 0; i < 50; i++) {
       tasks.push(task(`N${i}`, i > 0 ? `T${i - 1}` : '', `T${i}`));
     }
     const result = computeLayeredLayout(tasks);
     expect(result.nodes).toHaveLength(50);
-    expect(result.layerCount).toBe(51);
+    expect(result.layerCount).toBe(52);
   });
 
   it('computeLayeredLayout is deterministic', () => {
