@@ -550,10 +550,21 @@ function computeLayeredLayoutImpl(tasks: PipelineTask[]): LayeredLayout {
     }
   }
 
-  // Collect sink nodes (no downstream) to rightmost layer
-  let maxLayer = 0;
-  for (const [, l] of layerMap) if (l > maxLayer) maxLayer = l;
-  const sinkLayer = maxLayer + 1;
+  // Collect sink nodes (no downstream) and move to rightmost, then compress empty layers
+  // 1. Find non-isolated, non-sink max layer
+  let pipelineMax = 0;
+  for (const [id] of graph.nodes) {
+    if (isolatedIds.has(id)) continue;
+    const outIdxs = graph.out.get(id) ?? [];
+    const hasLiveOut = outIdxs.some((i) => !breakSet.has(i));
+    if (hasLiveOut) {
+      // Non-sink node
+      const l = layerMap.get(id) ?? 0;
+      if (l > pipelineMax) pipelineMax = l;
+    }
+  }
+  // 2. Move all sinks to pipelineMax + 1
+  const sinkLayer = pipelineMax + 1;
   for (const [id] of graph.nodes) {
     if (isolatedIds.has(id)) continue;
     const outIdxs = graph.out.get(id) ?? [];
@@ -565,7 +576,7 @@ function computeLayeredLayoutImpl(tasks: PipelineTask[]): LayeredLayout {
 
   // Build output nodes
   const outNodes: LayeredNode[] = [];
-  maxLayer = 0;
+  let maxLayer = 0;
   for (const [id, node] of graph.nodes) {
     const l = layerMap.get(id) ?? 0;
     if (l > maxLayer) maxLayer = l;
