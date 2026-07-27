@@ -801,13 +801,13 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
     };
   }, [selectedTask, depGraph]);
 
-  // Compact layout
-  const CELL_W = 96;
-  const CELL_H = 58;
-  const AXIS_W = 60;
-  const AXIS_H = 8;
-  const CIRCLE_R = 14;
-  const PADDING = 32;
+  // Compact layout — wider horizontal (sparse), tighter vertical (compact)
+  const CELL_W = 160;
+  const CELL_H = 40;
+  const AXIS_W = 90;
+  const AXIS_H = 12;
+  const CIRCLE_R = 13;
+  const PADDING = 48;
 
   const svgW = AXIS_W + MAX_COLS * CELL_W + PADDING;
   const svgH = AXIS_H + visibleRows.length * CELL_H + PADDING;
@@ -1168,7 +1168,7 @@ export function TaskLayerMatrix({ tasks, taskNames, layers, className }: TaskLay
                   );
                 }
 
-                const spacing = CIRCLE_R * 2.5;
+        const spacing = CIRCLE_R * 2.4;
                 const startX = -((count - 1) * spacing) / 2;
                 return cellTasks.map((task, i) => {
                   const dimmed =
