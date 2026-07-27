@@ -136,10 +136,12 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
           />
         )}
         {mode === 'matrix' && (
-          <LayeredFlowDiagram
-            className="h-full w-full"
-            tasks={pipelineTasks}
-          />
+          <GraphErrorBoundary>
+            <LayeredFlowDiagram
+              className="h-full w-full"
+              tasks={pipelineTasks}
+            />
+          </GraphErrorBoundary>
         )}
       </div>
     </div>

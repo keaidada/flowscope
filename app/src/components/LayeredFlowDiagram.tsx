@@ -11,7 +11,7 @@
 // Scroll: canvas uses absolute positioning to guarantee overflow scrolling.
 // ============================================================================
 
-import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
+import { useMemo, useState, useRef, useCallback, useEffect, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Search,
@@ -75,18 +75,27 @@ function basename(path: string): string {
 // Component
 // ============================================================================
 
-export function LayeredFlowDiagram({
+export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
   tasks,
   className,
 }: LayeredFlowDiagramProps) {
   const { t } = useTranslation();
-  const safeTasks = tasks ?? [];
+  const safeTasks = useMemo(() => tasks ?? [], [tasks]);
+
+  // ── Debug: detect excessive layout recalculations ────────────────────────
+  const layoutCallCount = useRef(0);
 
   // ── Layered layout ─────────────────────────────────────────────────────
-  const layout: LayeredLayout = useMemo(
-    () => computeLayeredLayout(safeTasks),
-    [safeTasks],
-  );
+  const layout: LayeredLayout = useMemo(() => {
+    layoutCallCount.current++;
+    if (layoutCallCount.current > 2) {
+      console.warn(
+        `[LayeredFlowDiagram] computeLayeredLayout called ${layoutCallCount.current} times. ` +
+        `Tasks length: ${safeTasks.length}. May indicate a re-render loop.`,
+      );
+    }
+    return computeLayeredLayout(safeTasks);
+  }, [safeTasks]);
 
   // ── UI state ───────────────────────────────────────────────────────────
   const [search, setSearch] = useState('');
@@ -870,7 +879,7 @@ export function LayeredFlowDiagram({
       </div>
     </div>
   );
-}
+});
 
 // ============================================================================
 // Detail panel (right side, slides in on card click)

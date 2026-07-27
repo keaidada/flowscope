@@ -214,12 +214,11 @@ describe('pickBreakEdges', () => {
   });
 
   it('skips already-broken edges when existingBroken is passed', () => {
-    // A=0 → B=1 → A=0: two edges, we pre-break the backward one (B→A)
+    // A→B and B→A form a 2-node SCC.
     const g = buildScriptGraph([
       task('A', 'Y', 'X'),
       task('B', 'X', 'Y'),
     ]);
-    const sccs = findSCCs(g);
     const preBroken = new Set<number>();
     // Pre-break the backward edge (B→A)
     const backwardEdge = g.edges.findIndex((e) => e.from === 'B' && e.to === 'A');

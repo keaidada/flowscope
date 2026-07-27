@@ -494,6 +494,17 @@ export function enforceFlowDirection(
  * @returns LayeredLayout with nodes positioned by computed layer
  */
 export function computeLayeredLayout(tasks: PipelineTask[]): LayeredLayout {
+  const emptyResult = { nodes: [], edges: [], layerCount: 1 };
+
+  try {
+    return computeLayeredLayoutImpl(tasks);
+  } catch (err) {
+    console.error('[computeLayeredLayout] failed:', err);
+    return emptyResult;
+  }
+}
+
+function computeLayeredLayoutImpl(tasks: PipelineTask[]): LayeredLayout {
   const graph = buildScriptGraph(tasks);
 
   // Handle empty input
