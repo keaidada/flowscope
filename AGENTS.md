@@ -296,7 +296,30 @@ Use a single repo tag for each release (`vX.Y.Z`) and align Rust workspace + npm
 - The demo app (`app/`) and VS Code webview (`vscode/webview-ui/`) currently define no tests.
 - For full CI parity, `just check` runs formatting checks, lint, typecheck, and schema checks.
 
-## Data Insights (数据洞察)
+## Matrix View (分层流程图)
+
+### Architecture
+- **Component**: `LayeredFlowDiagram.tsx` (app-local) — replaces old TaskLayerMatrix
+- **Algorithm**: `layered-layout.ts` — pure module: `buildScriptGraph`, `findSCCs`, `pickBreakEdges`, `longestPathLayers`, `enforceFlowDirection`, `computeLayeredLayout`
+- **Data source**: `usePipelineData.ts` — reads `table_level_edges` from DB as sole source. Auto-populates from `AnalyzeResult.globalLineage` when DB is empty. No per-statement heuristic, no globalLineage supplementation.
+- **Integration**: `GlobalLineageView.tsx` mode='matrix' → `<LayeredFlowDiagram tasks={pipelineTasks} />`
+
+### Key Decisions
+- **`table_level_edges` only**: `[from_table, to_table, script]` format. from=read, to=write. Authoritative direction, no heuristic guessing.
+- **Full qualified name matching**: exact normalized match only (lowercase+trim). No short-name fallback — different schemas with same table name are different tables.
+- **Iterative cycle breaking**: find SCCs → break 1 edge per SCC → repeat until acyclic. `pickBreakEdges` skips already-broken edges. `enforceFlowDirection` capped at node count.
+- **Layer layout**: L0=isolated (no edges), L1..N-1=pipeline (topological), LN=sink (no downstream).
+- **Arrow visibility = card visibility**: `recomputeArrows` checks `isVisibleDueToFocus` + `highlightSet` before computing paths. No phantom arrows.
+- **Agile mode**: ON=hide non-chain cards on click; OFF=all visible, chain highlighted.
+- **Scroll optimization**: arrows fade out during scroll (150ms debounce), 9511 SVG paths skipped during scroll.
+- **Empty files**: whitespace-only files filtered before analysis, no parse error.
+
+### Interaction Model
+- **Hover**: preview upstream/downstream chain, show impact stats (↑N ↓M · T 表)
+- **Single click**: select card, highlight chain (agile=hide others, full-view=dim others)
+- **Double click**: open right-side detail panel
+- **Per-layer filter (funnel icon)**: multi-select within layer, auto-clears previous layer
+- **Global focused dropdown**: searchable all-scripts selector with checkboxes
 
 ### Architecture
 - **独立 store**: `InsightsGraphView` uses `createLineageStore()` + `<LineageStoreProvider>` to isolate state from relationship graph

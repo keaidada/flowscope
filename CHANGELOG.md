@@ -7,7 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Matrix View (LayeredFlowDiagram)
+- **Layered flow diagram** replacing the old task-layer matrix. Left-to-right
+  DAG with auto-computed topological layers, interactive cards, and
+  bezier-curve arrows.
+- **Agile mode toggle**: ON = hide non-chain cards on click; OFF = keep all
+  cards visible, highlight chain only.
+- **Arrow display modes** (auto/none/all): auto-hides arrows when >100 edges.
+  Toggle appears in toolbar next to title.
+- **Per-layer filter dropdown**: select/deselect scripts within each layer.
+  Selecting a new layer auto-clears previous layer's filter.
+- **Focused scripts dropdown**: searchable global selector for focused scripts
+  with checkboxes. Always visible in toolbar.
+- **Impact stats on hover**: shows upstream count, downstream count, and
+  affected table count in toolbar.
+- **Per-layer highlight breakdown**: click N/M card count to see distribution
+  by layer.
+- **CSV export**: exports all nodes (layer, script, reads, writes, upstream,
+  downstream) with UTF-8 BOM for Excel.
+- **Copy script name**: hover card → copy icon appears.
+- **Scroll optimization**: arrows hidden during scroll (fade out/in with
+  150ms debounce) for smooth scrolling on large graphs (1000+ nodes).
+- **Dedicated L0** for isolated scripts (no edges) at leftmost column.
+- **Sink nodes** (no downstream) collected to rightmost layer.
+
+#### Data Pipeline (usePipelineData)
+- **`table_level_edges` as sole data source** for matrix read/write
+  classification. Per-statement heuristic and globalLineage supplementation
+  removed. Auto-populates from `AnalyzeResult` when DB is empty.
+
 ### Changed
+
+#### Matrix View
+- **Single click** = highlight chain (hide non-chain in agile mode).
+  **Double click** = open detail panel. Previously click did both.
+- **Arrow rendering** only computes paths between visible + highlighted cards.
+  No phantom arrows to hidden/dimmed cards.
+- **Full qualified name matching only**: removed short-name fallback that
+  caused false edges between tables with same name in different schemas.
+- **Simplified card/layer styling**: removed hover animations, colored
+  backgrounds, rounded corners. Cards are primary visual element.
+- **Layer labels** now 0-based (L0, L1, L2, …).
+
+#### Analysis
+- **Empty script files skipped**: whitespace-only files are filtered before
+  analysis. No parse errors. Shows hint if all files are empty.
+
+### Fixed
+
+- **Infinite loop in cycle breaking**: `pickBreakEdges` could select
+  already-broken edges, causing `breakSet` to never grow → deadlock.
+  Fixed by passing `existingBroken` and adding loop guard.
+- **Residual cycle deadlock**: single-pass SCC breaking could leave cycles,
+  causing `enforceFlowDirection` to loop forever. Fixed with iterative
+  cycle breaking + iteration cap.
+- **Cross-cutting edges**: edges from upstream to downstream (bypassing
+  focused nodes) are now hidden in filtered view.
+- **Arrow/card visibility mismatch**: arrows now follow card visibility
+  exactly — no lines to hidden cards.
+- **Read/write reversal**: scripts like M08_CTV_USER.HQL had reads/writes
+  swapped due to per-statement edge direction heuristic. Now uses
+  `table_level_edges` (DB materialized, authoritative direction).
 
 #### Storage (flowscope-cli / serve mode)
 - **Time fields now stored as RFC3339 strings.** All time columns
