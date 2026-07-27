@@ -175,6 +175,18 @@ export function LayeredFlowDiagram({
     [focusVisibleSet, selectionChainSet],
   );
 
+  // ── Combined arrow visibility: intersection of focusVisibleSet and selectionChainSet ──
+  const arrowVisibleSet = useMemo(() => {
+    if (focusVisibleSet === null && selectionChainSet === null) return null;
+    const result = new Set<string>();
+    for (const n of layout.nodes) {
+      const inFocus = !focusVisibleSet || focusVisibleSet.has(n.id);
+      const inChain = !selectionChainSet || selectionChainSet.has(n.id);
+      if (inFocus && inChain) result.add(n.id);
+    }
+    return result;
+  }, [focusVisibleSet, selectionChainSet, layout.nodes]);
+
   // ── Search filter ──────────────────────────────────────────────────────
   const searchLower = search.trim().toLowerCase();
   const matchesSearch = useCallback(
@@ -785,10 +797,10 @@ export function LayeredFlowDiagram({
                 </marker>
               </defs>
               {arrowPaths.map((p) => {
-                // Hide edges outside focus-visible set
+                // Hide edges outside visible set (focus filter + selection chain)
                 if (
-                  focusVisibleSet &&
-                  (!focusVisibleSet.has(p.from) || !focusVisibleSet.has(p.to))
+                  arrowVisibleSet &&
+                  (!arrowVisibleSet.has(p.from) || !arrowVisibleSet.has(p.to))
                 ) {
                   return null;
                 }
