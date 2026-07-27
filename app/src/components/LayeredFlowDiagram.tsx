@@ -496,12 +496,16 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                 · {diagnostics.isolated} {t('layeredFlow.isolated', '孤立')}
               </span>
             )}
-            {focusedNodes.size > 0 && (
-              <DropdownMenu>
+            <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex items-center gap-1 rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/20"
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium hover:bg-muted',
+                      focusedNodes.size > 0
+                        ? 'bg-primary/10 text-primary hover:bg-primary/20'
+                        : 'bg-muted/50 text-muted-foreground',
+                    )}
                   >
                     <Filter className="h-2.5 w-2.5" />
                     {t('layeredFlow.focused', '已聚焦')} {focusedNodes.size}
@@ -582,7 +586,6 @@ export const LayeredFlowDiagram = memo(function LayeredFlowDiagram({
                   </div>
                 </DropdownMenuContent>
               </DropdownMenu>
-            )}
           </span>
         </div>
 
