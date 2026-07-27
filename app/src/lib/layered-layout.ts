@@ -426,6 +426,72 @@ export function longestPathLayers(
 }
 
 // ============================================================================
+// Step 5: enforce flow direction — guarantee non-broken edges go left-to-right
+// ============================================================================
+
+/**
+ * Post-processing pass that guarantees every non-broken edge goes strictly
+ * left-to-right (from a lower layer to a higher layer).
+ *
+ * Under normal operation, longestPathLayers already guarantees this via its
+ * DP update rule: layer(B) >= layer(A) + 1 for every non-broken edge A→B.
+ * However, if some nodes were unreachable in Kahn's algorithm and fell back
+ * to layer 0, edges within that residual cluster could violate direction.
+ *
+ * This function detects such violations and auto-corrects B's layer to A+1.
+ * Returns the corrected layer map.
+ */
+export function enforceFlowDirection(
+  graph: Graph,
+  brokenEdges: Set<number>,
+  layers: Map<string, number>,
+): Map<string, number> {
+  const result = new Map(layers);
+  let fixed = false;
+
+  for (const [, idxs] of graph.out.entries()) {
+    for (const edgeIdx of idxs) {
+      if (brokenEdges.has(edgeIdx)) continue;
+      const e = graph.edges[edgeIdx];
+      const fromLayer = result.get(e.from) ?? 0;
+      const toLayer = result.get(e.to) ?? 0;
+      if (toLayer <= fromLayer) {
+        result.set(e.to, fromLayer + 1);
+        fixed = true;
+      }
+    }
+  }
+
+  if (fixed) {
+    // A single pass may not suffice if the violation cascades (A→B and B→C
+    // both at layer 0). Run a full longest-path recomputation from the fixed
+    // layers to propagate correctly.
+    const queue: string[] = [];
+    for (const [id, l] of result) {
+      const liveIncoming = (graph.in.get(id) ?? []).filter(
+        (i) => !brokenEdges.has(i),
+      ).length;
+      if (liveIncoming === 0 || l === 0) queue.push(id);
+    }
+
+    let head = 0;
+    while (head < queue.length) {
+      const v = queue[head++];
+      const vLayer = result.get(v) ?? 0;
+      const outs = (graph.out.get(v) ?? []).filter((i) => !brokenEdges.has(i));
+      for (const edgeIdx of outs) {
+        const e = graph.edges[edgeIdx];
+        const candidate = vLayer + 1;
+        const cur = result.get(e.to) ?? 0;
+        if (candidate > cur) result.set(e.to, candidate);
+      }
+    }
+  }
+
+  return result;
+}
+
+// ============================================================================
 // Top-level entry point
 // ============================================================================
 
@@ -454,7 +520,10 @@ export function computeLayeredLayout(tasks: PipelineTask[]): LayeredLayout {
   }
 
   // Compute layers
-  const layerMap = longestPathLayers(graph, breakSet);
+  let layerMap = longestPathLayers(graph, breakSet);
+
+  // Enforce left-to-right: guarantee non-broken edges never go right-to-left
+  layerMap = enforceFlowDirection(graph, breakSet, layerMap);
 
   // Build output nodes
   const outNodes: LayeredNode[] = [];

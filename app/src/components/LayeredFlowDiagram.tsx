@@ -25,7 +25,7 @@ import {
   Square,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { PipelineTask, LayerDef } from '@/types/pipeline-matrix';
+import type { PipelineTask } from '@/types/pipeline-matrix';
 import {
   computeLayeredLayout,
   getLayerColor,
@@ -44,9 +44,6 @@ import {
 
 interface LayeredFlowDiagramProps {
   tasks: PipelineTask[];
-  taskNames: string[];
-  /** Ignored — layers are recomputed from the actual graph. */
-  layers: LayerDef[];
   className?: string;
 }
 
@@ -80,8 +77,6 @@ function basename(path: string): string {
 
 export function LayeredFlowDiagram({
   tasks,
-  taskNames: _taskNames,
-  layers: _layers,
   className,
 }: LayeredFlowDiagramProps) {
   const { t } = useTranslation();

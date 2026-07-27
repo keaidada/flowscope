@@ -1,4 +1,4 @@
-import { useCallback, useMemo, type FC } from 'react';
+import { useCallback, type FC } from 'react';
 import { Network, Rows3, LayoutGrid, Loader2, Database } from 'lucide-react';
 import type { AnalyzeResult } from '@pondpilot/flowscope-core';
 import { GraphErrorBoundary, GraphView, useLineageActions } from '@pondpilot/flowscope-react';
@@ -9,7 +9,6 @@ import { LayeredFlowDiagram } from './LayeredFlowDiagram';
 import { InsightsGraphView } from './insights/InsightsGraphView';
 import { useGlobalLineageData } from '@/hooks/useGlobalLineageData';
 import { usePipelineData } from '@/hooks/usePipelineData';
-import type { LayerDef } from '@/types/pipeline-matrix';
 
 export type GlobalLineageMode = 'graph' | 'list' | 'matrix' | 'insights';
 
@@ -37,30 +36,7 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
 
   // Shared data — computed once, consumed by list and matrix
   const { isLightweight, loadEntryDetail } = useGlobalLineageData(result);
-  const { tasks: pipelineTasks, taskNames: pipelineTaskNames } = usePipelineData(result);
-
-  // Dynamic layers L1-Ln based on actual pipeline data
-  const pipelineLayers = useMemo<LayerDef[]>(() => {
-    const layerMap = new Map<string, number>();
-    for (const task of pipelineTasks) {
-      const key = task.layer;
-      layerMap.set(key, (layerMap.get(key) ?? 0) + 1);
-    }
-    if (layerMap.size === 0) {
-      return [{ key: 'L1', label: 'L1', type: 'logical' as const, order: 0 }];
-    }
-    const sorted = Array.from(layerMap.entries()).sort(([a], [b]) => {
-      const na = parseInt(a.slice(1));
-      const nb = parseInt(b.slice(1));
-      return na - nb;
-    });
-    return sorted.map(([key, count]) => ({
-      key,
-      label: `${key} (${count})`,
-      type: 'logical' as const,
-      order: 0,
-    }));
-  }, [pipelineTasks]);
+  const { tasks: pipelineTasks } = usePipelineData(result);
 
   // Navigate from list → graph (focus on a specific node)
   const handleOpenGraphForNode = useCallback(
@@ -163,8 +139,6 @@ export const GlobalLineageView: FC<GlobalLineageViewProps> = ({
           <LayeredFlowDiagram
             className="h-full w-full"
             tasks={pipelineTasks}
-            taskNames={pipelineTaskNames}
-            layers={pipelineLayers}
           />
         )}
       </div>
