@@ -24,6 +24,14 @@ interface MergedLine {
   removed: boolean;
 }
 
+/** SQL keywords that signal a line should always be kept */
+const SQL_KEYWORDS = [
+  'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL',
+  'CROSS', 'ON', 'AND', 'OR', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'UNION',
+  'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE', 'MERGE', 'USING',
+  'WHEN', 'THEN', 'ELSE', 'END',
+];
+
 function buildMergedLines(original: string, extracted: string): MergedLine[] {
   const origLines = original.split('\n');
   const extLines = extracted.split('\n');
@@ -33,6 +41,7 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
   for (let i = 0; i < origLines.length; i++) {
     const origTrim = origLines[i].trim();
     const isComment = origTrim.startsWith('--');
+    const firstWord = origTrim.toUpperCase().split(/\s+/)[0].replace(/[,;]$/, '');
 
     if (extIdx < extLines.length) {
       const extTrim = extLines[extIdx].trim();
@@ -46,7 +55,23 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
       }
     }
 
-    // Filtered or comment — removed (recoverable with right arrow)
+    // SQL keywords that didn't match — still keep (extraction may differ slightly)
+    if (!isComment && SQL_KEYWORDS.includes(firstWord)) {
+      // Look ahead in extracted lines to try to find a match
+      let found = false;
+      for (let k = extIdx; k < extLines.length; k++) {
+        const extTrim = extLines[k].trim();
+        if (extTrim === origTrim || (extTrim && origTrim && extTrim.includes(origTrim))) {
+          result.push({ content: extLines[k], removed: false });
+          // Advance extIdx to after the matched position
+          extIdx = k + 1;
+          found = true;
+          break;
+        }
+      }
+      if (found) continue;
+    }
+
     result.push({ content: origLines[i], removed: true });
   }
 
