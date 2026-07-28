@@ -86,7 +86,7 @@ function ClickableMiniMap({ show, nodeCount }: { show: boolean; nodeCount: numbe
       pannable
       zoomable
       style={undefined}
-      nodeStrokeWidth={nodeCount > 1000 ? 10 : 1}
+      nodeStrokeWidth={nodeCount > 1000 ? 100 : 1}
       onClick={handleClick}
       nodeColor={(node) => {
         if (isTableNodeData(node.data)) {
