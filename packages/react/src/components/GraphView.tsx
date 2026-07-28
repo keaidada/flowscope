@@ -75,8 +75,8 @@ function MiniMapNode({ x, y, width, height, color, strokeColor }: {
   x: number; y: number; width: number; height: number;
   color?: string; strokeColor?: string;
 }) {
-  const w = Math.max(width, 16);
-  const h = Math.max(height, 16);
+  const w = Math.max(width, 32);
+  const h = Math.max(height, 32);
   return <rect x={x} y={y} width={w} height={h} fill={color} rx={2} stroke={strokeColor} strokeWidth={0.5} />;
 }
 
