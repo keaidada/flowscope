@@ -225,34 +225,43 @@ export function ProcedureRepairDialog({
               </div>
               <div className="flex-1 min-h-0 overflow-hidden">
                 {mergedLines.map((line, idx) => {
-                  if (line.userRemoved && !showRemoved) return null;
+                  const isAutoRemoved = line.removed;
+                  const isUserRemoved = line.userRemoved;
+                  const isRemoved = isAutoRemoved || isUserRemoved;
+
+                  if (isUserRemoved && !showRemoved) return null;
+
                   return (
                     <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
-                      {line.removed ? (
-                        <>
-                          <button className="p-0 rounded" disabled>
-                            <ArrowLeft className="h-2.5 w-2.5 text-muted-foreground/20" />
-                          </button>
-                          <span className="text-[7px] text-muted-foreground/30">-</span>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            title="标记为删除"
-                            onClick={() => { if (!line.userRemoved) toggleUserRemoved(idx); }}
-                            className={cn('p-0 rounded hover:bg-red-100 transition-colors', line.userRemoved && 'bg-red-100')}
-                          >
-                            <ArrowLeft className={cn('h-2.5 w-2.5', line.userRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
-                          </button>
-                          <button
-                            title="保留此行"
-                            onClick={() => { if (line.userRemoved) toggleUserRemoved(idx); }}
-                            className={cn('p-0 rounded hover:bg-green-100 transition-colors', !line.userRemoved && 'bg-green-100')}
-                          >
-                            <ArrowRight className={cn('h-2.5 w-2.5', !line.userRemoved ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
-                          </button>
-                        </>
-                      )}
+                      <button
+                        title={isAutoRemoved ? '自动过滤' : '标记为删除'}
+                        onClick={() => { if (!isRemoved) toggleUserRemoved(idx); }}
+                        disabled={isAutoRemoved}
+                        className={cn(
+                          'p-0 rounded hover:bg-red-100 transition-colors',
+                          isRemoved && 'bg-red-100',
+                        )}
+                      >
+                        <ArrowLeft className={cn(
+                          'h-2.5 w-2.5',
+                          isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400',
+                          isAutoRemoved && 'opacity-40',
+                        )} />
+                      </button>
+                      <button
+                        title={isAutoRemoved ? '自动过滤，不可恢复' : isUserRemoved ? '保留此行' : '已保留'}
+                        onClick={() => { if (isUserRemoved) toggleUserRemoved(idx); }}
+                        disabled={!isUserRemoved || isAutoRemoved}
+                        className={cn(
+                          'p-0 rounded hover:bg-green-100 transition-colors',
+                          !isRemoved && 'bg-green-100',
+                        )}
+                      >
+                        <ArrowRight className={cn(
+                          'h-2.5 w-2.5',
+                          !isRemoved ? 'text-green-500' : (isAutoRemoved ? 'text-muted-foreground/20' : 'text-muted-foreground/40 hover:text-green-400'),
+                        )} />
+                      </button>
                     </div>
                   );
                 })}
