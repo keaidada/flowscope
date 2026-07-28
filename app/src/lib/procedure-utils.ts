@@ -143,7 +143,8 @@ function extractBqDml(content: string): string | null {
       }
 
       // ── Detect start of EXECUTE IMMEDIATE FORMAT(""" or """ ──
-      if (upper.includes('EXECUTE IMMEDIATE')) {
+      // Skip commented-out EXECUTE IMMEDIATE lines
+      if (upper.includes('EXECUTE IMMEDIATE') && !trimmed.startsWith('--')) {
         // Check for triple-quote start
         const dqIdx = line.indexOf('"""');
         const sqIdx = line.indexOf("'''");
