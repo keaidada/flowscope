@@ -69,6 +69,17 @@ const NODE_OVERLAP_THRESHOLD = 0.5;
  * MiniMap wrapper that supports click-to-navigate.
  * Must be inside ReactFlow to use useReactFlow.
  */
+
+/** Custom MiniMap node: forces minimum visible size for large graphs */
+function MiniMapNode({ x, y, width, height, color, strokeColor }: {
+  x: number; y: number; width: number; height: number;
+  color?: string; strokeColor?: string;
+}) {
+  const w = Math.max(width, 4);
+  const h = Math.max(height, 4);
+  return <rect x={x} y={y} width={w} height={h} fill={color} rx={1} stroke={strokeColor} />;
+}
+
 function ClickableMiniMap({ show, nodeCount }: { show: boolean; nodeCount: number }): JSX.Element | null {
   const { setCenter, getZoom } = useReactFlow();
 
@@ -85,8 +96,7 @@ function ClickableMiniMap({ show, nodeCount }: { show: boolean; nodeCount: numbe
     <MiniMap
       pannable
       zoomable
-      style={undefined}
-      nodeStrokeWidth={nodeCount > 1000 ? 100 : 1}
+      nodeComponent={nodeCount > 1000 ? MiniMapNode : undefined}
       onClick={handleClick}
       nodeColor={(node) => {
         if (isTableNodeData(node.data)) {
