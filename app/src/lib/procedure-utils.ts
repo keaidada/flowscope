@@ -35,6 +35,7 @@ const REMOVE_PREFIXES = [
 function shouldRemoveLine(line: string): boolean {
   const trimmed = line.trim().toUpperCase();
   if (!trimmed) return false; // keep blank lines
+  if (trimmed.startsWith('--')) return true; // comments
   if (trimmed.startsWith('CREATE PROCEDURE') || trimmed.startsWith('CREATE OR REPLACE PROCEDURE')) return true;
   return REMOVE_PREFIXES.some((p) => trimmed.startsWith(p));
 }
