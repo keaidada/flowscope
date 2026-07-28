@@ -153,6 +153,11 @@ rm -f "$INSTALL_DIR/data/flowscope.db"*
 tar -xzf "$TARBALL" -C "$INSTALL_DIR/bin/"
 chmod +x "$INSTALL_DIR/bin/flowscope"
 
+# 拷贝内置示例 SQL 文件
+for f in "$SCRIPT_DIR"/*.sql; do
+    [[ -f "$f" ]] && cp "$f" "$INSTALL_DIR/sql/" && info "内置 SQL: $(basename "$f")"
+done
+
 echo ""
 log "目录结构:"
 echo "  $INSTALL_DIR/bin/     → 二进制"

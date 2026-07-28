@@ -64,6 +64,15 @@ open http://localhost:3000
 └── start.sh             # 启动脚本
 ```
 
+### 内置示例 SQL
+
+安装后 `$INSTALL_DIR/sql/` 目录自带两个示例文件，启动即可体验：
+
+| 文件 | 说明 |
+|------|------|
+| `ck_demo.sql` | ClickHouse 完整 ETL pipeline 示例 |
+| `ck_demo2.sql` | ClickHouse 简化血缘示例 |
+
 ### 功能
 
 - ✅ SQL 血缘分析（15 种方言）
