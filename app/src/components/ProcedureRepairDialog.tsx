@@ -59,12 +59,13 @@ export function ProcedureRepairDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 flex gap-0 min-h-0 px-4 pb-2">
+        <div className="flex-1 flex gap-0 min-h-0 px-4 pb-2 overflow-hidden">
           {/* Left: Original */}
-          <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 flex flex-col min-w-0 min-h-0">
             <div className="text-xs text-muted-foreground mb-1 shrink-0">{t('procedure.original')}</div>
             <textarea
               className="flex-1 w-full resize-none rounded border bg-muted/30 p-2 font-mono text-xs"
+              style={{ minHeight: '300px' }}
               value={originalContent}
               readOnly
             />
@@ -76,7 +77,7 @@ export function ProcedureRepairDialog({
           </div>
 
           {/* Right: Transformed */}
-          <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 flex flex-col min-w-0 min-h-0">
             <div className="text-xs text-muted-foreground mb-1 shrink-0 flex items-center gap-2">
               {t('procedure.transformed')}
               <Button
@@ -91,6 +92,7 @@ export function ProcedureRepairDialog({
             </div>
             <textarea
               className="flex-1 w-full resize-none rounded border bg-background p-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              style={{ minHeight: '300px' }}
               value={transformedContent}
               onChange={(e) => setTransformedContent(e.target.value)}
               placeholder={t('procedure.noDml')}
