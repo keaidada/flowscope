@@ -73,7 +73,21 @@ function shouldRemoveLine(line: string): boolean {
  */
 export function extractDmlFromProcedure(content: string, dialect?: string): string | null {
   if (dialect && dialect !== 'bigquery') return null;
-  return extractBqDml(content);
+  const extracted = extractBqDml(content);
+  if (!extracted) return null;
+  // Filter: keep only lines that appear in original (exact or substring match).
+  // Substring match preserves EXECUTE IMMEDIATE unwrapped SQL.
+  const origLines = content.split('\n');
+  const filtered = extracted.split('\n').filter((extLine) => {
+    const t = extLine.trim();
+    if (!t) return true; // keep blank lines
+    return origLines.some((origLine) => {
+      const origTrim = origLine.trim();
+      return origTrim === t || origTrim.includes(t);
+    });
+  });
+  const text = filtered.join('\n').trim();
+  return text || null;
 }
 
 /**
