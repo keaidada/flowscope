@@ -235,8 +235,7 @@ export function ProcedureRepairDialog({
                     <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
                       <button
                         title={isAutoRemoved ? '自动过滤' : '标记为删除'}
-                        onClick={() => { if (!isRemoved) toggleUserRemoved(idx); }}
-                        disabled={isAutoRemoved}
+                        onClick={() => { if (!isAutoRemoved) toggleUserRemoved(idx); }}
                         className={cn(
                           'p-0 rounded hover:bg-red-100 transition-colors',
                           isRemoved && 'bg-red-100',
@@ -245,13 +244,11 @@ export function ProcedureRepairDialog({
                         <ArrowLeft className={cn(
                           'h-2.5 w-2.5',
                           isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400',
-                          isAutoRemoved && 'opacity-40',
                         )} />
                       </button>
                       <button
                         title={isAutoRemoved ? '自动过滤，不可恢复' : isUserRemoved ? '保留此行' : '已保留'}
                         onClick={() => { if (isUserRemoved) toggleUserRemoved(idx); }}
-                        disabled={!isUserRemoved || isAutoRemoved}
                         className={cn(
                           'p-0 rounded hover:bg-green-100 transition-colors',
                           !isRemoved && 'bg-green-100',
@@ -259,7 +256,7 @@ export function ProcedureRepairDialog({
                       >
                         <ArrowRight className={cn(
                           'h-2.5 w-2.5',
-                          !isRemoved ? 'text-green-500' : (isAutoRemoved ? 'text-muted-foreground/20' : 'text-muted-foreground/40 hover:text-green-400'),
+                          !isRemoved ? 'text-green-500' : (isAutoRemoved ? 'text-muted-foreground/30' : 'text-muted-foreground/40 hover:text-green-400'),
                         )} />
                       </button>
                     </div>
