@@ -279,7 +279,12 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
       const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
       const folderFiles = currentProject.files.filter((f) => f.path.startsWith(prefix));
-      const procFiles = folderFiles.filter((f) => f.isProcedure);
+      // Detect procedures by content, not just stored flag
+      const procFiles = folderFiles.filter((f) => {
+        if (f.isProcedure) return true;
+        const upper = (f.content || '').toUpperCase();
+        return upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC ');
+      });
       const total = procFiles.length;
 
       if (total === 0) return;
@@ -409,7 +414,12 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const folderProcedureCount = useMemo(() => {
     if (!convertDialogOpen || !currentProject) return 0;
     const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
-    return currentProject.files.filter((f) => f.path.startsWith(prefix) && f.isProcedure).length;
+    return currentProject.files.filter((f) => {
+      if (!f.path.startsWith(prefix)) return false;
+      if (f.isProcedure) return true;
+      const upper = (f.content || '').toUpperCase();
+      return upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC ');
+    }).length;
   }, [convertDialogOpen, currentProject, convertTargetPath]);
 
   const folderTotalCount = useMemo(() => {
