@@ -266,27 +266,19 @@ export function ProcedureRepairDialog({
                       key={idx}
                       className={cn(
                         'flex items-start h-[15px]',
-                        line.removed && 'bg-red-500/[0.06]',
-                        !line.removed && isComment && 'bg-green-500/[0.04]',
+                        (line.removed || isComment) && 'bg-red-500/[0.06]',
                       )}
                     >
                       <span className={cn(
                         'w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]',
-                        line.removed ? 'text-red-400' : isComment ? 'text-green-600/50' : 'text-muted-foreground'
+                        (line.removed || isComment) ? 'text-red-400' : 'text-muted-foreground'
                       )}>
                         {idx + 1}
                       </span>
 
-                      {line.removed ? (
+                      {(line.removed || isComment) ? (
                         <span className={cn(
                           'flex-1 whitespace-pre pr-2 overflow-hidden font-mono text-red-500 line-through',
-                          fSizeMono
-                        )}>
-                          {line.content}
-                        </span>
-                      ) : isComment ? (
-                        <span className={cn(
-                          'flex-1 whitespace-pre pr-2 overflow-hidden font-mono text-green-700/60 italic',
                           fSizeMono
                         )}>
                           {line.content}
