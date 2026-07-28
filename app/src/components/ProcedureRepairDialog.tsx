@@ -49,8 +49,8 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
       }
     }
 
-    // Filtered by extraction
-    result.push({ content: '-', removed: true, userRemoved: false });
+    // Filtered by extraction — show original content in red strikethrough
+    result.push({ content: origLines[i], removed: true, userRemoved: false });
   }
 
   return result;
