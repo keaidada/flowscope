@@ -205,7 +205,7 @@ export function ProcedureRepairDialog({
             </div>
             <div ref={leftRef} className="flex-1 min-h-0 overflow-auto bg-background" onScroll={() => handleScroll('left')}>
               {originalLines.map((line, idx) => (
-                <div key={idx} className="flex items-start h-[15px]">
+                <div key={`l-${idx}`} className="flex items-start h-[15px]">
                   <span className="w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px] text-muted-foreground/40">
                     {idx + 1}
                   </span>
@@ -232,7 +232,7 @@ export function ProcedureRepairDialog({
                   if (isUserRemoved && !showRemoved) return null;
 
                   return (
-                    <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
+                    <div key={`${idx}-${line.userRemoved ? 'r' : 'k'}`} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
                       <button
                         title={isAutoRemoved ? '自动过滤' : '标记为删除'}
                         onClick={() => { if (!isAutoRemoved) toggleUserRemoved(idx); }}
