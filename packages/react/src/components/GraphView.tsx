@@ -69,7 +69,7 @@ const NODE_OVERLAP_THRESHOLD = 0.5;
  * MiniMap wrapper that supports click-to-navigate.
  * Must be inside ReactFlow to use useReactFlow.
  */
-function ClickableMiniMap({ show }: { show: boolean }): JSX.Element | null {
+function ClickableMiniMap({ show, nodeCount }: { show: boolean; nodeCount: number }): JSX.Element | null {
   const { setCenter, getZoom } = useReactFlow();
 
   const handleClick = useCallback(
@@ -85,6 +85,10 @@ function ClickableMiniMap({ show }: { show: boolean }): JSX.Element | null {
     <MiniMap
       pannable
       zoomable
+      style={{
+        width: nodeCount > 1000 ? 280 : 200,
+        height: nodeCount > 1000 ? 200 : 150,
+      }}
       onClick={handleClick}
       nodeColor={(node) => {
         if (isTableNodeData(node.data)) {
@@ -1201,7 +1205,7 @@ export function GraphView({
         <Panel position="bottom-left" className="!m-3">
           <LayoutProgressIndicator />
         </Panel>
-        <ClickableMiniMap show={showMiniMap} />
+        <ClickableMiniMap show={showMiniMap} nodeCount={renderGraph.nodes.length} />
       </ReactFlow>
     </div>
   );
