@@ -228,7 +228,14 @@ export function ProcedureRepairDialog({
                   if (line.userRemoved && !showRemoved) return null;
                   return (
                     <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
-                      {!line.removed && (
+                      {line.removed ? (
+                        <>
+                          <button className="p-0 rounded" disabled>
+                            <ArrowLeft className="h-2.5 w-2.5 text-muted-foreground/20" />
+                          </button>
+                          <span className="text-[7px] text-muted-foreground/30">-</span>
+                        </>
+                      ) : (
                         <>
                           <button
                             title="标记为删除"
