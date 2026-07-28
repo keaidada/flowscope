@@ -14,23 +14,54 @@ const DML_KEYWORDS = [
   'MERGE',
   'UPDATE',
   'TRUNCATE',
-  'WITH',
-  'CREATE',
-  'EXPLAIN',
 ] as const;
+
+/** Keywords that indicate a line is NOT DML (procedure control flow / declarations) */
+const NON_DML_PREFIXES = [
+  'DECLARE',
+  'SET',
+  'BEGIN',
+  'END',
+  'IF',
+  'THEN',
+  'ELSE',
+  'ELSEIF',
+  'WHILE',
+  'DO',
+  'LOOP',
+  'FOR',
+  'BREAK',
+  'LEAVE',
+  'CONTINUE',
+  'RETURN',
+  'RAISE',
+  'EXCEPTION',
+  'WHEN',
+  'EXECUTE',
+  'CALL',
+  'ASSERT',
+];
 
 const isDml = (s: string): boolean =>
   DML_KEYWORDS.some((k) => s.toUpperCase().trimStart().startsWith(k));
 
-/** Check if a string looks like a complete SQL statement (not just a description mentioning DML keywords) */
+/** Check if a string looks like a complete SQL statement */
 const isSqlStatement = (s: string): boolean => {
   const upper = s.toUpperCase().trimStart();
   if (upper.startsWith('INSERT')) return /\bINTO\b/.test(upper);
-  if (upper.startsWith('SELECT')) return true; // SELECT can have various forms
+  if (upper.startsWith('SELECT')) return true;
   if (upper.startsWith('DELETE')) return /\bFROM\b/.test(upper);
   if (upper.startsWith('UPDATE')) return /\bSET\b/.test(upper);
-  if (upper.startsWith('MERGE')) return /\bUSING\b/.test(upper);
-  return true; // CREATE, TRUNCATE, WITH, EXPLAIN are accepted as-is
+  if (upper.startsWith('MERGE')) return /\bINTO\b/.test(upper);
+  if (upper.startsWith('TRUNCATE')) return /\bTABLE\b/.test(upper);
+  return false;
+};
+
+/** Check if a statement is a procedure control-flow keyword (not DML) */
+const isControlFlow = (s: string): boolean => {
+  const upper = s.toUpperCase().trimStart();
+  const firstWord = upper.split(/\s+/)[0];
+  return NON_DML_PREFIXES.includes(firstWord);
 };
 
 /** Split procedure body into statements, handling nested BEGIN/END and strings */
@@ -245,6 +276,9 @@ export function extractBqDml(content: string): string | null {
       let s = stmt.trim();
       if (!s) continue;
 
+      // Skip procedure control-flow statements (DECLARE, IF, WHILE, etc.)
+      if (isControlFlow(s)) continue;
+
       if (isDml(s) && isSqlStatement(s)) {
         results.push(s);
         continue;
@@ -262,21 +296,17 @@ export function extractBqDml(content: string): string | null {
         continue;
       }
 
-      // Handle nested BEGIN blocks: strip leading keywords and retry
+      // Handle nested blocks: strip leading control keywords and retry
       let remainder = s;
       while (true) {
         const upper2 = remainder.toUpperCase().trimStart();
         const prefix = upper2.split(/\s+/)[0];
-        if (
-          prefix === 'BEGIN' ||
-          prefix === 'IF' ||
-          prefix === 'WHILE' ||
-          prefix === 'LOOP' ||
-          prefix === 'ELSE' ||
-          prefix === 'THEN'
-        ) {
+        if (NON_DML_PREFIXES.includes(prefix)) {
           const idx = upper2.indexOf(prefix);
           remainder = remainder.slice(idx + prefix.length).trimStart();
+          if (!remainder) break;
+          // Skip if remainder is also control flow
+          if (isControlFlow(remainder)) continue;
           // Try EXECUTE IMMEDIATE on remainder
           const innerExec = extractExecuteImmediateSql(remainder);
           if (innerExec && isDml(innerExec) && isSqlStatement(innerExec)) {
