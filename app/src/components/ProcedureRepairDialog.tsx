@@ -45,6 +45,7 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
       }
     }
 
+    // Filtered or comment line — marked as removed (can be recovered with right arrow)
     result.push({ content: origLines[i], removed: true });
   }
 
@@ -258,7 +259,6 @@ export function ProcedureRepairDialog({
             {hasResult ? (
               <div ref={rightRef} className="flex-1 min-h-0 overflow-auto bg-background" onScroll={() => handleScroll('right')}>
                 {mergedLines.map((line, idx) => {
-                  const isComment = line.content.trim().startsWith('--');
                   if (line.removed && !showRemoved && line.content.trim()) return null;
 
                   return (
@@ -266,17 +266,17 @@ export function ProcedureRepairDialog({
                       key={idx}
                       className={cn(
                         'flex items-start h-[15px]',
-                        (line.removed || isComment) && 'bg-red-500/[0.06]',
+                        line.removed && 'bg-red-500/[0.06]',
                       )}
                     >
                       <span className={cn(
                         'w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]',
-                        (line.removed || isComment) ? 'text-red-400' : 'text-muted-foreground'
+                        line.removed ? 'text-red-400' : 'text-muted-foreground'
                       )}>
                         {idx + 1}
                       </span>
 
-                      {(line.removed || isComment) ? (
+                      {line.removed ? (
                         <span className={cn(
                           'flex-1 whitespace-pre pr-2 overflow-hidden font-mono text-red-500 line-through',
                           fSizeMono
