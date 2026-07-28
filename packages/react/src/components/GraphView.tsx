@@ -86,8 +86,8 @@ function ClickableMiniMap({ show, nodeCount }: { show: boolean; nodeCount: numbe
       pannable
       zoomable
       style={{
-        width: nodeCount > 1000 ? 280 : 200,
-        height: nodeCount > 1000 ? 200 : 150,
+        width: nodeCount > 1000 ? 600 : 200,
+        height: nodeCount > 1000 ? 400 : 150,
       }}
       onClick={handleClick}
       nodeColor={(node) => {
