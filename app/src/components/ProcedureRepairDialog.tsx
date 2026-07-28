@@ -39,9 +39,23 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
 
   let extIdx = 0;
   let inBlockComment = false;
+  let inMultiLineSet = false; // SET var = (SELECT ...)
   for (let i = 0; i < origLines.length; i++) {
     const origTrim = origLines[i].trim();
     const isComment = origTrim.startsWith('--');
+    const upper = origTrim.toUpperCase();
+
+    // Multi-line SET var = ( ... ); — mark all lines as removed
+    if (inMultiLineSet) {
+      if (origTrim === ');' || origTrim.endsWith(');')) inMultiLineSet = false;
+      result.push({ content: origLines[i], removed: true });
+      continue;
+    }
+    if (upper.startsWith('SET ') && upper.includes('=(') && !origTrim.endsWith(');')) {
+      inMultiLineSet = true;
+      result.push({ content: origLines[i], removed: true });
+      continue;
+    }
 
     // Track /* ... */ block comments
     if (inBlockComment) {
