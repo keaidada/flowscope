@@ -78,11 +78,20 @@ export function extractBqDml(content: string): string | null {
     let tripleChar = '';
     let skipExecuteImmediate = false; // EXECUTE IMMEDIATE '...' (single-line DROP etc)
     let inBlockComment = false; // inside /* ... */ block comment
+    let inMultiLineSet = false; // inside SET var = (SELECT ...) multi-line
 
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i];
       const trimmed = line.trim();
       const upper = trimmed.toUpperCase();
+
+      // ── Handle on-going multi-line SET var = ( ... ); ──
+      if (inMultiLineSet) {
+        if (trimmed === ');' || trimmed.endsWith(');')) {
+          inMultiLineSet = false;
+        }
+        continue;
+      }
 
       // ── Handle multi-line block comments /* ... */ ──
       if (inBlockComment) {
@@ -162,6 +171,12 @@ export function extractBqDml(content: string): string | null {
         }
 
         // EXECUTE IMMEDIATE without quotes (variable reference) — skip
+        continue;
+      }
+
+      // ── Detect multi-line SET var = (SELECT ... before shouldRemoveLine
+      if (upper.startsWith('SET ') && upper.includes('=(') && !trimmed.endsWith(');')) {
+        inMultiLineSet = true;
         continue;
       }
 
