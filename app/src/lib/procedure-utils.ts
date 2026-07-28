@@ -1,251 +1,58 @@
 /**
  * BigQuery stored procedure to DML conversion utilities.
  *
- * Extracts DML/SELECT statements from CREATE PROCEDURE ... BEGIN ... END bodies,
- * including SQL from EXECUTE IMMEDIATE and SET variable patterns.
- *
- * Other dialect conversions can be added here as separate functions.
+ * Strategy: LINE-LEVEL filtering (not statement extraction).
+ * Walks the procedure line by line, removes control-flow/declaration lines,
+ * and unwraps EXECUTE IMMEDIATE blocks to show the inner SQL.
  */
 
-const DML_KEYWORDS = [
-  'SELECT',
-  'INSERT',
-  'DELETE',
-  'MERGE',
-  'UPDATE',
-  'TRUNCATE',
-] as const;
-
-/** Keywords that indicate a line is NOT DML (procedure control flow / declarations) */
-const NON_DML_PREFIXES = [
+/** Lines starting with these keywords (uppercased) are removed */
+const REMOVE_PREFIXES = [
   'DECLARE',
-  'SET',
+  'SET ',
   'BEGIN',
   'END',
-  'IF',
+  'IF ',
+  'IF(',
   'THEN',
   'ELSE',
   'ELSEIF',
   'WHILE',
-  'DO',
   'LOOP',
-  'FOR',
+  'FOR ',
   'BREAK',
   'LEAVE',
   'CONTINUE',
   'RETURN',
   'RAISE',
   'EXCEPTION',
-  'WHEN',
-  'EXECUTE',
-  'CALL',
+  'WHEN ',
+  'CALL ',
   'ASSERT',
 ];
 
-const isDml = (s: string): boolean =>
-  DML_KEYWORDS.some((k) => s.toUpperCase().trimStart().startsWith(k));
-
-/** Check if a string looks like a complete SQL statement */
-const isSqlStatement = (s: string): boolean => {
-  const upper = s.toUpperCase().trimStart();
-  if (upper.startsWith('INSERT')) return /\bINTO\b/.test(upper);
-  if (upper.startsWith('SELECT')) return true;
-  if (upper.startsWith('DELETE')) return /\bFROM\b/.test(upper);
-  if (upper.startsWith('UPDATE')) return /\bSET\b/.test(upper);
-  if (upper.startsWith('MERGE')) return /\bINTO\b/.test(upper);
-  if (upper.startsWith('TRUNCATE')) return /\bTABLE\b/.test(upper);
-  return false;
-};
-
-/** Check if a statement is a procedure control-flow keyword (not DML) */
-// @ts-expect-error kept for potential future use
-const _isControlFlow = (s: string): boolean => {
-  const upper = s.toUpperCase().trimStart();
-  const firstWord = upper.split(/\s+/)[0];
-  return NON_DML_PREFIXES.includes(firstWord);
-};
-
-/** Split procedure body into statements, handling nested BEGIN/END and strings */
-function splitProcedureStatements(body: string): string[] {
-  const results: string[] = [];
-  let current = '';
-  let i = 0;
-
-  while (i < body.length) {
-    const ch = body[i];
-
-    // Track quoted strings to avoid splitting inside them
-    if (ch === "'" || ch === '"' || (ch === '`' && body.slice(i, i + 3) !== '```')) {
-      const quote = ch;
-      current += ch;
-      i++;
-      while (i < body.length && body[i] !== quote) {
-        if (body[i] === '\\') {
-          current += body[i];
-          i++;
-        }
-        current += body[i];
-        i++;
-      }
-      if (i < body.length) {
-        current += body[i];
-        i++;
-      }
-      continue;
-    }
-
-    // Triple-quoted strings (""" or ''')
-    if ((ch === '"' || ch === "'") && body.slice(i + 1, i + 3) === ch + ch) {
-      const triple = body.slice(i, i + 3);
-      current += triple;
-      i += 3;
-      while (i < body.length && body.slice(i, i + 3) !== triple) {
-        current += body[i];
-        i++;
-      }
-      if (i < body.length) {
-        current += body.slice(i, i + 3);
-        i += 3;
-      }
-      continue;
-    }
-
-    // Split at semicolons (simple, matching Rust sanitizer behavior)
-    if (ch === ';') {
-      results.push(current);
-      current = '';
-      i++;
-      continue;
-    }
-
-    current += ch;
-    i++;
-  }
-
-  if (current.trim()) results.push(current);
-  return results;
+/** Check if a line should be removed (control flow / declaration) */
+function shouldRemoveLine(line: string): boolean {
+  const trimmed = line.trim().toUpperCase();
+  if (!trimmed) return false; // keep blank lines
+  if (trimmed.startsWith('--')) return true; // comments
+  if (trimmed.startsWith('CREATE PROCEDURE') || trimmed.startsWith('CREATE OR REPLACE PROCEDURE')) return true;
+  return REMOVE_PREFIXES.some((p) => trimmed.startsWith(p));
 }
 
-/** Extract SQL from EXECUTE IMMEDIATE FORMAT("""...""") / EXECUTE IMMEDIATE """...""" / EXECUTE IMMEDIATE '...' */
-function extractExecuteImmediateSql(s: string): string | null {
-  const upper = s.toUpperCase().trimStart();
-  if (!upper.startsWith('EXECUTE IMMEDIATE')) return null;
+// Removed: replaceFormatPlaceholders — only %t replacement is needed, done inline
 
-  const keywordEnd = s.toUpperCase().indexOf('IMMEDIATE');
-  const afterKeyword = s.slice(keywordEnd + 9).trimStart();
-  if (!afterKeyword) return null;
-
-  // Case: FORMAT("""...""", ...) or FORMAT('...', ...)
-  if (afterKeyword.toUpperCase().startsWith('FORMAT')) {
-    const afterFormat = afterKeyword.slice(6).trimStart();
-    const afterParen = afterFormat.startsWith('(') ? afterFormat.slice(1).trimStart() : afterFormat;
-    const sql = extractFromQuotes(afterParen);
-    if (!sql) return null;
-    return replaceFormatPlaceholders(sql);
-  }
-
-  // Case: direct triple-quoted or single-quoted string
-  return extractFromQuotes(afterKeyword);
-}
-
-/** Extract SQL from SET var = FORMAT("""...""") / SET var = '...' */
-function extractSetStmtSql(s: string): string | null {
-  const upper = s.toUpperCase().trimStart();
-  if (!upper.startsWith('SET ')) return null;
-
-  const eqPos = s.indexOf('=');
-  if (eqPos < 0) return null;
-  const afterEq = s.slice(eqPos + 1).trimStart();
-  if (!afterEq) return null;
-
-  // SET var = FORMAT("""...""", ...)
-  if (afterEq.toUpperCase().startsWith('FORMAT')) {
-    const afterFormat = afterEq.slice(6).trimStart();
-    const afterParen = afterFormat.startsWith('(') ? afterFormat.slice(1).trimStart() : afterFormat;
-    const sql = extractFromQuotes(afterParen);
-    if (!sql) return null;
-    return replaceFormatPlaceholders(sql);
-  }
-
-  // SET var = CONCAT(...) — skip
-  if (afterEq.toUpperCase().startsWith('CONCAT')) return null;
-
-  // SET var = '...' or SET var = "..."
-  const ch = afterEq[0];
-  if (ch !== "'" && ch !== '"') return null;
-
-  let end = 1;
-  while (end < afterEq.length && afterEq[end] !== ch) {
-    if (afterEq[end] === '\\') end++;
-    end++;
-  }
-  if (end >= afterEq.length) return null;
-  return afterEq.slice(1, end);
-}
-
-/** Extract content from quoted string (supports triple-quoted and single-quoted) */
-function extractFromQuotes(s: string): string | null {
-  if (!s) return null;
-
-  // Triple-quoted: """...""" or '''...'''
-  if (
-    (s[0] === '"' && s[1] === '"' && s[2] === '"') ||
-    (s[0] === "'" && s[1] === "'" && s[2] === "'")
-  ) {
-    const triple = s.slice(0, 3);
-    let end = 3;
-    while (end < s.length && s.slice(end, end + 3) !== triple) end++;
-    if (end >= s.length) return null;
-    return s.slice(3, end);
-  }
-
-  // Single-quoted: "..." or '...'
-  if (s[0] === '"' || s[0] === "'") {
-    const q = s[0];
-    let end = 1;
-    while (end < s.length && s[end] !== q) {
-      if (s[end] === '\\') end++;
-      end++;
-    }
-    if (end >= s.length) return null;
-    return s.slice(1, end);
-  }
-
-  return null;
-}
-
-/** Replace FORMAT placeholders with dummy values for SQL parsing */
-function replaceFormatPlaceholders(s: string): string {
+/**
   let out = '';
   let i = 0;
   while (i < s.length) {
     if (s[i] === '%' && i + 1 < s.length) {
       const next = s[i + 1];
-      if (next === '%') {
-        out += '%';
-        i += 2;
-        continue;
-      }
-      if ('diuoxX'.includes(next)) {
-        out += '0';
-        i += 2;
-        continue;
-      }
-      if (next === 's' || next === 'S' || next === 'c') {
-        out += 'x';
-        i += 2;
-        continue;
-      }
-      if ('feEgG'.includes(next)) {
-        out += '0.0';
-        i += 2;
-        continue;
-      }
-      if (next === 't' || next === 'T') {
-        out += '2024-01-01';
-        i += 2;
-        continue;
-      }
+      if (next === '%') { out += '%'; i += 2; continue; }
+      if ('diuoxX'.includes(next)) { out += '0'; i += 2; continue; }
+      if (next === 's' || next === 'S' || next === 'c') { out += 'x'; i += 2; continue; }
+      if ('feEgG'.includes(next)) { out += '0.0'; i += 2; continue; }
+      if (next === 't' || next === 'T') { out += "'2024-01-01'"; i += 2; continue; }
     }
     out += s[i];
     i++;
@@ -254,105 +61,126 @@ function replaceFormatPlaceholders(s: string): string {
 }
 
 /**
- * Extract DML from a statement that may be wrapped in control flow
- * (IF...THEN, BEGIN...END, WHILE...DO, etc.).
+ * Transform a BigQuery stored procedure into DML by line-level filtering.
  *
- * Finds the FIRST DML keyword in the statement and extracts from there
- * to the end (or to a control-flow boundary like END IF / ELSE).
- * Only extracts ONCE per statement — no duplicate scanning.
- */
-function extractDmlFromMixedStatement(stmt: string): string[] | null {
-  const upper = stmt.toUpperCase();
-
-  // Find the first DML keyword position (word-boundary aware)
-  let bestIdx = -1;
-  let bestKw = '';
-  for (const kw of DML_KEYWORDS) {
-    const idx = upper.indexOf(kw);
-    if (idx < 0) continue;
-    // Check word boundary
-    if (idx > 0 && /\w/.test(stmt[idx - 1])) continue;
-    if (bestIdx < 0 || idx < bestIdx) {
-      bestIdx = idx;
-      bestKw = kw;
-    }
-  }
-
-  if (bestIdx < 0) return null;
-
-  // Extract from keyword to end of statement, trimming at control boundaries
-  let end = stmt.length;
-  const afterKw = upper.slice(bestIdx + bestKw.length);
-  const controlEnds = ['END IF', 'END;', 'END\n', 'END\t', ' ELSE ', 'ELSEIF', 'WHEN ', 'EXCEPTION'];
-  for (const ce of controlEnds) {
-    const ceIdx = afterKw.indexOf(ce);
-    if (ceIdx > 0 && ceIdx + bestIdx + bestKw.length < end) {
-      end = ceIdx + bestIdx + bestKw.length;
-    }
-  }
-
-  const fragment = stmt.slice(bestIdx, end).trim();
-  if (fragment.length > 10 && isSqlStatement(fragment)) {
-    return [fragment];
-  }
-  return null;
-}
-
-/**
- * Extract DML/SELECT from a BigQuery stored procedure body.
- * Returns the concatenated DML statements, or null if none found.
+ * 1. Remove DECLARE/SET/BEGIN/END/IF/THEN/ELSE/comments
+ * 2. Unwrap EXECUTE IMMEDIATE FORMAT("""...""") → inner SQL
+ * 3. Unwrap EXECUTE IMMEDIATE """...""" → inner SQL
+ * 4. Skip EXECUTE IMMEDIATE 'DROP TABLE...' (single-quote, one-liners)
+ * 5. Keep everything else (CREATE TABLE AS SELECT, SELECT, INSERT, etc.)
+ *
+ * Returns the filtered content, or null if no DML found.
  */
 export function extractBqDml(content: string): string | null {
   try {
-    const upper = content.toUpperCase();
-    const beginIdx = upper.indexOf('BEGIN');
-    const endIdx = upper.lastIndexOf('END');
-    if (beginIdx < 0 || endIdx <= beginIdx) return null;
+    const lines = content.split('\n');
+    const result: string[] = [];
+    let inTripleQuote = false; // inside """ or ''' block
+    let tripleChar = '';
+    let skipExecuteImmediate = false; // EXECUTE IMMEDIATE '...' (single-line DROP etc)
 
-    const body = content.slice(beginIdx + 5, endIdx);
-    const uncommented = body
-      .replace(/--[^\n]*/g, '')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .trim();
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i];
+      const trimmed = line.trim();
+      const upper = trimmed.toUpperCase();
 
-    const rawStmts = splitProcedureStatements(uncommented);
-    const results: string[] = [];
-
-    for (const stmt of rawStmts) {
-      let s = stmt.trim();
-      if (!s) continue;
-
-      // 1. Direct DML statement
-      if (isDml(s) && isSqlStatement(s)) {
-        results.push(s);
+      // ── Handle triple-quoted blocks (EXECUTE IMMEDIATE FORMAT("""...""")) ──
+      if (inTripleQuote) {
+        // Check if this line ends the triple quote
+        const endIdx = line.indexOf(tripleChar);
+        if (endIdx >= 0) {
+          // End of triple-quoted block
+          const beforeEnd = line.slice(0, endIdx);
+          if (beforeEnd.trim()) result.push(beforeEnd);
+          inTripleQuote = false;
+          tripleChar = '';
+          skipExecuteImmediate = false;
+        } else {
+          // Still inside triple-quoted block — this is SQL content
+          if (!skipExecuteImmediate) {
+            result.push(line);
+          }
+        }
         continue;
       }
 
-      // 2. EXECUTE IMMEDIATE — keep extracted SQL, skip DROP/DECLARE
-      const execSql = extractExecuteImmediateSql(s);
-      if (execSql && execSql.trim().length > 10 && !execSql.toUpperCase().trimStart().startsWith('DROP')) {
-        results.push(execSql);
+      // ── Detect start of EXECUTE IMMEDIATE FORMAT(""" or """ ──
+      if (upper.includes('EXECUTE IMMEDIATE')) {
+        // Check for triple-quote start
+        const dqIdx = line.indexOf('"""');
+        const sqIdx = line.indexOf("'''");
+
+        if (dqIdx >= 0 || sqIdx >= 0) {
+          const quoteChar = dqIdx >= 0 ? '"""' : "'''";
+          const afterQuote = line.slice(line.indexOf(quoteChar) + 3);
+
+          // Check if it closes on the same line
+          const closeIdx = afterQuote.indexOf(quoteChar);
+          if (closeIdx >= 0) {
+            // Single-line triple-quoted EXECUTE IMMEDIATE
+            const sql = afterQuote.slice(0, closeIdx);
+            if (sql.trim() && !sql.toUpperCase().trimStart().startsWith('DROP')) {
+              result.push(sql);
+            }
+          } else {
+            // Multi-line triple-quoted block starts here
+            inTripleQuote = true;
+            tripleChar = quoteChar;
+            skipExecuteImmediate = false;
+            // If there's content after the opening """, add it
+            if (afterQuote.trim()) {
+              result.push(afterQuote);
+            }
+          }
+          continue;
+        }
+
+        // Single-quoted EXECUTE IMMEDIATE '...' (usually DROP TABLE)
+        const singleQIdx = trimmed.indexOf("'");
+        if (singleQIdx >= 0) {
+          // Skip this line (DROP TABLE, etc.)
+          continue;
+        }
+
+        // EXECUTE IMMEDIATE without quotes (variable reference) — skip
         continue;
       }
 
-      // 3. SET variable = SQL — keep if it looks like SQL
-      const setSql = extractSetStmtSql(s);
-      if (setSql && setSql.trim().length > 10) {
-        results.push(setSql);
+      // ── Normal line: check if it should be removed ──
+      if (shouldRemoveLine(line)) {
         continue;
       }
 
-      // 4. Statement wrapped in control flow (IF...THEN, BEGIN, etc.)
-      // Scan for DML keywords anywhere in the statement
-      const dmlFound = extractDmlFromMixedStatement(s);
-      if (dmlFound) {
-        for (const d of dmlFound) results.push(d);
-        continue;
-      }
+      // ── Keep the line ──
+      result.push(line);
     }
 
-    return results.length > 0 ? results.join(';\n') : null;
+    // NOTE: We do NOT replace FORMAT placeholders inside SQL content.
+    // The %t/%d in FORMAT_TIMESTAMP etc. are NOT FORMAT placeholders.
+    // The original FORMAT() call handles them at runtime; for display we
+    // leave them as-is, matching the folder import behavior.
+
+    const finalText = result.join('\n').trim();
+
+    if (!finalText) return null;
+
+    // Check if there's any actual SQL content
+    const hasSql = finalText.toUpperCase().includes('SELECT') ||
+      finalText.toUpperCase().includes('INSERT') ||
+      finalText.toUpperCase().includes('CREATE TABLE') ||
+      finalText.toUpperCase().includes('MERGE') ||
+      finalText.toUpperCase().includes('DELETE') ||
+      finalText.toUpperCase().includes('UPDATE');
+
+    if (!hasSql) return null;
+
+    // Replace %t (FORMAT date placeholder) with a dummy date.
+    // Only %t — not %d/%s/etc which conflict with FORMAT_TIMESTAMP patterns.
+    return finalText.replace(/%t/gi, "'2024-01-01'");
   } catch {
     return null;
   }
 }
+
+// Re-export for compatibility
+export { extractBqDml as extractDmlFromProcedure };
