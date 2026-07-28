@@ -257,51 +257,45 @@ function replaceFormatPlaceholders(s: string): string {
  * Extract DML from a statement that may be wrapped in control flow
  * (IF...THEN, BEGIN...END, WHILE...DO, etc.).
  *
- * Strategy: find DML keyword positions (SELECT/INSERT/UPDATE/DELETE/MERGE/TRUNCATE)
- * in the statement. Extract from that keyword to the end of the statement
- * (or to the next control-flow keyword like END IF / END / ELSE / ELSEIF).
- *
- * Returns array of extracted DML strings, or null if none found.
+ * Finds the FIRST DML keyword in the statement and extracts from there
+ * to the end (or to a control-flow boundary like END IF / ELSE).
+ * Only extracts ONCE per statement — no duplicate scanning.
  */
 function extractDmlFromMixedStatement(stmt: string): string[] | null {
   const upper = stmt.toUpperCase();
-  const results: string[] = [];
 
+  // Find the first DML keyword position (word-boundary aware)
+  let bestIdx = -1;
+  let bestKw = '';
   for (const kw of DML_KEYWORDS) {
-    let searchFrom = 0;
-    while (true) {
-      const kwIdx = upper.indexOf(kw, searchFrom);
-      if (kwIdx < 0) break;
-
-      // Check word boundary: char before must not be alphanumeric
-      if (kwIdx > 0 && /\w/.test(stmt[kwIdx - 1])) {
-        searchFrom = kwIdx + kw.length;
-        continue;
-      }
-
-      // Extract from keyword to end of statement (or next control keyword)
-      let end = stmt.length;
-      const afterKw = upper.slice(kwIdx);
-      const controlEnds = ['END IF', 'END;', 'END ', 'ELSE', 'ELSEIF', 'WHEN ', 'EXCEPTION'];
-      for (const ce of controlEnds) {
-        const ceIdx = afterKw.indexOf(ce, kw.length);
-        if (ceIdx > 0 && ceIdx + kwIdx < end) {
-          end = ceIdx + kwIdx;
-        }
-      }
-
-      const fragment = stmt.slice(kwIdx, end).trim();
-      if (fragment.length > 10 && isSqlStatement(fragment)) {
-        // Avoid duplicates
-        if (!results.some((r) => r.trim() === fragment)) {
-          results.push(fragment);
-        }
-      }
-      searchFrom = kwIdx + kw.length;
+    const idx = upper.indexOf(kw);
+    if (idx < 0) continue;
+    // Check word boundary
+    if (idx > 0 && /\w/.test(stmt[idx - 1])) continue;
+    if (bestIdx < 0 || idx < bestIdx) {
+      bestIdx = idx;
+      bestKw = kw;
     }
   }
 
-  return results.length > 0 ? results : null;
+  if (bestIdx < 0) return null;
+
+  // Extract from keyword to end of statement, trimming at control boundaries
+  let end = stmt.length;
+  const afterKw = upper.slice(bestIdx + bestKw.length);
+  const controlEnds = ['END IF', 'END;', 'END\n', 'END\t', ' ELSE ', 'ELSEIF', 'WHEN ', 'EXCEPTION'];
+  for (const ce of controlEnds) {
+    const ceIdx = afterKw.indexOf(ce);
+    if (ceIdx > 0 && ceIdx + bestIdx + bestKw.length < end) {
+      end = ceIdx + bestIdx + bestKw.length;
+    }
+  }
+
+  const fragment = stmt.slice(bestIdx, end).trim();
+  if (fragment.length > 10 && isSqlStatement(fragment)) {
+    return [fragment];
+  }
+  return null;
 }
 
 /**
@@ -334,16 +328,16 @@ export function extractBqDml(content: string): string | null {
         continue;
       }
 
-      // 2. EXECUTE IMMEDIATE
+      // 2. EXECUTE IMMEDIATE — keep extracted SQL, skip DROP/DECLARE
       const execSql = extractExecuteImmediateSql(s);
-      if (execSql && isSqlStatement(execSql)) {
+      if (execSql && execSql.trim().length > 10 && !execSql.toUpperCase().trimStart().startsWith('DROP')) {
         results.push(execSql);
         continue;
       }
 
-      // 3. SET variable = SQL
+      // 3. SET variable = SQL — keep if it looks like SQL
       const setSql = extractSetStmtSql(s);
-      if (setSql && isSqlStatement(setSql)) {
+      if (setSql && setSql.trim().length > 10) {
         results.push(setSql);
         continue;
       }
