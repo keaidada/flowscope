@@ -174,7 +174,7 @@ PID_FILE="$INSTALL_DIR/logs/flowscope.pid"
 LOG_FILE="$INSTALL_DIR/logs/flowscope.log"
 DB_PATH="$INSTALL_DIR/data/flowscope.db"
 
-CMD="$INSTALL_DIR/bin/flowscope --serve --port $PORT --db-path $DB_PATH --watch $SQL_DIR"
+CMD="$INSTALL_DIR/bin/flowscope --serve --port $PORT --watch $SQL_DIR"
 
 if $DAEMON; then
     # --- 后台运行 ---
