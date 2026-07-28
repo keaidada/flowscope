@@ -146,6 +146,10 @@ fi
 
 mkdir -p "$INSTALL_DIR"/{bin,data,logs,sql}
 
+# 清理可能残留的旧数据库文件（避免 schema 不兼容）
+rm -f "$INSTALL_DIR/data/flowscope.db"*
+
+
 tar -xzf "$TARBALL" -C "$INSTALL_DIR/bin/"
 chmod +x "$INSTALL_DIR/bin/flowscope"
 
@@ -178,7 +182,8 @@ CMD="$INSTALL_DIR/bin/flowscope --serve --port $PORT --watch $SQL_DIR"
 
 if $DAEMON; then
     # --- 后台运行 ---
-    nohup $CMD > "$LOG_FILE" 2>&1 &
+    # serve 模式在工作目录下创建 flowscope.db，所以先 cd 到 data 目录
+    nohup bash -c "cd '$INSTALL_DIR/data' && exec $CMD" > "$LOG_FILE" 2>&1 &
     SERVER_PID=$!
     echo $SERVER_PID > "$PID_FILE"
     
@@ -214,7 +219,7 @@ else
     echo ""
     
     # 在后台先启动，等健康检查通过后再决定是否前台 attach
-    $CMD > "$LOG_FILE" 2>&1 &
+    nohup bash -c "cd '$INSTALL_DIR/data' && exec $CMD" > "$LOG_FILE" 2>&1 &
     SERVER_PID=$!
     echo $SERVER_PID > "$PID_FILE"
     
