@@ -334,7 +334,15 @@ export function EditorArea({
     [activeFile, activeProjectId, updateFiles]
   );
 
-  const isProcedure = activeFile?.isProcedure ?? false;
+  // Detect stored procedure from content (not just the stored flag)
+  const isProcedure = useMemo(() => {
+    if (activeFile?.isProcedure) return true;
+    const content = activeFile?.content ?? '';
+    const upper = content.toUpperCase();
+    return upper.includes('CREATE PROCEDURE')
+      || upper.includes('CREATE PROC ')
+      || upper.includes('CREATE OR REPLACE PROCEDURE');
+  }, [activeFile?.isProcedure, activeFile?.content]);
 
   // Keyboard shortcuts for running analysis
   const analysisShortcuts = useMemo<GlobalShortcut[]>(
