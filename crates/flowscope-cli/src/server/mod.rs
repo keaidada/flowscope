@@ -337,7 +337,13 @@ pub fn scan_sql_files(
                 } else {
                     relative_str.to_string()
                 };
-                sources.push(flowscope_core::FileSource { name, content, is_procedure: false, transformed_content: None });
+                // Detect stored procedure
+                let upper = content.to_uppercase();
+                let is_procedure = upper.contains("CREATE PROCEDURE")
+                    || upper.contains("CREATE PROC ")
+                    || upper.contains("CREATE OR REPLACE PROCEDURE");
+
+                sources.push(flowscope_core::FileSource { name, content, is_procedure, transformed_content: None });
 
                 // Store mtime for change detection
                 if let Ok(mtime) = metadata.modified() {
