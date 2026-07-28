@@ -75,8 +75,8 @@ function MiniMapNode({ x, y, width, height, color, strokeColor }: {
   x: number; y: number; width: number; height: number;
   color?: string; strokeColor?: string;
 }) {
-  const w = Math.max(width, 8);
-  const h = Math.max(height, 8);
+  const w = Math.max(width, 16);
+  const h = Math.max(height, 16);
   return <rect x={x} y={y} width={w} height={h} fill={color} rx={2} stroke={strokeColor} strokeWidth={0.5} />;
 }
 
@@ -92,12 +92,14 @@ function ClickableMiniMap({ show, nodeCount }: { show: boolean; nodeCount: numbe
 
   if (!show) return null;
 
+  const isLarge = nodeCount > 1000;
+
   return (
     <MiniMap
       pannable
       zoomable
-      style={nodeCount > 1000 ? { width: 400, height: 300 } : undefined}
-      nodeComponent={nodeCount > 1000 ? MiniMapNode : undefined}
+      style={isLarge ? { width: 600, height: 450 } : undefined}
+      nodeComponent={isLarge ? MiniMapNode : undefined}
       onClick={handleClick}
       nodeColor={(node) => {
         if (isTableNodeData(node.data)) {
