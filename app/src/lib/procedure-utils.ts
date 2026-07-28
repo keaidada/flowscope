@@ -163,10 +163,17 @@ export function extractBqDml(content: string): string | null {
           continue;
         }
 
-        // Single-quoted EXECUTE IMMEDIATE '...' (usually DROP TABLE)
+        // Single-quoted EXECUTE IMMEDIATE — extract SQL, skip DROP only
         const singleQIdx = trimmed.indexOf("'");
         if (singleQIdx >= 0) {
-          // Skip this line (DROP TABLE, etc.)
+          const afterQuote = trimmed.slice(singleQIdx + 1);
+          const closeIdx = afterQuote.lastIndexOf("'");
+          if (closeIdx >= 0) {
+            const sql = afterQuote.slice(0, closeIdx);
+            if (sql.trim() && !sql.toUpperCase().trimStart().startsWith('DROP')) {
+              result.push(sql);
+            }
+          }
           continue;
         }
 
