@@ -451,7 +451,7 @@ export function EditorArea({
         isProcedure={isProcedure}
         onConvertProcedure={isProcedure ? handleConvertProcedure : undefined}
         showTransformed={showTransformed}
-        onToggleTransformed={() => setShowTransformed((v) => !v)}
+        onToggleTransformed={isProcedure ? () => setShowTransformed((v) => !v) : undefined}
         hasTransformedContent={hasTransformedContent}
         onFoldAll={() => sqlViewRef.current?.foldAll()}
         onUnfoldAll={() => sqlViewRef.current?.unfoldAll()}
