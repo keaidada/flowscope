@@ -111,8 +111,14 @@ export function ProcedureRepairDialog({
   const toggleUserRemoved = useCallback((idx: number) => {
     setMergedLines((prev) => {
       const next = [...prev];
-      if (next[idx] && !next[idx].removed) {
-        next[idx] = { ...next[idx], userRemoved: !next[idx].userRemoved };
+      if (!next[idx]) return prev;
+      const line = next[idx];
+      if (line.removed) {
+        // Auto-removed line: un-remove it (keep)
+        next[idx] = { ...line, removed: false, userRemoved: false };
+      } else {
+        // Manual toggle
+        next[idx] = { ...line, userRemoved: !line.userRemoved };
       }
       return next;
     });
@@ -247,8 +253,8 @@ export function ProcedureRepairDialog({
                         )} />
                       </button>
                       <button
-                        title={isAutoRemoved ? '自动过滤，不可恢复' : isUserRemoved ? '保留此行' : '已保留'}
-                        onClick={() => { if (isUserRemoved) toggleUserRemoved(idx); }}
+                        title={isAutoRemoved ? '恢复此行' : isUserRemoved ? '保留此行' : '已保留'}
+                        onClick={() => { if (isRemoved) toggleUserRemoved(idx); }}
                         className={cn(
                           'p-0 rounded hover:bg-green-100 transition-colors',
                           !isRemoved && 'bg-green-100',
@@ -256,7 +262,7 @@ export function ProcedureRepairDialog({
                       >
                         <ArrowRight className={cn(
                           'h-2.5 w-2.5',
-                          !isRemoved ? 'text-green-500' : (isAutoRemoved ? 'text-muted-foreground/30' : 'text-muted-foreground/40 hover:text-green-400'),
+                          !isRemoved ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400',
                         )} />
                       </button>
                     </div>
