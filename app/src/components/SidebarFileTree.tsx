@@ -16,7 +16,7 @@ import {
 } from '@/lib/constants';
 import { genId } from '@/lib/utils';
 import { saveProjectFiles, upsertProjectFiles, loadFileContentsBatch } from '@/lib/file-storage';
-import { extractBqDml } from '@/lib/procedure-utils';
+import { extractDmlFromProcedure } from '@/lib/procedure-utils';
 import { ConvertFolderDialog } from './ConvertFolderDialog';
 import type { Dialect } from '@/lib/dialect-constants';
 
@@ -261,11 +261,6 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
   // Dialects that support automatic procedure-to-DML conversion
   const CONVERT_SUPPORTED_DIALECTS: Set<string> = new Set(['bigquery']);
-
-  const extractDmlFromProcedure = (content: string, dialect: string): string | null => {
-    if (dialect === 'bigquery') return extractBqDml(content);
-    return null;
-  };
 
   const handleOpenConvertFolder = useCallback((folderPath: string) => {
     setConvertTargetPath(folderPath);

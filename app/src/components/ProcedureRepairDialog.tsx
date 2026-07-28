@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Copy, Check, RotateCcw, Scissors, X, ArrowLeft, ArrowRight } from 'lucide-react';
-import { extractBqDml } from '@/lib/procedure-utils';
+import { extractDmlFromProcedure } from '@/lib/procedure-utils';
 import { cn } from '@/lib/utils';
 
 interface ProcedureRepairDialogProps {
@@ -113,6 +113,7 @@ export function ProcedureRepairDialog({
 }: ProcedureRepairDialogProps) {
   const { t } = useTranslation();
   const [mergedLines, setMergedLines] = useState<MergedLine[]>([]);
+  const [transformedContent, setTransformedContent] = useState('');
   const [copied, setCopied] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [showRemoved, setShowRemoved] = useState(true);
@@ -124,7 +125,8 @@ export function ProcedureRepairDialog({
 
   useEffect(() => {
     if (open && originalContent) {
-      const extracted = extractBqDml(originalContent) || '';
+      const extracted = extractDmlFromProcedure(originalContent) || '';
+      setTransformedContent(extracted);
       setMergedLines(buildMergedLines(originalContent, extracted));
     }
   }, [open, originalContent]);
@@ -144,7 +146,8 @@ export function ProcedureRepairDialog({
   }, []);
 
   const handleReExtract = useCallback(() => {
-    const extracted = extractBqDml(originalContent) || '';
+    const extracted = extractDmlFromProcedure(originalContent) || '';
+    setTransformedContent(extracted);
     setMergedLines(buildMergedLines(originalContent, extracted));
   }, [originalContent]);
 
@@ -168,10 +171,7 @@ export function ProcedureRepairDialog({
   }, []);
 
   const originalLines = useMemo(() => originalContent.split('\n'), [originalContent]);
-  const output = useMemo(
-    () => mergedLines.filter((l) => !l.removed).map((l) => l.content).join('\n'),
-    [mergedLines]
-  );
+  const output = transformedContent; // raw extraction, identical to folder conversion
   const removedCount = useMemo(() => mergedLines.filter((l) => l.removed).length, [mergedLines]);
   const keptCount = mergedLines.length - removedCount;
 

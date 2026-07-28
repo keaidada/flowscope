@@ -70,7 +70,16 @@ function shouldRemoveLine(line: string): boolean {
  *
  * Returns the filtered content, or null if no DML found.
  */
-export function extractBqDml(content: string): string | null {
+export function extractDmlFromProcedure(content: string, dialect?: string): string | null {
+  if (dialect && dialect !== 'bigquery') return null;
+  return extractBqDml(content);
+}
+
+/**
+ * Internal implementation: extract DML from BigQuery stored procedures.
+ * Line-level filtering — removes declarations, control flow, and comments.
+ */
+function extractBqDml(content: string): string | null {
   try {
     const lines = content.split('\n');
     const result: string[] = [];
@@ -222,6 +231,3 @@ export function extractBqDml(content: string): string | null {
     return null;
   }
 }
-
-// Re-export for compatibility
-export { extractBqDml as extractDmlFromProcedure };
