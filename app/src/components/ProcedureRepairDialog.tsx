@@ -51,7 +51,7 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
       result.push({ content: origLines[i], removed: true });
       continue;
     }
-    if (upper.startsWith('SET ') && upper.includes('=(') && !origTrim.endsWith(');')) {
+    if (upper.startsWith('SET ') && /\s*=\s*\(/.test(origTrim) && !origTrim.endsWith(');')) {
       inMultiLineSet = true;
       result.push({ content: origLines[i], removed: true });
       continue;

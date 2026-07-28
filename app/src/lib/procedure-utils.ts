@@ -182,7 +182,7 @@ export function extractBqDml(content: string): string | null {
       }
 
       // ── Detect multi-line SET var = (SELECT ... before shouldRemoveLine
-      if (upper.startsWith('SET ') && upper.includes('=(') && !trimmed.endsWith(');')) {
+      if (upper.startsWith('SET ') && /\s*=\s*\(/.test(origTrim) && !trimmed.endsWith(');')) {
         inMultiLineSet = true;
         continue;
       }
