@@ -26,7 +26,6 @@ const REMOVE_PREFIXES = [
   'RETURN',
   'RAISE',
   'EXCEPTION',
-  'WHEN ',
   'CALL ',
   'ASSERT',
 ];
