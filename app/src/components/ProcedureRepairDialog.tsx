@@ -171,7 +171,10 @@ export function ProcedureRepairDialog({
   }, []);
 
   const originalLines = useMemo(() => originalContent.split('\n'), [originalContent]);
-  const output = transformedContent; // raw extraction, identical to folder conversion
+  const output = useMemo(
+    () => mergedLines.filter((l) => !l.removed).map((l) => l.content).join('\n'),
+    [mergedLines]
+  );
   const removedCount = useMemo(() => mergedLines.filter((l) => l.removed).length, [mergedLines]);
   const keptCount = mergedLines.length - removedCount;
 
