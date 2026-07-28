@@ -33,6 +33,12 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
   for (let i = 0; i < origLines.length; i++) {
     const origTrim = origLines[i].trim();
 
+    // Comments are always removed
+    if (origTrim.startsWith('--')) {
+      result.push({ content: origLines[i], removed: true });
+      continue;
+    }
+
     if (extIdx < extLines.length) {
       const extTrim = extLines[extIdx].trim();
       if (
