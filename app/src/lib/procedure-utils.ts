@@ -58,7 +58,8 @@ const isSqlStatement = (s: string): boolean => {
 };
 
 /** Check if a statement is a procedure control-flow keyword (not DML) */
-const isControlFlow = (s: string): boolean => {
+// @ts-expect-error kept for potential future use
+const _isControlFlow = (s: string): boolean => {
   const upper = s.toUpperCase().trimStart();
   const firstWord = upper.split(/\s+/)[0];
   return NON_DML_PREFIXES.includes(firstWord);
@@ -253,6 +254,57 @@ function replaceFormatPlaceholders(s: string): string {
 }
 
 /**
+ * Extract DML from a statement that may be wrapped in control flow
+ * (IF...THEN, BEGIN...END, WHILE...DO, etc.).
+ *
+ * Strategy: find DML keyword positions (SELECT/INSERT/UPDATE/DELETE/MERGE/TRUNCATE)
+ * in the statement. Extract from that keyword to the end of the statement
+ * (or to the next control-flow keyword like END IF / END / ELSE / ELSEIF).
+ *
+ * Returns array of extracted DML strings, or null if none found.
+ */
+function extractDmlFromMixedStatement(stmt: string): string[] | null {
+  const upper = stmt.toUpperCase();
+  const results: string[] = [];
+
+  for (const kw of DML_KEYWORDS) {
+    let searchFrom = 0;
+    while (true) {
+      const kwIdx = upper.indexOf(kw, searchFrom);
+      if (kwIdx < 0) break;
+
+      // Check word boundary: char before must not be alphanumeric
+      if (kwIdx > 0 && /\w/.test(stmt[kwIdx - 1])) {
+        searchFrom = kwIdx + kw.length;
+        continue;
+      }
+
+      // Extract from keyword to end of statement (or next control keyword)
+      let end = stmt.length;
+      const afterKw = upper.slice(kwIdx);
+      const controlEnds = ['END IF', 'END;', 'END ', 'ELSE', 'ELSEIF', 'WHEN ', 'EXCEPTION'];
+      for (const ce of controlEnds) {
+        const ceIdx = afterKw.indexOf(ce, kw.length);
+        if (ceIdx > 0 && ceIdx + kwIdx < end) {
+          end = ceIdx + kwIdx;
+        }
+      }
+
+      const fragment = stmt.slice(kwIdx, end).trim();
+      if (fragment.length > 10 && isSqlStatement(fragment)) {
+        // Avoid duplicates
+        if (!results.some((r) => r.trim() === fragment)) {
+          results.push(fragment);
+        }
+      }
+      searchFrom = kwIdx + kw.length;
+    }
+  }
+
+  return results.length > 0 ? results : null;
+}
+
+/**
  * Extract DML/SELECT from a BigQuery stored procedure body.
  * Returns the concatenated DML statements, or null if none found.
  */
@@ -276,55 +328,32 @@ export function extractBqDml(content: string): string | null {
       let s = stmt.trim();
       if (!s) continue;
 
-      // Skip procedure control-flow statements (DECLARE, IF, WHILE, etc.)
-      if (isControlFlow(s)) continue;
-
+      // 1. Direct DML statement
       if (isDml(s) && isSqlStatement(s)) {
         results.push(s);
         continue;
       }
 
+      // 2. EXECUTE IMMEDIATE
       const execSql = extractExecuteImmediateSql(s);
-      if (execSql && isDml(execSql) && isSqlStatement(execSql)) {
+      if (execSql && isSqlStatement(execSql)) {
         results.push(execSql);
         continue;
       }
 
+      // 3. SET variable = SQL
       const setSql = extractSetStmtSql(s);
-      if (setSql && isDml(setSql) && isSqlStatement(setSql)) {
+      if (setSql && isSqlStatement(setSql)) {
         results.push(setSql);
         continue;
       }
 
-      // Handle nested blocks: strip leading control keywords and retry
-      let remainder = s;
-      while (true) {
-        const upper2 = remainder.toUpperCase().trimStart();
-        const prefix = upper2.split(/\s+/)[0];
-        if (NON_DML_PREFIXES.includes(prefix)) {
-          const idx = upper2.indexOf(prefix);
-          remainder = remainder.slice(idx + prefix.length).trimStart();
-          if (!remainder) break;
-          // Skip if remainder is also control flow
-          if (isControlFlow(remainder)) continue;
-          // Try EXECUTE IMMEDIATE on remainder
-          const innerExec = extractExecuteImmediateSql(remainder);
-          if (innerExec && isDml(innerExec) && isSqlStatement(innerExec)) {
-            results.push(innerExec);
-            break;
-          }
-          const innerSet = extractSetStmtSql(remainder);
-          if (innerSet && isDml(innerSet) && isSqlStatement(innerSet)) {
-            results.push(innerSet);
-            break;
-          }
-          if (isDml(remainder) && isSqlStatement(remainder)) {
-            results.push(remainder);
-            break;
-          }
-          continue;
-        }
-        break;
+      // 4. Statement wrapped in control flow (IF...THEN, BEGIN, etc.)
+      // Scan for DML keywords anywhere in the statement
+      const dmlFound = extractDmlFromMixedStatement(s);
+      if (dmlFound) {
+        for (const d of dmlFound) results.push(d);
+        continue;
       }
     }
 
