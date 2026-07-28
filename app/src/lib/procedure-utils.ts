@@ -77,11 +77,31 @@ export function extractBqDml(content: string): string | null {
     let inTripleQuote = false; // inside """ or ''' block
     let tripleChar = '';
     let skipExecuteImmediate = false; // EXECUTE IMMEDIATE '...' (single-line DROP etc)
+    let inBlockComment = false; // inside /* ... */ block comment
 
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i];
       const trimmed = line.trim();
       const upper = trimmed.toUpperCase();
+
+      // ── Handle multi-line block comments /* ... */ ──
+      if (inBlockComment) {
+        if (trimmed.includes('*/')) {
+          inBlockComment = false;
+        }
+        continue; // skip entire line
+      }
+      // Single-line block comment: /* ... */
+      if (trimmed.startsWith('/*') && trimmed.includes('*/')) continue;
+      // Start of multi-line block comment
+      if (trimmed.startsWith('/*') || trimmed.includes('/*')) {
+        // Check if it closes on the same line
+        const afterOpen = trimmed.slice(trimmed.indexOf('/*') + 2);
+        if (!afterOpen.includes('*/')) {
+          inBlockComment = true;
+        }
+        continue;
+      }
 
       // ── Handle triple-quoted blocks (EXECUTE IMMEDIATE FORMAT("""...""")) ──
       if (inTripleQuote) {
