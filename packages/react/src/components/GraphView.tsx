@@ -918,8 +918,9 @@ export function GraphView({
     } else {
       // Preserve user-adjusted positions while updating node data
       setNodes((currentNodes) => {
+        const nodeMap = new Map(currentNodes.map((n) => [n.id, n]));
         return layoutedNodes.map((layoutNode) => {
-          const currentNode = currentNodes.find((n) => n.id === layoutNode.id);
+          const currentNode = nodeMap.get(layoutNode.id);
           if (currentNode) {
             return applyRenderDataToNode({ ...layoutNode, position: currentNode.position });
           }
@@ -954,12 +955,13 @@ export function GraphView({
     const timer = setTimeout(() => {
       let changed = false;
       const dims = new Map<string, number>();
+      const layoutedMap = new Map(layoutedNodes.map((n) => [n.id, n]));
       for (const node of nodes) {
         const h = node.measured?.height;
         if (!h || h <= 0) continue;
         dims.set(node.id, h);
         // Compare with the height we passed to layout (stored in layoutedNodes)
-        const layouted = layoutedNodes.find((n) => n.id === node.id);
+        const layouted = layoutedMap.get(node.id);
         if (layouted) {
           const d = layouted.data as Record<string, unknown>;
           const d0 = layouted.data as Record<string, unknown>;
@@ -1142,7 +1144,7 @@ export function GraphView({
               }
             />
           )}
-          {viewMode !== 'script' && (
+          {viewMode !== 'script' && renderGraph.nodes.length <= 100 && (
             <ToolbarToggleButton
               isActive={showColumnEdges}
               onClick={actions.toggleColumnEdges}

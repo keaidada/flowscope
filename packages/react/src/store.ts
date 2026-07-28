@@ -299,6 +299,8 @@ export function createLineageStore(
 
     toggleTableExpansion: (tableId) =>
       set((state) => {
+        // Guard: no column-level expansion when >100 tables
+        if ((state.result?.summary.tableCount ?? 0) > 100) return state;
         const newExpandedTableIds = new Set(state.expandedTableIds);
         if (newExpandedTableIds.has(tableId)) {
           newExpandedTableIds.delete(tableId);

@@ -652,116 +652,102 @@ export async function repopulateTableLevelEdges(projectId: string): Promise<numb
 }
 
 /**
- * 只从 lineage_nodes 表构建全局血缘。
- * 用 resolution_source='implied' 区分读写方向。
- * 每个脚本内：READ 表 → WRITE 表 作为 data_flow 边。
- * 极快（1.1MB 查询 vs 19.8MB 完整 AnalyzeResult）。
+ * 从 table_level_edges 构建全局血缘关系图数据。
+ * table_level_edges 是预计算的精确表级依赖 [from_table, to_table, script]。
+ * 不再做 reads×writes 交叉积推测。
  */
 export async function buildGlobalLineageFromNodes(
   projectId: string
 ): Promise<AnalyzeResult | null> {
-  const rawNodes = await getOrLoadNodes(projectId);
-  const tableNodes = rawNodes.filter((n) => n.node_type === 'table' || n.node_type === 'view');
-  if (tableNodes.length === 0) return null;
+  // 加载预计算的表级边
+  let tleEdges: Array<[string, string, string]> = [];
+  try {
+    tleEdges = await serverDb.loadTableLevelEdges(projectId);
+  } catch {
+    tleEdges = [];
+  }
+  if (tleEdges.length === 0) return null;
 
-  // 去重：qualified_name → 统一 nodeId
+  // 收集所有表名（from ∪ to 去重）→ 节点
   const qnameToNodeId = new Map<string, string>();
-  const qnameToLabel = new Map<string, string>();
   let idx = 0;
-  for (const n of tableNodes) {
-    const qn = (n.qualified_name ?? n.label).toLowerCase();
-    if (!qnameToNodeId.has(qn)) {
-      qnameToNodeId.set(qn, `gt_${idx++}`);
-      qnameToLabel.set(qn, n.label);
+  for (const [from, to] of tleEdges) {
+    const fromQ = from.toLowerCase().trim();
+    const toQ = to.toLowerCase().trim();
+    if (fromQ && fromQ !== '-' && !qnameToNodeId.has(fromQ)) {
+      qnameToNodeId.set(fromQ, `gt_${idx++}`);
+    }
+    if (toQ && toQ !== '-' && !qnameToNodeId.has(toQ)) {
+      qnameToNodeId.set(toQ, `gt_${idx++}`);
     }
   }
 
-  // 按 (脚本, statement_index) 分组：reads / writes — 尊重 per-statement 边界
-  const stmtMap = new Map<string, { script: string; reads: Set<string>; writes: Set<string> }>();
-  for (const n of tableNodes) {
-    const script = n.file_path;
-    const stmtKey = `${script}\0${n.statement_index}`;
-    const qn = (n.qualified_name ?? n.label).toLowerCase();
-    if (!stmtMap.has(stmtKey))
-      stmtMap.set(stmtKey, { script, reads: new Set(), writes: new Set() });
-    const isWrite = n.resolution_source === 'implied';
-    if (isWrite) stmtMap.get(stmtKey)!.writes.add(qn);
-    else stmtMap.get(stmtKey)!.reads.add(qn);
-  }
+  if (qnameToNodeId.size === 0) return null;
 
-  // 构建 statements + edges — 每条 statement 独立 cross-product
+  // 直接构建边（不需要交叉积）
   const edgeSet = new Set<string>();
   const allEdges: Edge[] = [];
+  const scriptStmts = new Map<string, { nodes: Set<string>; edges: Edge[] }>();
   let edgeIdx = 0;
-  const statements: StatementLineage[] = [];
   let stmtIdx = 0;
 
-  // 按 script 分组 statement 的 edges 和 nodes
-  const scriptStmts = new Map<string, Array<{ reads: Set<string>; writes: Set<string> }>>();
-  for (const { script, reads, writes } of stmtMap.values()) {
-    if (!scriptStmts.has(script)) scriptStmts.set(script, []);
-    scriptStmts.get(script)!.push({ reads, writes });
+  for (const [fromTable, toTable, script] of tleEdges) {
+    const fromQ = fromTable.toLowerCase().trim();
+    const toQ = toTable.toLowerCase().trim();
+    if (!fromQ || !toQ || fromQ === '-' || toQ === '-') continue;
+
+    const fromId = qnameToNodeId.get(fromQ);
+    const toId = qnameToNodeId.get(toQ);
+    if (!fromId || !toId || fromId === toId) continue;
+
+    const key = `${fromId}->${toId}`;
+    if (edgeSet.has(key)) continue;
+    edgeSet.add(key);
+
+    const edge: Edge = { id: `ge_${edgeIdx++}`, from: fromId, to: toId, type: 'data_flow' };
+    allEdges.push(edge);
+
+    // 按 script 分组
+    if (!scriptStmts.has(script)) {
+      scriptStmts.set(script, { nodes: new Set(), edges: [] });
+    }
+    const ss = scriptStmts.get(script)!;
+    ss.nodes.add(fromQ);
+    ss.nodes.add(toQ);
+    ss.edges.push(edge);
   }
 
-  for (const [script, stmtList] of scriptStmts) {
-    // 合并该脚本所有 statement 的 reads/writes 用于节点展示
-    const scriptReads = new Set<string>();
-    const scriptWrites = new Set<string>();
-    for (const { reads, writes } of stmtList) {
-      for (const r of reads) scriptReads.add(r);
-      for (const w of writes) scriptWrites.add(w);
-    }
-
+  // 构建 statements（GraphView 需要）
+  const statements: StatementLineage[] = [];
+  for (const [script, { nodes: qnames, edges }] of scriptStmts) {
     const stmtNodes: Node[] = [];
-    const stmtEdges: Edge[] = [];
-    const seen = new Set<string>();
-
-    for (const qn of [...scriptReads, ...scriptWrites]) {
+    for (const qn of qnames) {
       const nodeId = qnameToNodeId.get(qn)!;
-      if (seen.has(nodeId)) continue;
-      seen.add(nodeId);
       stmtNodes.push({
         id: nodeId,
         type: 'table',
-        label: qnameToLabel.get(qn)!,
+        label: qn,
         qualifiedName: qn,
       });
     }
-
-    // READ → WRITE 边：per-statement cross-product，然后 dedup
-    for (const { reads, writes } of stmtList) {
-      for (const fromQn of reads) {
-        for (const toQn of writes) {
-          const fromId = qnameToNodeId.get(fromQn)!;
-          const toId = qnameToNodeId.get(toQn)!;
-          if (fromId === toId) continue;
-          const key = `${fromId}->${toId}`;
-          if (edgeSet.has(key)) continue;
-          edgeSet.add(key);
-          const edge: Edge = { id: `ge_${edgeIdx++}`, from: fromId, to: toId, type: 'data_flow' };
-          allEdges.push(edge);
-          stmtEdges.push(edge);
-        }
-      }
-    }
-
     if (stmtNodes.length > 0) {
       statements.push({
         statementIndex: stmtIdx++,
         statementType: 'GLOBAL',
         sourceName: script,
         nodes: stmtNodes,
-        edges: stmtEdges,
+        edges,
         joinCount: 0,
         complexityScore: 0,
       });
     }
   }
 
+  // 全局节点列表
   const globalNodes = [...qnameToNodeId.entries()].map(([qn, id]) => ({
     id,
     type: 'table' as const,
-    label: qnameToLabel.get(qn)!,
+    label: qn,
     canonicalName: { name: qn },
     statementRefs: [],
   }));
@@ -1178,6 +1164,7 @@ export async function initProjectData(projectId: string): Promise<void> {
 }
 
 /** 获取缓存的节点数据（优先用 TLE 计算时已加载的，避免重复请求） */
+// @ts-expect-error kept for potential future use by other callers
 async function getOrLoadNodes(projectId: string): Promise<serverDb.LineageNodeRow[]> {
   const cached = _nodeCache.get(projectId);
   if (cached) return cached;

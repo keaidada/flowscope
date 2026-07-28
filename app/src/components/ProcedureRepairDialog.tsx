@@ -113,7 +113,7 @@ export function ProcedureRepairDialog({
 }: ProcedureRepairDialogProps) {
   const { t } = useTranslation();
   const [mergedLines, setMergedLines] = useState<MergedLine[]>([]);
-  const [transformedContent, setTransformedContent] = useState('');
+  const [, setTransformedContent] = useState('');
   const [copied, setCopied] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [showRemoved, setShowRemoved] = useState(true);

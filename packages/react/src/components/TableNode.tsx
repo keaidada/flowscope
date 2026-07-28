@@ -486,6 +486,8 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
   const { toggleNodeCollapse, toggleTableExpansion, selectNode } = useLineageActions();
   const isExpanded = useLineageStore((state) => state.expandedTableIds.has(id));
   const showColumnEdges = useLineageStore((state) => state.showColumnEdges);
+  const totalNodeCount = useLineageStore((state) => state.result?.summary.tableCount ?? 0);
+  const canExpandColumns = totalNodeCount <= 100;
   const colors = useColors();
   const isDark = useIsDarkMode();
   const [copied, setCopied] = useState(false);
@@ -927,7 +929,7 @@ function TableNodeComponent({ id, data, selected }: NodeProps): JSX.Element {
           </span>
         )}
 
-        {hiddenColumnCount > 0 && (
+        {hiddenColumnCount > 0 && canExpandColumns && (
           <button
             onClick={(e) => {
               e.stopPropagation();
