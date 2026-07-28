@@ -461,3 +461,12 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 - **AI 对话功能**: 后续需要添加 AI 对话 (chat) 功能，让用户可以通过对话方式
   查询和理解 SQL 血缘关系。可能的方向：基于当前选中脚本/表/字段上下文，
   回答血缘相关问题；自然语言转 SQL；SQL 解释与优化建议。
+
+- **存储过程大样本调教转换逻辑**：当前 `extractBqDml` 行级过滤经过少量
+  样本验证。需要收集更多 BigQuery 存储过程样本（100+），系统化对比转换
+  结果与预期输出，修复遗漏的边界情况（嵌套 EXECUTE IMMEDIATE、多语句
+  BEGIN/END、复杂 FORMAT 占位符）。
+
+- **dbt 数据建模支持**：当前仅支持基础 dbt/Jinja 宏（`ref()`、`source()`、
+  `var()`）。需要完整支持 dbt 模型解析、`config()` 宏、`{{ this }}` 引用、
+  snapshots、seeds、tests 等，提供 dbt 项目级别的血缘分析。
