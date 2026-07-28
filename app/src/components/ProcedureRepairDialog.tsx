@@ -38,9 +38,24 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
   const result: MergedLine[] = [];
 
   let extIdx = 0;
+  let inBlockComment = false;
   for (let i = 0; i < origLines.length; i++) {
     const origTrim = origLines[i].trim();
     const isComment = origTrim.startsWith('--');
+
+    // Track /* ... */ block comments
+    if (inBlockComment) {
+      if (origTrim.includes('*/')) inBlockComment = false;
+      result.push({ content: origLines[i], removed: true });
+      continue;
+    }
+    if (origTrim.startsWith('/*') || origTrim.includes('/*')) {
+      const afterOpen = origTrim.slice(origTrim.indexOf('/*') + 2);
+      if (!afterOpen.includes('*/')) inBlockComment = true;
+      result.push({ content: origLines[i], removed: true });
+      continue;
+    }
+
     const firstWord = origTrim.toUpperCase().split(/\s+/)[0].replace(/[,;]$/, '');
 
     if (extIdx < extLines.length) {
