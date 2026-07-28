@@ -182,8 +182,7 @@ CMD="$INSTALL_DIR/bin/flowscope --serve --port $PORT --watch $SQL_DIR"
 
 if $DAEMON; then
     # --- 后台运行 ---
-    # serve 模式在工作目录下创建 flowscope.db，所以先 cd 到 data 目录
-    nohup bash -c "cd '$INSTALL_DIR/data' && exec $CMD" > "$LOG_FILE" 2>&1 &
+    nohup $CMD > "$LOG_FILE" 2>&1 &
     SERVER_PID=$!
     echo $SERVER_PID > "$PID_FILE"
     
@@ -219,7 +218,7 @@ else
     echo ""
     
     # 在后台先启动，等健康检查通过后再决定是否前台 attach
-    nohup bash -c "cd '$INSTALL_DIR/data' && exec $CMD" > "$LOG_FILE" 2>&1 &
+    nohup $CMD > "$LOG_FILE" 2>&1 &
     SERVER_PID=$!
     echo $SERVER_PID > "$PID_FILE"
     

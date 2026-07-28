@@ -397,7 +397,7 @@ fn migrate_v2_to_v3(conn: &Connection) -> Result<(), rusqlite::Error> {
 /// v3 → v4: Add `project_directories` table and `dir_id` column to `project_files`.
 /// Backfills dir_id and directory rows from existing file paths.
 fn migrate_v3_to_v4(conn: &Connection) -> Result<(), rusqlite::Error> {
-    // 1. Create project_directories table
+    // 1. Create project_directories table (safe on fresh DBs)
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS project_directories (
             id           TEXT    NOT NULL,
@@ -416,6 +416,19 @@ fn migrate_v3_to_v4(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_pd_parent ON project_directories(project_id, parent_id);",
     )?;
     eprintln!("[migrate v3→v4] created project_directories table");
+
+    // On fresh databases, project_files doesn't exist yet — skip column/backfill.
+    let pf_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='project_files'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if !pf_exists {
+        eprintln!("[migrate v3→v4] project_files not yet created (fresh DB), skipping column steps.");
+        return Ok(());
+    }
 
     // 2. Add dir_id column to project_files if not exists
     let pf_cols: Vec<String> = conn
@@ -479,6 +492,18 @@ fn split_file_path(file_path: &str) -> (String, String) {
 
 /// v4→v5: add dialect, is_procedure, transformed_content columns to project_files
 fn migrate_v4_to_v5(conn: &Connection) -> Result<(), rusqlite::Error> {
+    // On fresh databases (v0), project_files doesn't exist yet — skip.
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='project_files'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if !table_exists {
+        return Ok(());
+    }
+
     let pf_cols: Vec<String> = conn
         .prepare("PRAGMA table_info(project_files)")?
         .query_map([], |row| row.get::<_, String>(1))?
