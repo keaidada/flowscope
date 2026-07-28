@@ -73,7 +73,35 @@ function shouldRemoveLine(line: string): boolean {
  */
 export function extractDmlFromProcedure(content: string, dialect?: string): string | null {
   if (dialect && dialect !== 'bigquery') return null;
-  return extractBqDml(content);
+  const extracted = extractBqDml(content);
+  if (!extracted) return null;
+  // Cross-reference with original: only keep lines present in both
+  return crossFilter(content, extracted);
+}
+
+/**
+ * Cross-filter: return only extracted lines that also appear in the original.
+ * This is the same logic used by the dialog's preview panel, ensuring
+ * folder and single-file conversion produce identical results.
+ */
+function crossFilter(original: string, extracted: string): string | null {
+  const origLines = original.split('\n');
+  const extLines = extracted.split('\n');
+
+  // Build lookup of original trimmed lines
+  const origSet = new Set<string>();
+  for (const line of origLines) {
+    const t = line.trim();
+    if (t) origSet.add(t);
+  }
+
+  const result = extLines.filter((line) => {
+    const t = line.trim();
+    return !t || origSet.has(t);
+  });
+
+  const text = result.join('\n').trim();
+  return text || null;
 }
 
 /**

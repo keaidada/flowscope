@@ -113,7 +113,6 @@ export function ProcedureRepairDialog({
 }: ProcedureRepairDialogProps) {
   const { t } = useTranslation();
   const [mergedLines, setMergedLines] = useState<MergedLine[]>([]);
-  const [transformedContent, setTransformedContent] = useState('');
   const [copied, setCopied] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [showRemoved, setShowRemoved] = useState(true);
@@ -126,7 +125,6 @@ export function ProcedureRepairDialog({
   useEffect(() => {
     if (open && originalContent) {
       const extracted = extractDmlFromProcedure(originalContent) || '';
-      setTransformedContent(extracted);
       setMergedLines(buildMergedLines(originalContent, extracted));
     }
   }, [open, originalContent]);
@@ -147,7 +145,6 @@ export function ProcedureRepairDialog({
 
   const handleReExtract = useCallback(() => {
     const extracted = extractDmlFromProcedure(originalContent) || '';
-    setTransformedContent(extracted);
     setMergedLines(buildMergedLines(originalContent, extracted));
   }, [originalContent]);
 
@@ -171,7 +168,11 @@ export function ProcedureRepairDialog({
   }, []);
 
   const originalLines = useMemo(() => originalContent.split('\n'), [originalContent]);
-  const output = transformedContent; // raw extraction, same as folder conversion
+  // output = what the user sees as kept on the right panel
+  const output = useMemo(
+    () => mergedLines.filter((l) => !l.removed).map((l) => l.content).join('\n'),
+    [mergedLines]
+  );
   const removedCount = useMemo(() => mergedLines.filter((l) => l.removed).length, [mergedLines]);
   const keptCount = mergedLines.length - removedCount;
 
