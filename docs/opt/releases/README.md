@@ -17,17 +17,17 @@
 
 # 2. 运行初始化脚本
 chmod +x init.sh
-./init.sh                          # 默认安装到 /opt/flowscope
+./init.sh                          # 默认安装到 /tmp/flowscope
 # 或指定目录：
 ./init.sh --target ~/flowscope --arch arm64
 
 # 3. 放入 SQL 文件
-cp /path/to/your/*.sql /opt/flowscope/sql/
+cp /path/to/your/*.sql /tmp/flowscope/sql/
 
 # 4. 启动服务
-/opt/flowscope/start.sh                            # 前台运行
-/opt/flowscope/start.sh --daemon                   # 后台运行
-/opt/flowscope/start.sh --port 8080 --daemon       # 指定端口 + 后台
+/tmp/flowscope/start.sh                            # 前台运行
+/tmp/flowscope/start.sh --daemon                   # 后台运行
+/tmp/flowscope/start.sh --port 8080 --daemon       # 指定端口 + 后台
 
 # 5. 打开浏览器
 open http://localhost:3000
@@ -56,7 +56,7 @@ open http://localhost:3000
 ### 目录结构
 
 ```
-/opt/flowscope/
+/tmp/flowscope/
 ├── bin/flowscope        # 二进制
 ├── data/flowscope.db    # SQLite 数据库
 ├── logs/flowscope.log   # 运行日志

@@ -11,15 +11,15 @@
 #
 # 用法：
 #   chmod +x init.sh
-#   ./init.sh [--target /opt/flowscope] [--arch arm64|x86_64]
+#   ./init.sh [--target /tmp/flowscope] [--arch arm64|x86_64]
 #
-# 默认安装路径：/opt/flowscope
+# 默认安装路径：/tmp/flowscope
 # ============================================================================
 
 set -euo pipefail
 
 # ── 默认参数 ──────────────────────────────────────────────────────────────
-INSTALL_DIR="/opt/flowscope"
+INSTALL_DIR="/tmp/flowscope"
 ARCH=""
 SCRIPT_DIR="$(cd "$(dirname "$0")" &>/dev/null && pwd)"
 
@@ -47,10 +47,10 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            echo "用法: ./init.sh [--target /opt/flowscope] [--arch arm64|x86_64]"
+            echo "用法: ./init.sh [--target /tmp/flowscope] [--arch arm64|x86_64]"
             echo ""
             echo "选项:"
-            echo "  --target <dir>    安装目录 (默认: /opt/flowscope)"
+            echo "  --target <dir>    安装目录 (默认: /tmp/flowscope)"
             echo "  --arch <arch>     CPU 架构: arm64 或 x86_64 (默认: 自动检测)"
             exit 0
             ;;
