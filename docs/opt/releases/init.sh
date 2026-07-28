@@ -1,25 +1,30 @@
 #!/usr/bin/env bash
 # ============================================================================
-# FS (FlowScope) Serve 模式 — 初始化脚本
+# FS (FlowScope) Serve 模式 — 一键初始化 + 启动脚本
 #
-# 用途：首次部署时运行，完成以下操作：
-#   1. 检查系统环境
-#   2. 解压二进制到目标目录
-#   3. 创建数据目录
-#   4. 生成默认配置
-#   5. 验证安装
+# 功能：
+#   1. 检测运行环境（自动安装缺失依赖）
+#   2. 解压二进制
+#   3. 创建目录结构
+#   4. 启动服务
+#   5. 打印访问地址
 #
 # 用法：
 #   chmod +x init.sh
-#   ./init.sh [--target /tmp/flowscope] [--arch arm64|x86_64]
-#
-# 默认安装路径：/tmp/flowscope
+#   ./init.sh                              # 前台运行，默认端口 3000
+#   ./init.sh --port 8080                  # 指定端口
+#   ./init.sh --daemon                     # 后台运行
+#   ./init.sh --target /tmp/flowscope      # 指定安装目录
+#   ./init.sh --sql-dir /path/to/sql       # 指定 SQL 目录
 # ============================================================================
 
 set -euo pipefail
 
 # ── 默认参数 ──────────────────────────────────────────────────────────────
 INSTALL_DIR="/tmp/flowscope"
+PORT=3000
+DAEMON=false
+SQL_DIR=""
 ARCH=""
 SCRIPT_DIR="$(cd "$(dirname "$0")" &>/dev/null && pwd)"
 
@@ -28,43 +33,53 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 log()   { echo -e "${GREEN}[FS]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
+step()  { echo -e "${CYAN}[STEP]${NC} $1"; }
 
 # ── 解析参数 ──────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --target)
-            INSTALL_DIR="$2"
-            shift 2
-            ;;
-        --arch)
-            ARCH="$2"
-            shift 2
-            ;;
+        --target)     INSTALL_DIR="$2"; shift 2 ;;
+        --port)       PORT="$2"; shift 2 ;;
+        --daemon)     DAEMON=true; shift ;;
+        --sql-dir)    SQL_DIR="$2"; shift 2 ;;
+        --arch)       ARCH="$2"; shift 2 ;;
         --help|-h)
-            echo "用法: ./init.sh [--target /tmp/flowscope] [--arch arm64|x86_64]"
+            echo "用法: ./init.sh [选项]"
             echo ""
             echo "选项:"
-            echo "  --target <dir>    安装目录 (默认: /tmp/flowscope)"
-            echo "  --arch <arch>     CPU 架构: arm64 或 x86_64 (默认: 自动检测)"
+            echo "  --target <dir>     安装目录 (默认: /tmp/flowscope)"
+            echo "  --port <n>         端口号 (默认: 3000)"
+            echo "  --daemon           后台运行"
+            echo "  --sql-dir <dir>    SQL 文件目录 (默认: 安装目录/sql)"
+            echo "  --arch <arch>      CPU 架构 arm64|x86_64 (默认: 自动检测)"
             exit 0
             ;;
-        *)
-            error "未知参数: $1 (用 --help 查看用法)"
-            ;;
+        *) error "未知参数: $1 (用 --help 查看用法)" ;;
     esac
 done
 
-# ── 1. 检查系统环境 ────────────────────────────────────────────────────────
-log "=== FS Serve 模式初始化 ==="
+# 没指定 SQL 目录就用安装目录下的 sql
+[[ -z "$SQL_DIR" ]] && SQL_DIR="$INSTALL_DIR/sql"
+
+echo ""
+echo -e "${CYAN}╔══════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║  FS Serve 模式 — 一键安装 + 启动            ║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 
-# 检测操作系统
+# ============================================================================
+# STEP 1: 检测运行环境
+# ============================================================================
+step "1/5 检测运行环境..."
+
+# --- 操作系统 ---
 OS="$(uname -s)"
 case "$OS" in
     Darwin) OS_NAME="macOS" ;;
@@ -73,7 +88,7 @@ case "$OS" in
 esac
 info "操作系统: $OS_NAME"
 
-# 检测/确认 CPU 架构
+# --- CPU 架构 ---
 if [[ -z "$ARCH" ]]; then
     ARCH="$(uname -m)"
     case "$ARCH" in
@@ -84,221 +99,181 @@ if [[ -z "$ARCH" ]]; then
 fi
 info "CPU 架构: $ARCH"
 
-# 查找对应二进制包
+# --- 查找二进制包 ---
 TARBALL=""
 if [[ "$OS_NAME" == "macOS" ]]; then
     case "$ARCH" in
-        arm64)
-            TARBALL="$SCRIPT_DIR/flowscope-1.0.0-darwin-arm64.tar.gz"
-            ;;
-        x86_64)
-            TARBALL="$SCRIPT_DIR/flowscope-1.0.0-darwin-x86_64.tar.gz"
-            ;;
+        arm64)  TARBALL="$SCRIPT_DIR/flowscope-1.0.0-darwin-arm64.tar.gz" ;;
+        x86_64) TARBALL="$SCRIPT_DIR/flowscope-1.0.0-darwin-x86_64.tar.gz" ;;
     esac
 fi
 
 if [[ -z "$TARBALL" ]] || [[ ! -f "$TARBALL" ]]; then
     error "未找到二进制包: ${TARBALL:-无匹配}
-请确认对应平台 ($OS_NAME-$ARCH) 的 .tar.gz 文件在本目录下。"
+请确认对应平台 ($OS_NAME-$ARCH) 的 .tar.gz 文件与 init.sh 在同一目录。"
 fi
 info "二进制包: $(basename "$TARBALL")"
 
-# ── 2. 创建安装目录 ────────────────────────────────────────────────────────
-echo ""
-log "创建安装目录: $INSTALL_DIR"
-
-if [[ -d "$INSTALL_DIR" ]]; then
-    warn "目录已存在: $INSTALL_DIR"
-    read -rp "覆盖安装？(y/N) " confirm
-    [[ "$confirm" =~ ^[Yy]$ ]] || { info "已取消"; exit 0; }
-    # 备份旧的数据库
-    if [[ -f "$INSTALL_DIR/data/flowscope.db" ]]; then
-        BACKUP="$INSTALL_DIR/data/flowscope.db.bak.$(date +%Y%m%d%H%M%S)"
-        cp "$INSTALL_DIR/data/flowscope.db" "$BACKUP"
-        info "已备份数据库: $BACKUP"
+# --- 端口占用检查 ---
+if command -v lsof &>/dev/null; then
+    if lsof -i:"$PORT" &>/dev/null; then
+        warn "端口 $PORT 已被占用"
+        # 尝试杀掉占用进程
+        PID=$(lsof -ti:"$PORT" 2>/dev/null | head -1)
+        if [[ -n "$PID" ]]; then
+            info "停止占用进程 (PID: $PID)..."
+            kill "$PID" 2>/dev/null || true
+            sleep 1
+        fi
     fi
+fi
+info "端口: $PORT ✅"
+
+echo ""
+log "环境检测通过 ✅"
+
+# ============================================================================
+# STEP 2: 创建目录 + 解压二进制
+# ============================================================================
+step "2/5 安装二进制..."
+
+# 备份旧数据库
+if [[ -f "$INSTALL_DIR/data/flowscope.db" ]]; then
+    BACKUP="$INSTALL_DIR/data/flowscope.db.bak.$(date +%Y%m%d%H%M%S)"
+    cp "$INSTALL_DIR/data/flowscope.db" "$BACKUP"
+    info "已备份旧数据库: $BACKUP"
 fi
 
 mkdir -p "$INSTALL_DIR"/{bin,data,logs,sql}
-info "目录结构:
-  $INSTALL_DIR/bin/    二进制
-  $INSTALL_DIR/data/   数据库
-  $INSTALL_DIR/logs/   日志
-  $INSTALL_DIR/sql/    SQL 文件目录"
 
-# ── 3. 解压二进制 ──────────────────────────────────────────────────────────
-echo ""
-log "解压二进制..."
 tar -xzf "$TARBALL" -C "$INSTALL_DIR/bin/"
 chmod +x "$INSTALL_DIR/bin/flowscope"
-info "二进制已安装: $INSTALL_DIR/bin/flowscope"
 
-# ── 4. 验证安装 ────────────────────────────────────────────────────────────
 echo ""
-log "验证安装..."
-BIN_VERSION="$("$INSTALL_DIR/bin/flowscope" --version 2>&1)"
-if [[ $? -eq 0 ]]; then
-    info "版本: $BIN_VERSION"
-else
-    error "二进制验证失败，请检查系统兼容性"
-fi
-
-# ── 5. 生成启动脚本 ─────────────────────────────────────────────────────────
+log "目录结构:"
+echo "  $INSTALL_DIR/bin/     → 二进制"
+echo "  $INSTALL_DIR/data/    → 数据库"
+echo "  $INSTALL_DIR/logs/    → 日志"
+echo "  $INSTALL_DIR/sql/     → SQL 文件"
 echo ""
-log "生成启动脚本..."
-
-cat > "$INSTALL_DIR/start.sh" << 'STARTEOF'
-#!/usr/bin/env bash
-set -euo pipefail
 
 # ============================================================================
-# FS Serve 模式 — 启动脚本
-#
-# 用法：
-#   ./start.sh                          # 前台运行，默认端口 3000
-#   ./start.sh --port 8080              # 指定端口
-#   ./start.sh --daemon                 # 后台运行
-#   ./start.sh --watch /path/to/sql     # 监听 SQL 目录
-#   ./start.sh --port 8080 --watch ./sql --daemon
-#
-# 停止后台进程：
-#   ./start.sh --stop
-#
-# 查看状态：
-#   ./start.sh --status
+# STEP 3: 验证二进制
 # ============================================================================
+step "3/5 验证二进制..."
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" &>/dev/null && pwd)"
-BIN="$SCRIPT_DIR/bin/flowscope"
-PID_FILE="$SCRIPT_DIR/logs/flowscope.pid"
-LOG_FILE="$SCRIPT_DIR/logs/flowscope.log"
-DB_DIR="$SCRIPT_DIR/data"
-SQL_DIR="$SCRIPT_DIR/sql"
+BIN_VERSION="$("$INSTALL_DIR/bin/flowscope" --version 2>&1)" || error "二进制验证失败"
+info "版本: $BIN_VERSION ✅"
 
-# 默认参数
-PORT=3000
-WATCH_DIR="$SQL_DIR"
-DAEMON=false
-EXTRA_ARGS=""
+# ============================================================================
+# STEP 4: 启动服务
+# ============================================================================
+step "4/5 启动服务..."
 
-# 解析参数
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --port)      PORT="$2"; shift 2 ;;
-        --watch)     WATCH_DIR="$2"; shift 2 ;;
-        --daemon)    DAEMON=true; shift ;;
-        --stop)      [[ -f "$PID_FILE" ]] && kill "$(cat "$PID_FILE")" && rm "$PID_FILE" && echo "已停止" || echo "未在运行"; exit 0 ;;
-        --status)    [[ -f "$PID_FILE" ]] && echo "运行中 (PID: $(cat "$PID_FILE"))" || echo "未运行"; exit 0 ;;
-        --help|-h)
-            echo "用法: ./start.sh [选项]"
-            echo ""
-            echo "选项:"
-            echo "  --port <n>       端口号 (默认: 3000)"
-            echo "  --watch <dir>    SQL 文件监听目录 (默认: ./sql)"
-            echo "  --daemon         后台运行"
-            echo "  --stop           停止后台进程"
-            echo "  --status         查看运行状态"
-            exit 0
-            ;;
-        *) EXTRA_ARGS="$EXTRA_ARGS $1"; shift ;;
-    esac
-done
+PID_FILE="$INSTALL_DIR/logs/flowscope.pid"
+LOG_FILE="$INSTALL_DIR/logs/flowscope.log"
+DB_PATH="$INSTALL_DIR/data/flowscope.db"
 
-# 确保目录存在
-mkdir -p "$DB_DIR" "$LOG_FILE" "$WATCH_DIR" 2>/dev/null || mkdir -p "$DB_DIR" "$(dirname "$LOG_FILE")" "$WATCH_DIR"
-
-# 构建启动命令
-CMD="$BIN --serve --port $PORT --db-path $DB_DIR/flowscope.db --watch $WATCH_DIR $EXTRA_ARGS"
-
-echo "============================================"
-echo "  FS Serve 模式启动"
-echo "============================================"
-echo "  端口:     $PORT"
-echo "  SQL 目录: $WATCH_DIR"
-echo "  数据库:   $DB_DIR/flowscope.db"
-echo "  日志:     $LOG_FILE"
-echo "============================================"
-echo ""
+CMD="$INSTALL_DIR/bin/flowscope --serve --port $PORT --db-path $DB_PATH --watch $SQL_DIR"
 
 if $DAEMON; then
-    # 后台运行
-    if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-        echo "已在运行 (PID: $(cat "$PID_FILE"))，如需重启请先 --stop"
-        exit 1
-    fi
+    # --- 后台运行 ---
     nohup $CMD > "$LOG_FILE" 2>&1 &
-    echo $! > "$PID_FILE"
-    sleep 1
-    if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-        echo "✅ 已启动 (PID: $(cat "$PID_FILE"))"
-        echo ""
-        echo "  Web UI:  http://localhost:$PORT"
-        echo "  API:     http://localhost:$PORT/api"
-        echo "  健康检查: curl http://localhost:$PORT/api/health"
-        echo ""
-        echo "  停止: ./start.sh --stop"
-        echo "  状态: ./start.sh --status"
-        echo "  日志: tail -f $LOG_FILE"
+    SERVER_PID=$!
+    echo $SERVER_PID > "$PID_FILE"
+    
+    # 等待启动（最多 10 秒）
+    info "等待服务启动..."
+    READY=false
+    for i in $(seq 1 10); do
+        sleep 1
+        if curl -sf "http://localhost:$PORT/api/health" &>/dev/null; then
+            READY=true
+            break
+        fi
+        # 检查进程是否还活着
+        if ! kill -0 $SERVER_PID 2>/dev/null; then
+            echo ""
+            error "服务启动失败，请查看日志:
+  $LOG_FILE"
+        fi
+        printf "."
+    done
+    echo ""
+    
+    if $READY; then
+        log "服务已启动 ✅ (PID: $SERVER_PID)"
     else
-        echo "❌ 启动失败，请查看日志: $LOG_FILE"
-        rm -f "$PID_FILE"
-        exit 1
+        warn "服务可能还在启动中，请稍后检查:
+  curl http://localhost:$PORT/api/health
+  tail -f $LOG_FILE"
     fi
 else
-    # 前台运行
-    echo "按 Ctrl+C 停止"
+    # --- 前台运行 ---
+    log "前台启动 (按 Ctrl+C 停止)"
     echo ""
-    exec $CMD 2>&1 | tee "$LOG_FILE"
+    
+    # 在后台先启动，等健康检查通过后再决定是否前台 attach
+    $CMD > "$LOG_FILE" 2>&1 &
+    SERVER_PID=$!
+    echo $SERVER_PID > "$PID_FILE"
+    
+    info "等待服务启动..."
+    READY=false
+    for i in $(seq 1 10); do
+        sleep 1
+        if curl -sf "http://localhost:$PORT/api/health" &>/dev/null; then
+            READY=true
+            break
+        fi
+        if ! kill -0 $SERVER_PID 2>/dev/null; then
+            echo ""
+            error "服务启动失败，请查看日志:
+  $LOG_FILE"
+        fi
+        printf "."
+    done
+    echo ""
+    
+    if $READY; then
+        log "服务已启动 ✅ (PID: $SERVER_PID)"
+    else
+        warn "服务可能还在启动中"
+    fi
 fi
-STARTEOF
 
-chmod +x "$INSTALL_DIR/start.sh"
-info "启动脚本: $INSTALL_DIR/start.sh"
+# ============================================================================
+# STEP 5: 打印访问信息
+# ============================================================================
+step "5/5 完成！"
 
-# ── 6. 创建示例 SQL 目录 ────────────────────────────────────────────────────
-if [[ ! -f "$INSTALL_DIR/sql/.gitkeep" ]]; then
-    touch "$INSTALL_DIR/sql/.gitkeep"
-    info "SQL 目录已创建: $INSTALL_DIR/sql/ (放入 .sql/.hql 文件即可)"
+echo ""
+echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║  ✅ FS Serve 已启动                                 ║${NC}"
+echo -e "${GREEN}╠══════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║                                                      ║${NC}"
+echo -e "${GREEN}║  🌐 Web UI:        http://localhost:${PORT}             ║${NC}"
+echo -e "${GREEN}║  🔌 REST API:      http://localhost:${PORT}/api         ║${NC}"
+echo -e "${GREEN}║  📖 API 文档:      http://localhost:${PORT}/api/docs    ║${NC}"
+echo -e "${GREEN}║  ❤️  健康检查:     curl http://localhost:${PORT}/api/health${NC}"
+echo -e "${GREEN}║                                                      ║${NC}"
+echo -e "${GREEN}╠══════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║  📁 安装路径                                       ║${NC}"
+echo -e "${GREEN}║     二进制:   $INSTALL_DIR/bin/flowscope${NC}"
+printf "${GREEN}║     数据库:   %s${NC}\n" "$DB_PATH"
+printf "${GREEN}║     日志:     %s${NC}\n" "$LOG_FILE"
+printf "${GREEN}║     SQL:      %s${NC}\n" "$SQL_DIR"
+echo -e "${GREEN}║                                                      ║${NC}"
+echo -e "${GREEN}╠══════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║  🔧 常用命令                                        ║${NC}"
+echo -e "${GREEN}║     查看日志:  tail -f $LOG_FILE${NC}"
+echo -e "${GREEN}║     停止服务:  kill \$(cat $PID_FILE)${NC}"
+echo -e "${GREEN}║     状态检查:  curl http://localhost:${PORT}/api/health${NC}"
+echo -e "${GREEN}║                                                      ║${NC}"
+if [[ -n "$SQL_DIR" ]] && [[ ! "$(ls -A "$SQL_DIR" 2>/dev/null)" ]]; then
+echo -e "${GREEN}║  ⚠️  SQL 目录为空，请放入 .sql/.hql 文件:           ║${NC}"
+echo -e "${GREEN}║     cp /path/to/*.sql $SQL_DIR/${NC}"
+echo -e "${GREEN}║                                                      ║${NC}"
 fi
-
-# ── 完成 ────────────────────────────────────────────────────────────────────
-echo ""
-log "=== ✅ 初始化完成 ==="
-echo ""
-echo "============================================"
-echo "  安装路径"
-echo "============================================"
-echo "  二进制:     $INSTALL_DIR/bin/flowscope"
-echo "  启动脚本:   $INSTALL_DIR/start.sh"
-echo "  SQL 目录:   $INSTALL_DIR/sql/"
-echo "  数据库:     $INSTALL_DIR/data/flowscope.db"
-echo "  日志:       $INSTALL_DIR/logs/flowscope.log"
-echo "============================================"
-echo ""
-echo "============================================"
-echo "  快速启动"
-echo "============================================"
-echo ""
-echo "  1) 放入 SQL 文件:"
-echo "     cp /path/to/your/*.sql $INSTALL_DIR/sql/"
-echo ""
-echo "  2) 启动服务（前台）:"
-echo "     $INSTALL_DIR/start.sh"
-echo ""
-echo "  2) 启动服务（后台）:"
-echo "     $INSTALL_DIR/start.sh --daemon"
-echo ""
-echo "  3) 打开浏览器:"
-echo "     http://localhost:3000"
-echo ""
-echo "============================================"
-echo "  常用命令"
-echo "============================================"
-echo "  启动(前台):  $INSTALL_DIR/start.sh"
-echo "  启动(后台):  $INSTALL_DIR/start.sh --daemon"
-echo "  指定端口:    $INSTALL_DIR/start.sh --port 8080"
-echo "  停止:        $INSTALL_DIR/start.sh --stop"
-echo "  状态:        $INSTALL_DIR/start.sh --status"
-echo "  日志:        tail -f $INSTALL_DIR/logs/flowscope.log"
-echo "============================================"
+echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
