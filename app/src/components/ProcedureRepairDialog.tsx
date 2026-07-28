@@ -317,10 +317,7 @@ export function ProcedureRepairDialog({
               {mergedLines.map((line, idx) => (
                 <div
                   key={idx}
-                  className={cn(
-                    'flex items-start h-[15px]',
-                    line.removed && 'bg-red-500/[0.06]',
-                  )}
+                  className="flex items-start h-[15px]"
                 >
                   <span className="w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px] text-muted-foreground/40">
                     {line.origLineNum || ''}
@@ -329,7 +326,6 @@ export function ProcedureRepairDialog({
                     className={cn(
                       'flex-1 whitespace-pre pr-2 overflow-hidden font-mono',
                       fSizeMono,
-                      line.removed && 'text-red-500 line-through opacity-60',
                     )}
                   >
                     {line.content}
