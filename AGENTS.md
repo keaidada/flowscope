@@ -37,6 +37,8 @@ When in doubt, **ask**. A 10-second confirmation beats an irreversible data loss
 
 ### Other Critical Rules
 
+- **Never push to remote without explicit authorization.** `git push` and `git push --force` MUST only be executed when the user explicitly says "推送"、"提交到远程"、or "push". Local commits are fine. Force-push is an even higher bar — ask first.
+
 - Never commit secrets/credentials to the repository.
 - Never force-push, rewrite git history, or amend pushed commits without
   explicit user authorization.
