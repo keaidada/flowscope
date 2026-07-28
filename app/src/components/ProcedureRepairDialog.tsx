@@ -70,15 +70,13 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
       }
     }
 
-    // SQL keywords that didn't match — still keep (extraction may differ slightly)
+    // SQL keywords that didn't match — try nearby positions only
     if (!isComment && SQL_KEYWORDS.includes(firstWord)) {
-      // Look ahead in extracted lines to try to find a match
       let found = false;
-      for (let k = extIdx; k < extLines.length; k++) {
+      for (let k = extIdx; k < extLines.length && k < extIdx + 3; k++) {
         const extTrim = extLines[k].trim();
         if (extTrim === origTrim || (extTrim && origTrim && extTrim.includes(origTrim))) {
           result.push({ content: extLines[k], removed: false });
-          // Advance extIdx to after the matched position
           extIdx = k + 1;
           found = true;
           break;
