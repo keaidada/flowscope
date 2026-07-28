@@ -137,7 +137,7 @@ fn spans_anchor_to_current_statement() {
     let spans: Vec<Span> = result
         .issues
         .iter()
-        .filter(|issue| issue.code == issue_codes::UNRESOLVED_REFERENCE)
+        .filter(|issue| issue.code == issue_codes::UNKNOWN_TABLE)
         .filter_map(|issue| issue.span)
         .collect();
 
@@ -281,7 +281,7 @@ fn file_statements_produce_spans() {
     let issue = result
         .issues
         .iter()
-        .find(|issue| issue.code == issue_codes::UNRESOLVED_REFERENCE)
+        .find(|issue| issue.code == issue_codes::UNKNOWN_TABLE)
         .expect("missing table issue");
 
     let span = issue

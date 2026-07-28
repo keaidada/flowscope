@@ -39,27 +39,33 @@ impl<'a, 'b> SelectAnalyzer<'a, 'b> {
     pub(crate) fn analyze(&mut self, select: &Select) {
         self.ctx.clear_grouping();
 
-        self.analyze_group_by(&select.group_by);
+        // Pass 1: pre-scan aliases so GROUP BY can resolve them
+        let aliases = self.pre_scan_aliases(&select.projection);
+
+        self.analyze_group_by(&select.group_by, &aliases);
         self.analyze_projection(&select.projection);
         self.analyze_selection(&select.selection);
         self.analyze_having(&select.having);
     }
 
+    /// First-pass: scan SELECT projection for aliases (ExprWithAlias).
+    fn pre_scan_aliases(&self, projection: &[SelectItem]) -> HashSet<String> {
+        let mut aliases = HashSet::new();
+        for item in projection {
+            if let SelectItem::ExprWithAlias { alias, .. } = item {
+                aliases.insert(alias.value.clone());
+            }
+        }
+        aliases
+    }
+
     /// Analyzes GROUP BY expressions to track grouping columns.
     ///
-    /// # Limitations
+    /// Analyzes GROUP BY expressions to track grouping columns.
     ///
-    /// TODO: GROUP BY alias visibility checking is incomplete because GROUP BY is
-    /// analyzed before the SELECT projection. This means `output_columns` is typically
-    /// empty when we try to detect alias references. A multi-pass analysis approach
-    /// would be needed to properly detect aliases used in GROUP BY, which would require:
-    /// 1. First pass: collect SELECT aliases
-    /// 2. Second pass: analyze GROUP BY with alias knowledge
-    /// 3. Third pass: analyze projection with grouping context
-    ///
-    /// For now, this check only catches edge cases where output_columns were populated
-    /// from a previous statement or context.
-    fn analyze_group_by(&mut self, group_by: &ast::GroupByExpr) {
+    /// Note: GROUP BY alias visibility has been fixed by the pre-scan pass
+    /// that collects aliases before GROUP BY analysis.
+    fn analyze_group_by(&mut self, group_by: &ast::GroupByExpr, aliases: &HashSet<String>) {
         let dialect = self.analyzer.request.dialect;
         match group_by {
             ast::GroupByExpr::Expressions(exprs, _) => {
@@ -71,17 +77,10 @@ impl<'a, 'b> SelectAnalyzer<'a, 'b> {
                         ea.normalize_group_by_expr(group_by_expr)
                     };
 
-                    // Alias visibility check (limited - see function doc comment for details)
-                    let matched_alias = self
-                        .ctx
-                        .output_columns
-                        .iter()
-                        .find(|c| c.name == expr_str)
-                        .map(|c| c.name.clone());
-
-                    if let Some(alias_name) = matched_alias {
+                    // Alias detection via pre-scanned aliases
+                    if aliases.contains(&expr_str) {
                         if !dialect.alias_in_group_by() {
-                            self.emit_alias_warning("GROUP BY", &alias_name);
+                            self.emit_alias_warning("GROUP BY", &expr_str);
                         }
                     }
 

@@ -382,7 +382,7 @@ impl<'a> Analyzer<'a> {
             None
         } else {
             let mut issue = Issue::warning(
-                issue_codes::UNRESOLVED_REFERENCE,
+                issue_codes::UNKNOWN_TABLE,
                 format!(
                     "Table '{canonical}' could not be resolved using provided schema metadata or search path"
                 ),
