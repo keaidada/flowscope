@@ -33,8 +33,10 @@ interface ProcedureRepairDialogProps {
  * Mirrors EtlDialog's MergedLine but simpler.
  */
 interface MergedLine {
-  /** Content of this line */
+  /** Content of this line (extracted result for kept, original for removed) */
   content: string;
+  /** Original source line (always the raw original, for left panel) */
+  origContent: string;
   /** True = filtered out by extraction (red strikethrough) */
   removed: boolean;
   /** True = line was modified during extraction (yellow highlight) */
@@ -92,6 +94,7 @@ function mergeProcedureLines(original: string, extracted: string): MergedLine[] 
       const isChanged = origLine.trim() !== extLine.trim();
       result.push({
         content: extLine,
+        origContent: origLine,
         removed: false,
         changed: isChanged,
         segments: isChanged ? inlineDiff(origLine, extLine) : [{ text: extLine, highlight: false }],
@@ -102,6 +105,7 @@ function mergeProcedureLines(original: string, extracted: string): MergedLine[] 
       // This original line was filtered out
       result.push({
         content: origLine,
+        origContent: origLine,
         removed: true,
         changed: false,
         segments: [],
@@ -117,6 +121,7 @@ function mergeProcedureLines(original: string, extracted: string): MergedLine[] 
       outNum++;
       result.push({
         content: extLines[j],
+        origContent: '',
         removed: false,
         changed: true,
         segments: [{ text: extLines[j], highlight: true }],
@@ -328,7 +333,7 @@ export function ProcedureRepairDialog({
                       fSizeMono,
                     )}
                   >
-                    {line.content}
+                    {line.origContent}
                   </span>
                 </div>
               ))}
