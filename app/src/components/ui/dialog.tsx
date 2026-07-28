@@ -33,7 +33,7 @@ const dialogSizeClasses: Record<DialogSize, string> = {
   md: 'max-w-md',
   lg: 'max-w-lg',
   xl: 'max-w-2xl',
-  full: 'max-w-[90vw] w-[1400px] max-h-[85vh] flex flex-col p-0 gap-0',
+  full: 'max-w-[90vw] w-[1400px] h-[85vh] flex flex-col p-0 gap-0',
 };
 
 interface DialogContentProps extends React.ComponentPropsWithoutRef<
