@@ -106,6 +106,7 @@ export function ProcedureRepairDialog({
   const [showRemoved, setShowRemoved] = useState(true);
 
   const leftRef = useRef<HTMLDivElement>(null);
+  const middleRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   const syncing = useRef(false);
 
@@ -120,10 +121,13 @@ export function ProcedureRepairDialog({
     if (syncing.current) return;
     syncing.current = true;
     const l = leftRef.current;
+    const m = middleRef.current;
     const r = rightRef.current;
     if (!l || !r) { syncing.current = false; return; }
-    if (source === 'left') r.scrollTop = l.scrollTop;
-    else l.scrollTop = r.scrollTop;
+    const st = source === 'left' ? l.scrollTop : r.scrollTop;
+    if (source === 'left') r.scrollTop = st;
+    else l.scrollTop = st;
+    if (m) m.scrollTop = st;
     requestAnimationFrame(() => { syncing.current = false; });
   }, []);
 
@@ -253,7 +257,7 @@ export function ProcedureRepairDialog({
               <div className="h-[29px] border-b shrink-0 flex items-center justify-center bg-muted/10">
                 <span className="text-[8px] text-muted-foreground">操作</span>
               </div>
-              <div className="flex-1 min-h-0 overflow-hidden">
+              <div ref={middleRef} className="flex-1 min-h-0 overflow-hidden">
                 {mergedLines.map((line, idx) => {
                   if (line.removed && !showRemoved && line.content.trim()) return null;
                   return (
