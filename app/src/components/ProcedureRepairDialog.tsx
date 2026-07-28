@@ -32,12 +32,7 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
   let extIdx = 0;
   for (let i = 0; i < origLines.length; i++) {
     const origTrim = origLines[i].trim();
-
-    // Comments are always removed
-    if (origTrim.startsWith('--')) {
-      result.push({ content: origLines[i], removed: true });
-      continue;
-    }
+    const isComment = origTrim.startsWith('--');
 
     if (extIdx < extLines.length) {
       const extTrim = extLines[extIdx].trim();
@@ -45,13 +40,13 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
         origTrim === extTrim ||
         (origTrim && extTrim && (extTrim.includes(origTrim) || origTrim.includes(extTrim)))
       ) {
-        result.push({ content: extLines[extIdx], removed: false });
+        result.push({ content: isComment ? origLines[i] : extLines[extIdx], removed: isComment });
         extIdx++;
         continue;
       }
     }
 
-    // Filtered or comment line — marked as removed (can be recovered with right arrow)
+    // Filtered or comment — removed (recoverable with right arrow)
     result.push({ content: origLines[i], removed: true });
   }
 
