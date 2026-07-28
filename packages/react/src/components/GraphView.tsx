@@ -95,22 +95,23 @@ function ClickableMiniMap({ show, nodeCount }: { show: boolean; nodeCount: numbe
   const isLarge = nodeCount > 1000;
 
   return (
-    <MiniMap
-      pannable
-      zoomable
-      style={isLarge ? { width: 600, height: 450 } : undefined}
-      nodeComponent={isLarge ? MiniMapNode : undefined}
-      onClick={handleClick}
-      nodeColor={(node) => {
-        if (isTableNodeData(node.data)) {
-          return getMinimapNodeColor(node.data.nodeType || 'table');
-        }
-        if (node.id.startsWith('script:')) {
-          return getMinimapNodeColor('script');
-        }
-        return getMinimapNodeColor('table');
-      }}
-    />
+    <div style={isLarge ? { width: 600, height: 450 } : undefined}>
+      <MiniMap
+        pannable
+        zoomable
+        nodeComponent={isLarge ? MiniMapNode : undefined}
+        onClick={handleClick}
+        nodeColor={(node) => {
+          if (isTableNodeData(node.data)) {
+            return getMinimapNodeColor(node.data.nodeType || 'table');
+          }
+          if (node.id.startsWith('script:')) {
+            return getMinimapNodeColor('script');
+          }
+          return getMinimapNodeColor('table');
+        }}
+      />
+    </div>
   );
 }
 
