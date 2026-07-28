@@ -219,31 +219,36 @@ export function ProcedureRepairDialog({
 
           {/* Middle: keep/delete toggle */}
           {hasResult && (
-            <div className="w-10 shrink-0 flex flex-col border-r bg-muted/5">
-              <div className="h-[25px] border-b shrink-0" />
+            <div className="w-12 shrink-0 flex flex-col border-r bg-muted/5">
+              <div className="h-[29px] border-b shrink-0 flex items-center justify-center bg-muted/10">
+                <span className="text-[8px] text-muted-foreground">操作</span>
+              </div>
               <div className="flex-1 min-h-0 overflow-hidden">
-                {mergedLines.map((line, idx) => (
-                  <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
-                    {!line.removed && (
-                      <>
-                        <button
-                          title="标记为删除"
-                          onClick={() => { if (!line.userRemoved) toggleUserRemoved(idx); }}
-                          className={cn('p-0 rounded hover:bg-red-100', line.userRemoved && 'bg-red-100')}
-                        >
-                          <ArrowLeft className={cn('h-2.5 w-2.5', line.userRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
-                        </button>
-                        <button
-                          title="保留此行"
-                          onClick={() => { if (line.userRemoved) toggleUserRemoved(idx); }}
-                          className={cn('p-0 rounded hover:bg-green-100', !line.userRemoved && 'bg-green-100')}
-                        >
-                          <ArrowRight className={cn('h-2.5 w-2.5', !line.userRemoved ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
+                {mergedLines.map((line, idx) => {
+                  if (line.userRemoved && !showRemoved) return null;
+                  return (
+                    <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
+                      {!line.removed && (
+                        <>
+                          <button
+                            title="标记为删除"
+                            onClick={() => { if (!line.userRemoved) toggleUserRemoved(idx); }}
+                            className={cn('p-0 rounded hover:bg-red-100 transition-colors', line.userRemoved && 'bg-red-100')}
+                          >
+                            <ArrowLeft className={cn('h-2.5 w-2.5', line.userRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
+                          </button>
+                          <button
+                            title="保留此行"
+                            onClick={() => { if (line.userRemoved) toggleUserRemoved(idx); }}
+                            className={cn('p-0 rounded hover:bg-green-100 transition-colors', !line.userRemoved && 'bg-green-100')}
+                          >
+                            <ArrowRight className={cn('h-2.5 w-2.5', !line.userRemoved ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
