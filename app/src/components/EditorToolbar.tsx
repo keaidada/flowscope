@@ -74,7 +74,7 @@ interface EditorToolbarProps {
   onToggleTransformed?: () => void;
   hasTransformedContent?: boolean;
   onFoldAll?: () => void;
-  onUnfoldAll?: () => void;
+  folded?: boolean;
   // Open file tabs
   openFiles?: ProjectFile[];
   activeFileId?: string | null;
@@ -113,7 +113,7 @@ export function EditorToolbar({
   onToggleTransformed,
   hasTransformedContent,
   onFoldAll,
-  onUnfoldAll,
+  folded,
   openFiles,
   activeFileId,
   onOpenFile,
@@ -399,26 +399,16 @@ export function EditorToolbar({
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onFoldAll}>
-                  <ChevronsDownUp className="h-3.5 w-3.5" />
+                <Button variant="ghost" size="icon" className={cn('h-7 w-7', folded && 'bg-muted')} onClick={onFoldAll}>
+                  {folded ? (
+                    <ChevronsUpDown className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronsDownUp className="h-3.5 w-3.5" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>{t('editor.foldAll')}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
-        {onUnfoldAll && (
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onUnfoldAll}>
-                  <ChevronsUpDown className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{t('editor.unfoldAll')}</p>
+                <p>{folded ? t('editor.unfoldAll') : t('editor.foldAll')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

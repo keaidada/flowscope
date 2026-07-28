@@ -219,6 +219,7 @@ export function EditorArea({
 
   // Content to display in the editor based on view mode
   const [showTransformed, setShowTransformed] = useState(false);
+  const [folded, setFolded] = useState(false);
   const showTransformedRef = useRef(showTransformed);
   showTransformedRef.current = showTransformed;
 
@@ -453,8 +454,12 @@ export function EditorArea({
         showTransformed={showTransformed}
         onToggleTransformed={isProcedure ? () => setShowTransformed((v) => !v) : undefined}
         hasTransformedContent={hasTransformedContent}
-        onFoldAll={() => sqlViewRef.current?.foldAll()}
-        onUnfoldAll={() => sqlViewRef.current?.unfoldAll()}
+        onFoldAll={() => {
+          if (folded) sqlViewRef.current?.unfoldAll();
+          else sqlViewRef.current?.foldAll();
+          setFolded((v) => !v);
+        }}
+        folded={folded}
         openFiles={
           (currentProject?.openFileIds || [])
             .map((id) => currentProject?.files.find((f) => f.id === id))
