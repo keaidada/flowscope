@@ -291,7 +291,7 @@ export function ProcedureRepairDialog({
 
                   return (
                     <div
-                      key={idx}
+                      key={`${idx}-${line.userRemoved ? 'r' : 'k'}`}
                       className={cn(
                         'flex items-start h-[15px]',
                         line.removed && 'bg-red-500/[0.06]',
