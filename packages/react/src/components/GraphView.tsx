@@ -70,17 +70,7 @@ const NODE_OVERLAP_THRESHOLD = 0.5;
  * Must be inside ReactFlow to use useReactFlow.
  */
 
-/** Custom MiniMap node: forces minimum visible size for large graphs */
-function MiniMapNode({ x, y, width, height, color, strokeColor }: {
-  x: number; y: number; width: number; height: number;
-  color?: string; strokeColor?: string;
-}) {
-  const w = Math.max(width, 32);
-  const h = Math.max(height, 32);
-  return <rect x={x} y={y} width={w} height={h} fill={color} rx={2} stroke={strokeColor} strokeWidth={0.5} />;
-}
-
-function ClickableMiniMap({ show, nodeCount }: { show: boolean; nodeCount: number }): JSX.Element | null {
+function ClickableMiniMap({ show }: { show: boolean }): JSX.Element | null {
   const { setCenter, getZoom } = useReactFlow();
 
   const handleClick = useCallback(
@@ -92,26 +82,21 @@ function ClickableMiniMap({ show, nodeCount }: { show: boolean; nodeCount: numbe
 
   if (!show) return null;
 
-  const isLarge = nodeCount > 1000;
-
   return (
-    <div style={isLarge ? { width: 600, height: 450 } : undefined}>
-      <MiniMap
-        pannable
-        zoomable
-        nodeComponent={isLarge ? MiniMapNode : undefined}
-        onClick={handleClick}
-        nodeColor={(node) => {
-          if (isTableNodeData(node.data)) {
-            return getMinimapNodeColor(node.data.nodeType || 'table');
-          }
-          if (node.id.startsWith('script:')) {
-            return getMinimapNodeColor('script');
-          }
-          return getMinimapNodeColor('table');
-        }}
-      />
-    </div>
+    <MiniMap
+      pannable
+      zoomable
+      onClick={handleClick}
+      nodeColor={(node) => {
+        if (isTableNodeData(node.data)) {
+          return getMinimapNodeColor(node.data.nodeType || 'table');
+        }
+        if (node.id.startsWith('script:')) {
+          return getMinimapNodeColor('script');
+        }
+        return getMinimapNodeColor('table');
+      }}
+    />
   );
 }
 
@@ -1217,7 +1202,7 @@ export function GraphView({
         <Panel position="bottom-left" className="!m-3">
           <LayoutProgressIndicator />
         </Panel>
-        <ClickableMiniMap show={showMiniMap} nodeCount={renderGraph.nodes.length} />
+        <ClickableMiniMap show={showMiniMap} />
       </ReactFlow>
     </div>
   );
