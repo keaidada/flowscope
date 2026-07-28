@@ -54,7 +54,7 @@ import {
 } from './ui/graph-tooltip';
 import { GRAPH_CONFIG, PANEL_STYLES, getMinimapNodeColor } from '../constants';
 
-const MINIMAP_NODE_LIMIT = 2000;
+const MINIMAP_NODE_LIMIT = 5000;
 const ELK_NODE_LIMIT = 2000;
 
 /**
