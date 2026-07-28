@@ -20,12 +20,8 @@ interface ProcedureRepairDialogProps {
 }
 
 interface MergedLine {
-  /** Content of this line on the right panel */
   content: string;
-  /** True = auto-filtered by extraction (shown as red '-') */
   removed: boolean;
-  /** True = user manually marked for removal */
-  userRemoved: boolean;
 }
 
 function buildMergedLines(original: string, extracted: string): MergedLine[] {
@@ -43,14 +39,13 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
         origTrim === extTrim ||
         (origTrim && extTrim && (extTrim.includes(origTrim) || origTrim.includes(extTrim)))
       ) {
-        result.push({ content: extLines[extIdx], removed: false, userRemoved: false });
+        result.push({ content: extLines[extIdx], removed: false });
         extIdx++;
         continue;
       }
     }
 
-    // Filtered by extraction — show original content in red strikethrough
-    result.push({ content: origLines[i], removed: true, userRemoved: false });
+    result.push({ content: origLines[i], removed: true });
   }
 
   return result;
@@ -72,7 +67,6 @@ export function ProcedureRepairDialog({
   const rightRef = useRef<HTMLDivElement>(null);
   const syncing = useRef(false);
 
-  // Extract on open
   useEffect(() => {
     if (open && originalContent) {
       const extracted = extractBqDml(originalContent) || '';
@@ -80,13 +74,6 @@ export function ProcedureRepairDialog({
     }
   }, [open, originalContent]);
 
-  // Re-extract
-  const handleReExtract = useCallback(() => {
-    const extracted = extractBqDml(originalContent) || '';
-    setMergedLines(buildMergedLines(originalContent, extracted));
-  }, [originalContent]);
-
-  // Sync scroll between panels
   const handleScroll = useCallback((source: 'left' | 'right') => {
     if (syncing.current) return;
     syncing.current = true;
@@ -98,27 +85,17 @@ export function ProcedureRepairDialog({
     requestAnimationFrame(() => { syncing.current = false; });
   }, []);
 
-  // Derived data
-  const originalLines = useMemo(() => originalContent.split('\n'), [originalContent]);
-  const output = useMemo(
-    () => mergedLines.filter((l) => !l.removed && !l.userRemoved).map((l) => l.content).join('\n'),
-    [mergedLines]
-  );
-  const removedCount = useMemo(() => mergedLines.filter((l) => l.removed).length, [mergedLines]);
-  const userRemovedCount = useMemo(() => mergedLines.filter((l) => l.userRemoved).length, [mergedLines]);
-  const totalRemoved = removedCount + userRemovedCount;
+  const handleReExtract = useCallback(() => {
+    const extracted = extractBqDml(originalContent) || '';
+    setMergedLines(buildMergedLines(originalContent, extracted));
+  }, [originalContent]);
 
-  const toggleUserRemoved = useCallback((idx: number) => {
+  // Toggle removed status — matching ETL tool exactly
+  const toggleRemoved = useCallback((idx: number) => {
     setMergedLines((prev) => {
       const next = [...prev];
-      if (!next[idx]) return prev;
-      const line = next[idx];
-      if (line.removed) {
-        // Auto-removed line: un-remove it (keep)
-        next[idx] = { ...line, removed: false, userRemoved: false };
-      } else {
-        // Manual toggle
-        next[idx] = { ...line, userRemoved: !line.userRemoved };
+      if (next[idx]) {
+        next[idx] = { ...next[idx], removed: !next[idx].removed };
       }
       return next;
     });
@@ -131,6 +108,14 @@ export function ProcedureRepairDialog({
       return next;
     });
   }, []);
+
+  const originalLines = useMemo(() => originalContent.split('\n'), [originalContent]);
+  const output = useMemo(
+    () => mergedLines.filter((l) => !l.removed).map((l) => l.content).join('\n'),
+    [mergedLines]
+  );
+  const removedCount = useMemo(() => mergedLines.filter((l) => l.removed).length, [mergedLines]);
+  const keptCount = mergedLines.length - removedCount;
 
   const handleCopyAll = useCallback(async () => {
     if (!output) return;
@@ -150,7 +135,6 @@ export function ProcedureRepairDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="full">
-        {/* Header */}
         <DialogHeader className="px-3 pt-3 pb-0 shrink-0">
           <div className="flex items-center gap-1.5">
             <div className="flex items-center justify-center w-6 h-6 rounded-md bg-amber-500/10">
@@ -158,15 +142,14 @@ export function ProcedureRepairDialog({
             </div>
             <DialogTitle>{t('procedure.title', '存储过程转换')}</DialogTitle>
             <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
-              {originalLines.length} → {mergedLines.filter((l) => !l.removed && !l.userRemoved).length} 行 · 已过滤 {totalRemoved}
+              {originalLines.length} → {keptCount} 行 · 已过滤 {removedCount}
             </span>
           </div>
           <DialogDescription className="leading-tight">
-            左侧原始存储过程，右侧自动过滤 DECLARE/SET/控制流 — 可编辑、可手动删除行
+            左侧原始存储过程，右侧自动过滤 DECLARE/SET/控制流 — 可删除/恢复行
           </DialogDescription>
         </DialogHeader>
 
-        {/* Toolbar */}
         <div className="flex items-center justify-between px-3 py-1.5 border-b shrink-0 bg-muted/20">
           <div className="flex items-center gap-1.5">
             <Button
@@ -177,7 +160,7 @@ export function ProcedureRepairDialog({
               <RotateCcw className="h-3 w-3" />
               重新提取
             </Button>
-            {userRemovedCount > 0 && (
+            {removedCount > 0 && (
               <Button
                 size="sm"
                 variant="outline"
@@ -185,7 +168,7 @@ export function ProcedureRepairDialog({
                 onClick={() => setShowRemoved((v) => !v)}
               >
                 <X className={cn('h-2.5 w-2.5', !showRemoved && 'rotate-45')} />
-                已删除 ({userRemovedCount} 行)
+                已删除 ({removedCount} 行)
               </Button>
             )}
           </div>
@@ -200,9 +183,8 @@ export function ProcedureRepairDialog({
           </div>
         </div>
 
-        {/* Three-column view */}
         <div className="flex-1 min-h-0 flex overflow-hidden">
-          {/* Left: Original (read-only) */}
+          {/* Left: Original */}
           <div className="flex-1 min-w-0 flex flex-col border-r">
             <div className="flex items-center gap-1 px-2 py-1 border-b bg-muted/10 shrink-0">
               <span className="text-[10px] text-muted-foreground">
@@ -223,7 +205,7 @@ export function ProcedureRepairDialog({
             </div>
           </div>
 
-          {/* Middle: keep/delete toggle */}
+          {/* Middle: keep/delete — matching ETL exact pattern */}
           {hasResult && (
             <div className="w-12 shrink-0 flex flex-col border-r bg-muted/5">
               <div className="h-[29px] border-b shrink-0 flex items-center justify-center bg-muted/10">
@@ -231,39 +213,22 @@ export function ProcedureRepairDialog({
               </div>
               <div className="flex-1 min-h-0 overflow-hidden">
                 {mergedLines.map((line, idx) => {
-                  const isAutoRemoved = line.removed;
-                  const isUserRemoved = line.userRemoved;
-                  const isRemoved = isAutoRemoved || isUserRemoved;
-
-                  if (isUserRemoved && !showRemoved) return null;
-
+                  if (line.removed && !showRemoved && line.content.trim()) return null;
                   return (
-                    <div key={`${idx}-${line.userRemoved ? 'r' : 'k'}`} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
+                    <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
                       <button
-                        title={isAutoRemoved ? '自动过滤' : '标记为删除'}
-                        onClick={() => { if (!isAutoRemoved) toggleUserRemoved(idx); }}
-                        className={cn(
-                          'p-0 rounded hover:bg-red-100 transition-colors',
-                          isRemoved && 'bg-red-100',
-                        )}
+                        title="标记为删除"
+                        onClick={() => { if (!line.removed) toggleRemoved(idx); }}
+                        className={cn('p-0 rounded hover:bg-red-100 transition-colors', line.removed && 'bg-red-100')}
                       >
-                        <ArrowLeft className={cn(
-                          'h-2.5 w-2.5',
-                          isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400',
-                        )} />
+                        <ArrowLeft className={cn('h-2.5 w-2.5', line.removed ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
                       </button>
                       <button
-                        title={isAutoRemoved ? '恢复此行' : isUserRemoved ? '保留此行' : '已保留'}
-                        onClick={() => { if (isRemoved) toggleUserRemoved(idx); }}
-                        className={cn(
-                          'p-0 rounded hover:bg-green-100 transition-colors',
-                          !isRemoved && 'bg-green-100',
-                        )}
+                        title="保留此行"
+                        onClick={() => { if (line.removed) toggleRemoved(idx); }}
+                        className={cn('p-0 rounded hover:bg-green-100 transition-colors', !line.removed && 'bg-green-100')}
                       >
-                        <ArrowRight className={cn(
-                          'h-2.5 w-2.5',
-                          !isRemoved ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400',
-                        )} />
+                        <ArrowRight className={cn('h-2.5 w-2.5', !line.removed ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
                       </button>
                     </div>
                   );
@@ -272,7 +237,7 @@ export function ProcedureRepairDialog({
             </div>
           )}
 
-          {/* Right: Processed result (editable) */}
+          {/* Right: Result — matching ETL exact pattern */}
           <div className="flex-1 min-w-0 flex flex-col">
             <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/10 shrink-0">
               <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -293,26 +258,24 @@ export function ProcedureRepairDialog({
             {hasResult ? (
               <div ref={rightRef} className="flex-1 min-h-0 overflow-auto bg-background" onScroll={() => handleScroll('right')}>
                 {mergedLines.map((line, idx) => {
-                  if (line.userRemoved && !showRemoved) return null;
+                  if (line.removed && !showRemoved && line.content.trim()) return null;
 
                   return (
                     <div
-                      key={`${idx}-${line.userRemoved ? 'r' : 'k'}`}
+                      key={idx}
                       className={cn(
                         'flex items-start h-[15px]',
                         line.removed && 'bg-red-500/[0.06]',
-                        line.userRemoved && 'bg-red-500/[0.06]',
-                        !line.removed && !line.userRemoved && 'group',
                       )}
                     >
                       <span className={cn(
                         'w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]',
-                        line.removed || line.userRemoved ? 'text-red-400' : 'text-muted-foreground'
+                        line.removed ? 'text-red-400' : 'text-muted-foreground'
                       )}>
                         {idx + 1}
                       </span>
 
-                      {line.removed || line.userRemoved ? (
+                      {line.removed ? (
                         <span className={cn(
                           'flex-1 whitespace-pre pr-2 overflow-hidden font-mono text-red-500 line-through',
                           fSizeMono
@@ -335,11 +298,7 @@ export function ProcedureRepairDialog({
                           onBlur={() => setEditingIdx(null)}
                           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditingIdx(null); }}
                           autoFocus
-                          className={cn(
-                            'flex-1 min-w-0 pr-2 border-0 outline-none bg-transparent font-mono',
-                            fSizeMono,
-                            'focus:bg-amber-500/5'
-                          )}
+                          className={cn('flex-1 min-w-0 pr-2 border-0 outline-none bg-transparent font-mono', fSizeMono, 'focus:bg-amber-500/5')}
                           spellCheck={false}
                         />
                       )}
