@@ -457,8 +457,32 @@ function buildFlowNodes(
   });
 
   const flowNodes: SerializedFlowNode[] = [];
+  const isLargeGraph = sortedTableNodes.length > 100;
 
   for (const node of sortedTableNodes) {
+    // For large graphs, skip column data entirely
+    if (isLargeGraph) {
+      flowNodes.push({
+        id: node.id,
+        type: 'tableNode',
+        position: { x: 0, y: 0 },
+        data: buildTableNodeData(
+          node,
+          [], // no columns
+          {
+            selectedNodeId,
+            searchTerm,
+            isCollapsed: true,
+            hiddenColumnCount: 0,
+            isRecursive: recursiveNodeIds.has(node.id),
+            isBaseTable: baseTableIds.has(node.id),
+          },
+          globalNodeMap
+        ),
+      });
+      continue;
+    }
+
     const existingColumns = tableColumnMap.get(node.id) || [];
     const isExpanded = expandedTableIds.has(node.id);
 

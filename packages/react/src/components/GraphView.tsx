@@ -288,17 +288,47 @@ function enhanceGraphWithHighlights(
   graph: { nodes: FlowNode[]; edges: FlowEdge[] },
   highlightIds: Set<string>
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
+  // Fast path: no highlights — return as-is without re-allocating
+  if (highlightIds.size === 0) {
+    return graph;
+  }
+
+  // For large graphs, only enhance nodes that are actually highlighted.
+  // Non-highlighted nodes keep their existing data reference (no clone).
+  const isLargeGraph = graph.nodes.length > 200;
+  if (isLargeGraph) {
+    const enhancedNodes = graph.nodes.map((node) => {
+      const isHighlighted = highlightIds.has(node.id);
+      if (!isHighlighted) return node; // keep reference, no clone
+      const currentIsSelected = isSelectableNodeData(node.data) ? node.data.isSelected : false;
+      return {
+        ...node,
+        data: { ...node.data, isSelected: currentIsSelected || true },
+      };
+    });
+    const enhancedEdges = graph.edges.map((edge) => {
+      const isHl = highlightIds.has(edge.id);
+      if (!isHl) return edge;
+      return {
+        ...edge,
+        animated: true,
+        zIndex: GRAPH_CONFIG.HIGHLIGHTED_EDGE_Z_INDEX,
+        data: { ...edge.data, isHighlighted: true },
+      };
+    });
+    return { nodes: enhancedNodes, edges: enhancedEdges };
+  }
+
+  // Small graph: full enhancement (including column-level)
   const enhancedNodes = graph.nodes.map((node) => {
     const isHighlighted = highlightIds.has(node.id);
 
-    // Handle Table Nodes with columns
     if (isTableNodeData(node.data)) {
       const nodeData = node.data;
       const enhancedColumns = nodeData.columns.map((col) => ({
         ...col,
         isHighlighted: highlightIds.has(col.id),
       }));
-
       return {
         ...node,
         data: {
@@ -309,7 +339,6 @@ function enhanceGraphWithHighlights(
       };
     }
 
-    // Handle Script Nodes and generic nodes
     const currentIsSelected = isSelectableNodeData(node.data) ? node.data.isSelected : false;
     return {
       ...node,
