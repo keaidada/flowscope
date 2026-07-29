@@ -102,7 +102,8 @@ function extractBqDml(content: string): string | null {
     let tripleChar = '';
     let skipExecuteImmediate = false; // EXECUTE IMMEDIATE '...' (single-line DROP etc)
     let inBlockComment = false; // inside /* ... */ block comment
-    let inMultiLineSet = false; // inside SET var = (SELECT ...) multi-line
+    let inMultiLineSet = false; // inside multi-line SET ... ;
+    let inSetTripleQuote = false; // inside triple-quoted string within multi-line SET
 
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i];
@@ -111,6 +112,22 @@ function extractBqDml(content: string): string | null {
 
       // ── Handle on-going multi-line SET ... ; ──
       if (inMultiLineSet) {
+        // Track triple-quoted strings inside SET — don't treat ; inside them as end
+        if (inSetTripleQuote) {
+          if (trimmed.includes('"""') || trimmed.includes("'''")) {
+            inSetTripleQuote = false;
+          }
+          continue;
+        }
+        if (trimmed.includes('"""') || trimmed.includes("'''")) {
+          // Triple-quote starts on this line; check if it also ends here
+          const idx = line.indexOf('"""') >= 0 ? line.indexOf('"""') : line.indexOf("'''");
+          const after = line.slice(idx + 3);
+          if (!after.includes(line.slice(idx, idx + 3))) {
+            inSetTripleQuote = true;
+            continue; // don't end on ; yet — still inside triple quote
+          }
+        }
         if (trimmed.endsWith(';')) {
           inMultiLineSet = false;
         }
