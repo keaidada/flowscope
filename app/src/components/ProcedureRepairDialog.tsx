@@ -242,10 +242,15 @@ export function ProcedureRepairDialog({
                 const isUserKept = userKept.has(idx);
                 const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
                 if (isRemoved && !showRemoved) return null;
+                // For auto-removed lines, show original content in red strikethrough
+                // instead of blank — user can see exactly what was deleted
+                const displayText = isUserRemoved || isAutoRemoved
+                  ? (originalLines[idx] || '\u00A0')
+                  : line;
                 return (
                   <div key={`r-${idx}`} className={cn('flex items-start h-[15px]', isRemoved && 'bg-red-500/[0.06]', isUserKept && 'bg-blue-500/[0.06]')}>
                     <span className={cn('w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]', isRemoved && !isUserKept ? 'text-red-400' : isUserKept ? 'text-blue-400' : 'text-muted-foreground')}>{idx + 1}</span>
-                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, isUserRemoved && 'text-red-500 line-through', isAutoRemoved && !isUserKept && 'text-muted-foreground/20', isUserKept && 'text-blue-500')}>{isUserRemoved ? (originalLines[idx] || '\u00A0') : isAutoRemoved && isUserKept ? (originalLines[idx] || '\u00A0') : isAutoRemoved ? '\u00A0' : line}</span>
+                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, (isUserRemoved || (isAutoRemoved && !isUserKept)) && 'text-red-500 line-through', isUserKept && 'text-blue-500')}>{displayText}</span>
                   </div>
                 );
               })}
