@@ -882,7 +882,10 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
             }
             "CREATE" => {
                 let words: Vec<&str> = upper_stmt.split_whitespace().collect();
-                let has_as_select = words.windows(2).any(|w| w[0] == "AS" && (w[1] == "SELECT" || w[1] == "(SELECT"));
+                // Match AS SELECT, AS (SELECT, or AS WITH ... SELECT (CTE)
+                let has_as_select = words.windows(2).any(|w| w[0] == "AS" && (w[1] == "SELECT" || w[1] == "(SELECT"))
+                    || words.windows(2).any(|w| w[0] == "AS" && w[1] == "WITH")
+                    || (upper_stmt.contains(" AS ") && upper_stmt.contains("SELECT"));
                 if has_as_select {
                     out.push_str(content);
                     if !content.ends_with(';') {
