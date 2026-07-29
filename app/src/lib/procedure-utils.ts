@@ -7,7 +7,7 @@
  * FORMAT placeholders, EXECUTE IMMEDIATE, etc.
  */
 
-import { sanitizeProcedure } from '@pondpilot/flowscope-core';
+import { sanitizeProcedure, isWasmInitialized } from '@pondpilot/flowscope-core';
 
 /**
  * Extract DML from a stored procedure.
@@ -15,5 +15,8 @@ import { sanitizeProcedure } from '@pondpilot/flowscope-core';
  */
 export function extractDmlFromProcedure(content: string, dialect?: string): string | null {
   if (dialect && dialect !== 'bigquery') return null;
-  return sanitizeProcedure(content);
+  console.log('[procedure-utils] Wasm initialized:', isWasmInitialized(), 'content length:', content?.length);
+  const result = sanitizeProcedure(content);
+  console.log('[procedure-utils] sanitize result length:', result?.length);
+  return result;
 }
