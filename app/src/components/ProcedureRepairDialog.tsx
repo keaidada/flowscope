@@ -8,7 +8,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Copy, Check, RotateCcw, Scissors, X, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Copy, Check, RotateCcw, Scissors } from 'lucide-react';
 import { extractDmlFromProcedure } from '@/lib/procedure-utils';
 import { cn } from '@/lib/utils';
 
@@ -19,92 +19,6 @@ interface ProcedureRepairDialogProps {
   onApply: (transformedContent: string | null) => void;
 }
 
-interface MergedLine {
-  content: string;
-  removed: boolean;
-}
-
-/** SQL keywords that signal a line should always be kept */
-const SQL_KEYWORDS = [
-  'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL',
-  'CROSS', 'ON', 'AND', 'OR', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'UNION',
-  'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE', 'MERGE', 'USING',
-  'WHEN', 'THEN', 'ELSE', 'END',
-];
-
-function buildMergedLines(original: string, extracted: string): MergedLine[] {
-  const origLines = original.split('\n');
-  const extLines = extracted.split('\n');
-  const result: MergedLine[] = [];
-
-  let extIdx = 0;
-  let inBlockComment = false;
-  let inMultiLineSet = false; // SET var = (SELECT ...)
-  for (let i = 0; i < origLines.length; i++) {
-    const origTrim = origLines[i].trim();
-    const isComment = origTrim.startsWith('--');
-    const upper = origTrim.toUpperCase();
-
-    // Multi-line SET var = ( ... ); — mark all lines as removed
-    if (inMultiLineSet) {
-      if (origTrim.endsWith(';')) inMultiLineSet = false;
-      result.push({ content: origLines[i], removed: true });
-      continue;
-    }
-    if (upper.startsWith('SET ') && !origTrim.endsWith(';')) {
-      inMultiLineSet = true;
-      result.push({ content: origLines[i], removed: true });
-      continue;
-    }
-
-    // Track /* ... */ block comments
-    if (inBlockComment) {
-      if (origTrim.includes('*/')) inBlockComment = false;
-      result.push({ content: origLines[i], removed: true });
-      continue;
-    }
-    if (origTrim.startsWith('/*') || origTrim.includes('/*')) {
-      const afterOpen = origTrim.slice(origTrim.indexOf('/*') + 2);
-      if (!afterOpen.includes('*/')) inBlockComment = true;
-      result.push({ content: origLines[i], removed: true });
-      continue;
-    }
-
-    const firstWord = origTrim.toUpperCase().split(/\s+/)[0].replace(/[,;]$/, '');
-
-    if (extIdx < extLines.length) {
-      const extTrim = extLines[extIdx].trim();
-      if (
-        origTrim === extTrim ||
-        (origTrim && extTrim && (extTrim.includes(origTrim) || origTrim.includes(extTrim)))
-      ) {
-        result.push({ content: isComment ? origLines[i] : extLines[extIdx], removed: isComment });
-        extIdx++;
-        continue;
-      }
-    }
-
-    // SQL keywords that didn't match — try nearby positions only
-    if (!isComment && SQL_KEYWORDS.includes(firstWord)) {
-      let found = false;
-      for (let k = extIdx; k < extLines.length && k < extIdx + 3; k++) {
-        const extTrim = extLines[k].trim();
-        if (extTrim === origTrim || (extTrim && origTrim && extTrim.includes(origTrim))) {
-          result.push({ content: extLines[k], removed: false });
-          extIdx = k + 1;
-          found = true;
-          break;
-        }
-      }
-      if (found) continue;
-    }
-
-    result.push({ content: origLines[i], removed: true });
-  }
-
-  return result;
-}
-
 export function ProcedureRepairDialog({
   open,
   onOpenChange,
@@ -112,22 +26,16 @@ export function ProcedureRepairDialog({
   onApply,
 }: ProcedureRepairDialogProps) {
   const { t } = useTranslation();
-  const [mergedLines, setMergedLines] = useState<MergedLine[]>([]);
-  const [, setTransformedContent] = useState('');
+  const [transformedContent, setTransformedContent] = useState('');
   const [copied, setCopied] = useState(false);
-  const [editingIdx, setEditingIdx] = useState<number | null>(null);
-  const [showRemoved, setShowRemoved] = useState(true);
 
   const leftRef = useRef<HTMLDivElement>(null);
-  const middleRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   const syncing = useRef(false);
 
   useEffect(() => {
     if (open && originalContent) {
-      const extracted = extractDmlFromProcedure(originalContent) || '';
-      setTransformedContent(extracted);
-      setMergedLines(buildMergedLines(originalContent, extracted));
+      setTransformedContent(extractDmlFromProcedure(originalContent) || '');
     }
   }, [open, originalContent]);
 
@@ -135,63 +43,32 @@ export function ProcedureRepairDialog({
     if (syncing.current) return;
     syncing.current = true;
     const l = leftRef.current;
-    const m = middleRef.current;
     const r = rightRef.current;
     if (!l || !r) { syncing.current = false; return; }
-    const st = source === 'left' ? l.scrollTop : r.scrollTop;
-    if (source === 'left') r.scrollTop = st;
-    else l.scrollTop = st;
-    if (m) m.scrollTop = st;
+    if (source === 'left') r.scrollTop = l.scrollTop;
+    else l.scrollTop = r.scrollTop;
     requestAnimationFrame(() => { syncing.current = false; });
   }, []);
 
   const handleReExtract = useCallback(() => {
-    const extracted = extractDmlFromProcedure(originalContent) || '';
-    setTransformedContent(extracted);
-    setMergedLines(buildMergedLines(originalContent, extracted));
+    setTransformedContent(extractDmlFromProcedure(originalContent) || '');
   }, [originalContent]);
 
-  // Toggle removed status — matching ETL tool exactly
-  const toggleRemoved = useCallback((idx: number) => {
-    setMergedLines((prev) => {
-      const next = [...prev];
-      if (next[idx]) {
-        next[idx] = { ...next[idx], removed: !next[idx].removed };
-      }
-      return next;
-    });
-  }, []);
-
-  const handleLineChange = useCallback((idx: number, value: string) => {
-    setMergedLines((prev) => {
-      const next = [...prev];
-      if (next[idx]) next[idx] = { ...next[idx], content: value };
-      return next;
-    });
-  }, []);
-
-  const originalLines = useMemo(() => originalContent.split('\n'), [originalContent]);
-  const output = useMemo(
-    () => mergedLines.filter((l) => !l.removed).map((l) => l.content).join('\n'),
-    [mergedLines]
-  );
-  const removedCount = useMemo(() => mergedLines.filter((l) => l.removed).length, [mergedLines]);
-  const keptCount = mergedLines.length - removedCount;
-
   const handleCopyAll = useCallback(async () => {
-    if (!output) return;
-    await navigator.clipboard.writeText(output);
+    if (!transformedContent) return;
+    await navigator.clipboard.writeText(transformedContent);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, [output]);
+  }, [transformedContent]);
 
   const handleApply = useCallback(() => {
-    onApply(output.trim() || null);
+    onApply(transformedContent.trim() || null);
     onOpenChange(false);
-  }, [output, onApply, onOpenChange]);
+  }, [transformedContent, onApply, onOpenChange]);
 
+  const originalLines = useMemo(() => originalContent.split('\n'), [originalContent]);
+  const transformedLines = useMemo(() => transformedContent.split('\n'), [transformedContent]);
   const fSizeMono = 'text-[10px] leading-[15px]';
-  const hasResult = mergedLines.length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -203,178 +80,59 @@ export function ProcedureRepairDialog({
             </div>
             <DialogTitle>{t('procedure.title', '存储过程转换')}</DialogTitle>
             <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
-              {originalLines.length} → {keptCount} 行 · 已过滤 {removedCount}
+              {originalLines.length} → {transformedLines.length} 行
             </span>
           </div>
           <DialogDescription className="leading-tight">
-            左侧原始存储过程，右侧自动过滤 DECLARE/SET/控制流 — 可删除/恢复行
+            左侧原始存储过程，右侧 AST 引擎提取的 DML，与目录转换结果一致
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex items-center justify-between px-3 py-1.5 border-b shrink-0 bg-muted/20">
-          <div className="flex items-center gap-1.5">
-            <Button
-              size="sm"
-              className="h-7 gap-1 bg-amber-500 hover:bg-amber-600 text-white text-[11px] px-2.5"
-              onClick={handleReExtract}
-            >
-              <RotateCcw className="h-3 w-3" />
-              重新提取
+          <Button size="sm" className="h-7 gap-1 bg-amber-500 hover:bg-amber-600 text-white text-[11px] px-2.5" onClick={handleReExtract}>
+            <RotateCcw className="h-3 w-3" />重新提取
+          </Button>
+          {transformedContent && (
+            <Button size="sm" variant="outline" className="h-7 gap-1 text-[11px] px-2" onClick={handleCopyAll}>
+              {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+              {copied ? '已复制' : '复制全部'}
             </Button>
-            {removedCount > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 px-2 text-[10px] gap-1"
-                onClick={() => setShowRemoved((v) => !v)}
-              >
-                <X className={cn('h-2.5 w-2.5', !showRemoved && 'rotate-45')} />
-                已删除 ({removedCount} 行)
-              </Button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            {output && (
-              <Button size="sm" variant="outline" className="h-7 gap-1 text-[11px] px-2" onClick={handleCopyAll}>
-                {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-                {copied ? '已复制' : '复制全部'}
-              </Button>
-            )}
-          </div>
+          )}
         </div>
 
         <div className="flex-1 min-h-0 flex overflow-hidden">
-          {/* Left: Original */}
           <div className="flex-1 min-w-0 flex flex-col border-r">
             <div className="flex items-center gap-1 px-2 py-1 border-b bg-muted/10 shrink-0">
-              <span className="text-[10px] text-muted-foreground">
-                原始存储过程 ({originalLines.length} 行)
-              </span>
+              <span className="text-[10px] text-muted-foreground">原始存储过程 ({originalLines.length} 行)</span>
             </div>
             <div ref={leftRef} className="flex-1 min-h-0 overflow-auto bg-background" onScroll={() => handleScroll('left')}>
               {originalLines.map((line, idx) => (
                 <div key={`l-${idx}`} className="flex items-start h-[15px]">
-                  <span className="w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px] text-muted-foreground/40">
-                    {idx + 1}
-                  </span>
-                  <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono)}>
-                    {line}
-                  </span>
+                  <span className="w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px] text-muted-foreground/40">{idx + 1}</span>
+                  <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono)}>{line}</span>
                 </div>
               ))}
             </div>
           </div>
-
-          {/* Middle: keep/delete — matching ETL exact pattern */}
-          {hasResult && (
-            <div className="w-12 shrink-0 flex flex-col border-r bg-muted/5">
-              <div className="h-[29px] border-b shrink-0 flex items-center justify-center bg-muted/10">
-                <span className="text-[8px] text-muted-foreground">操作</span>
-              </div>
-              <div ref={middleRef} className="flex-1 min-h-0 overflow-hidden">
-                {mergedLines.map((line, idx) => {
-                  if (line.removed && !showRemoved && line.content.trim()) return null;
-                  return (
-                    <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
-                      <button
-                        title="标记为删除"
-                        onClick={() => { if (!line.removed) toggleRemoved(idx); }}
-                        className={cn('p-0 rounded hover:bg-red-100 transition-colors', line.removed && 'bg-red-100')}
-                      >
-                        <ArrowLeft className={cn('h-2.5 w-2.5', line.removed ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
-                      </button>
-                      <button
-                        title="保留此行"
-                        onClick={() => { if (line.removed) toggleRemoved(idx); }}
-                        className={cn('p-0 rounded hover:bg-green-100 transition-colors', !line.removed && 'bg-green-100')}
-                      >
-                        <ArrowRight className={cn('h-2.5 w-2.5', !line.removed ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Right: Result — matching ETL exact pattern */}
           <div className="flex-1 min-w-0 flex flex-col">
             <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/10 shrink-0">
-              <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                <Scissors className="h-3 w-3 text-amber-500" />
-                <span>转换结果（可编辑）</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-5 px-1.5 text-[10px] text-amber-500 hover:text-amber-600"
-                onClick={handleApply}
-                disabled={!output.trim()}
-              >
-                应用
-              </Button>
+              <span className="text-[10px] text-muted-foreground">转换结果 ({transformedLines.length} 行)</span>
+              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-amber-500 hover:text-amber-600" onClick={handleApply} disabled={!transformedContent.trim()}>应用</Button>
             </div>
-
-            {hasResult ? (
-              <div ref={rightRef} className="flex-1 min-h-0 overflow-auto bg-background" onScroll={() => handleScroll('right')}>
-                {mergedLines.map((line, idx) => {
-                  if (line.removed && !showRemoved && line.content.trim()) return null;
-
-                  return (
-                    <div
-                      key={idx}
-                      className={cn(
-                        'flex items-start h-[15px]',
-                        line.removed && 'bg-red-500/[0.06]',
-                      )}
-                    >
-                      <span className={cn(
-                        'w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]',
-                        line.removed ? 'text-red-400' : 'text-muted-foreground'
-                      )}>
-                        {idx + 1}
-                      </span>
-
-                      {line.removed ? (
-                        <span className={cn(
-                          'flex-1 whitespace-pre pr-2 overflow-hidden font-mono text-red-500 line-through',
-                          fSizeMono
-                        )}>
-                          {line.content}
-                        </span>
-                      ) : editingIdx !== idx ? (
-                        <span
-                          className={cn('flex-1 whitespace-pre pr-2 overflow-hidden cursor-text font-mono', fSizeMono)}
-                          onClick={() => setEditingIdx(idx)}
-                          title="点击编辑"
-                        >
-                          {line.content}
-                        </span>
-                      ) : (
-                        <input
-                          type="text"
-                          value={line.content}
-                          onChange={(e) => handleLineChange(idx, e.target.value)}
-                          onBlur={() => setEditingIdx(null)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditingIdx(null); }}
-                          autoFocus
-                          className={cn('flex-1 min-w-0 pr-2 border-0 outline-none bg-transparent font-mono', fSizeMono, 'focus:bg-amber-500/5')}
-                          spellCheck={false}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-[10px] text-muted-foreground">
-                <div className="text-center space-y-1.5">
-                  <RotateCcw className="h-4 w-4 mx-auto opacity-30" />
-                  <p>点击"重新提取"提取 DML</p>
+            <div ref={rightRef} className="flex-1 min-h-0 overflow-auto bg-background" onScroll={() => handleScroll('right')}>
+              {transformedLines.length > 0 ? (
+                transformedLines.map((line, idx) => (
+                  <div key={`r-${idx}`} className="flex items-start h-[15px]">
+                    <span className="w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px] text-muted-foreground/40">{idx + 1}</span>
+                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono)}>{line}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-[10px] text-muted-foreground">
+                  <span>点击"重新提取"提取 DML</span>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </DialogContent>
