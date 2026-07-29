@@ -2338,14 +2338,13 @@ pub(crate) async fn analyze_batch(
         }
 
         // For procedures, use stored transformed_content if available
-        let sql = if !f.transformed_content.is_empty() {
-            f.transformed_content.clone()
-        } else if f.is_procedure != 0
-            || f.content.to_uppercase().contains("CREATE PROCEDURE")
-            || f.content.to_uppercase().contains("CREATE PROC ")
-        {
-            flowscope_core::parser::sanitize_bigquery_raw_double_quoted_literals(&f.content)
-                .unwrap_or_else(|| f.content.clone())
+        let sql = if f.is_procedure != 0 {
+            if !f.transformed_content.is_empty() {
+                f.transformed_content.clone()
+            } else {
+                flowscope_core::parser::sanitize_bigquery_raw_double_quoted_literals(&f.content)
+                    .unwrap_or_else(|| f.content.clone())
+            }
         } else {
             f.content.clone()
         };
