@@ -1090,30 +1090,20 @@ fn extract_sql_from_set_stmt(s: &str) -> Option<String> {
         .then_some(inner);
     }
     // Handle SET var = 'SQL' or SET var = "SQL"
-    if !after_eq.starts_with('"') && !after_eq.starts_with('\'') {
-        return None;
-    }
-    let q = after_eq.as_bytes()[0];
-    let mut end = 1;
-    let bytes = after_eq.as_bytes();
-    while end < bytes.len() && bytes[end] != q {
-        if bytes[end] == b'\\' {
-            end += 2;
-            continue;
+    // Only extract from triple-quoted strings — single-quoted values
+    // are typically descriptions, not SQL.
+    if after_eq.starts_with("\"\"\"") || after_eq.starts_with("'''") {
+        if let Some(inner) = extract_triple_quoted(after_eq) {
+            let upper = inner.to_uppercase();
+            let first_word = upper.split_whitespace().next()?;
+            return matches!(
+                first_word,
+                "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN"
+            )
+            .then_some(inner);
         }
-        end += 1;
     }
-    if end >= bytes.len() {
-        return None;
-    }
-    let inner = after_eq[1..end].to_string();
-    let upper = inner.to_uppercase();
-    let first_word = upper.split_whitespace().next()?;
-    matches!(
-        first_word,
-        "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN"
-    )
-    .then_some(inner)
+    None
 }
 
 /// Remove /* ... */ markers, keeping the inner content.
