@@ -44,8 +44,6 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     renameFolder,
     deleteFolder,
     isReadOnly,
-    ensureFilesContent,
-    isContentLoaded,
   } = useProject();
 
   const [search, setSearch] = useState('');
@@ -270,7 +268,10 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
   const handleConvertFolder = useCallback(
     async (dialect: Dialect) => {
-      if (!currentProject) return;
+      if (!currentProject) {
+        console.warn('[convert] currentProject is null');
+        return;
+      }
 
       const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
       const folderFiles = currentProject.files.filter((f) => f.path.startsWith(prefix));
@@ -281,6 +282,8 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         return upper.includes('CREATE PROCEDURE') || upper.includes('CREATE PROC ');
       });
       const total = procFiles.length;
+
+      console.log(`[convert] folder=${prefix}, total=${folderFiles.length}, procedures=${total}`);
 
       if (total === 0) return;
 
@@ -346,6 +349,12 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         }
       } catch (e) {
         console.error('Failed to convert procedures:', e);
+        setConvertResult({
+          success: 0,
+          successPaths: [],
+          empty: [],
+          errors: [String(e)],
+        });
       } finally {
         setIsConvertingFolder(false);
       }
@@ -354,8 +363,6 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       currentProject,
       convertTargetPath,
       updateFiles,
-      ensureFilesContent,
-      isContentLoaded,
       activeProjectId,
     ]
   );
