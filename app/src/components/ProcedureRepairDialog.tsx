@@ -90,6 +90,15 @@ export function ProcedureRepairDialog({
           found = true;
           break;
         }
+        // Original contains extracted content: handles EXECUTE IMMEDIATE 'SQL'
+        // and SET var = """SQL""" where sanitizer extracted the inner SQL
+        if (origTrim.length > extTrim.length + 2 && origTrim.includes(extTrim) && extTrim.length > 10) {
+          result[i] = extLines[extIdx];
+          usedExt.add(extIdx);
+          origStart = i + 1;
+          found = true;
+          break;
+        }
       }
       // If no match found, try substring match as fallback
       if (!found) {
