@@ -50,6 +50,14 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState('');
   const quickInputRef = useRef<HTMLInputElement>(null);
+  const [revealCnt, setRevealCnt] = useState(0);
+
+  const handleRevealActive = useCallback(() => setRevealCnt((c) => c + 1), []);
+
+  // Changing revealCnt triggers FileTree to re-scroll to active file
+  const focusFileId = revealCnt > 0 && currentProject?.activeFileId
+    ? `${currentProject.activeFileId}:${revealCnt}`
+    : null;
 
   const [search, setSearch] = useState('');
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
