@@ -2337,7 +2337,10 @@ pub(crate) async fn analyze_batch(
             continue;
         }
 
-        let sql = if f.is_procedure != 0
+        // For procedures, use stored transformed_content if available
+        let sql = if !f.transformed_content.is_empty() {
+            f.transformed_content.clone()
+        } else if f.is_procedure != 0
             || f.content.to_uppercase().contains("CREATE PROCEDURE")
             || f.content.to_uppercase().contains("CREATE PROC ")
         {
@@ -2355,7 +2358,7 @@ pub(crate) async fn analyze_batch(
         }];
 
         let request = flowscope_core::AnalyzeRequest {
-            sql,
+            sql: sql.clone(),
             files: Some(files),
             dialect,
             source_name: Some(f.path.clone()),
