@@ -42,6 +42,8 @@ interface FileTreeProps {
   renamingFileId: string | null;
   renameValue: string;
   focusedFileId?: string | null;
+  /** Increments each time "locate" button is clicked in the editor */
+  revealCnt?: number;
   onSelectFile: (fileId: string) => void;
   onToggleSelection: (e: React.MouseEvent, fileId: string) => void;
   /** Toggle selection via keyboard (Space key) */
@@ -554,6 +556,7 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
     renamingFileId,
     renameValue,
     focusedFileId,
+    revealCnt,
     onSelectFile,
     onToggleSelection,
     onToggleSelectionKeyboard,
@@ -622,6 +625,15 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
       itemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
   }, [isActive]);
+
+  // Scroll to active file when revealCnt increments (locate button)
+  const prevReveal = useRef(revealCnt);
+  useEffect(() => {
+    if (revealCnt && revealCnt > (prevReveal.current ?? 0) && isActive && itemRef.current) {
+      itemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    prevReveal.current = revealCnt;
+  }, [revealCnt, isActive]);
 
   return (
     <div
