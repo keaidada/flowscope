@@ -674,6 +674,21 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         });
         if (emptyFileNames.length > 0) {
           console.log(`[useAnalysis] Skipped ${emptyFileNames.length} empty file(s):`, emptyFileNames);
+          // Record empty files as anomalies
+          import('@/lib/server-db').then((db) => {
+            for (const name of emptyFileNames) {
+              db.saveAnomaly(activeProjectId!, {
+                filePath: name,
+                scriptName: name.split('/').pop() || name,
+                scriptContent: '',
+                severity: 'warning',
+                anomalyType: 'empty_content',
+                message: '脚本内容为空，跳过解析',
+                detail: '',
+                isTest: 0,
+              }).catch(() => {});
+            }
+          });
         }
         if (context.files.length === 0) {
           return;
