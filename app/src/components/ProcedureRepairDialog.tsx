@@ -61,11 +61,14 @@ export function ProcedureRepairDialog({
 
     const result: string[] = new Array(originalLines.length).fill('');
 
+    // Skip trivial fragments that cause false matches
+    const skipSet = new Set([');', '(', ')', 'END;', 'BEGIN']);
+
     // Build extMap: trimmed text → first unused index (use array for dedup)
     const extMap = new Map<string, number[]>();
     extLines.forEach((line, i) => {
       const t = line.trim();
-      if (t && t.length >= 5) {
+      if (t && !skipSet.has(t)) {
         const arr = extMap.get(t) || [];
         arr.push(i);
         extMap.set(t, arr);
@@ -77,7 +80,7 @@ export function ProcedureRepairDialog({
     // Pass 1: exact match
     for (let i = 0; i < originalLines.length; i++) {
       const origTrim = originalLines[i].trim();
-      if (!origTrim || origTrim.length < 5) continue;
+      if (!origTrim || skipSet.has(origTrim)) continue;
       if (origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
 
       const indices = extMap.get(origTrim);
