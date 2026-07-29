@@ -86,13 +86,13 @@ export function EditorArea({
   // Lazy content loading: fetch file content when user opens it
   const [contentLoading, setContentLoading] = useState(false);
   useEffect(() => {
-    if (!activeFile || isContentLoaded(activeFile.id)) {
+    if (!activeFile || isContentLoaded(activeFile.id) || activeFile.content) {
       setContentLoading(false);
       return;
     }
     setContentLoading(true);
     loadFileContent(activeFile.id).finally(() => setContentLoading(false));
-  }, [activeFile?.id, isContentLoaded, loadFileContent]);
+  }, [activeFile?.id, isContentLoaded, loadFileContent, activeFile?.content]);
 
   // Track previous values to detect changes (null means initial mount)
   const previousSchema = useRef<string | null>(null);
