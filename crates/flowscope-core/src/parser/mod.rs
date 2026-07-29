@@ -99,15 +99,18 @@ pub fn parse_sql_with_dialect_output(
                 }
             }
 
-            if matches!(dialect, Dialect::Bigquery) || (matches!(dialect, Dialect::Generic) && looks_like_bigquery_procedure(sql)) {
+            if matches!(dialect, Dialect::Bigquery)
+                || (matches!(dialect, Dialect::Generic) && looks_like_bigquery_procedure(sql))
+            {
                 match sanitize_bigquery_raw_double_quoted_literals(sql) {
                     Some(sanitized_sql) => {
                         // Try Generic dialect first — the sanitized output contains standard
                         // DML (DELETE, INSERT…SELECT) and the BigQuery dialect may choke on
                         // CASE WHEN or other expressions.
                         let generic = GenericDialect {};
-                        let parsed = Parser::parse_sql(&generic, &sanitized_sql)
-                            .or_else(|_| Parser::parse_sql(sqlparser_dialect.as_ref(), &sanitized_sql));
+                        let parsed = Parser::parse_sql(&generic, &sanitized_sql).or_else(|_| {
+                            Parser::parse_sql(sqlparser_dialect.as_ref(), &sanitized_sql)
+                        });
                         if let Ok(statements) = parsed {
                             if !statements.is_empty() {
                                 return Ok(ParseSqlOutput {
@@ -351,7 +354,9 @@ fn strip_clickhouse_final(sql: &str) -> Option<String> {
                 && (i == 0 || bytes[i - 1].is_ascii_whitespace())
             {
                 let after = remaining.get(5);
-                let is_end = after.is_none() || after == Some(&b')') || after.map_or(false, |b| b.is_ascii_whitespace());
+                let is_end = after.is_none()
+                    || after == Some(&b')')
+                    || after.map_or(false, |b| b.is_ascii_whitespace());
                 if is_end {
                     i += 5;
                     changed = true;
@@ -591,13 +596,21 @@ fn backtick_quote_hyphenated_identifiers(sql: &str) -> String {
                 continue;
             }
         } else if in_single {
-            if b == b'\'' { in_single = false; }
+            if b == b'\'' {
+                in_single = false;
+            }
         } else if in_double {
-            if b == b'"' { in_double = false; }
+            if b == b'"' {
+                in_double = false;
+            }
         } else if in_backtick {
-            if b == b'`' { in_backtick = false; }
+            if b == b'`' {
+                in_backtick = false;
+            }
         } else if in_line_comment {
-            if b == b'\n' { in_line_comment = false; }
+            if b == b'\n' {
+                in_line_comment = false;
+            }
         } else if in_block_comment {
             if b == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
                 out.push(b as char);
@@ -644,13 +657,14 @@ fn sanitize_bigquery_procedure(sql: &str) -> Option<String> {
 /// meaning this END belongs to a control-flow block, not a procedure-level END.
 fn is_control_flow_end(after_end: &[u8]) -> bool {
     let mut i = 0;
-    while i < after_end.len() && after_end[i].is_ascii_whitespace() { i += 1; }
+    while i < after_end.len() && after_end[i].is_ascii_whitespace() {
+        i += 1;
+    }
     let rest = &after_end[i..];
-    rest.len() >= 2 && (
-        rest[..2].eq_ignore_ascii_case(b"IF")
-        || rest.len() >= 5 && rest[..5].eq_ignore_ascii_case(b"WHILE")
-        || rest.len() >= 4 && rest[..4].eq_ignore_ascii_case(b"LOOP")
-    )
+    rest.len() >= 2
+        && (rest[..2].eq_ignore_ascii_case(b"IF")
+            || rest.len() >= 5 && rest[..5].eq_ignore_ascii_case(b"WHILE")
+            || rest.len() >= 4 && rest[..4].eq_ignore_ascii_case(b"LOOP"))
 }
 
 /// Check that after END (skipping whitespace), the next character is `;`.
@@ -658,19 +672,24 @@ fn is_control_flow_end(after_end: &[u8]) -> bool {
 /// procedure-level END.
 fn is_end_followed_by_semicolon(after_end: &[u8]) -> bool {
     let mut i = 0;
-    while i < after_end.len() && after_end[i].is_ascii_whitespace() { i += 1; }
+    while i < after_end.len() && after_end[i].is_ascii_whitespace() {
+        i += 1;
+    }
     // Allow single-line comment before the semicolon
     if i + 1 < after_end.len() && after_end[i] == b'-' && after_end[i + 1] == b'-' {
         // Skip to end of line
-        while i < after_end.len() && after_end[i] != b'\n' { i += 1; }
-        while i < after_end.len() && after_end[i].is_ascii_whitespace() { i += 1; }
+        while i < after_end.len() && after_end[i] != b'\n' {
+            i += 1;
+        }
+        while i < after_end.len() && after_end[i].is_ascii_whitespace() {
+            i += 1;
+        }
     }
     i >= after_end.len() || after_end[i] == b';'
 }
 
 /// Extract DML/SELECT from a BEGIN...END body starting at begin_idx
 fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<String> {
-
     let bytes = sql.as_bytes();
     let mut depth = 0;
     let body_start = begin_idx + 5;
@@ -686,41 +705,94 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
         if !in_string && !in_line_comment && !in_block_comment {
             // Skip multi-byte UTF-8 characters to avoid mid-character slicing panic
             if c >= 0x80 {
-                i += if c >= 0xF0 { 4 } else if c >= 0xE0 { 3 } else { 2 };
+                i += if c >= 0xF0 {
+                    4
+                } else if c >= 0xE0 {
+                    3
+                } else {
+                    2
+                };
                 continue;
             }
-            if c == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' { in_line_comment = true; i += 2; continue; }
-            if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' { in_block_comment = true; i += 2; continue; }
-            if c == b'\'' || c == b'"' || c == b'`' { in_string = true; string_char = c; }
+            if c == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+                in_line_comment = true;
+                i += 2;
+                continue;
+            }
+            if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                in_block_comment = true;
+                i += 2;
+                continue;
+            }
+            if c == b'\'' || c == b'"' || c == b'`' {
+                in_string = true;
+                string_char = c;
+            }
         } else if in_string {
-            if c == b'\\' && i + 1 < bytes.len() && string_char != b'`' { i += 2; continue; }
-            if c == string_char { in_string = false; }
-        } else if in_line_comment { if c == b'\n' { in_line_comment = false; } i += 1; continue; }
-        else if in_block_comment { if c == b'*' && i+1 < bytes.len() && bytes[i+1] == b'/' { in_block_comment = false; i+=2; continue; } i+=1; continue; }
+            if c == b'\\' && i + 1 < bytes.len() && string_char != b'`' {
+                i += 2;
+                continue;
+            }
+            if c == string_char {
+                in_string = false;
+            }
+        } else if in_line_comment {
+            if c == b'\n' {
+                in_line_comment = false;
+            }
+            i += 1;
+            continue;
+        } else if in_block_comment {
+            if c == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                in_block_comment = false;
+                i += 2;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
         if !in_string && !in_line_comment && !in_block_comment {
-            if i+5 <= bytes.len() && upper[i..].starts_with("BEGIN") && is_word_boundary(bytes,i,5) && is_leading_word_boundary(bytes,i) { depth += 1; }
-            if i+3 <= bytes.len() && upper[i..].starts_with("END") && is_word_boundary(bytes,i,3) && is_leading_word_boundary(bytes,i) {
+            if i + 5 <= bytes.len()
+                && upper[i..].starts_with("BEGIN")
+                && is_word_boundary(bytes, i, 5)
+                && is_leading_word_boundary(bytes, i)
+            {
+                depth += 1;
+            }
+            if i + 3 <= bytes.len()
+                && upper[i..].starts_with("END")
+                && is_word_boundary(bytes, i, 3)
+                && is_leading_word_boundary(bytes, i)
+            {
                 // Distinguish END IF / END WHILE / END LOOP from procedure-level END
-                if is_control_flow_end(&bytes[i+3..]) {
+                if is_control_flow_end(&bytes[i + 3..]) {
                     i += 3;
                     continue;
                 }
                 // Skip END that is not followed by `;` or `--` comment — it's
                 // likely a CASE WHEN expression like `END,` or `END)`.
-                if !is_end_followed_by_semicolon(&bytes[i+3..]) {
+                if !is_end_followed_by_semicolon(&bytes[i + 3..]) {
                     i += 3; // advance past this END keyword
                     continue;
                 }
-                if depth == 0 { body_end = i; break; } depth -= 1;
+                if depth == 0 {
+                    body_end = i;
+                    break;
+                }
+                depth -= 1;
             }
         }
         i += 1;
     }
-    if body_end <= body_start { body_end = sql.len(); }
+    if body_end <= body_start {
+        body_end = sql.len();
+    }
     let body = &sql[body_start..body_end];
-    if body.trim().is_empty() { return None; }
+    if body.trim().is_empty() {
+        return None;
+    }
 
-    // Uncomment block-commented code: /* ... */ → inner content
+    // Remove block comments entirely (/* ... */ → removed)
     let body_uncommented = strip_block_comments(body);
 
     let statements = split_sql_statements(&body_uncommented);
@@ -728,7 +800,9 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
     let mut has_any = false;
     for stmt in &statements {
         let trimmed = stmt.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
 
         // Skip leading single-line comments (lines starting with "--") so that
         // statements like:
@@ -752,24 +826,28 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
             }
             s.trim()
         };
-        if content.is_empty() { continue; }
+        if content.is_empty() {
+            continue;
+        }
 
         let upper_stmt = content.to_uppercase();
         let first_word = upper_stmt.split_whitespace().next().unwrap_or("");
         match first_word {
-            "DECLARE" | "IF" | "ELSE" | "ELSEIF" | "WHILE" | "LOOP" | "FOR"
-            | "BREAK" | "CONTINUE" | "RETURN" | "RAISE" | "BEGIN" | "END"
-            | "CALL" | "DROP" | "ALTER" | "GRANT" | "REVOKE"
-            | "UPDATE" => {} // UPDATE with CASE WHEN may not parse in Generic dialect
+            "DECLARE" | "IF" | "ELSE" | "ELSEIF" | "WHILE" | "LOOP" | "FOR" | "BREAK"
+            | "CONTINUE" | "RETURN" | "RAISE" | "BEGIN" | "END" | "CALL" | "DROP" | "ALTER"
+            | "GRANT" | "REVOKE" | "UPDATE" => {} // UPDATE with CASE WHEN may not parse in Generic dialect
             "SET" => {
                 // SET variable = "SQL text" — extract the SQL if it contains DML keywords
                 if let Some(sql_text) = extract_sql_from_set_stmt(trimmed) {
                     let uw = sql_text.to_uppercase();
                     let fw = uw.split_whitespace().next().unwrap_or("");
                     match fw {
-                        "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" => {
+                        "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH"
+                        | "CREATE" => {
                             out.push_str(&sql_text);
-                            if !sql_text.ends_with(';') { out.push(';'); }
+                            if !sql_text.ends_with(';') {
+                                out.push(';');
+                            }
                             out.push('\n');
                             has_any = true;
                         }
@@ -782,13 +860,18 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
                 if let Some(inner) = extract_execute_immediate_sql(trimmed) {
                     for inner_stmt in split_sql_statements(&inner) {
                         let s = inner_stmt.trim();
-                        if s.is_empty() { continue; }
+                        if s.is_empty() {
+                            continue;
+                        }
                         let uw = s.to_uppercase();
                         let fw = uw.split_whitespace().next().unwrap_or("");
                         match fw {
-                            "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" => {
+                            "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH"
+                            | "CREATE" => {
                                 out.push_str(s);
-                                if !s.ends_with(';') { out.push(';'); }
+                                if !s.ends_with(';') {
+                                    out.push(';');
+                                }
                                 out.push('\n');
                                 has_any = true;
                             }
@@ -797,8 +880,26 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
                     }
                 }
             }
-            "CREATE" => { if upper_stmt.contains("AS SELECT") || upper_stmt.contains("AS\nSELECT") { out.push_str(trimmed); if !trimmed.ends_with(';') { out.push(';'); } out.push('\n'); has_any = true; } }
-            "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" => { out.push_str(trimmed); if !trimmed.ends_with(';') { out.push(';'); } out.push('\n'); has_any = true; }
+            "CREATE" => {
+                let words: Vec<&str> = upper_stmt.split_whitespace().collect();
+                let has_as_select = words.windows(2).any(|w| w[0] == "AS" && (w[1] == "SELECT" || w[1] == "(SELECT"));
+                if has_as_select {
+                    out.push_str(content);
+                    if !content.ends_with(';') {
+                        out.push(';');
+                    }
+                    out.push('\n');
+                    has_any = true;
+                }
+            }
+            "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" => {
+                out.push_str(content);
+                if !content.ends_with(';') {
+                    out.push(';');
+                }
+                out.push('\n');
+                has_any = true;
+            }
             _ => {}
         }
     }
@@ -807,8 +908,13 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
 
 fn is_word_boundary(bytes: &[u8], i: usize, word_len: usize) -> bool {
     let next = i + word_len;
-    if next >= bytes.len() { return true; }
-    matches!(bytes[next], b' ' | b'\t' | b'\n' | b'\r' | b';' | b'(' | b')' | b',' | b'.')
+    if next >= bytes.len() {
+        return true;
+    }
+    matches!(
+        bytes[next],
+        b' ' | b'\t' | b'\n' | b'\r' | b';' | b'(' | b')' | b',' | b'.'
+    )
 }
 
 /// Check that the character before position `i` is not an identifier character
@@ -827,22 +933,28 @@ fn extract_execute_immediate_sql(s: &str) -> Option<String> {
     // Skip past "EXECUTE IMMEDIATE "
     let after_keyword = upper.find("IMMEDIATE").map(|i| i + 9)?;
     let rest = &s[after_keyword..].trim_start();
-    if rest.is_empty() { return None; }
-    
+    if rest.is_empty() {
+        return None;
+    }
+
     // Case 1: FORMAT("""...""", ...) or FORMAT(...)
     if rest.to_uppercase().starts_with("FORMAT") {
         let after = &rest[6..].trim_start();
-        let after = if after.starts_with('(') { &after[1..].trim_start() } else { after };
+        let after = if after.starts_with('(') {
+            &after[1..].trim_start()
+        } else {
+            after
+        };
         let (q, qlen) = pick_quote(after)?;
         let inner = extract_between_quotes(after, q, qlen)?;
         return Some(replace_format_placeholders(&inner));
     }
-    
+
     // Case 2: """...""" or '''...''' (direct triple-quoted string, no FORMAT)
     if let Some(inner) = extract_triple_quoted(rest) {
         return Some(replace_format_placeholders(&inner));
     }
-    
+
     // Case 3: '...' or "..." (direct single-quoted string, no FORMAT)
     let (q, qlen) = pick_quote(rest)?;
     extract_between_quotes(rest, q, qlen)
@@ -850,11 +962,17 @@ fn extract_execute_immediate_sql(s: &str) -> Option<String> {
 
 /// Pick the quote type (triple/single) at the start of text
 fn pick_quote(text: &str) -> Option<(&str, usize)> {
-    if text.starts_with("\"\"\"") { Some(("\"\"\"", 3)) }
-    else if text.starts_with("'''") { Some(("'''", 3)) }
-    else if text.starts_with('"') { Some(("\"", 1)) }
-    else if text.starts_with('\'') { Some(("'", 1)) }
-    else { None }
+    if text.starts_with("\"\"\"") {
+        Some(("\"\"\"", 3))
+    } else if text.starts_with("'''") {
+        Some(("'''", 3))
+    } else if text.starts_with('"') {
+        Some(("\"", 1))
+    } else if text.starts_with('\'') {
+        Some(("'", 1))
+    } else {
+        None
+    }
 }
 
 /// Extract text between opening and closing quotes
@@ -872,9 +990,13 @@ fn extract_between_quotes(text: &str, q: &str, qlen: usize) -> Option<String> {
 
 /// Extract from """...""" or '''...''' at the start
 fn extract_triple_quoted(text: &str) -> Option<String> {
-    let (q, qlen) = if text.starts_with("\"\"\"") { ("\"\"\"", 3) }
-    else if text.starts_with("'''") { ("'''", 3) }
-    else { return None; };
+    let (q, qlen) = if text.starts_with("\"\"\"") {
+        ("\"\"\"", 3)
+    } else if text.starts_with("'''") {
+        ("'''", 3)
+    } else {
+        return None;
+    };
     extract_between_quotes(text, q, qlen)
 }
 
@@ -888,12 +1010,38 @@ fn replace_format_placeholders(s: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 1 < bytes.len() {
             match bytes[i + 1] {
-                b'%' => { out.push('%'); i += 2; continue; }
-                b'd' | b'i' | b'u' | b'o' | b'x' | b'X' => { out.push('0'); i += 2; continue; }
-                b's' | b'S' => { out.push('x'); i += 2; continue; }
-                b'f' | b'F' | b'e' | b'E' | b'g' | b'G' => { out.push('0'); out.push('.'); out.push('0'); i += 2; continue; }
-                b'c' => { out.push('x'); i += 2; continue; }
-                b't' | b'T' => { out.push_str("2024-01-01"); i += 2; continue; }
+                b'%' => {
+                    out.push('%');
+                    i += 2;
+                    continue;
+                }
+                b'd' | b'i' | b'u' | b'o' | b'x' | b'X' => {
+                    out.push('0');
+                    i += 2;
+                    continue;
+                }
+                b's' | b'S' => {
+                    out.push('x');
+                    i += 2;
+                    continue;
+                }
+                b'f' | b'F' | b'e' | b'E' | b'g' | b'G' => {
+                    out.push('0');
+                    out.push('.');
+                    out.push('0');
+                    i += 2;
+                    continue;
+                }
+                b'c' => {
+                    out.push('x');
+                    i += 2;
+                    continue;
+                }
+                b't' | b'T' => {
+                    out.push_str("2024-01-01");
+                    i += 2;
+                    continue;
+                }
                 _ => {}
             }
         }
@@ -908,32 +1056,53 @@ fn replace_format_placeholders(s: &str) -> String {
 fn extract_sql_from_set_stmt(s: &str) -> Option<String> {
     let eq_pos = s.find('=')?;
     let after_eq = s[eq_pos + 1..].trim_start();
-    if after_eq.is_empty() { return None; }
+    if after_eq.is_empty() {
+        return None;
+    }
     // Handle SET var = FORMAT("""...""", ...)
     let upper = after_eq.to_uppercase();
     if upper.starts_with("FORMAT") {
         let after = &after_eq[6..].trim_start();
-        let after = if after.starts_with('(') { &after[1..].trim_start() } else { after };
+        let after = if after.starts_with('(') {
+            &after[1..].trim_start()
+        } else {
+            after
+        };
         let (q, qlen) = pick_quote(after)?;
         let inner = extract_between_quotes(after, q, qlen)?;
         let upper_inner = inner.to_uppercase();
         let first_word = upper_inner.split_whitespace().next()?;
-        return matches!(first_word, "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN").then_some(replace_format_placeholders(&inner));
+        return matches!(
+            first_word,
+            "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN"
+        )
+        .then_some(replace_format_placeholders(&inner));
     }
     // Handle SET var = 'SQL' or SET var = "SQL"
-    if !after_eq.starts_with('"') && !after_eq.starts_with('\'') { return None; }
+    if !after_eq.starts_with('"') && !after_eq.starts_with('\'') {
+        return None;
+    }
     let q = after_eq.as_bytes()[0];
     let mut end = 1;
     let bytes = after_eq.as_bytes();
     while end < bytes.len() && bytes[end] != q {
-        if bytes[end] == b'\\' { end += 2; continue; }
+        if bytes[end] == b'\\' {
+            end += 2;
+            continue;
+        }
         end += 1;
     }
-    if end >= bytes.len() { return None; }
+    if end >= bytes.len() {
+        return None;
+    }
     let inner = after_eq[1..end].to_string();
     let upper = inner.to_uppercase();
     let first_word = upper.split_whitespace().next()?;
-    matches!(first_word, "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN").then_some(inner)
+    matches!(
+        first_word,
+        "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN"
+    )
+    .then_some(inner)
 }
 
 /// Remove /* ... */ markers, keeping the inner content.
@@ -943,36 +1112,61 @@ fn strip_block_comments(s: &str) -> String {
     let mut i = 0;
     let mut in_s = false;
     let mut in_d = false;
+    let mut in_b = false;
     while i < bytes.len() {
         let c = bytes[i];
-        if !in_s && !in_d {
+        if !in_s && !in_d && !in_b {
             if c == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
                 let mut j = i + 2;
-                while j < bytes.len() && bytes[j] != b'\n' { j += 1; }
+                while j < bytes.len() && bytes[j] != b'\n' {
+                    j += 1;
+                }
                 out.push_str(&s[i..j]);
                 i = j;
                 continue;
             }
             if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
-                // Skip /*, keep content until */
+                // Skip entire block comment (do NOT uncomment content)
                 i += 2;
-                loop {
-                    if i + 1 >= bytes.len() { break; }
-                    if bytes[i] == b'*' && bytes[i + 1] == b'/' { i += 2; break; }
-                    out.push(bytes[i] as char);
+                while i + 1 < bytes.len() {
+                    if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                        i += 2;
+                        break;
+                    }
                     i += 1;
                 }
                 continue;
             }
-            if c == b'\'' { in_s = true; }
-            else if c == b'"' { in_d = true; }
-        } else {
-            if in_s && c == b'\'' {
-                if i + 1 < bytes.len() && bytes[i + 1] == b'\'' { out.push(c as char); out.push(bytes[i+1] as char); i += 2; continue; }
+            if c == b'\'' {
+                in_s = true;
+            } else if c == b'"' {
+                in_d = true;
+            } else if c == b'`' {
+                in_b = true;
+            }
+        } else if in_s {
+            if c == b'\'' {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                    out.push(c as char);
+                    out.push(bytes[i + 1] as char);
+                    i += 2;
+                    continue;
+                }
                 in_s = false;
-            } else if in_d && c == b'"' {
-                if i + 1 < bytes.len() && bytes[i + 1] == b'"' { out.push(c as char); out.push(bytes[i+1] as char); i += 2; continue; }
+            }
+        } else if in_d {
+            if c == b'"' {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                    out.push(c as char);
+                    out.push(bytes[i + 1] as char);
+                    i += 2;
+                    continue;
+                }
                 in_d = false;
+            }
+        } else if in_b {
+            if c == b'`' {
+                in_b = false;
             }
         }
         out.push(c as char);
@@ -984,51 +1178,114 @@ fn strip_block_comments(s: &str) -> String {
 fn split_sql_statements(body: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
-    let mut in_s = false; let mut in_d = false; let mut in_b = false;
-    let mut in_trip_s = false; let mut in_trip_d = false;
-    let mut in_lc = false; let mut in_bc = false;
+    let mut in_s = false;
+    let mut in_d = false;
+    let mut in_b = false;
+    let mut in_trip_s = false;
+    let mut in_trip_d = false;
+    let mut in_lc = false;
+    let mut in_bc = false;
     let bytes = body.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         let c = bytes[i];
         // Triple-quoted string start (must check before single/double quote logic)
         if !in_s && !in_d && !in_b && !in_trip_s && !in_trip_d && !in_lc && !in_bc {
-            if c == b'\'' && i+2 < bytes.len() && bytes[i+1] == b'\'' && bytes[i+2] == b'\'' {
-                in_trip_s = true; current.push_str("'''"); i += 3; continue;
+            if c == b'\'' && i + 2 < bytes.len() && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
+                in_trip_s = true;
+                current.push_str("'''");
+                i += 3;
+                continue;
             }
-            if c == b'"' && i+2 < bytes.len() && bytes[i+1] == b'"' && bytes[i+2] == b'"' {
-                in_trip_d = true; current.push_str("\"\"\""); i += 3; continue;
+            if c == b'"' && i + 2 < bytes.len() && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
+                in_trip_d = true;
+                current.push_str("\"\"\"");
+                i += 3;
+                continue;
             }
         }
         if !in_s && !in_d && !in_b && !in_trip_s && !in_trip_d && !in_lc && !in_bc {
-            if c == b'-' && i+1 < bytes.len() && bytes[i+1] == b'-' { in_lc = true; current.push_str("--"); i+=2; continue; }
-            if c == b'/' && i+1 < bytes.len() && bytes[i+1] == b'*' { in_bc = true; current.push_str("/*"); i+=2; continue; }
-            if c == b'\'' { in_s = true; }
-            else if c == b'"' { in_d = true; }
-            else if c == b'`' { in_b = true; }
-            else if c == b';' { result.push(current); current = String::new(); i+=1; continue; }
+            if c == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+                in_lc = true;
+                current.push_str("--");
+                i += 2;
+                continue;
+            }
+            if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                in_bc = true;
+                current.push_str("/*");
+                i += 2;
+                continue;
+            }
+            if c == b'\'' {
+                in_s = true;
+            } else if c == b'"' {
+                in_d = true;
+            } else if c == b'`' {
+                in_b = true;
+            } else if c == b';' {
+                result.push(current);
+                current = String::new();
+                i += 1;
+                continue;
+            }
         } else if in_s {
-            if c == b'\\' && i+1 < bytes.len() { current.push(bytes[i] as char); current.push(bytes[i+1] as char); i+=2; continue; }
-            if c == b'\'' { in_s = false; }
+            if c == b'\\' && i + 1 < bytes.len() {
+                current.push(bytes[i] as char);
+                current.push(bytes[i + 1] as char);
+                i += 2;
+                continue;
+            }
+            if c == b'\'' {
+                in_s = false;
+            }
         } else if in_d {
-            if c == b'\\' && i+1 < bytes.len() { current.push(bytes[i] as char); current.push(bytes[i+1] as char); i+=2; continue; }
-            if c == b'"' { in_d = false; }
+            if c == b'\\' && i + 1 < bytes.len() {
+                current.push(bytes[i] as char);
+                current.push(bytes[i + 1] as char);
+                i += 2;
+                continue;
+            }
+            if c == b'"' {
+                in_d = false;
+            }
         } else if in_b {
-            if c == b'`' { in_b = false; }
+            if c == b'`' {
+                in_b = false;
+            }
         } else if in_trip_s {
-            if c == b'\'' && i+2 < bytes.len() && bytes[i+1] == b'\'' && bytes[i+2] == b'\'' {
-                in_trip_s = false; current.push_str("'''"); i += 3; continue;
+            if c == b'\'' && i + 2 < bytes.len() && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
+                in_trip_s = false;
+                current.push_str("'''");
+                i += 3;
+                continue;
             }
         } else if in_trip_d {
-            if c == b'"' && i+2 < bytes.len() && bytes[i+1] == b'"' && bytes[i+2] == b'"' {
-                in_trip_d = false; current.push_str("\"\"\""); i += 3; continue;
+            if c == b'"' && i + 2 < bytes.len() && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
+                in_trip_d = false;
+                current.push_str("\"\"\"");
+                i += 3;
+                continue;
             }
-        } else if in_lc { if c == b'\n' { in_lc = false; } }
-        else if in_bc { if c == b'*' && i+1 < bytes.len() && bytes[i+1] == b'/' { in_bc = false; current.push_str("*/"); i+=2; continue; } }
-        current.push(c as char); i += 1;
+        } else if in_lc {
+            if c == b'\n' {
+                in_lc = false;
+            }
+        } else if in_bc {
+            if c == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                in_bc = false;
+                current.push_str("*/");
+                i += 2;
+                continue;
+            }
+        }
+        current.push(c as char);
+        i += 1;
     }
     let trimmed = current.trim().to_string();
-    if !trimmed.is_empty() { result.push(trimmed); }
+    if !trimmed.is_empty() {
+        result.push(trimmed);
+    }
     result
 }
 
@@ -1466,7 +1723,11 @@ SELECT a.id FROM t1 a LEFT ANTI JOIN t2 b ON a.id = b.id;
 UNCACHE TABLE IF EXISTS Temp_X;
 SELECT * FROM t1;";
         let output = parse_sql_with_dialect_output(sql, Dialect::Generic);
-        assert!(output.is_ok(), "Failed to parse combined Spark SQL: {:?}", output.err());
+        assert!(
+            output.is_ok(),
+            "Failed to parse combined Spark SQL: {:?}",
+            output.err()
+        );
     }
 
     #[test]
@@ -1496,7 +1757,11 @@ SELECT * FROM smartfren_analytic_prd.dwh_cc.f_usage_cdr;
 
         // Test with Databricks dialect (should work via sanitize)
         let output = parse_sql_with_dialect_output(sql, Dialect::Databricks);
-        assert!(output.is_ok(), "Databricks parse failed: {:?}", output.err());
+        assert!(
+            output.is_ok(),
+            "Databricks parse failed: {:?}",
+            output.err()
+        );
 
         // Test with Generic dialect (should also work via sanitize)
         let output = parse_sql_with_dialect_output(sql, Dialect::Generic);
@@ -1513,7 +1778,11 @@ BEGIN
   INSERT INTO dst_table SELECT * FROM src_table WHERE id = v;
 END;";
         let output = parse_sql_with_dialect_output(sql, Dialect::Bigquery);
-        assert!(output.is_ok(), "BigQuery procedure parse failed: {:?}", output.err());
+        assert!(
+            output.is_ok(),
+            "BigQuery procedure parse failed: {:?}",
+            output.err()
+        );
         assert!(output.unwrap().parser_fallback_used);
     }
 
@@ -1527,7 +1796,11 @@ BEGIN
   UPDATE t3 SET x = 1 WHERE y = 2;
 END;";
         let output = parse_sql_with_dialect_output(sql, Dialect::Bigquery);
-        assert!(output.is_ok(), "BigQuery multi-DML parse failed: {:?}", output.err());
+        assert!(
+            output.is_ok(),
+            "BigQuery multi-DML parse failed: {:?}",
+            output.err()
+        );
     }
 
     #[test]
@@ -1539,7 +1812,11 @@ BEGIN
   SELECT a, b FROM my_table WHERE a > x;
 END;";
         let output = parse_sql_with_dialect_output(sql, Dialect::Generic);
-        assert!(output.is_ok(), "Generic dialect procedure parse failed: {:?}", output.err());
+        assert!(
+            output.is_ok(),
+            "Generic dialect procedure parse failed: {:?}",
+            output.err()
+        );
     }
 
     #[test]
@@ -1555,7 +1832,11 @@ BEGIN
   INSERT INTO outer_table SELECT * FROM inner_table;
 END;";
         let output = parse_sql_with_dialect_output(sql, Dialect::Bigquery);
-        assert!(output.is_ok(), "Nested BEGIN..END parse failed: {:?}", output.err());
+        assert!(
+            output.is_ok(),
+            "Nested BEGIN..END parse failed: {:?}",
+            output.err()
+        );
     }
 
     #[test]
@@ -1599,7 +1880,10 @@ END;
             o.statements.len(),
             o.parser_fallback_used
         );
-        assert!(o.statements.len() > 0, "Should extract at least one DML/SELECT");
+        assert!(
+            o.statements.len() > 0,
+            "Should extract at least one DML/SELECT"
+        );
         for (i, stmt) in o.statements.iter().enumerate() {
             println!("  stmt[{}]: {:?}", i, stmt);
         }
@@ -1610,15 +1894,22 @@ END;
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/tmp/1.sql");
         let sql = match std::fs::read_to_string(path) {
             Ok(s) => s,
-            Err(_) => { eprintln!("Cannot read file, skipping"); return; }
+            Err(_) => {
+                eprintln!("Cannot read file, skipping");
+                return;
+            }
         };
-        if sql.trim().is_empty() { eprintln!("File empty, skipping"); return; }
+        if sql.trim().is_empty() {
+            eprintln!("File empty, skipping");
+            return;
+        }
 
         let output = parse_sql_with_dialect_output(&sql, Dialect::Bigquery);
         match &output {
             Ok(o) => println!(
                 "BigQuery parsed: {} statements, fallback_used={}",
-                o.statements.len(), o.parser_fallback_used
+                o.statements.len(),
+                o.parser_fallback_used
             ),
             Err(e) => println!("BigQuery dialect failed: {:?}", e),
         }
@@ -1627,7 +1918,8 @@ END;
         match &output {
             Ok(o) => println!(
                 "Generic parsed: {} statements, fallback_used={}",
-                o.statements.len(), o.parser_fallback_used
+                o.statements.len(),
+                o.parser_fallback_used
             ),
             Err(e) => println!("Generic dialect failed: {:?}", e),
         }
@@ -1660,10 +1952,18 @@ END;"#;
         // Parse the sanitized output
         let generic = GenericDialect {};
         let parsed = Parser::parse_sql(&generic, sanitized.as_deref().unwrap());
-        assert!(parsed.is_ok(), "sanitized SQL parse failed: {:?}", parsed.err());
+        assert!(
+            parsed.is_ok(),
+            "sanitized SQL parse failed: {:?}",
+            parsed.err()
+        );
         let stmts = parsed.unwrap();
         println!("Parse OK: {} statements", stmts.len());
-        assert!(stmts.len() >= 3, "Expected >=3 statements from DELETE + EXECUTE IMMEDIATE body + INSERT, got {}", stmts.len());
+        assert!(
+            stmts.len() >= 3,
+            "Expected >=3 statements from DELETE + EXECUTE IMMEDIATE body + INSERT, got {}",
+            stmts.len()
+        );
     }
 
     #[test]
@@ -1672,9 +1972,15 @@ END;"#;
         for path in paths {
             let sql = match std::fs::read_to_string(path) {
                 Ok(s) => s,
-                Err(_) => { eprintln!("Cannot read {path}, skipping"); continue; }
+                Err(_) => {
+                    eprintln!("Cannot read {path}, skipping");
+                    continue;
+                }
             };
-            if sql.trim().is_empty() { eprintln!("{path} empty, skipping"); continue; }
+            if sql.trim().is_empty() {
+                eprintln!("{path} empty, skipping");
+                continue;
+            }
 
             let sanitized = sanitize_bigquery_procedure(&sql);
             match &sanitized {
@@ -1692,7 +1998,11 @@ END;"#;
             }
             for dialect in [Dialect::Bigquery, Dialect::Generic] {
                 match parse_sql_with_dialect_output(&sql, dialect) {
-                    Ok(o) => println!("parse_sql_with_dialect_output({dialect:?}) OK: {} stmts, fallback={}", o.statements.len(), o.parser_fallback_used),
+                    Ok(o) => println!(
+                        "parse_sql_with_dialect_output({dialect:?}) OK: {} stmts, fallback={}",
+                        o.statements.len(),
+                        o.parser_fallback_used
+                    ),
                     Err(e) => println!("parse_sql_with_dialect_output({dialect:?}) FAILED: {e:?}"),
                 }
             }
@@ -1780,9 +2090,17 @@ fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
             }
             // Strip PARTITION(col='val') clause
             if let Some(pi) = sanitized.to_uppercase().find("PARTITION (") {
-                sanitized = format!("{}-- hive partition{}", &sanitized[..pi], &sanitized[pi + "PARTITION (".len()..]);
+                sanitized = format!(
+                    "{}-- hive partition{}",
+                    &sanitized[..pi],
+                    &sanitized[pi + "PARTITION (".len()..]
+                );
             } else if let Some(pi) = sanitized.to_uppercase().find("PARTITION(") {
-                sanitized = format!("{}-- hive partition{}", &sanitized[..pi], &sanitized[pi + "PARTITION(".len()..]);
+                sanitized = format!(
+                    "{}-- hive partition{}",
+                    &sanitized[..pi],
+                    &sanitized[pi + "PARTITION(".len()..]
+                );
             }
             out_lines.push(sanitized);
             changed = true;
@@ -1808,20 +2126,20 @@ fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
         result_lines.push(line.clone());
     }
     let result = result_lines.join("\n");
-    
+
     // Post-process: handle Hive WITH...INSERT pattern.
     // Hive allows WITH at top level before multiple INSERTs, which sqlparser-rs
     // doesn't support. Convert: WITH cte (...) INSERT ... SELECT ... INSERT ... SELECT ...
     // to: INSERT ... WITH cte (...) SELECT ... \n INSERT ... WITH cte (...) SELECT ...
     let result_upper = result.to_uppercase();
-    
+
     if let Some(with_start) = result_upper.find("WITH ") {
         if let Some(first_insert) = result_upper[with_start..].find("INSERT ") {
             let first_insert = with_start + first_insert;
-            
+
             // Extract the WITH clause text (WITH ... up to but not including the first INSERT)
             let with_clause = result[with_start..first_insert].trim().to_string();
-            
+
             // Find all INSERT positions in the text after the WITH clause
             let rest = &result[first_insert..];
             let rest_upper = rest.to_uppercase();
@@ -1835,7 +2153,7 @@ fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
                 }
                 pos += 1;
             }
-            
+
             // For each INSERT block, inject the WITH clause after the INSERT INTO ... clause
             // but before the SELECT/DATA statement. The WITH goes right after column list.
             let mut out = String::new();
@@ -1847,11 +2165,11 @@ fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
                     rest.len()
                 };
                 let block = &rest[block_start..block_end];
-                
+
                 if i > 0 {
                     out.push_str("\n;");
                 }
-                
+
                 // Find where to insert WITH: after the INSERT INTO ... clause
                 // Look for SELECT keyword to determine insertion point
                 let block_upper = block.to_uppercase();
@@ -1895,10 +2213,9 @@ fn rewrite_spark_joins(line: &str) -> Option<String> {
         return None;
     }
 
-    use std::sync::LazyLock;
     use regex::Regex;
-    static SPARK_JOIN_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)(LEFT|RIGHT)\s+(ANTI|SEMI)\s+(JOIN)").unwrap()
-    });
+    use std::sync::LazyLock;
+    static SPARK_JOIN_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(LEFT|RIGHT)\s+(ANTI|SEMI)\s+(JOIN)").unwrap());
     Some(SPARK_JOIN_RE.replace_all(line, "$1 JOIN").into_owned())
 }
