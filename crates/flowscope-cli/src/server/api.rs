@@ -77,6 +77,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/db/anomalies", post(save_anomaly_api))
         .route("/db/anomalies", get(get_anomalies_api))
         .route("/db/convert-procedures", post(convert_procedures))
+        .route("/analyze-batch", post(analyze_batch))
 }
 
 // === Request/Response types ===
@@ -2252,5 +2253,130 @@ pub(crate) async fn convert_procedures(
         success_paths,
         empty_paths,
         error_paths,
+    }))
+}
+
+// ── batch analysis endpoint ────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct AnalyzeBatchRequest {
+    #[serde(alias = "projectId")]
+    project_id: String,
+    #[serde(alias = "folderPath")]
+    folder_path: Option<String>,
+    dialect: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AnalyzeBatchResponse {
+    total: usize,
+    success: usize,
+    errors: usize,
+    empty: usize,
+    error_details: Vec<String>,
+}
+
+pub(crate) async fn analyze_batch(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<AnalyzeBatchRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let prefix = req.folder_path.as_deref().map(|p| {
+        if p.ends_with('/') { p.to_string() } else { format!("{}/", p) }
+    });
+
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let all_files = store::load_project_files(&db, &req.project_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    drop(db);
+
+    let dialect = req
+        .dialect
+        .as_deref()
+        .and_then(|d| match d.to_lowercase().as_str() {
+            "bigquery" => Some(flowscope_core::Dialect::Bigquery),
+            "generic" => Some(flowscope_core::Dialect::Generic),
+            "hive" => Some(flowscope_core::Dialect::Hive),
+            _ => None,
+        })
+        .unwrap_or(flowscope_core::Dialect::Generic);
+
+    let sql_files: Vec<store::ProjectFileRow> = all_files
+        .into_iter()
+        .filter(|f| {
+            if let Some(ref pfx) = prefix {
+                if !f.path.starts_with(pfx.as_str()) { return false; }
+            }
+            let lower = f.name.to_lowercase();
+            lower.ends_with(".sql") || lower.ends_with(".hql")
+        })
+        .collect();
+
+    let total = sql_files.len();
+    eprintln!("[api] analyze_batch: project={}, files={total}", req.project_id);
+
+    let mut success = 0usize;
+    let mut errors = 0usize;
+    let mut empty = 0usize;
+    let mut error_details = Vec::new();
+
+    for (idx, f) in sql_files.iter().enumerate() {
+        if idx > 0 && idx % 500 == 0 {
+            eprintln!("[api] analyze_batch: progress {idx}/{total}");
+        }
+
+        if f.content.trim().is_empty() {
+            empty += 1;
+            continue;
+        }
+
+        let sql = if f.is_procedure != 0
+            || f.content.to_uppercase().contains("CREATE PROCEDURE")
+            || f.content.to_uppercase().contains("CREATE PROC ")
+        {
+            flowscope_core::parser::sanitize_bigquery_raw_double_quoted_literals(&f.content)
+                .unwrap_or_else(|| f.content.clone())
+        } else {
+            f.content.clone()
+        };
+
+        let files = vec![flowscope_core::FileSource {
+            name: f.name.clone(),
+            content: f.content.clone(),
+            is_procedure: f.is_procedure != 0,
+            transformed_content: if sql != f.content { Some(sql.clone()) } else { None },
+        }];
+
+        let request = flowscope_core::AnalyzeRequest {
+            sql,
+            files: Some(files),
+            dialect,
+            source_name: Some(f.path.clone()),
+            options: None,
+            schema: None,
+            #[cfg(feature = "templating")]
+            template_config: None,
+        };
+
+        let result = flowscope_core::analyzer::analyze(&request);
+
+        if result.summary.has_errors {
+            errors += 1;
+            error_details.push(format!("{}: analysis errors", f.path));
+        } else {
+            success += 1;
+        }
+    }
+
+    eprintln!("[api] analyze_batch: done — success={success}, errors={errors}, empty={empty}");
+
+    Ok(Json(AnalyzeBatchResponse {
+        total,
+        success,
+        errors,
+        empty,
+        error_details,
     }))
 }
