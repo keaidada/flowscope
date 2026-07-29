@@ -606,33 +606,20 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           console.log('[analysis] loading TC for:', filesNeedingTc.map((f) => f.name).slice(0, 5));
         }
         if (filesNeedingTc.length > 0 && activeProjectId) {
-          const { loadFileContent: loadSingle } = await import('@/lib/file-storage');
-          let loadedCount = 0;
-          let tcCount = 0;
-          const results = await Promise.all(
-            filesNeedingTc.map(async (f) => {
-              const loaded = await loadSingle(activeProjectId, f.name);
-              return { file: f, loaded, path: f.name };
-            })
+          const { loadFileContentsWithMetaBatch } = await import('@/lib/file-storage');
+          const metaMap = await loadFileContentsWithMetaBatch(
+            activeProjectId,
+            filesNeedingTc.map((f) => f.name)
           );
-          // Directly update context.files in-place (no React state needed)
-          for (const { file, loaded, path } of results) {
-            loadedCount++;
-            if (loaded?.transformedContent) {
-              file.transformedContent = loaded.transformedContent;
+          let tcCount = 0;
+          for (const f of filesNeedingTc) {
+            const meta = metaMap.get(f.name);
+            if (meta?.transformed_content) {
+              f.transformedContent = meta.transformed_content;
               tcCount++;
-            } else if (loadedCount <= 3) {
-              console.log(
-                '[analysis] no TC for:',
-                path,
-                'loaded:',
-                !!loaded,
-                'content:',
-                !!loaded?.content
-              );
             }
           }
-          console.log('[analysis] loaded TC:', tcCount, '/', loadedCount, 'files');
+          console.log('[analysis] loaded TC:', tcCount, '/', filesNeedingTc.length, 'files');
         }
 
         if (context.files.length === 0) {
