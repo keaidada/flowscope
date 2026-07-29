@@ -30,5 +30,14 @@ export async function extractDmlWithLineMap(
   if (!isWasmInitialized()) {
     await initWasm();
   }
-  return sanitizeProcedureWithMap(content);
+  try {
+    const result = sanitizeProcedureWithMap(content);
+    if (result) return result;
+  } catch {
+    console.warn('[procedure-utils] sanitizeProcedureWithMap failed, falling back to sanitizeProcedure');
+  }
+  // Fallback: use old method without line map
+  const dml = sanitizeProcedure(content);
+  if (!dml) return null;
+  return { dml, lineMap: [] };
 }
