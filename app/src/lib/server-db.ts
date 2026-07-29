@@ -72,15 +72,32 @@ export interface LineageEdgeRow {
   dir_path?: string;
 }
 
+// Global concurrency limiter — prevents browser connection exhaustion
+let pending = 0;
+const MAX = 6;
+
+function slot(): Promise<void> {
+  return new Promise((r) => {
+    const trySlot = () => { if (pending < MAX) { pending++; r(); } else setTimeout(trySlot, 10); };
+    trySlot();
+  });
+}
+function done() { pending--; }
+
 async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
-  if (body !== undefined) opts.body = JSON.stringify(body);
-  const res = await fetch(`${BASE}${path}`, opts);
-  if (!res.ok) throw new Error(`Server DB API error: ${res.status} ${res.statusText}`);
-  if (res.status === 204) return undefined as T;
-  const text = await res.text();
-  if (!text) return undefined as T;
-  return JSON.parse(text);
+  await slot();
+  try {
+    const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const res = await fetch(`${BASE}${path}`, opts);
+    if (!res.ok) throw new Error(`Server DB API error: ${res.status} ${res.statusText}`);
+    if (res.status === 204) return undefined as T;
+    const text = await res.text();
+    if (!text) return undefined as T;
+    return JSON.parse(text);
+  } finally {
+    done();
+  }
 }
 
 // ── project_files ──────────────────────────────────────────────────────
