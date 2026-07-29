@@ -44,7 +44,7 @@ export function ProcedureRepairDialog({
         if (result) {
           setTransformedContent(result.dml);
           setLineMap(result.lineMap);
-          console.log('[ProcedureRepair] lineMap size:', result.lineMap.length, 'mapped:', result.lineMap.filter((x: number) => x >= 0).length);
+          console.log('[ProcedureRepair] lineMap first 10:', result.lineMap.slice(0, 10), 'dml first 80 chars:', result.dml.substring(0, 80));
         } else {
           setTransformedContent('');
           setLineMap([]);
