@@ -75,7 +75,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/db/column-metadata", get(get_column_metadata_api))
         .route("/db/anomalies", post(save_anomaly_api))
         .route("/db/anomalies", get(get_anomalies_api))
-        .route("/convert-procedures", post(convert_procedures))
+        .route("/db/convert-procedures", post(convert_procedures))
 }
 
 // === Request/Response types ===
