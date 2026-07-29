@@ -317,29 +317,9 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
           errors: result.errorPaths,
         });
 
-        // Update store directly from API result — no need to reload from DB
-        const allPaths = new Set([...result.successPaths, ...result.emptyPaths]);
-        const fileUpdates: Array<{
-          fileId: string;
-          isProcedure?: boolean;
-          transformedContent?: string | null;
-          dialect?: string;
-        }> = [];
-
-        for (const f of procFiles) {
-          if (allPaths.has(f.path)) {
-            fileUpdates.push({
-              fileId: f.id,
-              isProcedure: true,
-              transformedContent: result.successPaths.includes(f.path) ? ' ' : null,
-              dialect,
-            });
-          }
-        }
-
-        if (fileUpdates.length > 0) {
-          updateFiles(fileUpdates);
-        }
+        // DB already updated by backend. Store will pick up changes on
+        // next refresh — no need to mutate 4304 file objects in-memory.
+        // The dialog result display is sufficient immediate feedback.
       } catch (e) {
         console.error('Failed to convert procedures:', e);
         setConvertResult({
@@ -355,7 +335,6 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     [
       currentProject,
       convertTargetPath,
-      updateFiles,
       activeProjectId,
     ]
   );
