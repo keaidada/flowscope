@@ -47,8 +47,14 @@ export function ProcedureRepairDialog({
     const l = leftRef.current;
     const r = rightRef.current;
     if (!l || !r) { syncing.current = false; return; }
-    if (source === 'left') r.scrollTop = l.scrollTop;
-    else l.scrollTop = r.scrollTop;
+    // Proportional scroll: same percentage on both sides
+    const lMax = l.scrollHeight - l.clientHeight;
+    const rMax = r.scrollHeight - r.clientHeight;
+    if (source === 'left' && lMax > 0) {
+      r.scrollTop = (l.scrollTop / lMax) * rMax;
+    } else if (source === 'right' && rMax > 0) {
+      l.scrollTop = (r.scrollTop / rMax) * lMax;
+    }
     requestAnimationFrame(() => { syncing.current = false; });
   }, []);
 
