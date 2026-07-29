@@ -1087,7 +1087,7 @@ fn extract_sql_from_set_stmt(s: &str) -> Option<String> {
             first_word,
             "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN"
         )
-        .then_some(inner);
+        .then_some(inner.trim().to_string());
     }
     // Handle SET var = 'SQL' or SET var = "SQL"
     // Only extract from triple-quoted strings — single-quoted values
@@ -1100,7 +1100,7 @@ fn extract_sql_from_set_stmt(s: &str) -> Option<String> {
                 first_word,
                 "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN"
             )
-            .then_some(inner);
+            .then_some(inner.trim().to_string());
         }
     }
     None
