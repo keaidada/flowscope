@@ -29,6 +29,7 @@ export function ProcedureRepairDialog({
   const [transformedContent, setTransformedContent] = useState('');
   const [lineMap, setLineMap] = useState<number[]>([]);
   const [userRemoved, setUserRemoved] = useState<Set<number>>(new Set());
+  const [userKept, setUserKept] = useState<Set<number>>(new Set());
   const [showRemoved, setShowRemoved] = useState(true);
   const [copied, setCopied] = useState(false);
 
@@ -48,6 +49,7 @@ export function ProcedureRepairDialog({
           setLineMap([]);
         }
         setUserRemoved(new Set());
+        setUserKept(new Set());
       });
     }
   }, [open, originalContent]);
@@ -67,13 +69,18 @@ export function ProcedureRepairDialog({
     return result;
   }, [originalLines, transformedContent, lineMap]);
 
-  // Output = non-empty rightLines, minus user-removed lines
+  // Output = DML lines (minus removed) + user-kept original lines
   const output = useMemo(() => {
-    return rightLines
-      .map((line, i) => (line && !userRemoved.has(i) ? line : ''))
-      .filter(Boolean)
-      .join('\n');
-  }, [rightLines, userRemoved]);
+    const kept: string[] = [];
+    for (let i = 0; i < rightLines.length; i++) {
+      if (userKept.has(i)) {
+        kept.push(originalLines[i].trimEnd());
+      } else if (rightLines[i] && !userRemoved.has(i)) {
+        kept.push(rightLines[i]);
+      }
+    }
+    return kept.join('\n');
+  }, [rightLines, userRemoved, userKept, originalLines]);
 
   const removedCount = rightLines.filter((l) => !l).length + userRemoved.size;
 
@@ -188,23 +195,33 @@ export function ProcedureRepairDialog({
               {rightLines.map((line, idx) => {
                 const isAutoRemoved = !line;
                 const isUserRemoved = userRemoved.has(idx);
-                if (isAutoRemoved && !showRemoved) return null;
-                const isRemoved = isAutoRemoved || isUserRemoved;
+                const isUserKept = userKept.has(idx);
+                if (isAutoRemoved && !isUserKept && !showRemoved) return null;
+                const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
                 return (
                   <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
                     <button
-                      title="删除"
-                      onClick={() => { if (line && !isRemoved) toggleRemoved(idx); }}
-                      className={cn('p-0 rounded hover:bg-red-100 transition-colors', isRemoved && 'bg-red-100')}
+                      title={isUserKept ? '取消保留' : '删除'}
+                      onClick={() => {
+                        if (isUserKept) {
+                          setUserKept(prev => { const n = new Set(prev); n.delete(idx); return n; });
+                        } else if (line && !isRemoved) {
+                          toggleRemoved(idx);
+                        }
+                      }}
+                      className={cn('p-0 rounded hover:bg-red-100 transition-colors', (isRemoved || isUserKept) && 'bg-red-100')}
                     >
-                      <ArrowLeft className={cn('h-2.5 w-2.5', isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
+                      <ArrowLeft className={cn('h-2.5 w-2.5', isUserKept ? 'text-red-500' : isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
                     </button>
                     <button
-                      title="恢复"
-                      onClick={() => { if (isUserRemoved) toggleRemoved(idx); }}
-                      className={cn('p-0 rounded hover:bg-green-100 transition-colors', !isRemoved && 'bg-green-100')}
+                      title={isUserRemoved ? '恢复' : isAutoRemoved ? '保留原始' : ''}
+                      onClick={() => {
+                        if (isUserRemoved) { toggleRemoved(idx); }
+                        else if (isAutoRemoved) { setUserKept(prev => { const n = new Set(prev); n.add(idx); return n; }); }
+                      }}
+                      className={cn('p-0 rounded hover:bg-green-100 transition-colors', (!isRemoved || isUserKept) && 'bg-green-100', isUserKept && 'ring-1 ring-blue-300')}
                     >
-                      <ArrowRight className={cn('h-2.5 w-2.5', !isRemoved ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
+                      <ArrowRight className={cn('h-2.5 w-2.5', (!isRemoved || isUserKept) ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
                     </button>
                   </div>
                 );
@@ -222,12 +239,13 @@ export function ProcedureRepairDialog({
               {rightLines.map((line, idx) => {
                 const isAutoRemoved = !line;
                 const isUserRemoved = userRemoved.has(idx);
-                const isRemoved = isAutoRemoved || isUserRemoved;
+                const isUserKept = userKept.has(idx);
+                const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
                 if (isRemoved && !showRemoved) return null;
                 return (
-                  <div key={`r-${idx}`} className={cn('flex items-start h-[15px]', isRemoved && 'bg-red-500/[0.06]')}>
-                    <span className={cn('w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]', isRemoved ? 'text-red-400' : 'text-muted-foreground')}>{idx + 1}</span>
-                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, isUserRemoved && 'text-red-500 line-through', isAutoRemoved && 'text-muted-foreground/20')}>{isUserRemoved ? (originalLines[idx] || '\u00A0') : isAutoRemoved ? '\u00A0' : line}</span>
+                  <div key={`r-${idx}`} className={cn('flex items-start h-[15px]', isRemoved && 'bg-red-500/[0.06]', isUserKept && 'bg-blue-500/[0.06]')}>
+                    <span className={cn('w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]', isRemoved && !isUserKept ? 'text-red-400' : isUserKept ? 'text-blue-400' : 'text-muted-foreground')}>{idx + 1}</span>
+                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, isUserRemoved && 'text-red-500 line-through', isAutoRemoved && !isUserKept && 'text-muted-foreground/20', isUserKept && 'text-blue-500')}>{isUserRemoved ? (originalLines[idx] || '\u00A0') : isAutoRemoved && isUserKept ? (originalLines[idx] || '\u00A0') : isAutoRemoved ? '\u00A0' : line}</span>
                   </div>
                 );
               })}
