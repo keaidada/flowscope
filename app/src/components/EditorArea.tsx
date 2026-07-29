@@ -161,6 +161,9 @@ export function EditorArea({
       return;
     }
 
+    const name = (activeFile.path || activeFile.name).toLowerCase();
+    if (!name.endsWith('.sql') && !name.endsWith('.hql')) return;
+
     const schemaChanged =
       previousSchema.current !== null && previousSchema.current !== debouncedSchemaSQL;
     const hideCTEsChanged =
@@ -270,6 +273,8 @@ export function EditorArea({
 
   const handleAnalyze = useCallback(() => {
     if (activeFile) {
+      const name = (activeFile.path || activeFile.name).toLowerCase();
+      if (!name.endsWith('.sql') && !name.endsWith('.hql')) return;
       onRequestOpenLineage?.();
       setActiveTab('lineage');
       void runAnalysis(activeFile.content, activeFile.path).catch((err) => {
@@ -281,6 +286,8 @@ export function EditorArea({
 
   const handleAnalyzeActiveOnly = useCallback(() => {
     if (activeFile) {
+      const name = (activeFile.path || activeFile.name).toLowerCase();
+      if (!name.endsWith('.sql') && !name.endsWith('.hql')) return;
       onRequestOpenLineage?.();
       setActiveTab('lineage');
       void runAnalysis(activeFile.content, activeFile.path, { runModeOverride: 'current' }).catch(
