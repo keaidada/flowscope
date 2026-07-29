@@ -903,7 +903,17 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
             _ => {}
         }
     }
-    has_any.then_some(out)
+    // Remove standalone -- comment lines from the final output
+    let filtered: Vec<&str> = out.lines().filter(|l| {
+        let t = l.trim();
+        !t.is_empty() && !t.starts_with("--")
+    }).collect();
+    if filtered.is_empty() {
+        return None;
+    }
+    let mut clean = filtered.join("\n");
+    clean.push('\n');
+    has_any.then_some(clean)
 }
 
 fn is_word_boundary(bytes: &[u8], i: usize, word_len: usize) -> bool {
