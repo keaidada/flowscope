@@ -28,6 +28,7 @@ export function ProcedureRepairDialog({
   const { t } = useTranslation();
   const [transformedContent, setTransformedContent] = useState('');
   const [userRemoved, setUserRemoved] = useState<Set<number>>(new Set());
+  const [userKept, setUserKept] = useState<Set<number>>(new Set());
   const [showRemoved, setShowRemoved] = useState(true);
   const [copied, setCopied] = useState(false);
 
@@ -46,6 +47,7 @@ export function ProcedureRepairDialog({
           .join('\n');
         setTransformedContent(clean);
         setUserRemoved(new Set());
+        setUserKept(new Set());
       });
     }
   }, [open, originalContent]);
@@ -117,13 +119,18 @@ export function ProcedureRepairDialog({
     return result;
   }, [originalLines, transformedContent]);
 
-  // Output = non-empty rightLines, minus user-removed lines
+  // Output = non-empty rightLines + user-kept original lines, minus user-removed
   const output = useMemo(() => {
-    return rightLines
-      .map((line, i) => (line && !userRemoved.has(i) ? line : ''))
-      .filter(Boolean)
-      .join('\n');
-  }, [rightLines, userRemoved]);
+    const kept: string[] = [];
+    for (let i = 0; i < rightLines.length; i++) {
+      if (userKept.has(i)) {
+        kept.push(originalLines[i].trimEnd());
+      } else if (rightLines[i] && !userRemoved.has(i)) {
+        kept.push(rightLines[i]);
+      }
+    }
+    return kept.join('\n');
+  }, [rightLines, userRemoved, userKept, originalLines]);
 
   const removedCount = rightLines.filter((l) => !l).length + userRemoved.size;
 
@@ -240,26 +247,32 @@ export function ProcedureRepairDialog({
               {rightLines.map((line, idx) => {
                 const isAutoRemoved = !line;
                 const isUserRemoved = userRemoved.has(idx);
-                // Always show buttons for user-removed lines (so they can be restored)
-                // and for active lines. Hide only auto-removed when showRemoved is off.
-                const hide = isAutoRemoved && !showRemoved;
+                const isUserKept = userKept.has(idx);
+                // Show when: has content, or user-kept, or showRemoved is on
+                const hide = isAutoRemoved && !isUserKept && !showRemoved;
                 if (hide) return null;
-                const isRemoved = isAutoRemoved || isUserRemoved;
+                const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
                 return (
                   <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
                     <button
-                      title="标记为删除"
-                      onClick={() => { if (!isRemoved && line) toggleRemoved(idx); }}
-                      disabled={!line}
-                      className={cn('p-0 rounded hover:bg-red-100 transition-colors disabled:opacity-20', isRemoved && 'bg-red-100')}
+                      title={isUserKept ? '取消保留原始' : isAutoRemoved ? '保留此行原始内容到 DML' : '标记为删除'}
+                      onClick={() => {
+                        if (isUserKept) {
+                          setUserKept(prev => { const n = new Set(prev); n.delete(idx); return n; });
+                        } else if (isAutoRemoved) {
+                          setUserKept(prev => { const n = new Set(prev); n.add(idx); return n; });
+                        } else if (line && !isRemoved) {
+                          toggleRemoved(idx);
+                        }
+                      }}
+                      className={cn('p-0 rounded hover:bg-red-100 transition-colors', isRemoved && 'bg-red-100', isUserKept && 'bg-blue-100')}
                     >
-                      <ArrowLeft className={cn('h-2.5 w-2.5', isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
+                      <ArrowLeft className={cn('h-2.5 w-2.5', isUserKept ? 'text-blue-500' : isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
                     </button>
                     <button
-                      title="保留此行"
+                      title="恢复此行"
                       onClick={() => { if (isUserRemoved) toggleRemoved(idx); }}
-                      disabled={!isUserRemoved}
-                      className={cn('p-0 rounded hover:bg-green-100 transition-colors disabled:opacity-20', !isRemoved && 'bg-green-100')}
+                      className={cn('p-0 rounded hover:bg-green-100 transition-colors', !isRemoved && 'bg-green-100')}
                     >
                       <ArrowRight className={cn('h-2.5 w-2.5', !isRemoved ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
                     </button>
@@ -279,12 +292,13 @@ export function ProcedureRepairDialog({
               {rightLines.map((line, idx) => {
                 const isAutoRemoved = !line;
                 const isUserRemoved = userRemoved.has(idx);
-                const isRemoved = isAutoRemoved || isUserRemoved;
+                const isUserKept = userKept.has(idx);
+                const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
                 if (isRemoved && !showRemoved) return null;
                 return (
-                  <div key={`r-${idx}`} className={cn('flex items-start h-[15px]', isRemoved && 'bg-red-500/[0.06]')}>
+                  <div key={`r-${idx}`} className={cn('flex items-start h-[15px]', isRemoved && 'bg-red-500/[0.06]', isUserKept && 'bg-blue-500/[0.06]')}>
                     <span className={cn('w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]', isRemoved ? 'text-red-400' : 'text-muted-foreground')}>{idx + 1}</span>
-                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, isUserRemoved && 'text-red-500 line-through', isAutoRemoved && 'text-muted-foreground/20')}>{isUserRemoved ? (originalLines[idx] || '\u00A0') : isAutoRemoved ? '\u00A0' : line}</span>
+                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, isUserRemoved && 'text-red-500 line-through', isAutoRemoved && !isUserKept && 'text-muted-foreground/20', isUserKept && 'text-blue-500')}>{isUserRemoved ? (originalLines[idx] || '\u00A0') : isAutoRemoved && isUserKept ? (originalLines[idx] || '\u00A0') : isAutoRemoved ? '\u00A0' : line}</span>
                   </div>
                 );
               })}
