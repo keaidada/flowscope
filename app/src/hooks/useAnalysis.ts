@@ -526,8 +526,8 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         project.files.find((file) => file.id === project.activeFileId)?.path ??
         null;
 
-      // Delegate all-files analysis to backend batch API (reads from SQLite directly)
-      if (runMode === 'all' && project.files.length > 0) {
+      // Delegate large batch analysis to backend (reads SQLite directly)
+      if ((runMode === 'all' || runMode === 'custom') && project.files.length > 0) {
         setAnalyzing(true);
         setError(null);
         setLoadingContext({ fileName: requestedFileName, runMode, fileCount: project.files.length, stage: 'preparing' });
