@@ -91,8 +91,11 @@ export function ProcedureRepairDialog({
           break;
         }
         // Original contains extracted content: handles EXECUTE IMMEDIATE 'SQL'
-        // and SET var = """SQL""" where sanitizer extracted the inner SQL
-        if (origTrim.length > extTrim.length + 2 && origTrim.includes(extTrim) && extTrim.length > 10) {
+        // and SET var = """SQL""" where sanitizer extracted the inner SQL.
+        // Strip trailing ; from extracted line for matching (original EXECUTE/SET
+        // lines have ; outside the quoted SQL, not inside).
+        const extCheck = extTrim.endsWith(';') ? extTrim.slice(0, -1).trim() : extTrim;
+        if (origTrim.length > extCheck.length + 2 && origTrim.includes(extCheck) && extCheck.length > 10) {
           result[i] = extLines[extIdx];
           usedExt.add(extIdx);
           origStart = i + 1;
@@ -102,10 +105,12 @@ export function ProcedureRepairDialog({
       }
       // If no match found, try substring match as fallback
       if (!found) {
+        const extCheck = extTrim.endsWith(';') ? extTrim.slice(0, -1).trim() : extTrim;
         for (let i = origStart; i < originalLines.length; i++) {
           const origTrim = originalLines[i].trim();
           if (!origTrim || origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
-          if (origTrim.length > 3 && (extTrim.includes(origTrim) || origTrim.includes(extTrim))) {
+          if (origTrim.length > 3 && extCheck.length > 10 &&
+              (origTrim.includes(extCheck) || extCheck.includes(origTrim))) {
             result[i] = extLines[extIdx];
             usedExt.add(extIdx);
             origStart = i + 1;
