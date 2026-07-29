@@ -47,11 +47,11 @@ function buildMergedLines(original: string, extracted: string): MergedLine[] {
 
     // Multi-line SET var = ( ... ); — mark all lines as removed
     if (inMultiLineSet) {
-      if (origTrim === ');' || origTrim.endsWith(');')) inMultiLineSet = false;
+      if (origTrim.endsWith(';')) inMultiLineSet = false;
       result.push({ content: origLines[i], removed: true });
       continue;
     }
-    if (upper.startsWith('SET ') && origTrim.endsWith('(')) {
+    if (upper.startsWith('SET ') && !origTrim.endsWith(';')) {
       inMultiLineSet = true;
       result.push({ content: origLines[i], removed: true });
       continue;

@@ -109,9 +109,9 @@ function extractBqDml(content: string): string | null {
       const trimmed = line.trim();
       const upper = trimmed.toUpperCase();
 
-      // ── Handle on-going multi-line SET var = ( ... ); ──
+      // ── Handle on-going multi-line SET ... ; ──
       if (inMultiLineSet) {
-        if (trimmed === ');' || trimmed.endsWith(');')) {
+        if (trimmed.endsWith(';')) {
           inMultiLineSet = false;
         }
         continue;
@@ -206,8 +206,8 @@ function extractBqDml(content: string): string | null {
         continue;
       }
 
-      // ── Detect multi-line SET var = (SELECT ... before shouldRemoveLine
-      if (upper.startsWith('SET ') && trimmed.endsWith('(')) {
+      // ── Detect multi-line SET ... (no closing ; on same line)
+      if (upper.startsWith('SET ') && !trimmed.endsWith(';')) {
         inMultiLineSet = true;
         continue;
       }
