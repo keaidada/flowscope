@@ -137,14 +137,19 @@ interface FileContentEntry {
   transformed_content: string | null;
 }
 
+const FILE_BATCH_CHUNK = 500;
+
 export async function loadFileContentsBatch(
   projectId: string,
   paths: string[]
 ): Promise<Map<string, string>> {
   const result = new Map<string, string>();
   if (paths.length === 0) return result;
-  const entries = await api<FileContentEntry[]>('POST', '/file-contents-batch', { projectId, paths });
-  for (const e of entries) result.set(e.path, e.content ?? '');
+  for (let i = 0; i < paths.length; i += FILE_BATCH_CHUNK) {
+    const chunk = paths.slice(i, i + FILE_BATCH_CHUNK);
+    const entries = await api<FileContentEntry[]>('POST', '/file-contents-batch', { projectId, paths: chunk });
+    for (const e of entries) result.set(e.path, e.content ?? '');
+  }
   return result;
 }
 
@@ -154,9 +159,12 @@ export async function loadFileContentsWithMetaBatch(
 ): Promise<Map<string, FileContentResult>> {
   const result = new Map<string, FileContentResult>();
   if (paths.length === 0) return result;
-  const entries = await api<FileContentEntry[]>('POST', '/file-contents-batch', { projectId, paths });
-  for (const e of entries) {
-    result.set(e.path, { content: e.content, is_procedure: e.is_procedure, transformed_content: e.transformed_content });
+  for (let i = 0; i < paths.length; i += FILE_BATCH_CHUNK) {
+    const chunk = paths.slice(i, i + FILE_BATCH_CHUNK);
+    const entries = await api<FileContentEntry[]>('POST', '/file-contents-batch', { projectId, paths: chunk });
+    for (const e of entries) {
+      result.set(e.path, { content: e.content, is_procedure: e.is_procedure, transformed_content: e.transformed_content });
+    }
   }
   return result;
 }
