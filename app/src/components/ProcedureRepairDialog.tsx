@@ -59,68 +59,61 @@ export function ProcedureRepairDialog({
 
     const result: string[] = new Array(originalLines.length).fill('');
 
-    // Compute signatures for fast matching: first 3 non-trivial words
-    const sig = (line: string) => {
-      const words = line.trim().toUpperCase().split(/\s+/).filter(w => w.length > 0);
-      return words.slice(0, 3).join(' ');
-    };
+    // Build extMap: trimmed text → first unused index (use array for dedup)
+    const extMap = new Map<string, number[]>();
+    extLines.forEach((line, i) => {
+      const t = line.trim();
+      if (t) {
+        const arr = extMap.get(t) || [];
+        arr.push(i);
+        extMap.set(t, arr);
+      }
+    });
 
-    const extSigs = extLines.map(l => sig(l));
     const usedExt = new Set<number>();
 
-    // Greedy LCS-like matching: walk extracted lines over original, assigning each
-    // extracted line to the first original line that matches (exact or signature)
-    for (let extIdx = 0, origStart = 0; extIdx < extLines.length; extIdx++) {
-      const extSig = extSigs[extIdx];
-      const extTrim = extLines[extIdx].trim();
-      let found = false;
+    // Pass 1: exact match
+    for (let i = 0; i < originalLines.length; i++) {
+      const origTrim = originalLines[i].trim();
+      if (!origTrim) continue;
+      if (origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
 
-      for (let i = origStart; i < originalLines.length; i++) {
-        const origTrim = originalLines[i].trim();
-        if (!origTrim) continue;
-        if (origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
-
-        const origSig = sig(originalLines[i]);
-
-        // Exact match or same signature
-        if (extTrim === origTrim || (extSig === origSig && extSig.length > 0)) {
+      const indices = extMap.get(origTrim);
+      if (indices && indices.length > 0) {
+        const extIdx = indices.shift()!;
+        if (!usedExt.has(extIdx)) {
           result[i] = extLines[extIdx];
           usedExt.add(extIdx);
-          origStart = i + 1;
-          found = true;
-          break;
-        }
-        // Original contains extracted content: handles EXECUTE IMMEDIATE 'SQL'
-        // and SET var = """SQL""" where sanitizer extracted the inner SQL.
-        // Strip trailing ; from extracted line for matching (original EXECUTE/SET
-        // lines have ; outside the quoted SQL, not inside).
-        const extCheck = extTrim.endsWith(';') ? extTrim.slice(0, -1).trim() : extTrim;
-        if (origTrim.length > extCheck.length + 2 && origTrim.includes(extCheck) && extCheck.length > 10) {
-          result[i] = extLines[extIdx];
-          usedExt.add(extIdx);
-          origStart = i + 1;
-          found = true;
-          break;
         }
       }
-      // If no match found, try substring match as fallback
-      if (!found) {
-        const extCheck = extTrim.endsWith(';') ? extTrim.slice(0, -1).trim() : extTrim;
-        for (let i = origStart; i < originalLines.length; i++) {
-          const origTrim = originalLines[i].trim();
-          if (!origTrim || origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
-          if (origTrim.length > 3 && extCheck.length > 10 &&
-              (origTrim.includes(extCheck) || extCheck.includes(origTrim))) {
-            result[i] = extLines[extIdx];
-            usedExt.add(extIdx);
-            origStart = i + 1;
-            found = true;
-            break;
-          }
-        }
-      }
-      // If still no match, skip this extracted line (couldn't align it)
     }
+
+    // Pass 2: containment match for EXECUTE IMMEDIATE / SET patterns
+    // Walk in order to preserve monotonicity
+    let lastMatchedOrig = 0;
+    for (let extIdx = 0; extIdx < extLines.length; extIdx++) {
+      if (usedExt.has(extIdx)) {
+        lastMatchedOrig = Math.max(lastMatchedOrig, result.findIndex((v, idx) => idx >= lastMatchedOrig && v === extLines[extIdx]) + 1);
+        continue;
+      }
+      const extTrim = extLines[extIdx].trim();
+      const extCheck = extTrim.endsWith(';') ? extTrim.slice(0, -1).trim() : extTrim;
+      if (extCheck.length < 10) continue;
+
+      for (let i = lastMatchedOrig; i < originalLines.length; i++) {
+        const origTrim = originalLines[i].trim();
+        if (!origTrim || origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
+        if (result[i]) continue; // already matched in pass 1
+
+        if (origTrim.includes(extCheck)) {
+          result[i] = extLines[extIdx];
+          usedExt.add(extIdx);
+          lastMatchedOrig = i + 1;
+          break;
+        }
+      }
+    }
+
     return result;
   }, [originalLines, transformedContent]);
 
