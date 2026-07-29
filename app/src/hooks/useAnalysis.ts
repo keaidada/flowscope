@@ -526,8 +526,21 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         project.files.find((file) => file.id === project.activeFileId)?.path ??
         null;
 
-      // Delegate large batch analysis to backend (reads SQLite directly)
-      if ((runMode === 'all' || runMode === 'custom') && project.files.length > 0) {
+      // Build context first to know file count
+      const context = await buildAnalysisContext(
+        project,
+        activeFileContent,
+        activeFilePath,
+        runMode
+      );
+      if (!context || context.files.length === 0) {
+        if (!context) setError(t('analysis.errors.noProjectContext'));
+        setAnalyzing(false);
+        return;
+      }
+
+      // Delegate multi-file analysis to backend batch API (reads SQLite directly)
+      if (context.files.length > 1) {
         setAnalyzing(true);
         setError(null);
         setLoadingContext({ fileName: requestedFileName, runMode, fileCount: project.files.length, stage: 'preparing' });
