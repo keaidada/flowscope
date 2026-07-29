@@ -84,6 +84,7 @@ interface EditorToolbarProps {
   onCloseOtherTabs?: (fileId: string) => void;
   onCloseTabsToLeft?: (fileId: string) => void;
   onCloseTabsToRight?: (fileId: string) => void;
+  onLocateFile?: () => void;
 }
 
 export function EditorToolbar({
@@ -122,6 +123,7 @@ export function EditorToolbar({
   onCloseOtherTabs,
   onCloseTabsToLeft,
   onCloseTabsToRight,
+  onLocateFile,
 }: EditorToolbarProps) {
   const { t } = useTranslation();
   const isMac = navigator.platform.includes('Mac');
@@ -143,6 +145,20 @@ export function EditorToolbar({
               <span className="truncate font-medium text-foreground text-xs">
                 {activeFile?.name || '—'}
               </span>
+              {onLocateFile && activeFileId && (
+                <button
+                  title="在文件树中定位"
+                  className="p-0.5 rounded hover:bg-muted-foreground/10 shrink-0"
+                  onClick={(e) => { e.stopPropagation(); onLocateFile(); }}
+                >
+                  <svg className="h-3 w-3 text-muted-foreground" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <circle cx="6" cy="6" r="4" />
+                    <line x1="10" y1="2" x2="14" y2="2" />
+                    <line x1="12" y1="0" x2="12" y2="4" />
+                    <path d="M6 10 L6 14 M4 12 L8 12" />
+                  </svg>
+                </button>
+              )}
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             </DropdownMenuTrigger>
             <DropdownMenuContent

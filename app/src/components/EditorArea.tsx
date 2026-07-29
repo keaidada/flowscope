@@ -74,6 +74,7 @@ export function EditorArea({
     closeOtherTabs,
     closeTabsToLeft,
     closeTabsToRight,
+    revealActiveFile,
   } = useProject();
 
   const theme = useThemeStore((state) => state.theme);
@@ -479,6 +480,7 @@ export function EditorArea({
         onCloseOtherTabs={closeOtherTabs}
         onCloseTabsToLeft={closeTabsToLeft}
         onCloseTabsToRight={closeTabsToRight}
+        onLocateFile={revealActiveFile}
       />
 
       {error && (

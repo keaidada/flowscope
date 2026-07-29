@@ -133,6 +133,10 @@ interface ProjectContextType {
   closeTab: (fileId: string) => void;
   /** Close all tabs */
   closeAllTabs: () => void;
+  /** Trigger file tree to scroll to active file */
+  revealActiveFile: () => void;
+  /** Reveal counter — increments on each revealActiveFile call */
+  revealCnt: number;
   /** Close tabs to the left of the given file */
   closeTabsToLeft: (fileId: string) => void;
   /** Close tabs to the right of the given file */
@@ -372,6 +376,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [backendActiveFileId, setBackendActiveFileId] = useState<string | null>(null);
   const [backendRunMode, setBackendRunMode] = useState<RunMode>('current');
   const [backendSelectedFileIds, setBackendSelectedFileIds] = useState<string[]>([]);
+  const [revealCnt, setRevealCnt] = useState(0);
+
+  const revealActiveFile = useCallback(() => {
+    setRevealCnt((c) => c + 1);
+  }, []);
 
   useEffect(() => {
     if (!backendFiles || backendFiles.length === 0) {
@@ -1590,6 +1599,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     openFile,
     closeTab,
     closeAllTabs,
+    revealActiveFile,
+    revealCnt,
     closeTabsToLeft,
     closeTabsToRight,
     closeOtherTabs,

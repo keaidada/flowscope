@@ -45,11 +45,20 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     deleteFolder,
     isReadOnly,
     selectFile,
+    revealCnt,
   } = useProject();
 
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState('');
   const quickInputRef = useRef<HTMLInputElement>(null);
+
+  // When revealCnt increments, trigger FileTree to scroll to active file
+  const focusedFileId = useMemo(() => {
+    if (revealCnt > 0 && currentProject?.activeFileId) {
+      return `${currentProject.activeFileId}:${revealCnt}`;
+    }
+    return null;
+  }, [revealCnt, currentProject?.activeFileId]);
 
   const [search, setSearch] = useState('');
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
@@ -779,6 +788,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
             canDeleteFiles={true}
             renameInputRef={renameInputRef}
             isReadOnly={isReadOnly}
+            focusedFileId={focusedFileId}
             onCreateFileInFolder={(folderPath) => {
               createFile(
                 DEFAULT_FILE_NAMES.NEW_QUERY,
