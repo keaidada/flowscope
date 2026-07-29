@@ -70,7 +70,7 @@ export interface AnalysisState {
     fileName: string | null;
     runMode: 'current' | 'all' | 'custom';
     fileCount: number;
-    stage: 'preparing' | 'loadingSchema' | 'buildingLineage' | 'persisting' | 'rendering';
+    stage: 'preparing' | 'loadingSchema' | 'buildingLineage' | 'persisting' | 'rendering' | 'done';
     batchProgress?: string;
     processedFiles?: number;
     processingFile?: string;

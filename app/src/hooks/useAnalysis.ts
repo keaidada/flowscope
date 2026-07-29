@@ -63,7 +63,7 @@ interface PreparedAnalysisFile {
 export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions) {
   const { t } = useTranslation();
   const adapter = options?.adapter;
-  const { currentProject, activeProjectId, updateFiles, ensureFilesContent } = useProject();
+  const { currentProject, activeProjectId, updateFiles, ensureFilesContent, refreshBackendFiles } = useProject();
   const hideCTEs = useLineageStore((state) => state.hideCTEs);
   const setLineageResult = useLineageStore((state) => state.setResult);
   const setLineageSql = useLineageStore((state) => state.setSql);
@@ -525,6 +525,41 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         activeFilePath ??
         project.files.find((file) => file.id === project.activeFileId)?.path ??
         null;
+
+      // Delegate all-files analysis to backend batch API (reads from SQLite directly)
+      if (runMode === 'all' && project.files.length > 0) {
+        setAnalyzing(true);
+        setError(null);
+        setLoadingContext({ fileName: requestedFileName, runMode, fileCount: project.files.length, stage: 'preparing' });
+
+        try {
+          const { analyzeBatch } = await import('@/lib/server-db');
+          const result = await analyzeBatch(
+            activeProjectId ?? project.id,
+            undefined,
+            project.dialect,
+            project.templateMode
+          );
+          console.log(`[analysis] batch complete: success=${result.success}, errors=${result.errors}, empty=${result.empty}`);
+          // Reload results from backend cache
+          await refreshBackendFiles();
+          setLoadingContext({
+            fileName: requestedFileName,
+            runMode,
+            fileCount: result.total,
+            stage: 'done',
+          });
+          if (result.errors > 0) {
+            setError(`批量分析完成：${result.success} 成功，${result.errors} 失败，${result.empty} 空文件`);
+          }
+        } catch (e) {
+          console.error('[analysis] batch failed:', e);
+          setError(`批量分析失败: ${e}`);
+        } finally {
+          setAnalyzing(false);
+        }
+        return;
+      }
 
       setAnalyzing(true);
       setError(null);
