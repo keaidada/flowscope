@@ -208,6 +208,11 @@ export function ProcedureRepairDialog({
                 已删除 ({removedCount} 行)
               </Button>
             )}
+            {userRemoved.size > 0 && (
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" onClick={() => setUserRemoved(new Set())}>
+                恢复全部
+              </Button>
+            )}
           </div>
           {output && (
             <Button size="sm" variant="outline" className="h-7 gap-1 text-[11px] px-2" onClick={handleCopyAll}>
@@ -240,8 +245,13 @@ export function ProcedureRepairDialog({
             </div>
             <div ref={middleRef} className="flex-1 min-h-0 overflow-hidden">
               {rightLines.map((line, idx) => {
-                const isRemoved = !line || userRemoved.has(idx);
-                if (isRemoved && !showRemoved) return null;
+                const isAutoRemoved = !line;
+                const isUserRemoved = userRemoved.has(idx);
+                // Always show buttons for user-removed lines (so they can be restored)
+                // and for active lines. Hide only auto-removed when showRemoved is off.
+                const hide = isAutoRemoved && !showRemoved;
+                if (hide) return null;
+                const isRemoved = isAutoRemoved || isUserRemoved;
                 return (
                   <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
                     <button
