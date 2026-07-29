@@ -256,15 +256,17 @@ export function ProcedureRepairDialog({
                   <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
                     <button
                       title="标记为删除"
-                      onClick={() => { if (!isRemoved) toggleRemoved(idx); }}
-                      className={cn('p-0 rounded hover:bg-red-100 transition-colors', isRemoved && 'bg-red-100')}
+                      onClick={() => { if (!isRemoved && line) toggleRemoved(idx); }}
+                      disabled={!line}
+                      className={cn('p-0 rounded hover:bg-red-100 transition-colors disabled:opacity-20', isRemoved && 'bg-red-100')}
                     >
                       <ArrowLeft className={cn('h-2.5 w-2.5', isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
                     </button>
                     <button
                       title="保留此行"
-                      onClick={() => { if (isRemoved) toggleRemoved(idx); }}
-                      className={cn('p-0 rounded hover:bg-green-100 transition-colors', !isRemoved && 'bg-green-100')}
+                      onClick={() => { if (isUserRemoved) toggleRemoved(idx); }}
+                      disabled={!isUserRemoved}
+                      className={cn('p-0 rounded hover:bg-green-100 transition-colors disabled:opacity-20', !isRemoved && 'bg-green-100')}
                     >
                       <ArrowRight className={cn('h-2.5 w-2.5', !isRemoved ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
                     </button>
