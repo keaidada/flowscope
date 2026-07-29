@@ -570,3 +570,25 @@ export async function saveTableMetadata(
 ): Promise<void> {
   await api<void>('POST', '/table-metadata', { project_id: projectId, tables, columns });
 }
+
+export interface AnalyzeBatchResult {
+  total: number;
+  success: number;
+  errors: number;
+  empty: number;
+  error_details: string[];
+}
+
+export async function analyzeBatch(
+  projectId: string,
+  folderPath?: string,
+  dialect?: string,
+  templateMode?: string
+): Promise<AnalyzeBatchResult> {
+  return api<AnalyzeBatchResult>('POST', '/analyze-batch', {
+    projectId,
+    folderPath,
+    dialect,
+    templateMode,
+  });
+}

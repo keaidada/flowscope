@@ -2265,6 +2265,8 @@ struct AnalyzeBatchRequest {
     #[serde(alias = "folderPath")]
     folder_path: Option<String>,
     dialect: Option<String>,
+    #[serde(alias = "templateMode")]
+    template_mode: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -2302,6 +2304,9 @@ pub(crate) async fn analyze_batch(
             _ => None,
         })
         .unwrap_or(flowscope_core::Dialect::Generic);
+
+    #[allow(unused_variables)]
+    let template_config = resolve_template_config(req.template_mode.as_deref(), state.as_ref());
 
     let sql_files: Vec<store::ProjectFileRow> = all_files
         .into_iter()
