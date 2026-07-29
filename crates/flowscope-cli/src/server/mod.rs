@@ -5,21 +5,21 @@
 
 pub mod api;
 mod assets;
+mod openapi;
 pub mod state;
 pub mod store;
 mod watcher;
-mod openapi;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Query;
 use axum::http::HeaderMap;
 use axum::response::Html;
+use axum::Router;
 use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -102,10 +102,7 @@ async fn openapi_json() -> axum::Json<serde_json::Value> {
     axum::Json(OPENAPI_JSON.clone())
 }
 
-async fn scalar_docs(
-    Query(q): Query<LangQuery>,
-    headers: HeaderMap,
-) -> Html<String> {
+async fn scalar_docs(Query(q): Query<LangQuery>, headers: HeaderMap) -> Html<String> {
     let lang = q.lang.or_else(|| {
         headers
             .get("accept-language")
@@ -123,7 +120,8 @@ async fn scalar_docs(
 }
 
 fn scalar_html(locale: &str, html_lang: &str, title: &str) -> String {
-    format!(r#"<!doctype html>
+    format!(
+        r#"<!doctype html>
 <html lang="{html_lang}">
 <head>
     <meta charset="utf-8" />
@@ -143,7 +141,8 @@ fn scalar_html(locale: &str, html_lang: &str, title: &str) -> String {
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1"></script>
 </body>
-</html>"#)
+</html>"#
+    )
 }
 
 /// Build the main router with all routes.
@@ -337,13 +336,23 @@ pub fn scan_sql_files(
                 } else {
                     relative_str.to_string()
                 };
-                // Detect stored procedure
+                // Detect stored procedure + extract DML
                 let upper = content.to_uppercase();
                 let is_procedure = upper.contains("CREATE PROCEDURE")
                     || upper.contains("CREATE PROC ")
                     || upper.contains("CREATE OR REPLACE PROCEDURE");
+                let transformed_content = if is_procedure {
+                    flowscope_core::parser::sanitize_bigquery_raw_double_quoted_literals(&content)
+                } else {
+                    None
+                };
 
-                sources.push(flowscope_core::FileSource { name, content, is_procedure, transformed_content: None });
+                sources.push(flowscope_core::FileSource {
+                    name,
+                    content,
+                    is_procedure,
+                    transformed_content,
+                });
 
                 // Store mtime for change detection
                 if let Ok(mtime) = metadata.modified() {

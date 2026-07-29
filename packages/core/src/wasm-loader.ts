@@ -85,6 +85,16 @@ export function getWasmModule(): typeof import('./wasm/flowscope_wasm') {
 }
 
 /**
+ * Sanitize a BigQuery stored procedure, extracting DML/SELECT from
+ * the BEGIN...END body. Returns null if the input is not a BigQuery
+ * procedure or extraction fails.
+ */
+export function sanitizeProcedure(sql: string): string | null {
+  if (!wasmModule) return null;
+  return wasmModule.sanitize_procedure(sql) ?? null;
+}
+
+/**
  * Get the version of the underlying Rust engine.
  * Throws if WASM is not initialized.
  */
