@@ -620,12 +620,6 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
     }
   }, [isFocused]);
 
-  useEffect(() => {
-    if (isActive && itemRef.current) {
-      itemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }
-  }, [isActive]);
-
   // Scroll to active file when revealCnt increments (locate button)
   const prevReveal = useRef(revealCnt);
   useEffect(() => {
