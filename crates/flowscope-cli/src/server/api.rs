@@ -77,7 +77,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/db/anomalies", post(save_anomaly_api))
         .route("/db/anomalies", get(get_anomalies_api))
         .route("/db/convert-procedures", post(convert_procedures))
-        .route("/analyze-batch", post(analyze_batch))
+        .route("/db/analyze-batch", post(analyze_batch))
 }
 
 // === Request/Response types ===
