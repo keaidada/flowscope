@@ -2370,6 +2370,30 @@ pub(crate) async fn analyze_batch(
         if result.summary.has_errors {
             errors += 1;
             error_details.push(format!("{}: analysis errors", f.path));
+            // Record as anomaly
+            let db = state.db.lock().ok();
+            if let Some(db) = db {
+                let msg = result.issues.iter()
+                    .filter(|i| matches!(i.severity, flowscope_core::Severity::Error))
+                    .map(|i| i.message.clone())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let _ = store::insert_anomaly(&db, &store::LineageAnomalyRow {
+                    id: 0,
+                    project_id: req.project_id.clone(),
+                    file_path: f.path.clone(),
+                    script_name: f.name.clone(),
+                    script_content: f.content.clone(),
+                    severity: "error".to_string(),
+                    anomaly_type: "analysis_error".to_string(),
+                    message: if msg.is_empty() { "分析出错".to_string() } else { msg },
+                    detail: String::new(),
+                    is_test: 0,
+                    created_at: String::new(),
+                    updated_at: String::new(),
+                    status: 1,
+                });
+            }
         } else {
             // Save lineage results to DB
             let (nodes, columns, edges) = convert_to_lineage_rows(&result, &f.path);
