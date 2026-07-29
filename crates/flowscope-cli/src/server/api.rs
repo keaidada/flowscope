@@ -2371,6 +2371,12 @@ pub(crate) async fn analyze_batch(
             errors += 1;
             error_details.push(format!("{}: analysis errors", f.path));
         } else {
+            // Save lineage results to DB
+            let (nodes, columns, edges) = convert_to_lineage_rows(&result, &f.path);
+            let db = state.db.lock().ok();
+            if let Some(db) = db {
+                let _ = store::save_lineage_batch(&db, &req.project_id, &nodes, &columns, &edges);
+            }
             success += 1;
         }
     }
@@ -2384,4 +2390,94 @@ pub(crate) async fn analyze_batch(
         empty,
         error_details,
     }))
+}
+
+/// Convert analysis result statements to DB row types for lineage storage.
+fn convert_to_lineage_rows(
+    result: &flowscope_core::AnalyzeResult,
+    file_path: &str,
+) -> (Vec<store::LineageNodeRow>, Vec<store::LineageColumnRow>, Vec<store::LineageEdgeRow>) {
+    use std::collections::{HashMap, HashSet};
+
+    let file_name = file_path.split('/').last().unwrap_or(file_path).to_string();
+    let dir_path = file_path
+        .rfind('/')
+        .map(|i| file_path[..i].to_string())
+        .unwrap_or_default();
+
+    let fn_ref = &file_name;
+    let dp_ref = &dir_path;
+    let fp = file_path;
+
+    let mut nodes = Vec::new();
+    let mut columns = Vec::new();
+    let mut edges = Vec::new();
+
+    for stmt in &result.statements {
+        let si = stmt.statement_index;
+
+        let mut ownership: HashMap<&str, &str> = HashMap::new();
+        for edge in &stmt.edges {
+            if edge.edge_type == flowscope_core::EdgeType::Ownership {
+                ownership.insert(edge.to.as_ref(), edge.from.as_ref());
+            }
+        }
+
+        let all_ids: HashSet<&str> = stmt.nodes.iter().map(|n| n.id.as_ref()).collect();
+        let mut persisted_ids = HashSet::new();
+
+        for node in &stmt.nodes {
+            if node.node_type == flowscope_core::NodeType::Column {
+                if let Some(parent) = ownership.get(node.id.as_ref()) {
+                    if all_ids.contains(parent) {
+                        columns.push(store::LineageColumnRow {
+                            column_id: node.id.to_string(),
+                            label: node.label.to_string(),
+                            qualified_name: Some(node.qualified_name.as_ref().map(|s| s.to_string()).unwrap_or_default()),
+                            parent_node_id: Some(parent.to_string()),
+                            expression: node.expression.as_ref().map(|s| s.to_string()),
+                            statement_index: si as i64,
+                            file_path: fp.to_string(),
+                            file_name: fn_ref.clone(),
+                            dir_path: dp_ref.clone(),
+                        });
+                        persisted_ids.insert(node.id.as_ref());
+                    }
+                }
+            } else {
+                nodes.push(store::LineageNodeRow {
+                    node_id: node.id.to_string(),
+                    node_type: format!("{:?}", node.node_type).to_lowercase(),
+                    label: node.label.to_string(),
+                    qualified_name: node.qualified_name.as_ref().map(|s| s.to_string()),
+                    statement_index: si as i64,
+                    resolution_source: node.resolution_source.as_ref().map(|rs| format!("{:?}", rs).to_lowercase()),
+                    file_path: fp.to_string(),
+                    file_name: fn_ref.clone(),
+                    dir_path: dp_ref.clone(),
+                });
+                persisted_ids.insert(node.id.as_ref());
+            }
+        }
+
+        for edge in &stmt.edges {
+            if persisted_ids.contains(edge.from.as_ref())
+                && persisted_ids.contains(edge.to.as_ref())
+            {
+                edges.push(store::LineageEdgeRow {
+                    edge_id: edge.id.to_string(),
+                    from_id: edge.from.to_string(),
+                    to_id: edge.to.to_string(),
+                    edge_type: format!("{:?}", edge.edge_type),
+                    expression: edge.expression.as_ref().map(|s| s.to_string()),
+                    statement_index: Some(si as i64),
+                    file_path: fp.to_string(),
+                    file_name: fn_ref.clone(),
+                    dir_path: dp_ref.clone(),
+                });
+            }
+        }
+    }
+
+    (nodes, columns, edges)
 }
