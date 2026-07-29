@@ -1434,7 +1434,10 @@ pub fn batch_update_transformed(
 ) -> Result<(), rusqlite::Error> {
     let tx = conn.unchecked_transaction()?;
     {
-        let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        let now = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap())
+            .format("%Y-%m-%dT%H:%M:%S%.3f+08:00")
+            .to_string();
         let mut stmt = tx.prepare(
             "UPDATE project_files SET transformed_content = ?1, is_procedure = 1, updated_at = ?4 WHERE project_id = ?2 AND path = ?3"
         )?;
