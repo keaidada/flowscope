@@ -39,7 +39,12 @@ export function ProcedureRepairDialog({
   useEffect(() => {
     if (open && originalContent) {
       extractDmlFromProcedure(originalContent).then((extracted) => {
-        setTransformedContent(extracted || '');
+        // Defense: strip any remaining comment lines
+        const clean = (extracted || '')
+          .split('\n')
+          .filter(l => !l.trim().startsWith('--') && !l.trim().startsWith('/*'))
+          .join('\n');
+        setTransformedContent(clean);
         setUserRemoved(new Set());
       });
     }
@@ -49,7 +54,7 @@ export function ProcedureRepairDialog({
 
   // Build padded right panel: empty lines where content was removed
   const rightLines = useMemo(() => {
-    const extLines = transformedContent.split('\n');
+    const extLines = transformedContent.split('\n').filter(l => !l.trim().startsWith('--') && !l.trim().startsWith('/*'));
     const extMap = new Map<string, number>();
     extLines.forEach((line, i) => {
       const t = line.trim();
@@ -59,22 +64,41 @@ export function ProcedureRepairDialog({
     const result: string[] = new Array(originalLines.length).fill('');
     let extIdx = 0;
     const usedExt = new Set<number>();
+    const sqlKeywords = new Set(['SELECT','FROM','WHERE','JOIN','INSERT','DELETE','UPDATE','MERGE','CREATE','DROP','TRUNCATE','WITH','GROUP','ORDER','HAVING','LIMIT','UNION','SET','INTO','VALUES','AND','OR','ON']);
 
     for (let i = 0; i < originalLines.length; i++) {
       const origTrim = originalLines[i].trim();
       if (!origTrim) continue;
+      // Skip comments in matching
+      if (origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
+
+      // Exact match
       const matchIdx = extMap.get(origTrim);
       if (matchIdx !== undefined && !usedExt.has(matchIdx)) {
         result[i] = extLines[matchIdx];
         usedExt.add(matchIdx);
         continue;
       }
+      // Sequential match: same keyword + substring
+      const origWord = origTrim.toUpperCase().split(/\s+/)[0].replace(/[,;]$/, '');
       if (extIdx < extLines.length) {
         const extTrim = extLines[extIdx].trim();
-        if (extTrim && (extTrim.includes(origTrim) || origTrim.includes(extTrim))) {
+        const extWord = extTrim.toUpperCase().split(/\s+/)[0].replace(/[,;]$/, '');
+        if (extTrim && (extTrim === origTrim || (origWord === extWord && sqlKeywords.has(origWord)) || extTrim.includes(origTrim) || origTrim.includes(extTrim))) {
           result[i] = extLines[extIdx];
           extIdx++;
           continue;
+        }
+      }
+      // Scan ahead: look through remaining extracted lines for this keyword
+      for (let k = extIdx; k < extLines.length; k++) {
+        if (usedExt.has(k)) continue;
+        const extTrim = extLines[k].trim();
+        const extWord = extTrim.toUpperCase().split(/\s+/)[0].replace(/[,;]$/, '');
+        if (origWord === extWord && sqlKeywords.has(origWord) && (extTrim.includes(origTrim) || origTrim.includes(extTrim) || Math.abs(extTrim.length - origTrim.length) < 50)) {
+          result[i] = extLines[k];
+          usedExt.add(k);
+          break;
         }
       }
     }
