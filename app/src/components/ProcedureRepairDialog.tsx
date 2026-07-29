@@ -65,7 +65,7 @@ export function ProcedureRepairDialog({
     const extMap = new Map<string, number[]>();
     extLines.forEach((line, i) => {
       const t = line.trim();
-      if (t) {
+      if (t && t.length >= 5) {
         const arr = extMap.get(t) || [];
         arr.push(i);
         extMap.set(t, arr);
@@ -77,7 +77,7 @@ export function ProcedureRepairDialog({
     // Pass 1: exact match
     for (let i = 0; i < originalLines.length; i++) {
       const origTrim = originalLines[i].trim();
-      if (!origTrim) continue;
+      if (!origTrim || origTrim.length < 5) continue;
       if (origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
 
       const indices = extMap.get(origTrim);
@@ -248,34 +248,37 @@ export function ProcedureRepairDialog({
                 const isAutoRemoved = !line;
                 const isUserRemoved = userRemoved.has(idx);
                 const isUserKept = userKept.has(idx);
-                // Show when: has content, or user-kept, or showRemoved is on
                 const hide = isAutoRemoved && !isUserKept && !showRemoved;
                 if (hide) return null;
                 const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
                 return (
                   <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
                     <button
-                      title={isUserKept ? '取消保留原始' : isAutoRemoved ? '保留此行原始内容到 DML' : '标记为删除'}
-                      onClick={() => {
-                        if (isUserKept) {
-                          setUserKept(prev => { const n = new Set(prev); n.delete(idx); return n; });
-                        } else if (isAutoRemoved) {
-                          setUserKept(prev => { const n = new Set(prev); n.add(idx); return n; });
-                        } else if (line && !isRemoved) {
-                          toggleRemoved(idx);
-                        }
-                      }}
-                      className={cn('p-0 rounded hover:bg-red-100 transition-colors', isRemoved && 'bg-red-100', isUserKept && 'bg-blue-100')}
+                      title="删除"
+                      onClick={() => { if (line && !isRemoved) toggleRemoved(idx); }}
+                      className={cn('p-0 rounded hover:bg-red-100 transition-colors', isRemoved && 'bg-red-100')}
                     >
-                      <ArrowLeft className={cn('h-2.5 w-2.5', isUserKept ? 'text-blue-500' : isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
+                      <ArrowLeft className={cn('h-2.5 w-2.5', isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
                     </button>
                     <button
-                      title="恢复此行"
-                      onClick={() => { if (isUserRemoved) toggleRemoved(idx); }}
-                      className={cn('p-0 rounded hover:bg-green-100 transition-colors', !isRemoved && 'bg-green-100')}
+                      title={isUserRemoved ? '恢复' : isAutoRemoved ? '保留原始' : ''}
+                      onClick={() => {
+                        if (isUserRemoved) { toggleRemoved(idx); }
+                        else if (isAutoRemoved) { setUserKept(prev => { const n = new Set(prev); n.add(idx); return n; }); }
+                      }}
+                      className={cn('p-0 rounded hover:bg-green-100 transition-colors', (!isRemoved || isUserKept) && 'bg-green-100', isUserKept && 'bg-blue-100')}
                     >
-                      <ArrowRight className={cn('h-2.5 w-2.5', !isRemoved ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
+                      <ArrowRight className={cn('h-2.5 w-2.5', (!isRemoved || isUserKept) ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400', isUserKept && 'text-blue-500')} />
                     </button>
+                    {isUserKept && (
+                      <button
+                        title="取消保留"
+                        onClick={() => setUserKept(prev => { const n = new Set(prev); n.delete(idx); return n; })}
+                        className="p-0 rounded hover:bg-red-100"
+                      >
+                        <X className="h-2 w-2 text-red-400" />
+                      </button>
+                    )}
                   </div>
                 );
               })}
