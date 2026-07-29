@@ -1434,11 +1434,12 @@ pub fn batch_update_transformed(
 ) -> Result<(), rusqlite::Error> {
     let tx = conn.unchecked_transaction()?;
     {
+        let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
         let mut stmt = tx.prepare(
-            "UPDATE project_files SET transformed_content = ?1, is_procedure = 1 WHERE project_id = ?2 AND path = ?3"
+            "UPDATE project_files SET transformed_content = ?1, is_procedure = 1, updated_at = ?4 WHERE project_id = ?2 AND path = ?3"
         )?;
         for (path, transformed) in updates {
-            stmt.execute(params![transformed, project_id, path])?;
+            stmt.execute(params![transformed, project_id, path, now])?;
         }
     }
     tx.commit()
