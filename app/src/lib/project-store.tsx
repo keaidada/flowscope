@@ -115,7 +115,7 @@ interface ProjectContextType {
   updateFiles: (
     updates: Array<{
       fileId: string;
-      content: string;
+      content?: string;
       isProcedure?: boolean;
       transformedContent?: string | null;
       dialect?: string;
@@ -994,7 +994,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     (
       updates: Array<{
         fileId: string;
-        content: string;
+        content?: string;
         isProcedure?: boolean;
         transformedContent?: string | null;
         dialect?: string;
@@ -1018,8 +1018,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
               const update = updatesMap.get(f.id);
               if (!update) return f;
               const content = update.content;
-              const size = new TextEncoder().encode(content).length;
-              const result = { ...f, content, size };
+              const result = content !== undefined
+                ? { ...f, content, size: new TextEncoder().encode(content).length }
+                : { ...f };
               if (update.isProcedure !== undefined) {
                 result.isProcedure = update.isProcedure;
               }

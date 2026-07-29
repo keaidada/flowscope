@@ -6,8 +6,8 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use rusqlite::{Connection, params};
-use serde::{Serialize, Deserialize};
+use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Current schema version.
@@ -89,8 +89,16 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         (
             "project_files",
             &[
-                "id", "project_id", "name", "path", "content", "language",
-                "size", "created_at", "updated_at", "status",
+                "id",
+                "project_id",
+                "name",
+                "path",
+                "content",
+                "language",
+                "size",
+                "created_at",
+                "updated_at",
+                "status",
             ],
             &["created_at", "updated_at"],
         ),
@@ -98,8 +106,15 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         (
             "schema_files",
             &[
-                "id", "project_id", "name", "path", "content", "size",
-                "created_at", "updated_at", "status",
+                "id",
+                "project_id",
+                "name",
+                "path",
+                "content",
+                "size",
+                "created_at",
+                "updated_at",
+                "status",
             ],
             &["created_at", "updated_at"],
         ),
@@ -107,8 +122,14 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         (
             "analysis_cache",
             &[
-                "id", "cache_key", "result_json", "size_bytes",
-                "created_at", "updated_at", "last_accessed_at", "status",
+                "id",
+                "cache_key",
+                "result_json",
+                "size_bytes",
+                "created_at",
+                "updated_at",
+                "last_accessed_at",
+                "status",
             ],
             &["created_at", "updated_at", "last_accessed_at"],
         ),
@@ -116,8 +137,15 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         (
             "project_file_results",
             &[
-                "id", "project_id", "file_path", "result_json",
-                "content_hash", "size_bytes", "created_at", "updated_at", "status",
+                "id",
+                "project_id",
+                "file_path",
+                "result_json",
+                "content_hash",
+                "size_bytes",
+                "created_at",
+                "updated_at",
+                "status",
             ],
             &["created_at", "updated_at"],
         ),
@@ -125,9 +153,18 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         (
             "lineage_nodes",
             &[
-                "id", "project_id", "file_path", "node_id", "node_type",
-                "label", "qualified_name", "statement_index",
-                "resolution_source", "created_at", "updated_at", "status",
+                "id",
+                "project_id",
+                "file_path",
+                "node_id",
+                "node_type",
+                "label",
+                "qualified_name",
+                "statement_index",
+                "resolution_source",
+                "created_at",
+                "updated_at",
+                "status",
             ],
             &["created_at", "updated_at"],
         ),
@@ -135,9 +172,18 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         (
             "lineage_columns",
             &[
-                "id", "project_id", "file_path", "column_id", "label",
-                "qualified_name", "parent_node_id", "expression",
-                "statement_index", "created_at", "updated_at", "status",
+                "id",
+                "project_id",
+                "file_path",
+                "column_id",
+                "label",
+                "qualified_name",
+                "parent_node_id",
+                "expression",
+                "statement_index",
+                "created_at",
+                "updated_at",
+                "status",
             ],
             &["created_at", "updated_at"],
         ),
@@ -145,9 +191,18 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         (
             "lineage_edges",
             &[
-                "id", "project_id", "file_path", "edge_id", "from_id",
-                "to_id", "edge_type", "expression", "statement_index",
-                "created_at", "updated_at", "status",
+                "id",
+                "project_id",
+                "file_path",
+                "edge_id",
+                "from_id",
+                "to_id",
+                "edge_type",
+                "expression",
+                "statement_index",
+                "created_at",
+                "updated_at",
+                "status",
             ],
             &["created_at", "updated_at"],
         ),
@@ -155,11 +210,26 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         (
             "table_metadata",
             &[
-                "id", "project_id", "catalog", "schema_name", "table_name",
-                "table_type", "origin", "temporary", "partition_keys",
-                "cluster_keys", "file_format", "location", "properties_json",
-                "owner", "comment", "row_count", "size_bytes",
-                "created_at", "updated_at", "status",
+                "id",
+                "project_id",
+                "catalog",
+                "schema_name",
+                "table_name",
+                "table_type",
+                "origin",
+                "temporary",
+                "partition_keys",
+                "cluster_keys",
+                "file_format",
+                "location",
+                "properties_json",
+                "owner",
+                "comment",
+                "row_count",
+                "size_bytes",
+                "created_at",
+                "updated_at",
+                "status",
             ],
             &["created_at", "updated_at"],
         ),
@@ -167,9 +237,20 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         (
             "column_metadata",
             &[
-                "id", "project_id", "table_id", "column_name", "ordinal",
-                "data_type", "is_nullable", "is_primary_key", "is_partition",
-                "default_value", "comment", "created_at", "updated_at", "status",
+                "id",
+                "project_id",
+                "table_id",
+                "column_name",
+                "ordinal",
+                "data_type",
+                "is_nullable",
+                "is_primary_key",
+                "is_partition",
+                "default_value",
+                "comment",
+                "created_at",
+                "updated_at",
+                "status",
             ],
             &["created_at", "updated_at"],
         ),
@@ -177,9 +258,16 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         (
             "projects",
             &[
-                "id", "name", "dialect", "run_mode", "template_mode",
-                "schema_sql", "selected_file_ids", "active_file_id",
-                "created_at", "updated_at",
+                "id",
+                "name",
+                "dialect",
+                "run_mode",
+                "template_mode",
+                "schema_sql",
+                "selected_file_ids",
+                "active_file_id",
+                "created_at",
+                "updated_at",
             ],
             &["created_at", "updated_at"],
         ),
@@ -192,7 +280,14 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         // table_level_edges
         (
             "table_level_edges",
-            &["id", "project_id", "from_table", "to_table", "script", "created_at"],
+            &[
+                "id",
+                "project_id",
+                "from_table",
+                "to_table",
+                "script",
+                "created_at",
+            ],
             &["created_at"],
         ),
     ];
@@ -276,7 +371,12 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
 /// v1 → v2: add `file_name` and `dir_path` columns to all tables that have
 /// `file_path`. Existing rows are backfilled from `file_path`.
 fn migrate_v1_to_v2(conn: &Connection) -> Result<(), rusqlite::Error> {
-    let tables = ["lineage_nodes", "lineage_columns", "lineage_edges", "project_file_results"];
+    let tables = [
+        "lineage_nodes",
+        "lineage_columns",
+        "lineage_edges",
+        "project_file_results",
+    ];
 
     for table in &tables {
         // Check if the table exists
@@ -319,16 +419,20 @@ fn migrate_v1_to_v2(conn: &Connection) -> Result<(), rusqlite::Error> {
         if empty_count > 0 {
             eprintln!("[migrate v1→v2] backfilling {empty_count} rows in '{table}'...");
             let rows: Vec<(i64, String)> = conn
-                .prepare(&format!("SELECT rowid, file_path FROM {table} WHERE file_name = ''"))?
-                .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
+                .prepare(&format!(
+                    "SELECT rowid, file_path FROM {table} WHERE file_name = ''"
+                ))?
+                .query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })?
                 .filter_map(Result::ok)
                 .collect();
 
             let tx = conn.unchecked_transaction()?;
             {
-                let mut stmt = tx.prepare(
-                    &format!("UPDATE {table} SET file_name = ?1, dir_path = ?2 WHERE rowid = ?3")
-                )?;
+                let mut stmt = tx.prepare(&format!(
+                    "UPDATE {table} SET file_name = ?1, dir_path = ?2 WHERE rowid = ?3"
+                ))?;
                 for (rowid, fp) in &rows {
                     let (fn_, dp) = split_file_path(fp);
                     stmt.execute(params![fn_, dp, rowid])?;
@@ -347,9 +451,12 @@ fn migrate_v2_to_v3(conn: &Connection) -> Result<(), rusqlite::Error> {
     let table = "table_level_edges";
     let exists: i64 = conn.query_row(
         &format!("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{table}'"),
-        [], |row| row.get(0),
+        [],
+        |row| row.get(0),
     )?;
-    if exists == 0 { return Ok(()); }
+    if exists == 0 {
+        return Ok(());
+    }
 
     let cols: Vec<String> = conn
         .prepare(&format!("PRAGMA table_info({table})"))?
@@ -367,22 +474,27 @@ fn migrate_v2_to_v3(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     let empty_count: i64 = conn.query_row(
         &format!("SELECT COUNT(*) FROM {table} WHERE script_name = ''"),
-        [], |row| row.get(0),
+        [],
+        |row| row.get(0),
     )?;
 
     if empty_count > 0 {
         eprintln!("[migrate v2→v3] backfilling {empty_count} rows in '{table}'...");
         let rows: Vec<(i64, String)> = conn
-            .prepare(&format!("SELECT rowid, script FROM {table} WHERE script_name = ''"))?
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
+            .prepare(&format!(
+                "SELECT rowid, script FROM {table} WHERE script_name = ''"
+            ))?
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
             .filter_map(Result::ok)
             .collect();
 
         let tx = conn.unchecked_transaction()?;
         {
-            let mut stmt = tx.prepare(
-                &format!("UPDATE {table} SET script_name = ?1, dir_path = ?2 WHERE rowid = ?3")
-            )?;
+            let mut stmt = tx.prepare(&format!(
+                "UPDATE {table} SET script_name = ?1, dir_path = ?2 WHERE rowid = ?3"
+            ))?;
             for (rowid, script) in &rows {
                 let (sn, dp) = split_file_path(script);
                 stmt.execute(params![sn, dp, rowid])?;
@@ -426,7 +538,9 @@ fn migrate_v3_to_v4(conn: &Connection) -> Result<(), rusqlite::Error> {
         )
         .unwrap_or(false);
     if !pf_exists {
-        eprintln!("[migrate v3→v4] project_files not yet created (fresh DB), skipping column steps.");
+        eprintln!(
+            "[migrate v3→v4] project_files not yet created (fresh DB), skipping column steps."
+        );
         return Ok(());
     }
 
@@ -438,20 +552,25 @@ fn migrate_v3_to_v4(conn: &Connection) -> Result<(), rusqlite::Error> {
         .collect();
 
     if !pf_cols.iter().any(|c| c == "dir_id") {
-        conn.execute_batch("ALTER TABLE project_files ADD COLUMN dir_id TEXT NOT NULL DEFAULT '';")?;
+        conn.execute_batch(
+            "ALTER TABLE project_files ADD COLUMN dir_id TEXT NOT NULL DEFAULT '';",
+        )?;
         eprintln!("[migrate v3→v4] added dir_id column to project_files");
     }
 
     // 3. Backfill dir_id in project_files
     let empty_dir_count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM project_files WHERE dir_id = ''",
-        [], |row| row.get(0),
+        [],
+        |row| row.get(0),
     )?;
     if empty_dir_count > 0 {
         eprintln!("[migrate v3→v4] backfilling dir_id for {empty_dir_count} files...");
         let rows: Vec<(i64, String)> = conn
             .prepare("SELECT rowid, path FROM project_files WHERE dir_id = ''")?
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
             .filter_map(Result::ok)
             .collect();
         let tx = conn.unchecked_transaction()?;
@@ -511,13 +630,19 @@ fn migrate_v4_to_v5(conn: &Connection) -> Result<(), rusqlite::Error> {
         .collect();
 
     if !pf_cols.iter().any(|c| c == "dialect") {
-        conn.execute_batch("ALTER TABLE project_files ADD COLUMN dialect TEXT NOT NULL DEFAULT '';")?;
+        conn.execute_batch(
+            "ALTER TABLE project_files ADD COLUMN dialect TEXT NOT NULL DEFAULT '';",
+        )?;
     }
     if !pf_cols.iter().any(|c| c == "is_procedure") {
-        conn.execute_batch("ALTER TABLE project_files ADD COLUMN is_procedure INTEGER NOT NULL DEFAULT 0;")?;
+        conn.execute_batch(
+            "ALTER TABLE project_files ADD COLUMN is_procedure INTEGER NOT NULL DEFAULT 0;",
+        )?;
     }
     if !pf_cols.iter().any(|c| c == "transformed_content") {
-        conn.execute_batch("ALTER TABLE project_files ADD COLUMN transformed_content TEXT NOT NULL DEFAULT '';")?;
+        conn.execute_batch(
+            "ALTER TABLE project_files ADD COLUMN transformed_content TEXT NOT NULL DEFAULT '';",
+        )?;
     }
     Ok(())
 }
@@ -526,7 +651,8 @@ fn migrate_v4_to_v5(conn: &Connection) -> Result<(), rusqlite::Error> {
 /// (v1) schema — time columns as `TEXT`.
 fn create_table_sql_for(table: &str) -> &'static str {
     match table {
-        "project_files" => "
+        "project_files" => {
+            "
             CREATE TABLE project_files (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id          TEXT    NOT NULL,
@@ -542,8 +668,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 updated_at          TEXT    NOT NULL DEFAULT '',
                 status              INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, path)
-            );",
-        "schema_files" => "
+            );"
+        }
+        "schema_files" => {
+            "
             CREATE TABLE schema_files (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id TEXT    NOT NULL,
@@ -555,8 +683,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 updated_at TEXT    NOT NULL DEFAULT '',
                 status     INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, path)
-            );",
-        "analysis_cache" => "
+            );"
+        }
+        "analysis_cache" => {
+            "
             CREATE TABLE analysis_cache (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 cache_key        TEXT    NOT NULL UNIQUE,
@@ -566,8 +696,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 created_at       TEXT    NOT NULL DEFAULT '',
                 updated_at       TEXT    NOT NULL DEFAULT '',
                 status           INTEGER NOT NULL DEFAULT 1
-            );",
-        "project_file_results" => "
+            );"
+        }
+        "project_file_results" => {
+            "
             CREATE TABLE project_file_results (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id   TEXT    NOT NULL,
@@ -581,8 +713,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 updated_at   TEXT    NOT NULL DEFAULT '',
                 status       INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, file_path)
-            );",
-        "lineage_anomalies" => "
+            );"
+        }
+        "lineage_anomalies" => {
+            "
             CREATE TABLE lineage_anomalies (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id    TEXT    NOT NULL,
@@ -597,8 +731,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 created_at    TEXT    NOT NULL DEFAULT '',
                 updated_at    TEXT    NOT NULL DEFAULT '',
                 status        INTEGER NOT NULL DEFAULT 1
-            );",
-        "lineage_nodes" => "
+            );"
+        }
+        "lineage_nodes" => {
+            "
             CREATE TABLE lineage_nodes (
                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id        TEXT    NOT NULL,
@@ -615,8 +751,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 updated_at        TEXT    NOT NULL DEFAULT '',
                 status            INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, file_path, node_id)
-            );",
-        "lineage_columns" => "
+            );"
+        }
+        "lineage_columns" => {
+            "
             CREATE TABLE lineage_columns (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id      TEXT    NOT NULL,
@@ -633,8 +771,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 updated_at      TEXT    NOT NULL DEFAULT '',
                 status          INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, file_path, column_id)
-            );",
-        "lineage_edges" => "
+            );"
+        }
+        "lineage_edges" => {
+            "
             CREATE TABLE lineage_edges (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id      TEXT    NOT NULL,
@@ -651,8 +791,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 updated_at      TEXT    NOT NULL DEFAULT '',
                 status          INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, file_path, edge_id)
-            );",
-        "table_metadata" => "
+            );"
+        }
+        "table_metadata" => {
+            "
             CREATE TABLE table_metadata (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id      TEXT    NOT NULL,
@@ -675,8 +817,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 updated_at      TEXT    NOT NULL DEFAULT '',
                 status          INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, catalog, schema_name, table_name)
-            );",
-        "column_metadata" => "
+            );"
+        }
+        "column_metadata" => {
+            "
             CREATE TABLE column_metadata (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id      TEXT    NOT NULL,
@@ -694,8 +838,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 status          INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, table_id, column_name),
                 FOREIGN KEY(table_id) REFERENCES table_metadata(id) ON DELETE CASCADE
-            );",
-        "projects" => "
+            );"
+        }
+        "projects" => {
+            "
             CREATE TABLE projects (
                 id                TEXT PRIMARY KEY,
                 name              TEXT    NOT NULL,
@@ -708,8 +854,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 created_at        TEXT    NOT NULL DEFAULT '',
                 updated_at        TEXT    NOT NULL DEFAULT '',
                 status            INTEGER NOT NULL DEFAULT 1
-            );",
-        "view_states" => "
+            );"
+        }
+        "view_states" => {
+            "
             CREATE TABLE view_states (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id  TEXT    NOT NULL UNIQUE,
@@ -717,8 +865,10 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 created_at  TEXT    NOT NULL DEFAULT '',
                 updated_at  TEXT    NOT NULL DEFAULT '',
                 status      INTEGER NOT NULL DEFAULT 1
-            );",
-        "table_level_edges" => "
+            );"
+        }
+        "table_level_edges" => {
+            "
             CREATE TABLE table_level_edges (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id  TEXT    NOT NULL,
@@ -731,7 +881,8 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 updated_at  TEXT    NOT NULL DEFAULT '',
                 status      INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(project_id, from_table, to_table, script)
-            );",
+            );"
+        }
         _ => panic!("create_table_sql_for: unknown table '{table}'"),
     }
 }
@@ -1048,7 +1199,20 @@ pub fn save_project_files_batch(
             "INSERT INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?12), COALESCE(NULLIF(?11, ''), ?12), 1) ON CONFLICT(project_id, path) DO UPDATE SET name=excluded.name, content=excluded.content, language=excluded.language, size=excluded.size, dialect=excluded.dialect, is_procedure=excluded.is_procedure, transformed_content=excluded.transformed_content, updated_at=COALESCE(NULLIF(excluded.updated_at, ''), ?12), status=1"
         )?;
         for f in files {
-            stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, f.dialect, f.is_procedure, f.transformed_content, f.created_at, f.updated_at, now])?;
+            stmt.execute(params![
+                project_id,
+                f.name,
+                f.path,
+                f.content,
+                f.language,
+                f.size,
+                f.dialect,
+                f.is_procedure,
+                f.transformed_content,
+                f.created_at,
+                f.updated_at,
+                now
+            ])?;
         }
     }
     tx.commit()?;
@@ -1159,7 +1323,11 @@ pub fn load_file_full(
                 is_procedure: row.get(1)?,
                 transformed_content: {
                     let tc: String = row.get(2)?;
-                    if tc.is_empty() { None } else { Some(tc) }
+                    if tc.is_empty() {
+                        None
+                    } else {
+                        Some(tc)
+                    }
                 },
             })
         },
@@ -1191,9 +1359,10 @@ pub fn load_file_contents_batch(
         placeholders.join(", ")
     );
     let mut stmt = conn.prepare(&sql)?;
-    let params_iter: Vec<&dyn rusqlite::ToSql> = std::iter::once(&project_id as &dyn rusqlite::ToSql)
-        .chain(paths.iter().map(|p| p as &dyn rusqlite::ToSql))
-        .collect();
+    let params_iter: Vec<&dyn rusqlite::ToSql> =
+        std::iter::once(&project_id as &dyn rusqlite::ToSql)
+            .chain(paths.iter().map(|p| p as &dyn rusqlite::ToSql))
+            .collect();
     let rows = stmt.query_map(params_iter.as_slice(), |row| {
         Ok(FileContentRow {
             path: row.get(0)?,
@@ -1233,13 +1402,46 @@ pub fn upsert_project_files(
         )?;
         for f in files {
             let (_, dir) = split_file_path(&f.path);
-            stmt.execute(params![project_id, f.name, f.path, f.content, f.language, f.size, f.dialect, f.is_procedure, f.transformed_content, f.created_at, f.updated_at, dir, now])?;
+            stmt.execute(params![
+                project_id,
+                f.name,
+                f.path,
+                f.content,
+                f.language,
+                f.size,
+                f.dialect,
+                f.is_procedure,
+                f.transformed_content,
+                f.created_at,
+                f.updated_at,
+                dir,
+                now
+            ])?;
         }
     }
     tx.commit()?;
     // Sync directories after upsert
     rebuild_directories_for_project(conn, project_id)?;
     Ok(())
+}
+
+/// Batch-update transformed_content for procedure files.
+/// Takes (path, transformed_content) pairs.
+pub fn batch_update_transformed(
+    conn: &Connection,
+    project_id: &str,
+    updates: &[(String, String)],
+) -> Result<(), rusqlite::Error> {
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "UPDATE project_files SET transformed_content = ?1, is_procedure = 1 WHERE project_id = ?2 AND path = ?3"
+        )?;
+        for (path, transformed) in updates {
+            stmt.execute(params![transformed, project_id, path])?;
+        }
+    }
+    tx.commit()
 }
 
 // ── delete by paths ───────────────────────────────────────────────────
@@ -1345,7 +1547,7 @@ pub fn rename_project_folder(
     {
         let mut stmt = tx.prepare(
             "UPDATE project_files SET path = ?1, dir_id = ?2, updated_at = ?3
-             WHERE project_id = ?4 AND path = ?5"
+             WHERE project_id = ?4 AND path = ?5",
         )?;
         for (old_path, new_path) in &files_to_update {
             let (_, dir) = split_file_path(new_path);
@@ -1377,7 +1579,7 @@ pub fn load_directories(
 ) -> Result<Vec<ProjectDirectoryRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT id, project_id, parent_id, name, path, level, file_count, child_count
-         FROM project_directories WHERE project_id = ?1 AND status = 1 ORDER BY path"
+         FROM project_directories WHERE project_id = ?1 AND status = 1 ORDER BY path",
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(ProjectDirectoryRow {
@@ -1395,7 +1597,10 @@ pub fn load_directories(
 }
 
 /// Rebuild directories for a single project (called after file changes).
-fn rebuild_directories_for_project(conn: &Connection, project_id: &str) -> Result<(), rusqlite::Error> {
+fn rebuild_directories_for_project(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<(), rusqlite::Error> {
     let now = chrono::Local::now().to_rfc3339();
 
     let now = chrono::Local::now().to_rfc3339();
@@ -1407,12 +1612,17 @@ fn rebuild_directories_for_project(conn: &Connection, project_id: &str) -> Resul
         .filter_map(Result::ok)
         .collect();
 
-    let mut dir_map: std::collections::BTreeMap<String, (String, usize)> = std::collections::BTreeMap::new();
+    let mut dir_map: std::collections::BTreeMap<String, (String, usize)> =
+        std::collections::BTreeMap::new();
     // dir_path → (parent_path, file_count)
 
     for path in &paths {
         let (_, dir) = split_file_path(path);
-        let segments: Vec<&str> = if dir.is_empty() { vec![] } else { dir.split('/').collect() };
+        let segments: Vec<&str> = if dir.is_empty() {
+            vec![]
+        } else {
+            dir.split('/').collect()
+        };
         let mut current_path = String::new();
         let mut parent_path = String::new();
         for (i, seg) in segments.iter().enumerate() {
@@ -1421,7 +1631,9 @@ fn rebuild_directories_for_project(conn: &Connection, project_id: &str) -> Resul
                 current_path.push('/');
             }
             current_path.push_str(seg);
-            dir_map.entry(current_path.clone()).or_insert_with(|| (parent_path.clone(), 0));
+            dir_map
+                .entry(current_path.clone())
+                .or_insert_with(|| (parent_path.clone(), 0));
         }
         if !dir.is_empty() {
             if let Some(entry) = dir_map.get_mut(&dir) {
@@ -1430,7 +1642,8 @@ fn rebuild_directories_for_project(conn: &Connection, project_id: &str) -> Resul
         }
     }
 
-    let mut child_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut child_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     for (_dir_path, (parent_path, _)) in &dir_map {
         if !parent_path.is_empty() {
             *child_counts.entry(parent_path.clone()).or_insert(0usize) += 1;
@@ -1450,9 +1663,23 @@ fn rebuild_directories_for_project(conn: &Connection, project_id: &str) -> Resul
         )?;
         for (dir_path, (parent_path, file_count)) in &dir_map {
             let name = dir_path.rsplit('/').next().unwrap_or(dir_path);
-            let level = if dir_path.is_empty() { 0 } else { dir_path.matches('/').count() + 1 } as i64;
+            let level = if dir_path.is_empty() {
+                0
+            } else {
+                dir_path.matches('/').count() + 1
+            } as i64;
             let cc = *child_counts.get(dir_path).unwrap_or(&0) as i64;
-            stmt.execute(params![dir_path, project_id, parent_path, name, dir_path, level, *file_count as i64, cc, now])?;
+            stmt.execute(params![
+                dir_path,
+                project_id,
+                parent_path,
+                name,
+                dir_path,
+                level,
+                *file_count as i64,
+                cc,
+                now
+            ])?;
         }
     }
     tx.commit()?;
@@ -1477,7 +1704,9 @@ pub struct ProjectRow {
     pub status: i32,
 }
 
-fn default_status() -> i32 { 1 }
+fn default_status() -> i32 {
+    1
+}
 
 pub fn save_project(conn: &Connection, p: &ProjectRow) -> Result<(), rusqlite::Error> {
     conn.execute(
@@ -1512,14 +1741,29 @@ pub fn load_projects(conn: &Connection) -> Result<Vec<ProjectRow>, rusqlite::Err
 pub fn delete_project(conn: &Connection, project_id: &str) -> Result<(), rusqlite::Error> {
     let now = chrono::Local::now().to_rfc3339();
     // Soft-delete project and cascade to all related tables
-    conn.execute("UPDATE projects SET status = 0, updated_at = ?2 WHERE id = ?1 AND status = 1", params![project_id, now])?;
+    conn.execute(
+        "UPDATE projects SET status = 0, updated_at = ?2 WHERE id = ?1 AND status = 1",
+        params![project_id, now],
+    )?;
     for table in &[
-        "project_files", "project_directories", "schema_files", "project_file_results",
-        "lineage_nodes", "lineage_columns", "lineage_edges", "table_level_edges",
-        "lineage_anomalies", "view_states", "table_metadata", "column_metadata",
+        "project_files",
+        "project_directories",
+        "schema_files",
+        "project_file_results",
+        "lineage_nodes",
+        "lineage_columns",
+        "lineage_edges",
+        "table_level_edges",
+        "lineage_anomalies",
+        "view_states",
+        "table_metadata",
+        "column_metadata",
     ] {
         conn.execute(
-            &format!("UPDATE {} SET status = 0, updated_at = ?2 WHERE project_id = ?1 AND status = 1", table),
+            &format!(
+                "UPDATE {} SET status = 0, updated_at = ?2 WHERE project_id = ?1 AND status = 1",
+                table
+            ),
             params![project_id, now],
         )?;
     }
@@ -1541,8 +1785,12 @@ pub fn save_view_state(
     Ok(())
 }
 
-pub fn load_view_state(conn: &Connection, project_id: &str) -> Result<Option<String>, rusqlite::Error> {
-    let mut stmt = conn.prepare("SELECT state_json FROM view_states WHERE project_id = ?1 AND status = 1")?;
+pub fn load_view_state(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Option<String>, rusqlite::Error> {
+    let mut stmt =
+        conn.prepare("SELECT state_json FROM view_states WHERE project_id = ?1 AND status = 1")?;
     let mut rows = stmt.query(params![project_id])?;
     if let Some(row) = rows.next()? {
         Ok(Some(row.get(0)?))
@@ -1552,7 +1800,8 @@ pub fn load_view_state(conn: &Connection, project_id: &str) -> Result<Option<Str
 }
 
 pub fn load_all_view_states(conn: &Connection) -> Result<Vec<(String, String)>, rusqlite::Error> {
-    let mut stmt = conn.prepare("SELECT project_id, state_json FROM view_states WHERE status = 1")?;
+    let mut stmt =
+        conn.prepare("SELECT project_id, state_json FROM view_states WHERE status = 1")?;
     let rows = stmt.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -1572,7 +1821,10 @@ pub struct TableLevelEdge {
 /// Joins lineage_edges to lineage_nodes on both endpoints, keeping only edges
 /// where BOTH endpoints are physical tables/views (node_type table|view),
 /// excluding CTE/temp/self-loops. This is what "table-level lineage" exports need.
-pub fn load_table_lineage(conn: &Connection, project_id: &str) -> Result<Vec<TableLevelEdge>, rusqlite::Error> {
+pub fn load_table_lineage(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<TableLevelEdge>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT DISTINCT
             COALESCE(NULLIF(nf.qualified_name, ''), nf.label) AS from_table,
@@ -1584,7 +1836,7 @@ pub fn load_table_lineage(conn: &Connection, project_id: &str) -> Result<Vec<Tab
          WHERE e.project_id = ?1
            AND nf.node_type IN ('table', 'view')
            AND nt.node_type IN ('table', 'view')
-           AND nf.node_id <> nt.node_id"
+           AND nf.node_id <> nt.node_id",
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(TableLevelEdge {
@@ -1606,13 +1858,16 @@ pub fn save_table_level_edges(
     use rusqlite::{params_from_iter, ToSql};
     let tx = conn.unchecked_transaction()?;
     // Only delete edges for the scripts we're updating, not the whole project
-    let scripts: std::collections::HashSet<&str> = edges.iter().map(|(_, _, s)| s.as_str()).collect();
+    let scripts: std::collections::HashSet<&str> =
+        edges.iter().map(|(_, _, s)| s.as_str()).collect();
     if !scripts.is_empty() {
         let placeholders: Vec<String> = (0..scripts.len()).map(|_| "?".to_string()).collect();
         let now_tl = chrono::Local::now().to_rfc3339();
         let sql = format!("UPDATE table_level_edges SET status = 0, updated_at = ? WHERE project_id = ? AND script IN ({}) AND status = 1", placeholders.join(","));
         let mut params: Vec<&dyn ToSql> = vec![&now_tl, &project_id];
-        for s in &scripts { params.push(s); }
+        for s in &scripts {
+            params.push(s);
+        }
         tx.execute(&sql, params_from_iter(params))?;
     }
     let now = chrono::Local::now().to_rfc3339();
@@ -1643,10 +1898,17 @@ pub fn save_table_level_edges(
     Ok(())
 }
 
-pub fn load_table_level_edges(conn: &Connection, project_id: &str) -> Result<Vec<(String, String, String)>, rusqlite::Error> {
+pub fn load_table_level_edges(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<(String, String, String)>, rusqlite::Error> {
     let mut stmt = conn.prepare("SELECT from_table, to_table, script FROM table_level_edges WHERE project_id = ?1 AND status = 1")?;
     let rows = stmt.query_map(params![project_id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     })?;
     rows.collect()
 }
@@ -1670,13 +1932,24 @@ pub fn save_schema_files(
 ) -> Result<(), rusqlite::Error> {
     let tx = conn.unchecked_transaction()?;
     let now = chrono::Local::now().to_rfc3339();
-    tx.execute("UPDATE schema_files SET status = 0, updated_at = ?2 WHERE project_id = ?1 AND status = 1", params![project_id, now])?;
+    tx.execute(
+        "UPDATE schema_files SET status = 0, updated_at = ?2 WHERE project_id = ?1 AND status = 1",
+        params![project_id, now],
+    )?;
     {
         let mut stmt = tx.prepare(
             "INSERT INTO schema_files (project_id, name, path, content, size, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1) ON CONFLICT(project_id, path) DO UPDATE SET name=excluded.name, content=excluded.content, size=excluded.size, updated_at=excluded.updated_at, status=1"
         )?;
         for f in files {
-            stmt.execute(params![project_id, f.name, f.path, f.content, f.size, f.created_at, f.updated_at])?;
+            stmt.execute(params![
+                project_id,
+                f.name,
+                f.path,
+                f.content,
+                f.size,
+                f.created_at,
+                f.updated_at
+            ])?;
         }
     }
     tx.commit()?;
@@ -1705,13 +1978,8 @@ pub fn load_schema_files(
 
 // ── analysis_cache ─────────────────────────────────────────────────────
 
-pub fn get_cache(
-    conn: &Connection,
-    cache_key: &str,
-) -> Result<Option<String>, rusqlite::Error> {
-    let mut stmt = conn.prepare(
-        "SELECT result_json FROM analysis_cache WHERE cache_key = ?1"
-    )?;
+pub fn get_cache(conn: &Connection, cache_key: &str) -> Result<Option<String>, rusqlite::Error> {
+    let mut stmt = conn.prepare("SELECT result_json FROM analysis_cache WHERE cache_key = ?1")?;
     let mut rows = stmt.query_map(params![cache_key], |row| row.get::<_, String>(0))?;
     if let Some(row) = rows.next() {
         conn.execute(
@@ -1743,7 +2011,10 @@ pub fn clear_all_cache(conn: &Connection) -> Result<(), rusqlite::Error> {
 }
 
 pub fn delete_cache(conn: &Connection, key: &str) -> Result<(), rusqlite::Error> {
-    conn.execute("DELETE FROM analysis_cache WHERE cache_key = ?1", params![key])?;
+    conn.execute(
+        "DELETE FROM analysis_cache WHERE cache_key = ?1",
+        params![key],
+    )?;
     Ok(())
 }
 
@@ -1792,11 +2063,11 @@ pub fn get_file_results(
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok((
-            row.get::<_, String>(0)?,  // file_path
-            row.get::<_, String>(1)?,  // result_json
-            row.get::<_, String>(2)?,  // content_hash
-            row.get::<_, String>(3)?,  // file_name
-            row.get::<_, String>(4)?,  // dir_path
+            row.get::<_, String>(0)?, // file_path
+            row.get::<_, String>(1)?, // result_json
+            row.get::<_, String>(2)?, // content_hash
+            row.get::<_, String>(3)?, // file_name
+            row.get::<_, String>(4)?, // dir_path
         ))
     })?;
     rows.collect()
@@ -1811,10 +2082,7 @@ pub fn get_file_results_light(
         "SELECT file_path, file_name FROM project_file_results WHERE project_id = ?1 AND status = 1"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-        ))
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
     rows.collect()
 }
@@ -1855,10 +2123,7 @@ pub struct LineageAnomalyRow {
     pub status: i32,
 }
 
-pub fn insert_anomaly(
-    conn: &Connection,
-    row: &LineageAnomalyRow,
-) -> Result<i64, rusqlite::Error> {
+pub fn insert_anomaly(conn: &Connection, row: &LineageAnomalyRow) -> Result<i64, rusqlite::Error> {
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO lineage_anomalies (project_id, file_path, script_name, script_content, severity, anomaly_type, message, detail, is_test, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
@@ -1956,7 +2221,9 @@ pub fn save_lineage_batch(
     // 只删除本次涉及的 file_path 的旧 lineage(支持 merged 跨文件),
     // 避免单文件分析时删全项目千万行导致卡死
     use std::collections::HashSet;
-    let fp_set: HashSet<&str> = nodes.iter().map(|n| n.file_path.as_str())
+    let fp_set: HashSet<&str> = nodes
+        .iter()
+        .map(|n| n.file_path.as_str())
         .chain(columns.iter().map(|c| c.file_path.as_str()))
         .chain(edges.iter().map(|e| e.file_path.as_str()))
         .collect();
@@ -2083,7 +2350,10 @@ pub fn load_lineage_nodes(
             vec![project_id.to_string()],
         )
     };
-    let params: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let params: Vec<&dyn rusqlite::types::ToSql> = params_vec
+        .iter()
+        .map(|s| s as &dyn rusqlite::types::ToSql)
+        .collect();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params.as_slice(), |row| {
         Ok(LineageNodeRow {
@@ -2117,7 +2387,10 @@ pub fn load_lineage_columns(
             vec![project_id.to_string()],
         )
     };
-    let params: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let params: Vec<&dyn rusqlite::types::ToSql> = params_vec
+        .iter()
+        .map(|s| s as &dyn rusqlite::types::ToSql)
+        .collect();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params.as_slice(), |row| {
         Ok(LineageColumnRow {
@@ -2156,9 +2429,16 @@ pub fn load_lineage_edges(
         ),
     };
     let mut params_vec: Vec<String> = vec![project_id.to_string()];
-    if let Some(fp) = file_path { params_vec.push(fp.to_string()); }
-    if let Some(et) = edge_type { params_vec.push(et.to_string()); }
-    let params: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    if let Some(fp) = file_path {
+        params_vec.push(fp.to_string());
+    }
+    if let Some(et) = edge_type {
+        params_vec.push(et.to_string());
+    }
+    let params: Vec<&dyn rusqlite::types::ToSql> = params_vec
+        .iter()
+        .map(|s| s as &dyn rusqlite::types::ToSql)
+        .collect();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params.as_slice(), |row| {
         Ok(LineageEdgeRow {
@@ -2266,17 +2546,30 @@ pub fn save_table_metadata(
     )?;
 
     // Map of (catalog, schema, table_name) -> table_id for column insertion
-    let mut table_id_map: std::collections::HashMap<(String, String, String), i64> = std::collections::HashMap::new();
+    let mut table_id_map: std::collections::HashMap<(String, String, String), i64> =
+        std::collections::HashMap::new();
 
     for t in tables {
         insert_table.execute(params![
             project_id,
-            t.catalog, t.schema_name, t.table_name, t.table_type,
-            t.origin, t.temporary as i32,
-            t.partition_keys, t.cluster_keys, t.file_format, t.location,
-            t.properties_json, t.owner, t.comment,
-            t.row_count, t.size_bytes,
-            t.created_at, t.updated_at, t.status,
+            t.catalog,
+            t.schema_name,
+            t.table_name,
+            t.table_type,
+            t.origin,
+            t.temporary as i32,
+            t.partition_keys,
+            t.cluster_keys,
+            t.file_format,
+            t.location,
+            t.properties_json,
+            t.owner,
+            t.comment,
+            t.row_count,
+            t.size_bytes,
+            t.created_at,
+            t.updated_at,
+            t.status,
         ])?;
     }
     // Drop insert_table so get_table_id can borrow the connection
@@ -2288,7 +2581,14 @@ pub fn save_table_metadata(
             params![project_id, t.catalog, t.schema_name, t.table_name],
             |row| row.get(0),
         )?;
-        table_id_map.insert((t.catalog.clone(), t.schema_name.clone(), t.table_name.clone()), table_id);
+        table_id_map.insert(
+            (
+                t.catalog.clone(),
+                t.schema_name.clone(),
+                t.table_name.clone(),
+            ),
+            table_id,
+        );
     }
     drop(get_table_id);
 
@@ -2300,7 +2600,12 @@ pub fn save_table_metadata(
         let input_order_to_real: Vec<i64> = (0..tables.len())
             .map(|i| {
                 let t = &tables[i];
-                *table_id_map.get(&(t.catalog.clone(), t.schema_name.clone(), t.table_name.clone()))
+                *table_id_map
+                    .get(&(
+                        t.catalog.clone(),
+                        t.schema_name.clone(),
+                        t.table_name.clone(),
+                    ))
                     .unwrap_or(&0)
             })
             .collect();
@@ -2311,18 +2616,27 @@ pub fn save_table_metadata(
 
         for c in columns {
             // Remap table_id: input uses 1-indexed sequential IDs
-            let real_table_id = if c.table_id > 0 && (c.table_id as usize) <= input_order_to_real.len() {
-                input_order_to_real[(c.table_id - 1) as usize]
-            } else {
-                c.table_id // fallback
-            };
+            let real_table_id =
+                if c.table_id > 0 && (c.table_id as usize) <= input_order_to_real.len() {
+                    input_order_to_real[(c.table_id - 1) as usize]
+                } else {
+                    c.table_id // fallback
+                };
 
             insert_col.execute(params![
                 project_id,
-                real_table_id, c.column_name, c.ordinal, c.data_type,
-                c.is_nullable as i32, c.is_primary_key as i32, c.is_partition as i32,
-                c.default_value, c.comment,
-                c.created_at, c.updated_at, c.status,
+                real_table_id,
+                c.column_name,
+                c.ordinal,
+                c.data_type,
+                c.is_nullable as i32,
+                c.is_primary_key as i32,
+                c.is_partition as i32,
+                c.default_value,
+                c.comment,
+                c.created_at,
+                c.updated_at,
+                c.status,
             ])?;
         }
     }
@@ -2343,10 +2657,18 @@ pub fn save_column_metadata(
         for c in columns {
             stmt.execute(params![
                 project_id,
-                c.table_id, c.column_name, c.ordinal, c.data_type,
-                c.is_nullable as i32, c.is_primary_key as i32, c.is_partition as i32,
-                c.default_value, c.comment,
-                c.created_at, c.updated_at, c.status,
+                c.table_id,
+                c.column_name,
+                c.ordinal,
+                c.data_type,
+                c.is_nullable as i32,
+                c.is_primary_key as i32,
+                c.is_partition as i32,
+                c.default_value,
+                c.comment,
+                c.created_at,
+                c.updated_at,
+                c.status,
             ])?;
         }
     }

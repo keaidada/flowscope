@@ -153,6 +153,24 @@ export async function loadFileContentsBatch(
   return result;
 }
 
+export async function loadFileContentsWithMetaBatch(
+  projectId: string,
+  paths: string[]
+): Promise<Map<string, FileContentResult>> {
+  const BATCH = 50;
+  const result = new Map<string, FileContentResult>();
+  for (let i = 0; i < paths.length; i += BATCH) {
+    const batch = paths.slice(i, i + BATCH);
+    const responses = await Promise.all(
+      batch.map(async (p) => [p, await loadFileContent(projectId, p)] as const)
+    );
+    for (const [p, resp] of responses) {
+      result.set(p, resp);
+    }
+  }
+  return result;
+}
+
 // ── incremental upsert / delete / rename ──────────────────────────────
 
 export async function upsertProjectFiles(projectId: string, files: ProjectFile[]): Promise<void> {
@@ -175,6 +193,26 @@ export async function upsertProjectFiles(projectId: string, files: ProjectFile[]
 
 export async function deleteProjectFilesByPaths(projectId: string, paths: string[]): Promise<void> {
   await api<void>('POST', '/file-delete-batch', { projectId, paths });
+}
+
+export interface ConvertProceduresResult {
+  success: number;
+  empty: number;
+  errors: number;
+  total: number;
+  successPaths: string[];
+  emptyPaths: string[];
+  errorPaths: string[];
+}
+
+export async function convertProceduresOnServer(
+  projectId: string,
+  folderPath?: string
+): Promise<ConvertProceduresResult> {
+  return api<ConvertProceduresResult>('POST', '/convert-procedures', {
+    projectId,
+    folderPath: folderPath || undefined,
+  });
 }
 
 export async function renameProjectFile(

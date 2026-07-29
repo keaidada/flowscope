@@ -84,6 +84,14 @@ export async function loadFileContentsBatch(
   return serverDb.loadFileContentsBatch(projectId, paths);
 }
 
+/** Load content + metadata for multiple files (batch, returns transformed_content too) */
+export async function loadFileContentsWithMetaBatch(
+  projectId: string,
+  paths: string[]
+): Promise<Map<string, serverDb.FileContentResult>> {
+  return serverDb.loadFileContentsWithMetaBatch(projectId, paths);
+}
+
 /** Upsert files incrementally (does NOT delete other files) */
 export async function upsertProjectFiles(projectId: string, files: ProjectFile[]): Promise<void> {
   await serverDb.upsertProjectFiles(

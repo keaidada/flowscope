@@ -15,8 +15,8 @@ import {
   DEFAULT_FILE_NAMES,
 } from '@/lib/constants';
 import { genId } from '@/lib/utils';
-import { saveProjectFiles, upsertProjectFiles, loadFileContentsBatch } from '@/lib/file-storage';
-import { extractDmlFromProcedure } from '@/lib/procedure-utils';
+import { saveProjectFiles, loadFileContentsWithMetaBatch } from '@/lib/file-storage';
+import { convertProceduresOnServer } from '@/lib/server-db';
 import { ConvertFolderDialog } from './ConvertFolderDialog';
 import type { Dialect } from '@/lib/dialect-constants';
 
@@ -300,94 +300,48 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       setConvertProgress({ done: 0, total });
 
       try {
-        // Step 1: ensure all procedure files have content loaded
-        const unloadedIds = procFiles.filter((f) => !isContentLoaded(f.id)).map((f) => f.id);
-        if (unloadedIds.length > 0) {
-          await ensureFilesContent(unloadedIds);
-        }
-
-        // Step 2: load content from DB directly (bypass React state timing)
-        const contentMap = await loadFileContentsBatch(
+        // Delegate to backend — same sanitizer, native performance, no Wasm limits
+        const result = await convertProceduresOnServer(
           activeProjectId ?? '',
-          procFiles.map((f) => f.path)
+          convertTargetPath
         );
 
-        // Step 3: process and save in batches
-        const BATCH = 50;
-        const savedFiles: ProjectFile[] = [];
-        let successCount = 0;
-        const successPaths: string[] = [];
-        const emptyFiles: string[] = [];
-        const errorFiles: string[] = [];
+        setConvertProgress({ done: total, total });
+        setConvertResult({
+          success: result.success,
+          successPaths: result.successPaths,
+          empty: result.emptyPaths,
+          errors: result.errorPaths,
+        });
 
-        for (let i = 0; i < procFiles.length; i += BATCH) {
-          const batch = procFiles.slice(i, i + BATCH);
-          const batchUpdates: Array<{
+        // Reload procedure files from DB to pick up transformed_content
+        if (result.success > 0 || result.empty > 0) {
+          const procPaths = [...result.successPaths, ...result.emptyPaths];
+          const metaMap = await loadFileContentsWithMetaBatch(
+            activeProjectId ?? '',
+            procPaths
+          );
+          const fileUpdates: Array<{
             fileId: string;
-            content: string;
             isProcedure?: boolean;
             transformedContent?: string | null;
             dialect?: string;
           }> = [];
 
-          for (const f of batch) {
-            try {
-              const content = contentMap.get(f.path) || f.content;
-              if (!content) {
-                emptyFiles.push(f.path);
-                continue;
-              }
-              const transformedContent = await extractDmlFromProcedure(content, dialect);
-              if (!transformedContent) {
-                emptyFiles.push(f.path);
-              } else {
-                successCount++;
-                successPaths.push(f.path);
-              }
-              const updatedFile: ProjectFile = {
-                ...f,
-                content,
-                dialect,
-                isProcedure: true,
-                transformedContent,
-              };
-              savedFiles.push(updatedFile);
-
-              batchUpdates.push({
+          for (const f of procFiles) {
+            if (procPaths.includes(f.path)) {
+              const meta = metaMap.get(f.path);
+              fileUpdates.push({
                 fileId: f.id,
-                content,
                 isProcedure: true,
-                transformedContent,
+                transformedContent: meta?.transformed_content || null,
                 dialect,
               });
-            } catch (err) {
-              errorFiles.push(`${f.path} (${err instanceof Error ? err.message : String(err)})`);
             }
           }
 
-          if (batchUpdates.length > 0) {
-            updateFiles(batchUpdates);
-          }
-          setConvertProgress({ done: Math.min(i + BATCH, total), total });
-          await new Promise((r) => setTimeout(r, 0));
-        }
-
-        setConvertProgress({ done: total, total });
-        setConvertResult({
-          success: successCount,
-          successPaths,
-          empty: emptyFiles,
-          errors: errorFiles,
-        });
-
-        // Step 4: persist to DB
-        if (savedFiles.length > 0) {
-          const project = currentProjectRef.current;
-          if (project) {
-            const CHUNK = 200;
-            for (let i = 0; i < savedFiles.length; i += CHUNK) {
-              await upsertProjectFiles(project.id, savedFiles.slice(i, i + CHUNK));
-            }
+          if (fileUpdates.length > 0) {
+            updateFiles(fileUpdates);
           }
         }
       } catch (e) {

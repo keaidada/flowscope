@@ -15,10 +15,10 @@ use axum::{
 };
 use flowscope_core::{self, AnalyzeRequest as CoreAnalyzeRequest, Dialect};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 use std::sync::atomic::{AtomicU64, Ordering};
+use utoipa::ToSchema;
 
-use super::{AppState, state::MergeSession};
+use super::{state::MergeSession, AppState};
 
 /// Build the API router with all endpoints.
 pub fn api_routes() -> Router<Arc<AppState>> {
@@ -75,6 +75,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/db/column-metadata", get(get_column_metadata_api))
         .route("/db/anomalies", post(save_anomaly_api))
         .route("/db/anomalies", get(get_anomalies_api))
+        .route("/convert-procedures", post(convert_procedures))
 }
 
 // === Request/Response types ===
@@ -231,7 +232,9 @@ pub(crate) async fn analyze(
     #[cfg(feature = "templating")]
     let template_config = resolve_template_config(payload.template_mode.as_deref(), state.as_ref());
 
-    let dialect = payload.dialect.as_deref()
+    let dialect = payload
+        .dialect
+        .as_deref()
         .and_then(|d| match d.to_lowercase().as_str() {
             "generic" => Some(flowscope_core::Dialect::Generic),
             "hive" => Some(flowscope_core::Dialect::Hive),
@@ -250,7 +253,7 @@ pub(crate) async fn analyze(
             _ => None,
         })
         .unwrap_or(state.config.dialect);
-    
+
     let request = flowscope_core::AnalyzeRequest {
         sql: payload.sql,
         files: payload.files,
@@ -262,15 +265,24 @@ pub(crate) async fn analyze(
         template_config,
     };
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| flowscope_core::analyze(&request)));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        flowscope_core::analyze(&request)
+    }));
     match result {
         Ok(r) => Ok(Json(r)),
         Err(panic_err) => {
-            let msg = if let Some(s) = panic_err.downcast_ref::<&str>() { s.to_string() }
-                else if let Some(s) = panic_err.downcast_ref::<String>() { s.clone() }
-                else { "unknown panic".to_string() };
+            let msg = if let Some(s) = panic_err.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = panic_err.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic".to_string()
+            };
             eprintln!("flowscope: analyze panicked: {msg}");
-            Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Analysis panic: {msg}")))
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Analysis panic: {msg}"),
+            ))
         }
     }
 }
@@ -520,11 +532,15 @@ pub(crate) async fn project_export_start(
             COUNTER.fetch_add(1, Ordering::SeqCst)
         )
     };
-    state.merge_sessions.write().await.insert(
-        session_id.clone(),
-        MergeSession { merged: None },
-    );
-    Ok((StatusCode::CREATED, Json(ProjectExportStartResponse { session_id })))
+    state
+        .merge_sessions
+        .write()
+        .await
+        .insert(session_id.clone(), MergeSession { merged: None });
+    Ok((
+        StatusCode::CREATED,
+        Json(ProjectExportStartResponse { session_id }),
+    ))
 }
 
 /// POST /api/project-export/{session_id}/add - Add one AnalyzeResult to a session.
@@ -546,13 +562,20 @@ pub(crate) async fn project_export_add(
     Path(session_id): Path<String>,
     body: Bytes,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let result = serde_json::from_slice::<flowscope_core::AnalyzeResult>(&body)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid AnalyzeResult JSON: {e}")))?;
+    let result = serde_json::from_slice::<flowscope_core::AnalyzeResult>(&body).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid AnalyzeResult JSON: {e}"),
+        )
+    })?;
 
     let mut sessions = state.merge_sessions.write().await;
-    let session = sessions
-        .get_mut(&session_id)
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Unknown export session: {session_id}")))?;
+    let session = sessions.get_mut(&session_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("Unknown export session: {session_id}"),
+        )
+    })?;
 
     match session.merged.as_mut() {
         Some(existing) => existing.merge_into(result),
@@ -584,11 +607,17 @@ pub(crate) async fn project_export_finish(
     let merged = {
         let mut sessions = state.merge_sessions.write().await;
         let session = sessions.remove(&session_id).ok_or_else(|| {
-            (StatusCode::NOT_FOUND, format!("Unknown export session: {session_id}"))
+            (
+                StatusCode::NOT_FOUND,
+                format!("Unknown export session: {session_id}"),
+            )
         })?;
-        session
-            .merged
-            .ok_or_else(|| (StatusCode::BAD_REQUEST, "Export session is empty".to_string()))?
+        session.merged.ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                "Export session is empty".to_string(),
+            )
+        })?
     };
 
     build_project_export_response(
@@ -775,8 +804,8 @@ fn template_mode_to_str(mode: flowscope_core::TemplateMode) -> &'static str {
 
 // === Persistence Handlers ===
 
-use axum::extract::Query;
 use super::store;
+use axum::extract::Query;
 
 #[derive(Deserialize, ToSchema)]
 pub(crate) struct ProjectFilesQuery {
@@ -813,7 +842,10 @@ pub(crate) async fn get_project_files(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectFilesQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let files = store::load_project_files(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(files))
@@ -841,8 +873,15 @@ pub(crate) async fn save_project_files_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveProjectFilesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    eprintln!("[api] save_project_files: project={}, files={}", payload.project_id, payload.files.len());
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    eprintln!(
+        "[api] save_project_files: project={}, files={}",
+        payload.project_id,
+        payload.files.len()
+    );
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::save_project_files(&db, &payload.project_id, &payload.files)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
@@ -867,7 +906,10 @@ pub(crate) async fn get_files_meta(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectFilesQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let files = store::load_file_metadata(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(files))
@@ -909,7 +951,10 @@ pub(crate) async fn get_file_content(
     State(state): State<Arc<AppState>>,
     Query(q): Query<FileContentQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let full = store::load_file_full(&db, &q.project_id, &q.path)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(FileContentResponse {
@@ -936,8 +981,15 @@ pub(crate) async fn upsert_files_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveProjectFilesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    eprintln!("[api] upsert_files: project={}, files={}", payload.project_id, payload.files.len());
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    eprintln!(
+        "[api] upsert_files: project={}, files={}",
+        payload.project_id,
+        payload.files.len()
+    );
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::upsert_project_files(&db, &payload.project_id, &payload.files)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
@@ -967,7 +1019,10 @@ pub(crate) async fn delete_files_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<DeleteFilesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::delete_project_files_by_paths(&db, &payload.project_id, &payload.paths)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
@@ -1001,13 +1056,27 @@ pub(crate) async fn rename_file_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<RenameFileRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     if payload.is_folder {
-        store::rename_project_folder(&db, &payload.project_id, &payload.old_path, &payload.new_path)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        store::rename_project_folder(
+            &db,
+            &payload.project_id,
+            &payload.old_path,
+            &payload.new_path,
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     } else {
-        store::rename_project_file(&db, &payload.project_id, &payload.old_path, &payload.new_path, &payload.new_name)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        store::rename_project_file(
+            &db,
+            &payload.project_id,
+            &payload.old_path,
+            &payload.new_path,
+            &payload.new_name,
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
     Ok(StatusCode::OK)
 }
@@ -1031,7 +1100,10 @@ pub(crate) async fn get_directories(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectFilesQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let dirs = store::load_directories(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(dirs))
@@ -1052,7 +1124,10 @@ pub(crate) async fn get_directories(
 pub(crate) async fn get_projects(
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let projects = store::load_projects(&db)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(projects))
@@ -1078,7 +1153,10 @@ pub(crate) async fn save_project_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveProjectRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::save_project(&db, &payload.project)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
@@ -1107,7 +1185,10 @@ pub(crate) async fn delete_project_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectIdQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::delete_project(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
@@ -1132,7 +1213,10 @@ pub(crate) async fn get_view_state(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectIdQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let state_json = store::load_view_state(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(state_json))
@@ -1161,7 +1245,10 @@ pub(crate) async fn save_view_state(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveViewStateRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::save_view_state(&db, &payload.project_id, &payload.state_json)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
@@ -1186,7 +1273,10 @@ pub(crate) async fn get_table_lineage(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectIdQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let edges = store::load_table_lineage(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(edges))
@@ -1216,7 +1306,10 @@ pub(crate) async fn save_table_level_edges_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveTableLevelEdgesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::save_table_level_edges(&db, &payload.project_id, &payload.edges)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
@@ -1239,7 +1332,10 @@ pub(crate) async fn get_table_level_edges(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectIdQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let edges = store::load_table_level_edges(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(edges))
@@ -1264,7 +1360,10 @@ pub(crate) async fn get_schema_files(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectFilesQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let files = store::load_schema_files(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(files))
@@ -1292,18 +1391,23 @@ pub(crate) async fn save_schema_files_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveSchemaFilesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::save_schema_files(&db, &payload.project_id, &payload.files)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Parse DDL to extract table/column metadata using the flowscope-core analyzer
     if !payload.files.is_empty() {
-        eprintln!("[api] save_schema_files_api: extracting DDL metadata from {} files", payload.files.len());
-        extract_and_save_ddl_metadata(&db, &payload.project_id, &payload.files)
-            .map_err(|e| {
-                eprintln!("[api] extract_and_save_ddl_metadata error: {:?}", e);
-                e
-            })?;
+        eprintln!(
+            "[api] save_schema_files_api: extracting DDL metadata from {} files",
+            payload.files.len()
+        );
+        extract_and_save_ddl_metadata(&db, &payload.project_id, &payload.files).map_err(|e| {
+            eprintln!("[api] extract_and_save_ddl_metadata error: {:?}", e);
+            e
+        })?;
     }
 
     Ok(StatusCode::OK)
@@ -1328,7 +1432,11 @@ fn extract_and_save_ddl_metadata(
         }
         // Log progress every 100 files
         if fi > 0 && fi % 100 == 0 {
-            eprintln!("[api] extract_and_save_ddl_metadata: processed {}/{} files", fi, files.len());
+            eprintln!(
+                "[api] extract_and_save_ddl_metadata: processed {}/{} files",
+                fi,
+                files.len()
+            );
         }
 
         let result = flowscope_core::analyze(&CoreAnalyzeRequest {
@@ -1391,8 +1499,12 @@ fn extract_and_save_ddl_metadata(
         }
     }
 
-    eprintln!("[api] extract_and_save_ddl_metadata: extracted {} tables, {} columns from {} files",
-        all_tables.len(), all_columns.len(), files.len());
+    eprintln!(
+        "[api] extract_and_save_ddl_metadata: extracted {} tables, {} columns from {} files",
+        all_tables.len(),
+        all_columns.len(),
+        files.len()
+    );
 
     if !all_tables.is_empty() {
         store::save_table_metadata(db, project_id, &all_tables, &all_columns)
@@ -1426,7 +1538,10 @@ pub(crate) async fn get_cache_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<CacheQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     match store::get_cache(&db, &q.key)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     {
@@ -1456,7 +1571,10 @@ pub(crate) async fn set_cache_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SetCacheRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let json = serde_json::to_string(&payload.result)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     store::set_cache(&db, &payload.key, &json)
@@ -1481,7 +1599,10 @@ pub(crate) async fn delete_cache_api(
     State(state): State<Arc<AppState>>,
     Query(params): Query<CacheQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::delete_cache(&db, &params.key)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
@@ -1500,9 +1621,11 @@ pub(crate) async fn delete_cache_api(
 pub(crate) async fn clear_cache_api(
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    store::clear_all_cache(&db)
+    let db = state
+        .db
+        .lock()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    store::clear_all_cache(&db).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
 }
 
@@ -1538,7 +1661,10 @@ pub(crate) async fn set_file_result_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SetFileResultsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     for r in &payload.rows {
         store::set_file_result(&db, &payload.project_id, &r.file_path, "", &r.content_hash)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -1572,10 +1698,14 @@ pub(crate) async fn get_file_result_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<FileResultQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let file_path = q.file_path.as_deref().ok_or_else(|| {
-        (StatusCode::BAD_REQUEST, "filePath is required".to_string())
-    })?;
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let file_path = q
+        .file_path
+        .as_deref()
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "filePath is required".to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     match store::get_file_result(&db, &q.project_id, file_path)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     {
@@ -1583,7 +1713,8 @@ pub(crate) async fn get_file_result_api(
             "found": true,
             "resultJson": json,
             "contentHash": hash,
-        })).into_response()),
+        }))
+        .into_response()),
         None => Ok(Json(serde_json::json!({ "found": false })).into_response()),
     }
 }
@@ -1605,7 +1736,10 @@ pub(crate) async fn get_file_results_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectFilesQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let results = store::get_file_results(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let list: Vec<serde_json::Value> = results.into_iter().map(|(fp, json, hash, fn_, dp)| {
@@ -1619,12 +1753,16 @@ pub(crate) async fn get_file_results_light_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectFilesQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let results = store::get_file_results_light(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let list: Vec<serde_json::Value> = results.into_iter().map(|(fp, fn_)| {
-        serde_json::json!({ "filePath": fp, "fileName": fn_ })
-    }).collect();
+    let list: Vec<serde_json::Value> = results
+        .into_iter()
+        .map(|(fp, fn_)| serde_json::json!({ "filePath": fp, "fileName": fn_ }))
+        .collect();
     Ok(Json(serde_json::json!({ "files": list })).into_response())
 }
 
@@ -1651,7 +1789,10 @@ pub(crate) async fn delete_file_results_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<DeleteFileResultsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     for fp in &payload.file_paths {
         store::delete_file_result(&db, &payload.project_id, fp)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -1695,7 +1836,10 @@ pub(crate) async fn save_anomaly_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveAnomalyRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let row = store::LineageAnomalyRow {
         id: 0,
         project_id: payload.project_id,
@@ -1730,7 +1874,10 @@ pub(crate) async fn get_anomalies_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectFilesQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let rows = store::get_anomalies(&db, &q.project_id, 100, 0)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(serde_json::json!({ "anomalies": rows })).into_response())
@@ -1762,9 +1909,18 @@ pub(crate) async fn save_lineage_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveLineageRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    store::save_lineage_batch(&db, &payload.project_id, &payload.nodes, &payload.columns, &payload.edges)
+    let db = state
+        .db
+        .lock()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    store::save_lineage_batch(
+        &db,
+        &payload.project_id,
+        &payload.nodes,
+        &payload.columns,
+        &payload.edges,
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
 }
 
@@ -1793,7 +1949,10 @@ pub(crate) async fn save_table_metadata_api(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveTableMetadataRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::save_table_metadata(&db, &payload.project_id, &payload.tables, &payload.columns)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
@@ -1816,7 +1975,10 @@ pub(crate) async fn get_table_metadata_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<LineageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let tables = store::load_table_metadata(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(tables))
@@ -1839,7 +2001,10 @@ pub(crate) async fn get_column_metadata_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<LineageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let columns = store::load_column_metadata(&db, &q.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(columns))
@@ -1862,7 +2027,10 @@ pub(crate) async fn get_lineage_nodes_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<LineageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let nodes = store::load_lineage_nodes(&db, &q.project_id, q.file_path.as_deref())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(nodes))
@@ -1885,7 +2053,10 @@ pub(crate) async fn get_lineage_columns_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<LineageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let columns = store::load_lineage_columns(&db, &q.project_id, q.file_path.as_deref())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(columns))
@@ -1908,8 +2079,139 @@ pub(crate) async fn get_lineage_edges_api(
     State(state): State<Arc<AppState>>,
     Query(q): Query<LineageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let edges = store::load_lineage_edges(&db, &q.project_id, q.file_path.as_deref(), q.edge_type.as_deref())
+    let db = state
+        .db
+        .lock()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let edges = store::load_lineage_edges(
+        &db,
+        &q.project_id,
+        q.file_path.as_deref(),
+        q.edge_type.as_deref(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(edges))
+}
+
+// ── Convert procedures endpoint ─────────────────────────────────────────
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct ConvertProceduresRequest {
+    #[serde(alias = "projectId")]
+    project_id: String,
+    #[serde(alias = "folderPath")]
+    folder_path: Option<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(crate) struct ConvertProceduresResponse {
+    success: usize,
+    empty: usize,
+    errors: usize,
+    total: usize,
+    #[serde(rename = "successPaths")]
+    success_paths: Vec<String>,
+    #[serde(rename = "emptyPaths")]
+    empty_paths: Vec<String>,
+    #[serde(rename = "errorPaths")]
+    error_paths: Vec<String>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/convert-procedures",
+    request_body = ConvertProceduresRequest,
+    responses(
+        (status = 200, description = "Conversion completed", body = ConvertProceduresResponse),
+        (status = 500, description = "Server error")
+    )
+)]
+pub(crate) async fn convert_procedures(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ConvertProceduresRequest>,
+) -> Result<Json<ConvertProceduresResponse>, (StatusCode, String)> {
+    let prefix = req.folder_path.as_deref().map(|p| {
+        if p.ends_with('/') { p.to_string() } else { format!("{}/", p) }
+    });
+
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let all_files = store::load_project_files(&db, &req.project_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    drop(db);
+
+    let start = std::time::Instant::now();
+    eprintln!(
+        "[api] convert_procedures: project={}, folder={:?}, total_files={}",
+        req.project_id, req.folder_path, all_files.len()
+    );
+
+    let proc_files: Vec<&store::ProjectFileRow> = all_files
+        .iter()
+        .filter(|f| {
+            if let Some(ref pfx) = prefix {
+                if !f.path.starts_with(pfx.as_str()) {
+                    return false;
+                }
+            }
+            f.is_procedure != 0
+                || f.content.to_uppercase().contains("CREATE PROCEDURE")
+                || f.content.to_uppercase().contains("CREATE PROC ")
+        })
+        .collect();
+
+    let total = proc_files.len();
+    let mut success_count = 0usize;
+    let mut success_paths = Vec::new();
+    let mut empty_paths = Vec::new();
+    let mut error_paths = Vec::new();
+    let mut updates: Vec<(String, String)> = Vec::with_capacity(total);
+
+    for (idx, f) in proc_files.iter().enumerate() {
+        if idx > 0 && idx % 500 == 0 {
+            eprintln!("[api] convert_procedures: progress {idx}/{total}");
+        }
+        match flowscope_core::parser::sanitize_bigquery_raw_double_quoted_literals(&f.content) {
+            Some(transformed) => {
+                success_count += 1;
+                success_paths.push(f.path.clone());
+                updates.push((f.path.clone(), transformed));
+            }
+            None => {
+                empty_paths.push(f.path.clone());
+                updates.push((f.path.clone(), String::new()));
+            }
+        }
+    }
+
+    // Persist to DB in chunks
+    if !updates.is_empty() {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        const CHUNK: usize = 500;
+        for chunk in updates.chunks(CHUNK) {
+            store::batch_update_transformed(&db, &req.project_id, chunk)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        }
+    }
+
+    let elapsed = start.elapsed();
+    eprintln!(
+        "[api] convert_procedures: done in {elapsed:.2?}, success={}, empty={}",
+        success_count, empty_paths.len()
+    );
+
+    Ok(Json(ConvertProceduresResponse {
+        success: success_count,
+        empty: empty_paths.len(),
+        errors: error_paths.len(),
+        total,
+        success_paths,
+        empty_paths,
+        error_paths,
+    }))
 }
