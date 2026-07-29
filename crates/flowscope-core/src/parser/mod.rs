@@ -960,13 +960,11 @@ fn extract_execute_immediate_sql(s: &str) -> Option<String> {
         };
         let (q, qlen) = pick_quote(after)?;
         let inner = extract_between_quotes(after, q, qlen)?;
-        return Some(replace_format_placeholders(&inner));
-    }
+        return Some(inner);    }
 
     // Case 2: """...""" or '''...''' (direct triple-quoted string, no FORMAT)
     if let Some(inner) = extract_triple_quoted(rest) {
-        return Some(replace_format_placeholders(&inner));
-    }
+        return Some(inner);    }
 
     // Case 3: '...' or "..." (direct single-quoted string, no FORMAT)
     let (q, qlen) = pick_quote(rest)?;
@@ -1089,7 +1087,7 @@ fn extract_sql_from_set_stmt(s: &str) -> Option<String> {
             first_word,
             "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "CREATE" | "EXPLAIN"
         )
-        .then_some(replace_format_placeholders(&inner));
+        .then_some(inner);
     }
     // Handle SET var = 'SQL' or SET var = "SQL"
     if !after_eq.starts_with('"') && !after_eq.starts_with('\'') {
@@ -1433,6 +1431,7 @@ pub fn sanitize_with_line_map(sql: &str) -> Option<(String, Vec<i32>)> {
         // has ; outside the quoted SQL, not inside)
         let dml_no_sc = dml_trim.strip_suffix(';').unwrap_or(dml_trim).trim();
         if dml_trim == orig_trim
+            || dml_no_sc == orig_trim
             || (dml_no_sc.len() > 10
                 && orig_trim.len() > dml_no_sc.len()
                 && orig_trim.contains(dml_no_sc))
