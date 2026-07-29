@@ -2136,6 +2136,130 @@ pub fn insert_anomaly(conn: &Connection, row: &LineageAnomalyRow) -> Result<i64,
     Ok(conn.last_insert_rowid())
 }
 
+/// Compute table-level edges from lineage_nodes and lineage_edges.
+/// Simplifies column-level data_flow edges into (from_table, to_table, script) triples.
+pub fn rebuild_table_level_edges(conn: &Connection, project_id: &str) -> Result<(), rusqlite::Error> {
+    // Delete existing edges for this project
+    conn.execute(
+        "DELETE FROM table_level_edges WHERE project_id = ?1",
+        params![project_id],
+    )?;
+
+    // Get all table/view nodes: node_id → qualified_name
+    let mut stmt = conn.prepare(
+        "SELECT node_id, COALESCE(qualified_name, label) as qn, file_path FROM lineage_nodes WHERE project_id = ?1 AND node_type IN ('table', 'view')"
+    )?;
+    let mut node_qn: std::collections::HashMap<(String, String), String> = std::collections::HashMap::new();
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (nid, qn, fp) = row?;
+        node_qn.insert((fp.clone(), nid), qn.to_lowercase());
+    }
+
+    // Build column → owning table map from ownership edges
+    let mut col_owner: std::collections::HashMap<(String, String), (String, String)> = std::collections::HashMap::new();
+    let mut stmt2 = conn.prepare(
+        "SELECT to_id, from_id, file_path FROM lineage_edges WHERE project_id = ?1 AND edge_type = 'ownership'"
+    )?;
+    let rows = stmt2.query_map(params![project_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (col_id, owner_id, fp) = row?;
+        // Only record if the owner is a known table
+        if node_qn.contains_key(&(fp.clone(), owner_id.clone())) {
+            col_owner.insert((fp.clone(), col_id), (owner_id.clone(), fp.clone()));
+        }
+    }
+
+    // Collect reads/writes per (file_path, statement_index)
+    let mut stmt = conn.prepare(
+        "SELECT from_id, to_id, file_path, statement_index FROM lineage_edges WHERE project_id = ?1 AND edge_type = 'data_flow' AND statement_index IS NOT NULL"
+    )?;
+    let mut stmt_reads: std::collections::HashMap<(String, i64), std::collections::HashSet<String>> = std::collections::HashMap::new();
+    let mut stmt_writes: std::collections::HashMap<(String, i64), std::collections::HashSet<String>> = std::collections::HashMap::new();
+    let mut all_keys = std::collections::HashSet::new();
+
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+        ))
+    })?;
+    for row in rows {
+        let (from_id, to_id, fp, si) = row?;
+        let key = (fp.clone(), si);
+        all_keys.insert(key.clone());
+
+        let from_key = (fp.clone(), from_id.clone());
+        let to_key = (fp.clone(), to_id.clone());
+
+        // Resolve column nodes to their owning tables
+        let from_table = node_qn.get(&from_key)
+            .cloned()
+            .or_else(|| {
+                col_owner.get(&from_key)
+                    .and_then(|(owner_id, owner_fp)| node_qn.get(&(owner_fp.clone(), owner_id.clone())).cloned())
+            });
+        let to_table = node_qn.get(&to_key)
+            .cloned()
+            .or_else(|| {
+                col_owner.get(&to_key)
+                    .and_then(|(owner_id, owner_fp)| node_qn.get(&(owner_fp.clone(), owner_id.clone())).cloned())
+            });
+
+        if let Some(qn) = from_table {
+            stmt_reads.entry(key.clone()).or_default().insert(qn);
+        }
+        if let Some(qn) = to_table {
+            stmt_writes.entry(key.clone()).or_default().insert(qn);
+        }
+    }
+
+    // Insert table-level edges: for each statement, read_table × write_table
+    let now = chrono::Local::now().to_rfc3339();
+    let mut insert = conn.prepare(
+        "INSERT OR IGNORE INTO table_level_edges (project_id, from_table, to_table, script, script_name, dir_path, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)"
+    )?;
+
+    for ((fp, _si), reads) in &stmt_reads {
+        let writes = stmt_writes.get(&(fp.clone(), *_si));
+        if writes.is_none() || writes.unwrap().is_empty() { continue; }
+
+        let script_name = fp.rsplit('/').next().unwrap_or(fp);
+        let dir_path = fp.rfind('/').map(|i| &fp[..i]).unwrap_or("");
+
+        for read_tbl in reads {
+            for write_tbl in writes.unwrap() {
+                insert.execute(params![
+                    project_id,
+                    read_tbl,
+                    write_tbl,
+                    fp,
+                    script_name,
+                    dir_path,
+                    &now,
+                    &now,
+                ])?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn get_anomalies(
     conn: &Connection,
     project_id: &str,
