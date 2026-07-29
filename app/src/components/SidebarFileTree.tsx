@@ -44,7 +44,12 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     renameFolder,
     deleteFolder,
     isReadOnly,
+    selectFile,
   } = useProject();
+
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickQuery, setQuickQuery] = useState('');
+  const quickInputRef = useRef<HTMLInputElement>(null);
 
   const [search, setSearch] = useState('');
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
@@ -94,6 +99,26 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       setTimeout(() => folderNameInputRef.current?.focus(), 0);
     }
   }, [isCreatingFolder]);
+
+  const quickMatches = useMemo(() => {
+    if (!quickQuery.trim() || !currentProject) return [] as ProjectFile[];
+    const q = quickQuery.toLowerCase();
+    return currentProject.files
+      .filter((f) => f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q))
+      .slice(0, 20);
+  }, [quickQuery, currentProject]);
+
+  useEffect(() => {
+    if (quickOpen && quickInputRef.current) {
+      setTimeout(() => quickInputRef.current?.focus(), 0);
+    }
+  }, [quickOpen]);
+
+  const handleQuickSelect = (fileId: string) => {
+    selectFile(fileId);
+    setQuickOpen(false);
+    setQuickQuery('');
+  };
 
   const handleCreateFolder = () => {
     const trimmed = newFolderName.trim();
@@ -497,6 +522,17 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
               ({currentProject.files.length})
             </span>
           )}
+          {currentProject.files.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1"
+              onClick={() => setQuickOpen((v) => !v)}
+              title="快速打开文件"
+            >
+              <Search className="h-3 w-3" />
+            </Button>
+          )}
           {selectedCount > 0 && (
             <span className="text-xs text-muted-foreground whitespace-nowrap">
               · {t('sidebar.selectedCount', { count: selectedCount })}
@@ -629,6 +665,45 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
           </TooltipProvider>
         )}
       </div>
+
+      {/* Quick open popup */}
+      {quickOpen && (
+        <div className="px-2 py-1.5 border-b shrink-0 bg-muted/20">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-primary pointer-events-none" />
+            <Input
+              ref={quickInputRef}
+              value={quickQuery}
+              onChange={(e) => setQuickQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') { setQuickOpen(false); setQuickQuery(''); }
+                if (e.key === 'Enter' && quickMatches.length > 0) {
+                  handleQuickSelect(quickMatches[0].id);
+                }
+              }}
+              placeholder="输入文件名快速打开..."
+              className="h-7 pl-7 text-xs bg-background border-primary/30"
+            />
+          </div>
+          {quickMatches.length > 0 && (
+            <div className="mt-1 max-h-40 overflow-auto rounded border bg-background">
+              {quickMatches.map((f) => (
+                <div
+                  key={f.id}
+                  className="flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-primary/10 text-xs border-b last:border-0"
+                  onClick={() => handleQuickSelect(f.id)}
+                >
+                  <span className="truncate flex-1">{f.name}</span>
+                  <span className="text-[10px] text-muted-foreground truncate max-w-[50%]">{f.path}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {quickQuery && quickMatches.length === 0 && (
+            <div className="mt-1 px-2 py-1 text-[10px] text-muted-foreground">无匹配文件</div>
+          )}
+        </div>
+      )}
 
       {/* Search */}
       <div className="px-2 py-1.5 border-b shrink-0">
