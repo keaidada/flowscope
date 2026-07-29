@@ -842,6 +842,25 @@ export function FileTree(props: FileTreeProps) {
     }
   }, [files, hasNestedStructure, searchQuery]);
 
+  // When revealCnt increments, expand parent folders to make active file visible
+  useEffect(() => {
+    const cnt = props.revealCnt;
+    if (!cnt || !props.activeFileId || !hasNestedStructure) return;
+    const activeFile = files.find((f) => f.id === props.activeFileId);
+    if (!activeFile) return;
+    const parts = activeFile.path.split('/').filter(Boolean);
+    if (parts.length <= 1) return; // file is in root, no folders to expand
+    const parents: string[] = [];
+    for (let i = 1; i < parts.length; i++) {
+      parents.push(parts.slice(0, i).join('/'));
+    }
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      for (const p of parents) next.add(p);
+      return next;
+    });
+  }, [props.revealCnt, props.activeFileId, files, hasNestedStructure]);
+
   useEffect(() => {
     if (!onContentWidthChange || !treeRef.current) return;
     const raf = requestAnimationFrame(() => {
