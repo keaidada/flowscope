@@ -72,42 +72,15 @@ export interface LineageEdgeRow {
   dir_path?: string;
 }
 
-// Global concurrency limiter: prevent browser connection pool exhaustion
-let pendingRequests = 0;
-const MAX_CONCURRENT = 6;
-
-function acquireSlot(): Promise<void> {
-  return new Promise((resolve) => {
-    const tryAcquire = () => {
-      if (pendingRequests < MAX_CONCURRENT) {
-        pendingRequests++;
-        resolve();
-      } else {
-        setTimeout(tryAcquire, 20);
-      }
-    };
-    tryAcquire();
-  });
-}
-
-function releaseSlot(): void {
-  pendingRequests--;
-}
-
 async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
-  await acquireSlot();
-  try {
-    const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
-    if (body !== undefined) opts.body = JSON.stringify(body);
-    const res = await fetch(`${BASE}${path}`, opts);
-    if (!res.ok) throw new Error(`Server DB API error: ${res.status} ${res.statusText}`);
-    if (res.status === 204) return undefined as T;
-    const text = await res.text();
-    if (!text) return undefined as T;
-    return JSON.parse(text);
-  } finally {
-    releaseSlot();
-  }
+  const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(`${BASE}${path}`, opts);
+  if (!res.ok) throw new Error(`Server DB API error: ${res.status} ${res.statusText}`);
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text);
 }
 
 // ── project_files ──────────────────────────────────────────────────────
@@ -157,25 +130,21 @@ export async function loadFileContent(
   );
 }
 
+interface FileContentEntry {
+  path: string;
+  content: string | null;
+  is_procedure: number | null;
+  transformed_content: string | null;
+}
+
 export async function loadFileContentsBatch(
   projectId: string,
   paths: string[]
 ): Promise<Map<string, string>> {
-  // Fetch content for each path individually but in parallel batches of 50
-  const BATCH = 20;
   const result = new Map<string, string>();
-  for (let i = 0; i < paths.length; i += BATCH) {
-    const batch = paths.slice(i, i + BATCH);
-    const responses = await Promise.all(
-      batch.map(async (p) => {
-        const resp = await loadFileContent(projectId, p);
-        return [p, resp.content ?? ''] as const;
-      })
-    );
-    for (const [p, c] of responses) {
-      result.set(p, c);
-    }
-  }
+  if (paths.length === 0) return result;
+  const entries = await api<FileContentEntry[]>('POST', '/file-contents-batch', { projectId, paths });
+  for (const e of entries) result.set(e.path, e.content ?? '');
   return result;
 }
 
@@ -183,16 +152,11 @@ export async function loadFileContentsWithMetaBatch(
   projectId: string,
   paths: string[]
 ): Promise<Map<string, FileContentResult>> {
-  const BATCH = 20;
   const result = new Map<string, FileContentResult>();
-  for (let i = 0; i < paths.length; i += BATCH) {
-    const batch = paths.slice(i, i + BATCH);
-    const responses = await Promise.all(
-      batch.map(async (p) => [p, await loadFileContent(projectId, p)] as const)
-    );
-    for (const [p, resp] of responses) {
-      result.set(p, resp);
-    }
+  if (paths.length === 0) return result;
+  const entries = await api<FileContentEntry[]>('POST', '/file-contents-batch', { projectId, paths });
+  for (const e of entries) {
+    result.set(e.path, { content: e.content, is_procedure: e.is_procedure, transformed_content: e.transformed_content });
   }
   return result;
 }

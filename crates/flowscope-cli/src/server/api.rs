@@ -43,6 +43,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/db/project-files", post(save_project_files_api))
         .route("/db/files-meta", get(get_files_meta))
         .route("/db/file-content", get(get_file_content))
+        .route("/db/file-contents-batch", post(get_file_contents_batch))
         .route("/db/file-upsert-batch", post(upsert_files_api))
         .route("/db/file-delete-batch", post(delete_files_api))
         .route("/db/file-rename", post(rename_file_api))
@@ -962,6 +963,44 @@ pub(crate) async fn get_file_content(
         is_procedure: full.as_ref().map(|f| f.is_procedure),
         transformed_content: full.as_ref().and_then(|f| f.transformed_content.clone()),
     }))
+}
+
+/// POST /api/db/file-contents-batch - Get file content for multiple paths
+#[derive(Deserialize)]
+struct FileContentsBatchRequest {
+    #[serde(alias = "projectId")]
+    project_id: String,
+    paths: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct FileContentEntry {
+    path: String,
+    content: Option<String>,
+    is_procedure: Option<i64>,
+    transformed_content: Option<String>,
+}
+
+pub(crate) async fn get_file_contents_batch(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<FileContentsBatchRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut results = Vec::with_capacity(req.paths.len());
+    for path in &req.paths {
+        let full = store::load_file_full(&db, &req.project_id, path)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        results.push(FileContentEntry {
+            path: path.clone(),
+            content: full.as_ref().and_then(|f| f.content.clone()),
+            is_procedure: full.as_ref().map(|f| f.is_procedure),
+            transformed_content: full.as_ref().and_then(|f| f.transformed_content.clone()),
+        });
+    }
+    Ok(Json(results))
 }
 
 // ── incremental upsert ─────────────────────────────────────────────────
