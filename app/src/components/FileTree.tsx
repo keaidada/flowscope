@@ -617,6 +617,12 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
     }
   }, [isFocused]);
 
+  useEffect(() => {
+    if (isActive && itemRef.current) {
+      itemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [isActive]);
+
   return (
     <div
       ref={itemRef}
@@ -624,7 +630,8 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
       aria-selected={isActive}
       className={cn(
         'flex items-center gap-2 py-1 px-2 rounded-md cursor-pointer hover:bg-muted/50 group',
-        isFocused && 'bg-muted'
+        isFocused && 'bg-muted',
+        isActive && 'bg-primary/10 ring-1 ring-primary/20',
       )}
       style={{ paddingLeft: `${depth * 12 + 8}px` }}
       onClick={() => onSelectFile(file.id)}
