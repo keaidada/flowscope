@@ -1421,6 +1421,7 @@ pub fn sanitize_with_line_map(sql: &str) -> Option<(String, Vec<i32>)> {
         // has ; outside the quoted SQL, not inside)
         let dml_no_sc = dml_trim.strip_suffix(';').unwrap_or(dml_trim).trim();
         if dml_trim == orig_trim
+            || dml_trim.replace('`', "") == orig_trim.replace('`', "")
             || dml_no_sc == orig_trim
             || (dml_no_sc.len() > 10
                 && orig_trim.len() > dml_no_sc.len()
