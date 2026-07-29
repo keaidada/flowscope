@@ -136,7 +136,7 @@ export async function loadFileContentsBatch(
   paths: string[]
 ): Promise<Map<string, string>> {
   // Fetch content for each path individually but in parallel batches of 50
-  const BATCH = 50;
+  const BATCH = 5;
   const result = new Map<string, string>();
   for (let i = 0; i < paths.length; i += BATCH) {
     const batch = paths.slice(i, i + BATCH);
@@ -149,6 +149,10 @@ export async function loadFileContentsBatch(
     for (const [p, c] of responses) {
       result.set(p, c);
     }
+    // Small delay between batches to avoid overwhelming browser connections
+    if (i + BATCH < paths.length) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
   }
   return result;
 }
@@ -157,7 +161,7 @@ export async function loadFileContentsWithMetaBatch(
   projectId: string,
   paths: string[]
 ): Promise<Map<string, FileContentResult>> {
-  const BATCH = 50;
+  const BATCH = 5;
   const result = new Map<string, FileContentResult>();
   for (let i = 0; i < paths.length; i += BATCH) {
     const batch = paths.slice(i, i + BATCH);
@@ -166,6 +170,9 @@ export async function loadFileContentsWithMetaBatch(
     );
     for (const [p, resp] of responses) {
       result.set(p, resp);
+    }
+    if (i + BATCH < paths.length) {
+      await new Promise((r) => setTimeout(r, 50));
     }
   }
   return result;
