@@ -337,7 +337,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
                 emptyFiles.push(f.path);
                 continue;
               }
-              const transformedContent = extractDmlFromProcedure(content, dialect);
+              const transformedContent = await extractDmlFromProcedure(content, dialect);
               if (!transformedContent) {
                 emptyFiles.push(f.path);
               } else {

@@ -7,16 +7,16 @@
  * FORMAT placeholders, EXECUTE IMMEDIATE, etc.
  */
 
-import { sanitizeProcedure, isWasmInitialized } from '@pondpilot/flowscope-core';
+import { sanitizeProcedure, initWasm, isWasmInitialized } from '@pondpilot/flowscope-core';
 
 /**
  * Extract DML from a stored procedure.
  * Delegates to the Rust/Wasm engine for AST-level parsing.
  */
-export function extractDmlFromProcedure(content: string, dialect?: string): string | null {
+export async function extractDmlFromProcedure(content: string, dialect?: string): Promise<string | null> {
   if (dialect && dialect !== 'bigquery') return null;
-  console.log('[procedure-utils] Wasm initialized:', isWasmInitialized(), 'content length:', content?.length);
-  const result = sanitizeProcedure(content);
-  console.log('[procedure-utils] sanitize result length:', result?.length);
-  return result;
+  if (!isWasmInitialized()) {
+    await initWasm();
+  }
+  return sanitizeProcedure(content);
 }

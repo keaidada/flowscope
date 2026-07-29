@@ -35,7 +35,9 @@ export function ProcedureRepairDialog({
 
   useEffect(() => {
     if (open && originalContent) {
-      setTransformedContent(extractDmlFromProcedure(originalContent) || '');
+      extractDmlFromProcedure(originalContent).then((extracted) => {
+        setTransformedContent(extracted || '');
+      });
     }
   }, [open, originalContent]);
 
@@ -51,7 +53,9 @@ export function ProcedureRepairDialog({
   }, []);
 
   const handleReExtract = useCallback(() => {
-    setTransformedContent(extractDmlFromProcedure(originalContent) || '');
+    extractDmlFromProcedure(originalContent).then((extracted) => {
+      setTransformedContent(extracted || '');
+    });
   }, [originalContent]);
 
   const handleCopyAll = useCallback(async () => {
