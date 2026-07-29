@@ -55,52 +55,57 @@ export function ProcedureRepairDialog({
   // Build padded right panel: empty lines where content was removed
   const rightLines = useMemo(() => {
     const extLines = transformedContent.split('\n').filter(l => !l.trim().startsWith('--') && !l.trim().startsWith('/*'));
-    const extMap = new Map<string, number>();
-    extLines.forEach((line, i) => {
-      const t = line.trim();
-      if (t) extMap.set(t, i);
-    });
+    if (extLines.length === 0) return new Array(originalLines.length).fill('');
 
     const result: string[] = new Array(originalLines.length).fill('');
-    let extIdx = 0;
+
+    // Compute signatures for fast matching: first 3 non-trivial words
+    const sig = (line: string) => {
+      const words = line.trim().toUpperCase().split(/\s+/).filter(w => w.length > 0);
+      return words.slice(0, 3).join(' ');
+    };
+
+    const extSigs = extLines.map(l => sig(l));
     const usedExt = new Set<number>();
-    const sqlKeywords = new Set(['SELECT','FROM','WHERE','JOIN','INSERT','DELETE','UPDATE','MERGE','CREATE','DROP','TRUNCATE','WITH','GROUP','ORDER','HAVING','LIMIT','UNION','SET','INTO','VALUES','AND','OR','ON']);
 
-    for (let i = 0; i < originalLines.length; i++) {
-      const origTrim = originalLines[i].trim();
-      if (!origTrim) continue;
-      // Skip comments in matching
-      if (origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
+    // Greedy LCS-like matching: walk extracted lines over original, assigning each
+    // extracted line to the first original line that matches (exact or signature)
+    for (let extIdx = 0, origStart = 0; extIdx < extLines.length; extIdx++) {
+      const extSig = extSigs[extIdx];
+      const extTrim = extLines[extIdx].trim();
+      let found = false;
 
-      // Exact match
-      const matchIdx = extMap.get(origTrim);
-      if (matchIdx !== undefined && !usedExt.has(matchIdx)) {
-        result[i] = extLines[matchIdx];
-        usedExt.add(matchIdx);
-        continue;
-      }
-      // Sequential match: same keyword + substring
-      const origWord = origTrim.toUpperCase().split(/\s+/)[0].replace(/[,;]$/, '');
-      if (extIdx < extLines.length) {
-        const extTrim = extLines[extIdx].trim();
-        const extWord = extTrim.toUpperCase().split(/\s+/)[0].replace(/[,;]$/, '');
-        if (extTrim && (extTrim === origTrim || (origWord === extWord && sqlKeywords.has(origWord)) || extTrim.includes(origTrim) || origTrim.includes(extTrim))) {
+      for (let i = origStart; i < originalLines.length; i++) {
+        const origTrim = originalLines[i].trim();
+        if (!origTrim) continue;
+        if (origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
+
+        const origSig = sig(originalLines[i]);
+
+        // Exact match or same signature
+        if (extTrim === origTrim || (extSig === origSig && extSig.length > 0)) {
           result[i] = extLines[extIdx];
-          extIdx++;
-          continue;
-        }
-      }
-      // Scan ahead: look through remaining extracted lines for this keyword
-      for (let k = extIdx; k < extLines.length; k++) {
-        if (usedExt.has(k)) continue;
-        const extTrim = extLines[k].trim();
-        const extWord = extTrim.toUpperCase().split(/\s+/)[0].replace(/[,;]$/, '');
-        if (origWord === extWord && sqlKeywords.has(origWord) && (extTrim.includes(origTrim) || origTrim.includes(extTrim) || Math.abs(extTrim.length - origTrim.length) < 50)) {
-          result[i] = extLines[k];
-          usedExt.add(k);
+          usedExt.add(extIdx);
+          origStart = i + 1;
+          found = true;
           break;
         }
       }
+      // If no match found, try substring match as fallback
+      if (!found) {
+        for (let i = origStart; i < originalLines.length; i++) {
+          const origTrim = originalLines[i].trim();
+          if (!origTrim || origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
+          if (origTrim.length > 3 && (extTrim.includes(origTrim) || origTrim.includes(extTrim))) {
+            result[i] = extLines[extIdx];
+            usedExt.add(extIdx);
+            origStart = i + 1;
+            found = true;
+            break;
+          }
+        }
+      }
+      // If still no match, skip this extracted line (couldn't align it)
     }
     return result;
   }, [originalLines, transformedContent]);
