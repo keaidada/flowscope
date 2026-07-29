@@ -15,7 +15,7 @@ import {
   DEFAULT_FILE_NAMES,
 } from '@/lib/constants';
 import { genId } from '@/lib/utils';
-import { saveProjectFiles, loadFileContentsWithMetaBatch } from '@/lib/file-storage';
+import { saveProjectFiles } from '@/lib/file-storage';
 import { convertProceduresOnServer } from '@/lib/server-db';
 import { ConvertFolderDialog } from './ConvertFolderDialog';
 import type { Dialect } from '@/lib/dialect-constants';
@@ -317,35 +317,28 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
           errors: result.errorPaths,
         });
 
-        // Reload procedure files from DB to pick up transformed_content
-        if (result.success > 0 || result.empty > 0) {
-          const procPaths = [...result.successPaths, ...result.emptyPaths];
-          const metaMap = await loadFileContentsWithMetaBatch(
-            activeProjectId ?? '',
-            procPaths
-          );
-          const fileUpdates: Array<{
-            fileId: string;
-            isProcedure?: boolean;
-            transformedContent?: string | null;
-            dialect?: string;
-          }> = [];
+        // Update store directly from API result — no need to reload from DB
+        const allPaths = new Set([...result.successPaths, ...result.emptyPaths]);
+        const fileUpdates: Array<{
+          fileId: string;
+          isProcedure?: boolean;
+          transformedContent?: string | null;
+          dialect?: string;
+        }> = [];
 
-          for (const f of procFiles) {
-            if (procPaths.includes(f.path)) {
-              const meta = metaMap.get(f.path);
-              fileUpdates.push({
-                fileId: f.id,
-                isProcedure: true,
-                transformedContent: meta?.transformed_content || null,
-                dialect,
-              });
-            }
+        for (const f of procFiles) {
+          if (allPaths.has(f.path)) {
+            fileUpdates.push({
+              fileId: f.id,
+              isProcedure: true,
+              transformedContent: result.successPaths.includes(f.path) ? ' ' : null,
+              dialect,
+            });
           }
+        }
 
-          if (fileUpdates.length > 0) {
-            updateFiles(fileUpdates);
-          }
+        if (fileUpdates.length > 0) {
+          updateFiles(fileUpdates);
         }
       } catch (e) {
         console.error('Failed to convert procedures:', e);
