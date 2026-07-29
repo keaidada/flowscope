@@ -87,6 +87,7 @@ export interface KeyboardShortcutHandler {
 export interface FileValidationResult {
   valid: boolean;
   error?: string;
+  emptyCount?: number;
 }
 
 export interface AnalysisContext {

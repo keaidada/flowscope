@@ -139,16 +139,13 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
         }
       }
 
-      // Check if ALL files are empty (whitespace only)
-      const nonEmptyFiles = files.filter((f) => f.content.trim().length > 0);
-      if (nonEmptyFiles.length === 0) {
-        return {
-          valid: false,
-          error: t('analysis.errors.allFilesEmpty', '所有脚本内容为空，无需解析'),
-        };
+      // Count empty files for reporting — don't block analysis
+      const emptyCount = files.filter((f) => f.content.trim().length === 0).length;
+      if (emptyCount > 0) {
+        console.log(`[useAnalysis] ${emptyCount}/${files.length} files have empty content`);
       }
 
-      return { valid: true };
+      return { valid: true, emptyCount };
     },
     []
   );
@@ -663,7 +660,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           return;
         }
 
-        // Filter out empty files (whitespace-only content) — skip analysis for them
+        // Track how many files are empty for the result summary
         const emptyFileNames: string[] = [];
         context.files = context.files.filter((f: { name: string; content: string; path?: string }) => {
           if (f.content.trim().length === 0) {
@@ -686,7 +683,9 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
                 message: '脚本内容为空，跳过解析',
                 detail: '',
                 isTest: 0,
-              }).catch(() => {});
+              }).catch((err) => {
+                console.error('[useAnalysis] Failed to save anomaly for empty file:', name, err);
+              });
             }
           });
         }
