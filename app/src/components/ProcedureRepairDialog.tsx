@@ -41,20 +41,57 @@ export function ProcedureRepairDialog({
     }
   }, [open, originalContent]);
 
+  // Build right-panel lines: pad with empty lines to match left panel count.
+  // Lines that appear in the extraction are aligned with the corresponding original lines.
+  const rightLines = useMemo(() => {
+    const origLines = originalContent.split('\n');
+    const extLines = transformedContent.split('\n');
+    // Build lookup: trimmed extracted line → its index
+    const extMap = new Map<string, number>();
+    extLines.forEach((line, i) => {
+      const t = line.trim();
+      if (t) extMap.set(t, i);
+    });
+
+    const result: string[] = new Array(origLines.length).fill('');
+    let extIdx = 0;
+    const usedExt = new Set<number>();
+
+    for (let i = 0; i < origLines.length; i++) {
+      const origTrim = origLines[i].trim();
+      if (!origTrim) continue;
+      // Try exact match first
+      const matchIdx = extMap.get(origTrim);
+      if (matchIdx !== undefined && !usedExt.has(matchIdx)) {
+        result[i] = extLines[matchIdx];
+        usedExt.add(matchIdx);
+        continue;
+      }
+      // Try substring: extracted line contains original or vice versa
+      if (extIdx < extLines.length) {
+        const extTrim = extLines[extIdx].trim();
+        if (extTrim && (extTrim.includes(origTrim) || origTrim.includes(extTrim))) {
+          result[i] = extLines[extIdx];
+          extIdx++;
+          continue;
+        }
+      }
+    }
+
+    return result;
+  }, [originalContent, transformedContent]);
+
+  const originalLines = useMemo(() => originalContent.split('\n'), [originalContent]);
+  const fSizeMono = 'text-[10px] leading-[15px]';
+
   const handleScroll = useCallback((source: 'left' | 'right') => {
     if (syncing.current) return;
     syncing.current = true;
     const l = leftRef.current;
     const r = rightRef.current;
     if (!l || !r) { syncing.current = false; return; }
-    // Proportional scroll: same percentage on both sides
-    const lMax = l.scrollHeight - l.clientHeight;
-    const rMax = r.scrollHeight - r.clientHeight;
-    if (source === 'left' && lMax > 0) {
-      r.scrollTop = (l.scrollTop / lMax) * rMax;
-    } else if (source === 'right' && rMax > 0) {
-      l.scrollTop = (r.scrollTop / rMax) * lMax;
-    }
+    if (source === 'left') r.scrollTop = l.scrollTop;
+    else l.scrollTop = r.scrollTop;
     requestAnimationFrame(() => { syncing.current = false; });
   }, []);
 
@@ -75,11 +112,6 @@ export function ProcedureRepairDialog({
     onApply(transformedContent.trim() || null);
     onOpenChange(false);
   }, [transformedContent, onApply, onOpenChange]);
-
-  const originalLines = useMemo(() => originalContent.split('\n'), [originalContent]);
-  const transformedLines = useMemo(() => transformedContent.split('\n'), [transformedContent]);
-  const fSizeMono = 'text-[10px] leading-[15px]';
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="full">
@@ -90,11 +122,11 @@ export function ProcedureRepairDialog({
             </div>
             <DialogTitle>{t('procedure.title', '存储过程转换')}</DialogTitle>
             <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
-              {originalLines.length} → {transformedLines.length} 行
+              {originalLines.length} → {rightLines.filter(l => l).length} 行 DML
             </span>
           </div>
           <DialogDescription className="leading-tight">
-            左侧原始存储过程，右侧 AST 引擎提取的 DML，与目录转换结果一致
+              左侧原始存储过程，右侧 AST 引擎提取的 DML（空行对齐）
           </DialogDescription>
         </DialogHeader>
 
@@ -126,15 +158,15 @@ export function ProcedureRepairDialog({
           </div>
           <div className="flex-1 min-w-0 flex flex-col">
             <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/10 shrink-0">
-              <span className="text-[10px] text-muted-foreground">转换结果 ({transformedLines.length} 行)</span>
+              <span className="text-[10px] text-muted-foreground">转换结果 ({rightLines.filter(l => l).length} 行 DML)</span>
               <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-amber-500 hover:text-amber-600" onClick={handleApply} disabled={!transformedContent.trim()}>应用</Button>
             </div>
             <div ref={rightRef} className="flex-1 min-h-0 overflow-auto bg-background" onScroll={() => handleScroll('right')}>
-              {transformedLines.length > 0 ? (
-                transformedLines.map((line, idx) => (
-                  <div key={`r-${idx}`} className="flex items-start h-[15px]">
+              {rightLines.length > 0 ? (
+                rightLines.map((line, idx) => (
+                  <div key={`r-${idx}`} className={cn('flex items-start h-[15px]', !line && 'bg-muted/20')}>
                     <span className="w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px] text-muted-foreground/40">{idx + 1}</span>
-                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono)}>{line}</span>
+                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, !line && 'opacity-25')}>{line || '\u00A0'}</span>
                   </div>
                 ))
               ) : (
