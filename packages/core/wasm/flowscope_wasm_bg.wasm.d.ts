@@ -21,6 +21,7 @@ export const merge_and_export: (a: number, b: number) => [number, number, number
 export const merge_progressive_add: (a: number, b: number) => [number, number];
 export const merge_progressive_export: (a: number, b: number) => [number, number, number, number];
 export const sanitize_procedure: (a: number, b: number) => [number, number];
+export const sanitize_procedure_with_map: (a: number, b: number) => [number, number];
 export const split_statements_json: (a: number, b: number) => [number, number];
 export const merge_progressive_init: () => void;
 export const set_panic_hook: () => void;

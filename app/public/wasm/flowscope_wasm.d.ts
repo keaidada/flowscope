@@ -125,6 +125,13 @@ export function merge_progressive_init(): void;
 export function sanitize_procedure(sql: string): string | undefined;
 
 /**
+ * Sanitize a BigQuery stored procedure and return DML with a line map.
+ * Returns a JSON string: {"dml":"...","lineMap":[-1,-1,0,1,2,...]}
+ * where lineMap[i] is the extracted line index for original line i (or -1).
+ */
+export function sanitize_procedure_with_map(sql: string): string | undefined;
+
+/**
  * Install panic hook for better error messages in browser console
  */
 export function set_panic_hook(): void;
@@ -162,6 +169,7 @@ export interface InitOutput {
     readonly merge_progressive_add: (a: number, b: number) => [number, number];
     readonly merge_progressive_export: (a: number, b: number) => [number, number, number, number];
     readonly sanitize_procedure: (a: number, b: number) => [number, number];
+    readonly sanitize_procedure_with_map: (a: number, b: number) => [number, number];
     readonly split_statements_json: (a: number, b: number) => [number, number];
     readonly merge_progressive_init: () => void;
     readonly set_panic_hook: () => void;

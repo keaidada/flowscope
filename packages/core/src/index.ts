@@ -20,7 +20,8 @@ export {
   splitStatements,
   validateSchemaName,
 } from './analyzer';
-export { initWasm, isWasmInitialized, resetWasm, getEngineVersion, sanitizeProcedure } from './wasm-loader';
+export { initWasm, isWasmInitialized, resetWasm, getEngineVersion, sanitizeProcedure, sanitizeProcedureWithMap } from './wasm-loader';
+export type { SanitizeWithMapResult } from './wasm-loader';
 export type { InitWasmOptions } from './wasm-loader';
 
 // Type exports

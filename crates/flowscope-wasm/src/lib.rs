@@ -698,6 +698,23 @@ pub fn sanitize_procedure(sql: &str) -> Option<String> {
     sanitize_bigquery_raw_double_quoted_literals(sql)
 }
 
+/// Sanitize a BigQuery stored procedure and return DML with a line map.
+/// Returns a JSON string: {"dml":"...","lineMap":[-1,-1,0,1,2,...]}
+/// where lineMap[i] is the extracted line index for original line i (or -1).
+#[wasm_bindgen]
+pub fn sanitize_procedure_with_map(sql: &str) -> Option<String> {
+    use flowscope_core::parser::sanitize_with_line_map;
+    use serde::Serialize;
+    #[derive(Serialize)]
+    struct WithMap {
+        dml: String,
+        #[serde(rename = "lineMap")]
+        line_map: Vec<i32>,
+    }
+    let (dml, line_map) = sanitize_with_line_map(sql)?;
+    serde_json::to_string(&WithMap { dml, line_map }).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

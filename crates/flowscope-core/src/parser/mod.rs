@@ -1374,6 +1374,81 @@ pub fn sanitize_bigquery_raw_double_quoted_literals(sql: &str) -> Option<String>
     changed.then_some(out)
 }
 
+/// Returns the DML and a line map: for each original line index, the
+/// corresponding extracted DML line index (or -1 if no match). This lets
+/// frontends align original and extracted lines without client-side matching.
+pub fn sanitize_with_line_map(sql: &str) -> Option<(String, Vec<i32>)> {
+    let dml = sanitize_bigquery_raw_double_quoted_literals(sql)?;
+    let original_lines: Vec<&str> = sql.lines().collect();
+    let dml_lines: Vec<&str> = dml.lines().collect();
+
+    let begin_line = original_lines
+        .iter()
+        .position(|l| {
+            let upper = l.to_uppercase();
+            upper.trim_start().starts_with("BEGIN")
+                && (upper.len() == 5
+                    || !upper[5..].chars().next().unwrap().is_alphanumeric())
+        })
+        .unwrap_or(0);
+
+    let skip_words: std::collections::HashSet<&str> =
+        [");", "(", ")", "END;", "BEGIN"].iter().cloned().collect();
+
+    // Filter DML lines to exclude fragments that will never match
+    // (separators like ) on their own line inside expressions)
+    let dml_keep: Vec<(usize, bool)> = dml_lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let t = l.trim();
+            (i, !t.is_empty() && !skip_words.contains(t))
+        })
+        .collect();
+
+    let mut line_map = vec![-1i32; original_lines.len()];
+    let mut dml_idx = 0;
+
+    // Advance dml_idx past any initial skip-words
+    while dml_idx < dml_keep.len() && !dml_keep[dml_idx].1 {
+        dml_idx += 1;
+    }
+
+    for orig_idx in begin_line..original_lines.len() {
+        let orig_trim = original_lines[orig_idx].trim();
+        if orig_trim.is_empty()
+            || orig_trim.starts_with("--")
+            || orig_trim.starts_with("/*")
+            || skip_words.contains(orig_trim)
+        {
+            continue;
+        }
+        if dml_idx >= dml_keep.len() {
+            break;
+        }
+        let actual_dml_idx = dml_keep[dml_idx].0;
+        let dml_trim = dml_lines[actual_dml_idx].trim();
+        // Exact match OR containment for EXECUTE IMMEDIATE extractions
+        // (strip trailing ; from DML for containment — original EXECUTE line
+        // has ; outside the quoted SQL, not inside)
+        let dml_no_sc = dml_trim.strip_suffix(';').unwrap_or(dml_trim).trim();
+        if dml_trim == orig_trim
+            || (dml_no_sc.len() > 10
+                && orig_trim.len() > dml_no_sc.len()
+                && orig_trim.contains(dml_no_sc))
+        {
+            line_map[orig_idx] = actual_dml_idx as i32;
+            dml_idx += 1;
+            // Skip subsequent DML skip-words
+            while dml_idx < dml_keep.len() && !dml_keep[dml_idx].1 {
+                dml_idx += 1;
+            }
+        }
+    }
+
+    Some((dml, line_map))
+}
+
 fn rewrite_escaped_quoted_identifiers(sql: &str, delimiters: &[u8]) -> String {
     let bytes = sql.as_bytes();
     let mut out = String::with_capacity(sql.len());

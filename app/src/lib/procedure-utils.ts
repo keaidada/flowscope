@@ -7,7 +7,8 @@
  * FORMAT placeholders, EXECUTE IMMEDIATE, etc.
  */
 
-import { sanitizeProcedure, initWasm, isWasmInitialized } from '@pondpilot/flowscope-core';
+import { sanitizeProcedure, sanitizeProcedureWithMap, initWasm, isWasmInitialized } from '@pondpilot/flowscope-core';
+import type { SanitizeWithMapResult } from '@pondpilot/flowscope-core';
 
 /**
  * Extract DML from a stored procedure.
@@ -19,4 +20,15 @@ export async function extractDmlFromProcedure(content: string, dialect?: string)
     await initWasm();
   }
   return sanitizeProcedure(content);
+}
+
+export async function extractDmlWithLineMap(
+  content: string,
+  dialect?: string
+): Promise<SanitizeWithMapResult | null> {
+  if (dialect && dialect !== 'bigquery') return null;
+  if (!isWasmInitialized()) {
+    await initWasm();
+  }
+  return sanitizeProcedureWithMap(content);
 }

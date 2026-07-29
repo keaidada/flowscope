@@ -94,6 +94,22 @@ export function sanitizeProcedure(sql: string): string | null {
   return wasmModule.sanitize_procedure(sql) ?? null;
 }
 
+export interface SanitizeWithMapResult {
+  dml: string;
+  lineMap: number[];
+}
+
+export function sanitizeProcedureWithMap(sql: string): SanitizeWithMapResult | null {
+  if (!wasmModule) return null;
+  const json = wasmModule.sanitize_procedure_with_map(sql);
+  if (!json) return null;
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Get the version of the underlying Rust engine.
  * Throws if WASM is not initialized.

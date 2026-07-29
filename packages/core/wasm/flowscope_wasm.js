@@ -442,6 +442,25 @@ export function sanitize_procedure(sql) {
 }
 
 /**
+ * Sanitize a BigQuery stored procedure and return DML with a line map.
+ * Returns a JSON string: {"dml":"...","lineMap":[-1,-1,0,1,2,...]}
+ * where lineMap[i] is the extracted line index for original line i (or -1).
+ * @param {string} sql
+ * @returns {string | undefined}
+ */
+export function sanitize_procedure_with_map(sql) {
+    const ptr0 = passStringToWasm0(sql, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.sanitize_procedure_with_map(ptr0, len0);
+    let v2;
+    if (ret[0] !== 0) {
+        v2 = getStringFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v2;
+}
+
+/**
  * Install panic hook for better error messages in browser console
  */
 export function set_panic_hook() {

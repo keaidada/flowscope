@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Copy, Check, RotateCcw, Scissors, X, ArrowLeft, ArrowRight } from 'lucide-react';
-import { extractDmlFromProcedure } from '@/lib/procedure-utils';
+import { extractDmlWithLineMap } from '@/lib/procedure-utils';
 import { cn } from '@/lib/utils';
 
 interface ProcedureRepairDialogProps {
@@ -27,8 +27,8 @@ export function ProcedureRepairDialog({
 }: ProcedureRepairDialogProps) {
   const { t } = useTranslation();
   const [transformedContent, setTransformedContent] = useState('');
+  const [lineMap, setLineMap] = useState<number[]>([]);
   const [userRemoved, setUserRemoved] = useState<Set<number>>(new Set());
-  const [userKept, setUserKept] = useState<Set<number>>(new Set());
   const [showRemoved, setShowRemoved] = useState(true);
   const [copied, setCopied] = useState(false);
 
@@ -39,101 +39,41 @@ export function ProcedureRepairDialog({
 
   useEffect(() => {
     if (open && originalContent) {
-      extractDmlFromProcedure(originalContent).then((extracted) => {
-        // Defense: strip any remaining comment lines
-        const clean = (extracted || '')
-          .split('\n')
-          .filter(l => !l.trim().startsWith('--') && !l.trim().startsWith('/*'))
-          .join('\n');
-        setTransformedContent(clean);
+      extractDmlWithLineMap(originalContent).then((result) => {
+        if (result) {
+          setTransformedContent(result.dml);
+          setLineMap(result.lineMap);
+        } else {
+          setTransformedContent('');
+          setLineMap([]);
+        }
         setUserRemoved(new Set());
-        setUserKept(new Set());
       });
     }
   }, [open, originalContent]);
 
   const originalLines = useMemo(() => originalContent.split('\n'), [originalContent]);
 
-  // Build padded right panel: empty lines where content was removed
+  // Build padded right panel using server-computed line map
   const rightLines = useMemo(() => {
-    const extLines = transformedContent.split('\n').filter(l => !l.trim().startsWith('--') && !l.trim().startsWith('/*'));
-    if (extLines.length === 0) return new Array(originalLines.length).fill('');
-
+    const dmlLines = transformedContent.split('\n');
     const result: string[] = new Array(originalLines.length).fill('');
-
-    // Skip trivial fragments that cause false matches
-    const skipSet = new Set([');', '(', ')', 'END;', 'BEGIN']);
-
-    // Build extMap: trimmed text → first unused index (use array for dedup)
-    const extMap = new Map<string, number[]>();
-    extLines.forEach((line, i) => {
-      const t = line.trim();
-      if (t && !skipSet.has(t)) {
-        const arr = extMap.get(t) || [];
-        arr.push(i);
-        extMap.set(t, arr);
-      }
-    });
-
-    const usedExt = new Set<number>();
-
-    // Pass 1: exact match
-    for (let i = 0; i < originalLines.length; i++) {
-      const origTrim = originalLines[i].trim();
-      if (!origTrim || skipSet.has(origTrim)) continue;
-      if (origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
-
-      const indices = extMap.get(origTrim);
-      if (indices && indices.length > 0) {
-        const extIdx = indices.shift()!;
-        if (!usedExt.has(extIdx)) {
-          result[i] = extLines[extIdx];
-          usedExt.add(extIdx);
-        }
+    for (let i = 0; i < Math.min(lineMap.length, originalLines.length); i++) {
+      const dmlIdx = lineMap[i];
+      if (dmlIdx >= 0 && dmlIdx < dmlLines.length) {
+        result[i] = dmlLines[dmlIdx];
       }
     }
-
-    // Pass 2: containment match for EXECUTE IMMEDIATE / SET patterns
-    // Walk in order to preserve monotonicity
-    let lastMatchedOrig = 0;
-    for (let extIdx = 0; extIdx < extLines.length; extIdx++) {
-      if (usedExt.has(extIdx)) {
-        lastMatchedOrig = Math.max(lastMatchedOrig, result.findIndex((v, idx) => idx >= lastMatchedOrig && v === extLines[extIdx]) + 1);
-        continue;
-      }
-      const extTrim = extLines[extIdx].trim();
-      const extCheck = extTrim.endsWith(';') ? extTrim.slice(0, -1).trim() : extTrim;
-      if (extCheck.length < 10) continue;
-
-      for (let i = lastMatchedOrig; i < originalLines.length; i++) {
-        const origTrim = originalLines[i].trim();
-        if (!origTrim || origTrim.startsWith('--') || origTrim.startsWith('/*')) continue;
-        if (result[i]) continue; // already matched in pass 1
-
-        if (origTrim.includes(extCheck)) {
-          result[i] = extLines[extIdx];
-          usedExt.add(extIdx);
-          lastMatchedOrig = i + 1;
-          break;
-        }
-      }
-    }
-
     return result;
-  }, [originalLines, transformedContent]);
+  }, [originalLines, transformedContent, lineMap]);
 
-  // Output = non-empty rightLines + user-kept original lines, minus user-removed
+  // Output = non-empty rightLines, minus user-removed lines
   const output = useMemo(() => {
-    const kept: string[] = [];
-    for (let i = 0; i < rightLines.length; i++) {
-      if (userKept.has(i)) {
-        kept.push(originalLines[i].trimEnd());
-      } else if (rightLines[i] && !userRemoved.has(i)) {
-        kept.push(rightLines[i]);
-      }
-    }
-    return kept.join('\n');
-  }, [rightLines, userRemoved, userKept, originalLines]);
+    return rightLines
+      .map((line, i) => (line && !userRemoved.has(i) ? line : ''))
+      .filter(Boolean)
+      .join('\n');
+  }, [rightLines, userRemoved]);
 
   const removedCount = rightLines.filter((l) => !l).length + userRemoved.size;
 
@@ -152,8 +92,11 @@ export function ProcedureRepairDialog({
   }, []);
 
   const handleReExtract = useCallback(() => {
-    extractDmlFromProcedure(originalContent).then((extracted) => {
-      setTransformedContent(extracted || '');
+    extractDmlWithLineMap(originalContent).then((result) => {
+      if (result) {
+        setTransformedContent(result.dml);
+        setLineMap(result.lineMap);
+      }
       setUserRemoved(new Set());
     });
   }, [originalContent]);
@@ -211,11 +154,6 @@ export function ProcedureRepairDialog({
                 已删除 ({removedCount} 行)
               </Button>
             )}
-            {userRemoved.size > 0 && (
-              <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" onClick={() => setUserRemoved(new Set())}>
-                恢复全部
-              </Button>
-            )}
           </div>
           {output && (
             <Button size="sm" variant="outline" className="h-7 gap-1 text-[11px] px-2" onClick={handleCopyAll}>
@@ -250,10 +188,8 @@ export function ProcedureRepairDialog({
               {rightLines.map((line, idx) => {
                 const isAutoRemoved = !line;
                 const isUserRemoved = userRemoved.has(idx);
-                const isUserKept = userKept.has(idx);
-                const hide = isAutoRemoved && !isUserKept && !showRemoved;
-                if (hide) return null;
-                const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
+                if (isAutoRemoved && !showRemoved) return null;
+                const isRemoved = isAutoRemoved || isUserRemoved;
                 return (
                   <div key={idx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
                     <button
@@ -264,24 +200,12 @@ export function ProcedureRepairDialog({
                       <ArrowLeft className={cn('h-2.5 w-2.5', isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
                     </button>
                     <button
-                      title={isUserRemoved ? '恢复' : isAutoRemoved ? '保留原始' : ''}
-                      onClick={() => {
-                        if (isUserRemoved) { toggleRemoved(idx); }
-                        else if (isAutoRemoved) { setUserKept(prev => { const n = new Set(prev); n.add(idx); return n; }); }
-                      }}
-                      className={cn('p-0 rounded hover:bg-green-100 transition-colors', (!isRemoved || isUserKept) && 'bg-green-100', isUserKept && 'bg-blue-100')}
+                      title="恢复"
+                      onClick={() => { if (isUserRemoved) toggleRemoved(idx); }}
+                      className={cn('p-0 rounded hover:bg-green-100 transition-colors', !isRemoved && 'bg-green-100')}
                     >
-                      <ArrowRight className={cn('h-2.5 w-2.5', (!isRemoved || isUserKept) ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400', isUserKept && 'text-blue-500')} />
+                      <ArrowRight className={cn('h-2.5 w-2.5', !isRemoved ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
                     </button>
-                    {isUserKept && (
-                      <button
-                        title="取消保留"
-                        onClick={() => setUserKept(prev => { const n = new Set(prev); n.delete(idx); return n; })}
-                        className="p-0 rounded hover:bg-red-100"
-                      >
-                        <X className="h-2 w-2 text-red-400" />
-                      </button>
-                    )}
                   </div>
                 );
               })}
@@ -298,13 +222,12 @@ export function ProcedureRepairDialog({
               {rightLines.map((line, idx) => {
                 const isAutoRemoved = !line;
                 const isUserRemoved = userRemoved.has(idx);
-                const isUserKept = userKept.has(idx);
-                const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
+                const isRemoved = isAutoRemoved || isUserRemoved;
                 if (isRemoved && !showRemoved) return null;
                 return (
-                  <div key={`r-${idx}`} className={cn('flex items-start h-[15px]', isRemoved && 'bg-red-500/[0.06]', isUserKept && 'bg-blue-500/[0.06]')}>
+                  <div key={`r-${idx}`} className={cn('flex items-start h-[15px]', isRemoved && 'bg-red-500/[0.06]')}>
                     <span className={cn('w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]', isRemoved ? 'text-red-400' : 'text-muted-foreground')}>{idx + 1}</span>
-                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, isUserRemoved && 'text-red-500 line-through', isAutoRemoved && !isUserKept && 'text-muted-foreground/20', isUserKept && 'text-blue-500')}>{isUserRemoved ? (originalLines[idx] || '\u00A0') : isAutoRemoved && isUserKept ? (originalLines[idx] || '\u00A0') : isAutoRemoved ? '\u00A0' : line}</span>
+                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, isUserRemoved && 'text-red-500 line-through', isAutoRemoved && 'text-muted-foreground/20')}>{isUserRemoved ? (originalLines[idx] || '\u00A0') : isAutoRemoved ? '\u00A0' : line}</span>
                   </div>
                 );
               })}
