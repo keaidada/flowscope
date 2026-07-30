@@ -1,88 +1,49 @@
-# FS Releases
+# FlowScope v1.0
 
-## v1.0.0 (Stable)
+## Windows Installation
 
-### 下载
+### Prerequisites
+- Windows 10/11 or Windows Server 2019+
+- No other dependencies required
 
-| 文件 | 平台 | 架构 | 大小 |
-|------|------|------|------|
-| [flowscope-1.0.0-darwin-arm64.tar.gz](./flowscope-1.0.0-darwin-arm64.tar.gz) | macOS | Apple Silicon (M1/M2/M3/M4) | 29 MB |
-| [flowscope-1.0.0-darwin-x86_64.tar.gz](./flowscope-1.0.0-darwin-x86_64.tar.gz) | macOS | Intel | 30 MB |
+### Quick Install
+1. Download `flowscope.exe` from [GitHub Releases](https://github.com/keaidada/flowscope/releases/tag/v1.0)
+2. Place `flowscope.exe` and `install.bat` in the same directory
+3. Run `install.bat` as Administrator
 
-### 一键部署
+### Default Paths
+| Directory | Path |
+|-----------|------|
+| Binary | `D:\tmp\flowscope\flowscope.exe` |
+| Data (SQL files) | `D:\tmp\flowscope-data` |
+| Database | `D:\tmp\flowscope-data\flowscope.db` |
+
+If `D:\tmp` doesn't exist, it will be created automatically.
+
+### Manual Install
+```cmd
+mkdir D:\tmp\flowscope
+copy flowscope.exe D:\tmp\flowscope\
+```
+
+### Commands
+```cmd
+# Start web server
+flowscope --serve --port 3000 --watch D:\tmp\flowscope-data
+
+# Analyze single file
+flowscope analyze D:\tmp\flowscope-data\query.sql
+
+# Help
+flowscope --help
+```
+
+### Web UI
+Open http://localhost:3000 in browser after starting serve mode.
+
+## Build from Source
 
 ```bash
-# 1. 下载所有文件到同一目录
-#    init.sh + 对应平台的 .tar.gz
-
-# 2. 运行初始化脚本
-chmod +x init.sh
-./init.sh                          # 默认安装到 /tmp/flowscope
-# 或指定目录：
-./init.sh --target ~/flowscope --arch arm64
-
-# 3. 放入 SQL 文件
-cp /path/to/your/*.sql /tmp/flowscope/sql/
-
-# 4. 启动服务
-/tmp/flowscope/start.sh                            # 前台运行
-/tmp/flowscope/start.sh --daemon                   # 后台运行
-/tmp/flowscope/start.sh --port 8080 --daemon       # 指定端口 + 后台
-
-# 5. 打开浏览器
-open http://localhost:3000
+# Prerequisites: Rust 1.82+, Node.js 18+
+cargo build -p flowscope-cli --features serve --release
 ```
-
-### 常用命令
-
-```bash
-./start.sh                          # 前台启动
-./start.sh --daemon                 # 后台启动
-./start.sh --stop                   # 停止
-./start.sh --status                 # 查看状态
-./start.sh --port 8080              # 指定端口
-./start.sh --watch /custom/sql/dir  # 指定 SQL 目录
-```
-
-### 服务端点
-
-| 服务 | 地址 |
-|------|------|
-| Web UI | `http://localhost:3000` |
-| REST API | `http://localhost:3000/api` |
-| OpenAPI 文档 | `http://localhost:3000/api/docs` |
-| 健康检查 | `http://localhost:3000/api/health` |
-
-### 目录结构
-
-```
-/tmp/flowscope/
-├── bin/flowscope        # 二进制
-├── data/flowscope.db    # SQLite 数据库
-├── logs/flowscope.log   # 运行日志
-├── sql/                 # SQL 文件目录（被监听）
-└── start.sh             # 启动脚本
-```
-
-### 内置示例 SQL
-
-安装后 `$INSTALL_DIR/sql/` 目录自带两个示例文件，启动即可体验：
-
-| 文件 | 说明 |
-|------|------|
-| `ck_demo.sql` | ClickHouse 完整 ETL pipeline 示例 |
-| `ck_demo2.sql` | ClickHouse 简化血缘示例 |
-
-### 功能
-
-- ✅ SQL 血缘分析（15 种方言）
-- ✅ CLI 模式（分析 / Lint / 导出）
-- ✅ Serve 模式（Web UI + REST API 内嵌）
-- ✅ 导出格式：table / json / mermaid / html / csv / xlsx / duckdb
-- ✅ 文件监听（修改 SQL 自动重新分析）
-
-### 系统要求
-
-- macOS 12.0+ (Monterey)
-- Apple Silicon 或 Intel
-- 无需额外依赖
