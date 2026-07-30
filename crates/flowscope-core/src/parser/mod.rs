@@ -888,25 +888,27 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
                     || (upper_stmt.contains(" AS ") && upper_stmt.contains("SELECT"));
                 if has_as_select {
                     out.push_str(content);
+                    if !out.ends_with('\n') { out.push('\n'); }
                     if !content.ends_with(';') {
                         out.push(';');
+                        out.push('\n');
                     }
-                    out.push('\n');
                     has_any = true;
                 }
             }
             "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" => {
                 out.push_str(content);
+                if !out.ends_with('\n') { out.push('\n'); }
                 if !content.ends_with(';') {
                     out.push(';');
+                    out.push('\n');
                 }
-                out.push('\n');
                 has_any = true;
             }
             _ => {}
         }
     }
-    // Remove standalone -- comment lines from the final output
+    // Remove standalone -- comment lines and empty lines from output
     let filtered: Vec<&str> = out.lines().filter(|l| {
         let t = l.trim();
         !t.is_empty() && !t.starts_with("--")
