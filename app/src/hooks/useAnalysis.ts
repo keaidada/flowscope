@@ -558,8 +558,12 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           console.log(`[analysis] batch complete: success=${result.success}, errors=${result.errors}, empty=${result.empty}`);
           await refreshBackendFiles();
           if (activeProjectId) {
-            const { writeTableLevelEdges } = await import('@/lib/analysis-cache');
+            const { writeTableLevelEdges, buildGlobalLineageFromNodes } = await import('@/lib/analysis-cache');
             await writeTableLevelEdges(activeProjectId);
+            const lineageResult = await buildGlobalLineageFromNodes(activeProjectId);
+            if (lineageResult) {
+              setLineageResult(lineageResult);
+            }
           }
           setLoadingContext({
             fileName: requestedFileName,
