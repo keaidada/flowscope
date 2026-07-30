@@ -2322,68 +2322,104 @@ pub(crate) async fn analyze_batch(
     let total = sql_files.len();
     eprintln!("[api] analyze_batch: project={}, files={total}", req.project_id);
 
+    // Phase 1: parallel analysis via rayon
+    use rayon::prelude::*;
+    struct FileResult {
+        path: String,
+        name: String,
+        content: String,
+        sql: String,
+        is_proc: bool,
+        orig_tc: String,
+        lineage_nodes: Vec<store::LineageNodeRow>,
+        lineage_columns: Vec<store::LineageColumnRow>,
+        lineage_edges: Vec<store::LineageEdgeRow>,
+        has_statements: bool,
+    }
+
+    let results: Vec<FileResult> = sql_files
+        .par_iter()
+        .filter_map(|f| {
+            if f.content.trim().is_empty() { return None; }
+
+            let sql = if f.is_procedure != 0 {
+                let tc = f.transformed_content.trim();
+                if !tc.is_empty() && !tc.starts_with(')') && !tc.starts_with(";\n") {
+                    f.transformed_content.clone()
+                } else {
+                    flowscope_core::parser::sanitize_bigquery_raw_double_quoted_literals(&f.content)
+                        .unwrap_or_else(|| f.content.clone())
+                }
+            } else { f.content.clone() };
+
+            let file_sources = vec![flowscope_core::FileSource {
+                name: f.name.clone(),
+                content: f.content.clone(),
+                is_procedure: f.is_procedure != 0,
+                transformed_content: if sql != f.content { Some(sql.clone()) } else { None },
+            }];
+
+            let request = flowscope_core::AnalyzeRequest {
+                sql: sql.clone(),
+                files: Some(file_sources),
+                dialect,
+                source_name: Some(f.path.clone()),
+                options: None,
+                schema: None,
+                #[cfg(feature = "templating")]
+                template_config: None,
+            };
+
+            let result = flowscope_core::analyzer::analyze(&request);
+
+            let (nodes, columns, edges) = if result.statements.is_empty() {
+                (vec![], vec![], vec![])
+            } else {
+                convert_to_lineage_rows(&result, &f.path)
+            };
+
+            Some(FileResult {
+                path: f.path.clone(),
+                name: f.name.clone(),
+                content: f.content.clone(),
+                sql,
+                is_proc: f.is_procedure != 0,
+                orig_tc: f.transformed_content.clone(),
+                lineage_nodes: nodes,
+                lineage_columns: columns,
+                lineage_edges: edges,
+                has_statements: !result.statements.is_empty(),
+            })
+        })
+        .collect();
+
+    // Phase 2: sequential save to DB
+    let empty = sql_files.iter().filter(|f| f.content.trim().is_empty()).count();
     let mut success = 0usize;
     let mut errors = 0usize;
-    let mut empty = 0usize;
     let mut error_details = Vec::new();
 
-    for (idx, f) in sql_files.iter().enumerate() {
-        if idx > 0 && idx % 500 == 0 {
-            eprintln!("[api] analyze_batch: progress {idx}/{total}");
-        }
-
-        if f.content.trim().is_empty() {
-            empty += 1;
-            continue;
-        }
-
-        // For procedures, use stored transformed_content if available
-        let sql = if f.is_procedure != 0 {
-            let tc = f.transformed_content.trim();
-            // Use stored transformed_content only if it looks valid (doesn't start with garbage)
-            if !tc.is_empty() && !tc.starts_with(')') && !tc.starts_with(";\n") {
-                f.transformed_content.clone()
-            } else {
-                flowscope_core::parser::sanitize_bigquery_raw_double_quoted_literals(&f.content)
-                    .unwrap_or_else(|| f.content.clone())
+    for r in &results {
+        if r.has_statements {
+            let db = state.db.lock().ok();
+            if let Some(db) = db {
+                let _ = store::save_lineage_batch(&db, &req.project_id, &r.lineage_nodes, &r.lineage_columns, &r.lineage_edges);
+                if r.is_proc && r.sql != r.orig_tc && !r.orig_tc.is_empty() {
+                    let _ = store::batch_update_transformed(&db, &req.project_id, &[(r.path.clone(), r.sql.clone())]);
+                }
             }
+            success += 1;
         } else {
-            f.content.clone()
-        };
-
-        let files = vec![flowscope_core::FileSource {
-            name: f.name.clone(),
-            content: f.content.clone(),
-            is_procedure: f.is_procedure != 0,
-            transformed_content: if sql != f.content { Some(sql.clone()) } else { None },
-        }];
-
-        let request = flowscope_core::AnalyzeRequest {
-            sql: sql.clone(),
-            files: Some(files),
-            dialect,
-            source_name: Some(f.path.clone()),
-            options: None,
-            schema: None,
-            #[cfg(feature = "templating")]
-            template_config: None,
-        };
-
-        let result = flowscope_core::analyzer::analyze(&request);
-
-        // Only count as error if no statements were parsed at all
-        if result.statements.is_empty() {
             errors += 1;
-            error_details.push(format!("{}: no statements parsed", f.path));
-            // Record as anomaly with the actual SQL that was analyzed
+            error_details.push(format!("{}: no statements parsed", r.path));
             let db = state.db.lock().ok();
             if let Some(db) = db {
                 let _ = store::insert_anomaly(&db, &store::LineageAnomalyRow {
                     id: 0,
                     project_id: req.project_id.clone(),
-                    file_path: f.path.clone(),
-                    script_name: f.name.clone(),
-                    script_content: sql.clone(),
+                    file_path: r.path.clone(),
+                    script_name: r.name.clone(),
+                    script_content: r.sql.clone(),
                     severity: "error".to_string(),
                     anomaly_type: "analysis_error".to_string(),
                     message: "no statements parsed".to_string(),
@@ -2394,18 +2430,6 @@ pub(crate) async fn analyze_batch(
                     status: 1,
                 });
             }
-        } else {
-            // Save lineage results to DB
-            let (nodes, columns, edges) = convert_to_lineage_rows(&result, &f.path);
-            let db = state.db.lock().ok();
-            if let Some(db) = db {
-                let _ = store::save_lineage_batch(&db, &req.project_id, &nodes, &columns, &edges);
-                // If we re-sanitized, write back fresh transformed_content
-                if f.is_procedure != 0 && sql != f.transformed_content && !f.transformed_content.is_empty() {
-                    let _ = store::batch_update_transformed(&db, &req.project_id, &[(f.path.clone(), sql.clone())]);
-                }
-            }
-            success += 1;
         }
     }
 
