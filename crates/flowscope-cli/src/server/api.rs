@@ -2326,7 +2326,7 @@ pub(crate) async fn analyze_batch(
     let non_empty: Vec<_> = sql_files.iter().filter(|f| !f.content.trim().is_empty()).collect();
 
     // Process in batches of 200 files per analyze() call
-    const BATCH: usize = 200;
+    const BATCH: usize = 50;
     let mut all_nodes = Vec::new();
     let mut all_columns = Vec::new();
     let mut all_edges = Vec::new();
