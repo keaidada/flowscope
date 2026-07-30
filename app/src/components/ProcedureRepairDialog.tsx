@@ -134,7 +134,7 @@ export function ProcedureRepairDialog({
     l.addEventListener('scroll', onScroll, { passive: true });
     r.addEventListener('scroll', onScroll, { passive: true });
     return () => { l.removeEventListener('scroll', onScroll); r.removeEventListener('scroll', onScroll); };
-  }, [useVirtual, totalLines]);
+  }, [useVirtual, totalLines, listHeight]);
 
   const toggleRemoved = useCallback((idx: number) => {
     setUserRemoved((prev) => {
