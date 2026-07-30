@@ -1427,7 +1427,8 @@ pub fn sanitize_with_line_map(sql: &str) -> Option<(String, Vec<i32>)> {
             || dml_trim.replace('`', "") == orig_trim.replace('`', "")
             || (dml_no_sc.len() > 10
                 && orig_trim.len() > dml_no_sc.len()
-                && orig_trim.contains(dml_no_sc))
+                && (orig_trim.contains(dml_no_sc)
+                    || orig_trim.replace('`', "").contains(dml_no_sc.replace('`', "").as_str())))
         {
             line_map[orig_idx] = actual_dml_idx as i32;
             dml_idx += 1;
