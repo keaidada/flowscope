@@ -42,9 +42,6 @@ export function ProcedureRepairDialog({
   const leftRef = useRef<any>(null);
   const middleRef = useRef<any>(null);
   const rightRef = useRef<any>(null);
-  const leftDivRef = useRef<HTMLDivElement>(null);
-  const middleDivRef = useRef<HTMLDivElement>(null);
-  const rightDivRef = useRef<HTMLDivElement>(null);
   const syncing = useRef(false);
 
   useEffect(() => {
@@ -103,6 +100,21 @@ export function ProcedureRepairDialog({
   const totalLines = originalLines.length;
   const useVirtual = originalContent.length > 100_000;
 
+  // Scroll sync for direct render path (virtual lists scroll independently)
+  const handleScroll = useCallback((source: 'left' | 'right') => {
+    if (syncing.current) return;
+    syncing.current = true;
+    const l = leftRef.current;
+    const m = middleRef.current;
+    const r = rightRef.current;
+    if (!l || !r) { syncing.current = false; return; }
+    const st = source === 'left' ? l.scrollTop : r.scrollTop;
+    if (source === 'left') r.scrollTop = st;
+    else l.scrollTop = st;
+    if (m) m.scrollTop = st;
+    requestAnimationFrame(() => { syncing.current = false; });
+  }, []);
+
   const toggleRemoved = useCallback((idx: number) => {
     setUserRemoved((prev) => {
       const next = new Set(prev);
@@ -144,38 +156,30 @@ export function ProcedureRepairDialog({
     onOpenChange(false);
   }, [output, onApply, onOpenChange]);
 
-  // 3-way scroll sync via DOM — attach to correct elements based on render path
-  const getEls = useCallback(() => {
-    const l = useVirtual ? leftRef.current?.element : leftDivRef.current;
-    const m = useVirtual ? middleRef.current?.element : middleDivRef.current;
-    const r = useVirtual ? rightRef.current?.element : rightDivRef.current;
-    return { l: l as HTMLElement | null, m: m as HTMLElement | null, r: r as HTMLElement | null };
-  }, [useVirtual]);
-
+  // 3-way scroll sync via DOM
   useEffect(() => {
-    const { l, r } = getEls();
-    if (!l || !r) return;
+    const leftEl = leftRef.current?.element as HTMLElement | null;
+    const middleEl = middleRef.current?.element as HTMLElement | null;
+    const rightEl = rightRef.current?.element as HTMLElement | null;
+    if (!leftEl || !rightEl) return;
 
     const sync = (source: HTMLElement) => {
       if (syncing.current) return;
       syncing.current = true;
       const st = source.scrollTop;
-      const { l: el, m: me, r: re } = getEls();
-      if (source !== el && el) el.scrollTop = st;
-      if (source !== me && me) me.scrollTop = st;
-      if (source !== re && re) re.scrollTop = st;
+      if (source !== leftEl) leftEl.scrollTop = st;
+      if (source !== middleEl && middleEl) middleEl.scrollTop = st;
+      if (source !== rightEl) rightEl.scrollTop = st;
       requestAnimationFrame(() => { syncing.current = false; });
     };
 
-    const onL = () => sync(l);
-    const onR = () => sync(r);
-    l.addEventListener('scroll', onL, { passive: true });
-    r.addEventListener('scroll', onR, { passive: true });
+    leftEl.addEventListener('scroll', () => sync(leftEl), { passive: true });
+    rightEl.addEventListener('scroll', () => sync(rightEl), { passive: true });
     return () => {
-      l.removeEventListener('scroll', onL);
-      r.removeEventListener('scroll', onR);
+      leftEl.removeEventListener('scroll', () => sync(leftEl));
+      rightEl.removeEventListener('scroll', () => sync(rightEl));
     };
-  }, [getEls]);
+  }, []);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -223,19 +227,10 @@ export function ProcedureRepairDialog({
             </div>
             <div className="flex-1 min-h-0">
               {useVirtual ? (
-                listHeight > 0 && (
-                  <List
-                    listRef={leftRef}
-                    rowCount={totalLines}
-                    rowHeight={ROW_H}
-                    overscanCount={OVERSCAN}
-                    rowComponent={LeftRow}
-                    rowProps={{ originalLines } as any}
-                    style={{ height: listHeight }}
-                  />
-                )
+                listHeight > 0 && <List listRef={leftRef} rowCount={totalLines} rowHeight={ROW_H} overscanCount={OVERSCAN}
+                  rowComponent={LeftRow} rowProps={{ originalLines } as any} style={{ height: listHeight }} />
               ) : (
-                <div className="h-full overflow-auto" ref={leftDivRef}>
+                <div ref={leftRef} className="h-full overflow-auto bg-background" onScroll={() => handleScroll('left')}>
                   {originalLines.map((_line, idx) => (
                     <LeftRow key={idx} index={idx} style={{}} originalLines={originalLines} />
                   ))}
@@ -251,19 +246,11 @@ export function ProcedureRepairDialog({
             </div>
             <div className="flex-1 min-h-0">
               {useVirtual ? (
-                listHeight > 0 && (
-                  <List
-                    listRef={middleRef}
-                    rowCount={totalLines}
-                    rowHeight={ROW_H}
-                    overscanCount={OVERSCAN}
-                    rowComponent={MiddleRow}
-                    rowProps={{ rightLines, originalLines, userRemoved, userKept, showRemoved, toggleRemoved, handleKeptChange } as any}
-                    style={{ height: listHeight }}
-                  />
-                )
+                listHeight > 0 && <List listRef={middleRef} rowCount={totalLines} rowHeight={ROW_H} overscanCount={OVERSCAN}
+                  rowComponent={MiddleRow} rowProps={{ rightLines, originalLines, userRemoved, userKept, showRemoved, toggleRemoved, handleKeptChange } as any}
+                  style={{ height: listHeight }} />
               ) : (
-                <div className="h-full overflow-auto" ref={middleDivRef}>
+                <div ref={middleRef} className="h-full overflow-hidden">
                   {rightLines.map((_line, idx) => (
                     <MiddleRow key={idx} index={idx} style={{}} rightLines={rightLines} originalLines={originalLines}
                       userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved}
@@ -282,19 +269,11 @@ export function ProcedureRepairDialog({
             </div>
             <div className="flex-1 min-h-0">
               {useVirtual ? (
-                listHeight > 0 && (
-                  <List
-                    listRef={rightRef}
-                    rowCount={totalLines}
-                    rowHeight={ROW_H}
-                    overscanCount={OVERSCAN}
-                    rowComponent={RightRow}
-                    rowProps={{ rightLines, originalLines, userRemoved, userKept, showRemoved } as any}
-                    style={{ height: listHeight }}
-                  />
-                )
+                listHeight > 0 && <List listRef={rightRef} rowCount={totalLines} rowHeight={ROW_H} overscanCount={OVERSCAN}
+                  rowComponent={RightRow} rowProps={{ rightLines, originalLines, userRemoved, userKept, showRemoved } as any}
+                  style={{ height: listHeight }} />
               ) : (
-                <div className="h-full overflow-auto" ref={rightDivRef}>
+                <div ref={rightRef} className="h-full overflow-auto bg-background" onScroll={() => handleScroll('right')}>
                   {rightLines.map((_line, idx) => (
                     <RightRow key={idx} index={idx} style={{}} rightLines={rightLines} originalLines={originalLines}
                       userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved} />
