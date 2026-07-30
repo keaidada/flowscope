@@ -98,6 +98,7 @@ export function ProcedureRepairDialog({
   const removedCount = rightLines.filter((l) => !l).length + userRemoved.size;
   const dmlCount = rightLines.reduce((c, l, i) => c + (l && !userRemoved.has(i) ? 1 : 0), 0);
   const totalLines = originalLines.length;
+  const useVirtual = originalContent.length > 100_000;
 
   const toggleRemoved = useCallback((idx: number) => {
     setUserRemoved((prev) => {
@@ -210,16 +211,24 @@ export function ProcedureRepairDialog({
               <span className="text-[10px] text-muted-foreground">原始存储过程 ({totalLines} 行)</span>
             </div>
             <div className="flex-1 min-h-0">
-              {listHeight > 0 && (
-                <List
-                  listRef={leftRef}
-                  rowCount={totalLines}
-                  rowHeight={ROW_H}
-                  overscanCount={OVERSCAN}
-                  rowComponent={LeftRow}
-                  rowProps={{ originalLines } as any}
-                  style={{ height: listHeight }}
-                />
+              {useVirtual ? (
+                listHeight > 0 && (
+                  <List
+                    listRef={leftRef}
+                    rowCount={totalLines}
+                    rowHeight={ROW_H}
+                    overscanCount={OVERSCAN}
+                    rowComponent={LeftRow}
+                    rowProps={{ originalLines } as any}
+                    style={{ height: listHeight }}
+                  />
+                )
+              ) : (
+                <div className="h-full overflow-auto" ref={(el) => { if (el) leftRef.current = { element: el }; }}>
+                  {originalLines.map((_line, idx) => (
+                    <LeftRow key={idx} index={idx} style={{}} originalLines={originalLines} />
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -230,16 +239,26 @@ export function ProcedureRepairDialog({
               <span className="text-[8px] text-muted-foreground">操作</span>
             </div>
             <div className="flex-1 min-h-0">
-              {listHeight > 0 && (
-                <List
-                  listRef={middleRef}
-                  rowCount={totalLines}
-                  rowHeight={ROW_H}
-                  overscanCount={OVERSCAN}
-                  rowComponent={MiddleRow}
-                  rowProps={{ rightLines, originalLines, userRemoved, userKept, showRemoved, toggleRemoved, handleKeptChange } as any}
-                  style={{ height: listHeight }}
-                />
+              {useVirtual ? (
+                listHeight > 0 && (
+                  <List
+                    listRef={middleRef}
+                    rowCount={totalLines}
+                    rowHeight={ROW_H}
+                    overscanCount={OVERSCAN}
+                    rowComponent={MiddleRow}
+                    rowProps={{ rightLines, originalLines, userRemoved, userKept, showRemoved, toggleRemoved, handleKeptChange } as any}
+                    style={{ height: listHeight }}
+                  />
+                )
+              ) : (
+                <div className="h-full overflow-auto" ref={(el) => { if (el) middleRef.current = { element: el }; }}>
+                  {rightLines.map((_line, idx) => (
+                    <MiddleRow key={idx} index={idx} style={{}} rightLines={rightLines} originalLines={originalLines}
+                      userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved}
+                      toggleRemoved={toggleRemoved} handleKeptChange={handleKeptChange} />
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -251,16 +270,25 @@ export function ProcedureRepairDialog({
               <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-amber-500 hover:text-amber-600" onClick={handleApply} disabled={!output.trim()}>应用</Button>
             </div>
             <div className="flex-1 min-h-0">
-              {listHeight > 0 && (
-                <List
-                  listRef={rightRef}
-                  rowCount={totalLines}
-                  rowHeight={ROW_H}
-                  overscanCount={OVERSCAN}
-                  rowComponent={RightRow}
-                  rowProps={{ rightLines, originalLines, userRemoved, userKept, showRemoved } as any}
-                  style={{ height: listHeight }}
-                />
+              {useVirtual ? (
+                listHeight > 0 && (
+                  <List
+                    listRef={rightRef}
+                    rowCount={totalLines}
+                    rowHeight={ROW_H}
+                    overscanCount={OVERSCAN}
+                    rowComponent={RightRow}
+                    rowProps={{ rightLines, originalLines, userRemoved, userKept, showRemoved } as any}
+                    style={{ height: listHeight }}
+                  />
+                )
+              ) : (
+                <div className="h-full overflow-auto" ref={(el) => { if (el) rightRef.current = { element: el }; }}>
+                  {rightLines.map((_line, idx) => (
+                    <RightRow key={idx} index={idx} style={{}} rightLines={rightLines} originalLines={originalLines}
+                      userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved} />
+                  ))}
+                </div>
               )}
             </div>
           </div>
