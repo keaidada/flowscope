@@ -100,20 +100,41 @@ export function ProcedureRepairDialog({
   const totalLines = originalLines.length;
   const useVirtual = originalContent.length > 100_000;
 
-  // Scroll sync for direct render path (virtual lists scroll independently)
+  // Scroll sync for direct render path (virtual lists sync via useEffect below)
   const handleScroll = useCallback((source: 'left' | 'right') => {
-    if (syncing.current) return;
+    if (useVirtual || syncing.current) return;
     syncing.current = true;
-    const l = leftRef.current;
-    const m = middleRef.current;
-    const r = rightRef.current;
+    const l = leftRef.current as HTMLDivElement | null;
+    const m = middleRef.current as HTMLDivElement | null;
+    const r = rightRef.current as HTMLDivElement | null;
     if (!l || !r) { syncing.current = false; return; }
     const st = source === 'left' ? l.scrollTop : r.scrollTop;
     if (source === 'left') r.scrollTop = st;
     else l.scrollTop = st;
     if (m) m.scrollTop = st;
     requestAnimationFrame(() => { syncing.current = false; });
-  }, []);
+  }, [useVirtual]);
+
+  // Scroll sync for virtual path — attach DOM listeners to List elements
+  useEffect(() => {
+    if (!useVirtual) return;
+    const l = leftRef.current?.element as HTMLElement | null;
+    const m = middleRef.current?.element as HTMLElement | null;
+    const r = rightRef.current?.element as HTMLElement | null;
+    if (!l || !r) return;
+    const onScroll = () => {
+      if (syncing.current) return;
+      syncing.current = true;
+      const st = (document.activeElement === l || l.contains(document.activeElement)) ? l.scrollTop : r.scrollTop;
+      if (l.scrollTop !== st) l.scrollTop = st;
+      if (r.scrollTop !== st) r.scrollTop = st;
+      if (m && m.scrollTop !== st) m.scrollTop = st;
+      requestAnimationFrame(() => { syncing.current = false; });
+    };
+    l.addEventListener('scroll', onScroll, { passive: true });
+    r.addEventListener('scroll', onScroll, { passive: true });
+    return () => { l.removeEventListener('scroll', onScroll); r.removeEventListener('scroll', onScroll); };
+  }, [useVirtual, totalLines]);
 
   const toggleRemoved = useCallback((idx: number) => {
     setUserRemoved((prev) => {
