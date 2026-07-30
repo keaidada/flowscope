@@ -11,7 +11,6 @@ import { Button } from '@/components/ui/button';
 import { Copy, Check, RotateCcw, Scissors, X, ArrowLeft, ArrowRight } from 'lucide-react';
 import { extractDmlWithLineMap } from '@/lib/procedure-utils';
 import { cn } from '@/lib/utils';
-import { List } from 'react-window';
 
 interface ProcedureRepairDialogProps {
   open: boolean;
@@ -19,9 +18,6 @@ interface ProcedureRepairDialogProps {
   originalContent: string;
   onApply: (transformedContent: string | null) => void;
 }
-
-const ROW_H = 15;
-const OVERSCAN = 80;
 
 export function ProcedureRepairDialog({
   open,
@@ -36,12 +32,11 @@ export function ProcedureRepairDialog({
   const [userKept, setUserKept] = useState<Set<number>>(new Set());
   const [showRemoved, setShowRemoved] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [page, setPage] = useState(0);
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [listHeight, setListHeight] = useState(600);
-  const leftRef = useRef<any>(null);
-  const middleRef = useRef<any>(null);
-  const rightRef = useRef<any>(null);
+  const leftRef = useRef<HTMLDivElement>(null);
+  const middleRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
   const syncing = useRef(false);
 
   useEffect(() => {
@@ -50,6 +45,7 @@ export function ProcedureRepairDialog({
         if (result) {
           setTransformedContent(result.dml);
           setLineMap(result.lineMap);
+          console.log('[ProcedureRepair] lineMap size:', result.lineMap.length, 'mapped:', result.lineMap.filter((x: number) => x >= 0).length);
         } else {
           setTransformedContent('');
           setLineMap([]);
@@ -60,17 +56,9 @@ export function ProcedureRepairDialog({
     }
   }, [open, originalContent]);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setListHeight(el.clientHeight - 29));
-    ro.observe(el);
-    setListHeight(el.clientHeight - 29);
-    return () => ro.disconnect();
-  }, []);
-
   const originalLines = useMemo(() => originalContent.split('\n'), [originalContent]);
 
+  // Build padded right panel using server-computed line map
   const rightLines = useMemo(() => {
     const dmlLines = transformedContent.split('\n');
     const result: string[] = new Array(originalLines.length).fill('');
@@ -83,6 +71,7 @@ export function ProcedureRepairDialog({
     return result;
   }, [originalLines, transformedContent, lineMap]);
 
+  // Output = DML lines (minus removed) + user-kept original lines
   const output = useMemo(() => {
     const kept: string[] = [];
     for (let i = 0; i < rightLines.length; i++) {
@@ -96,26 +85,49 @@ export function ProcedureRepairDialog({
   }, [rightLines, userRemoved, userKept, originalLines]);
 
   const removedCount = rightLines.filter((l) => !l).length + userRemoved.size;
-  const dmlCount = rightLines.reduce((c, l, i) => c + (l && !userRemoved.has(i) ? 1 : 0), 0);
-  const totalLines = originalLines.length;
-  const useVirtual = originalContent.length > 100_000;
 
-  const toggleRemoved = useCallback((idx: number) => {
-    setUserRemoved((prev) => {
-      const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
-      return next;
-    });
-  }, []);
+  // Chunk large files into ~100KB pages
+  const CHUNK_SIZE = 100_000;
+  const chunks = useMemo(() => {
+    if (originalContent.length <= CHUNK_SIZE) return null;
+    const pages: { start: number; end: number }[] = [];
+    let start = 0;
+    let byteCount = 0;
+    for (let i = 0; i < originalLines.length; i++) {
+      byteCount += originalLines[i].length + 1; // +1 for \n
+      if (byteCount >= CHUNK_SIZE && i > start) {
+        pages.push({ start, end: i });
+        start = i;
+        byteCount = originalLines[i].length + 1;
+      }
+    }
+    if (start < originalLines.length) {
+      pages.push({ start, end: originalLines.length });
+    }
+    return pages;
+  }, [originalLines, originalContent.length]);
 
-  const handleKeptChange = useCallback((idx: number, keep: boolean) => {
-    setUserKept((prev) => {
-      const next = new Set(prev);
-      if (keep) next.add(idx);
-      else next.delete(idx);
-      return next;
-    });
+  // Clamp page when chunks change
+  useEffect(() => { setPage(0); }, [chunks]);
+
+  const activeChunk = chunks ? chunks[page] : null;
+  const pageStart = activeChunk ? activeChunk.start : 0;
+  const pageEnd = activeChunk ? activeChunk.end : originalLines.length;
+  const pageLines = originalLines.slice(pageStart, pageEnd);
+  const pageRightLines = rightLines.slice(pageStart, pageEnd);
+
+  const handleScroll = useCallback((source: 'left' | 'right') => {
+    if (syncing.current) return;
+    syncing.current = true;
+    const l = leftRef.current;
+    const m = middleRef.current;
+    const r = rightRef.current;
+    if (!l || !r) { syncing.current = false; return; }
+    const st = source === 'left' ? l.scrollTop : r.scrollTop;
+    if (source === 'left') r.scrollTop = st;
+    else l.scrollTop = st;
+    if (m) m.scrollTop = st;
+    requestAnimationFrame(() => { syncing.current = false; });
   }, []);
 
   const handleReExtract = useCallback(() => {
@@ -125,9 +137,17 @@ export function ProcedureRepairDialog({
         setLineMap(result.lineMap);
       }
       setUserRemoved(new Set());
-      setUserKept(new Set());
     });
   }, [originalContent]);
+
+  const toggleRemoved = useCallback((idx: number) => {
+    setUserRemoved((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  }, []);
 
   const handleCopyAll = useCallback(async () => {
     if (!output) return;
@@ -141,43 +161,8 @@ export function ProcedureRepairDialog({
     onOpenChange(false);
   }, [output, onApply, onOpenChange]);
 
-  // Scroll sync for direct render path
-  const handleScroll = useCallback((source: 'left' | 'right') => {
-    if (syncing.current) return;
-    syncing.current = true;
-    const l = leftRef.current, m = middleRef.current, r = rightRef.current;
-    if (!l || !r) { syncing.current = false; return; }
-    const st = source === 'left' ? l.scrollTop : r.scrollTop;
-    if (source === 'left') r.scrollTop = st;
-    else l.scrollTop = st;
-    if (m) m.scrollTop = st;
-    requestAnimationFrame(() => { syncing.current = false; });
-  }, []);
-
-  // 3-way scroll sync via DOM
-  useEffect(() => {
-    const leftEl = leftRef.current?.element as HTMLElement | null;
-    const middleEl = middleRef.current?.element as HTMLElement | null;
-    const rightEl = rightRef.current?.element as HTMLElement | null;
-    if (!leftEl || !rightEl) return;
-
-    const sync = (source: HTMLElement) => {
-      if (syncing.current) return;
-      syncing.current = true;
-      const st = source.scrollTop;
-      if (source !== leftEl) leftEl.scrollTop = st;
-      if (source !== middleEl && middleEl) middleEl.scrollTop = st;
-      if (source !== rightEl) rightEl.scrollTop = st;
-      requestAnimationFrame(() => { syncing.current = false; });
-    };
-
-    leftEl.addEventListener('scroll', () => sync(leftEl), { passive: true });
-    rightEl.addEventListener('scroll', () => sync(rightEl), { passive: true });
-    return () => {
-      leftEl.removeEventListener('scroll', () => sync(leftEl));
-      rightEl.removeEventListener('scroll', () => sync(rightEl));
-    };
-  }, []);
+  const fSizeMono = 'text-[10px] leading-[15px]';
+  const dmlCount = rightLines.reduce((c, l, i) => c + (l && !userRemoved.has(i) ? 1 : 0), 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -189,11 +174,12 @@ export function ProcedureRepairDialog({
             </div>
             <DialogTitle>{t('procedure.title', '存储过程转换')}</DialogTitle>
             <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
-              {totalLines} → {output.split('\n').length} 行 DML · 已过滤 {removedCount}
+              {originalLines.length} → {output.split('\n').length} 行 DML · 已过滤 {removedCount}
+              {chunks && ` · 第${page + 1}/${chunks.length}页`}
             </span>
           </div>
           <DialogDescription className="leading-tight">
-            左侧原始存储过程，右侧 AST 引擎提取的 DML，中间操作列可删除/恢复
+            左侧原始存储过程，右侧 AST 引擎提取的 DML（空行对齐），中间操作列可删除/恢复
           </DialogDescription>
         </DialogHeader>
 
@@ -208,6 +194,18 @@ export function ProcedureRepairDialog({
                 已删除 ({removedCount} 行)
               </Button>
             )}
+            {/* Page navigation */}
+            {chunks && chunks.length > 1 && (
+              <div className="flex items-center gap-0.5 ml-2">
+                <Button size="sm" variant="ghost" className="h-6 px-1" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+                  <ArrowLeft className="h-3 w-3" />
+                </Button>
+                <span className="text-[10px] text-muted-foreground mx-1">{page + 1}/{chunks.length}</span>
+                <Button size="sm" variant="ghost" className="h-6 px-1" disabled={page >= chunks.length - 1} onClick={() => setPage(p => p + 1)}>
+                  <ArrowRight className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
           </div>
           {output && (
             <Button size="sm" variant="outline" className="h-7 gap-1 text-[11px] px-2" onClick={handleCopyAll}>
@@ -217,125 +215,94 @@ export function ProcedureRepairDialog({
           )}
         </div>
 
-        <div ref={containerRef} className="flex-1 min-h-0 flex overflow-hidden">
-          {/* Left */}
+        <div className="flex-1 min-h-0 flex overflow-hidden">
+          {/* Left: Original */}
           <div className="flex-1 min-w-0 flex flex-col border-r">
             <div className="flex items-center gap-1 px-2 py-1 border-b bg-muted/10 shrink-0">
-              <span className="text-[10px] text-muted-foreground">原始存储过程 ({totalLines} 行)</span>
+              <span className="text-[10px] text-muted-foreground">原始存储过程 (行 {pageStart + 1}-{pageEnd} / {originalLines.length})</span>
             </div>
-            <div className="flex-1 min-h-0">
-              {useVirtual ? (
-                listHeight > 0 && <List listRef={leftRef} rowCount={totalLines} rowHeight={ROW_H} overscanCount={OVERSCAN}
-                  rowComponent={LeftRow} rowProps={{ originalLines } as any} style={{ height: listHeight }} />
-              ) : (
-                <div ref={leftRef} className="h-full overflow-auto bg-background" onScroll={() => handleScroll('left')}>
-                  {originalLines.map((_l, i) => <LeftRow key={i} index={i} style={{}} originalLines={originalLines} />)}
+            <div ref={leftRef} className="flex-1 min-h-0 overflow-auto bg-background" onScroll={() => handleScroll('left')}>
+              {pageLines.map((line, idx) => (
+                <div key={`l-${pageStart + idx}`} className="flex items-start h-[15px]">
+                  <span className="w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px] text-muted-foreground/40">{pageStart + idx + 1}</span>
+                  <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono)}>{line}</span>
                 </div>
-              )}
+              ))}
             </div>
           </div>
 
-          {/* Middle */}
+          {/* Middle: keep/delete */}
           <div className="w-12 shrink-0 flex flex-col border-r bg-muted/5">
             <div className="h-[29px] border-b shrink-0 flex items-center justify-center bg-muted/10">
               <span className="text-[8px] text-muted-foreground">操作</span>
             </div>
-            <div className="flex-1 min-h-0">
-              {useVirtual ? (
-                listHeight > 0 && <List listRef={middleRef} rowCount={totalLines} rowHeight={ROW_H} overscanCount={OVERSCAN}
-                  rowComponent={MiddleRow} rowProps={{ rightLines, originalLines, userRemoved, userKept, showRemoved, toggleRemoved, handleKeptChange } as any}
-                  style={{ height: listHeight }} />
-              ) : (
-                <div ref={middleRef} className="h-full overflow-hidden">
-                  {rightLines.map((_l, i) => <MiddleRow key={i} index={i} style={{}} rightLines={rightLines} originalLines={originalLines} userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved} toggleRemoved={toggleRemoved} handleKeptChange={handleKeptChange} />)}
-                </div>
-              )}
+            <div ref={middleRef} className="flex-1 min-h-0 overflow-hidden">
+              {pageRightLines.map((line, idx) => {
+                const globalIdx = pageStart + idx;
+                const isAutoRemoved = !line;
+                const isUserRemoved = userRemoved.has(globalIdx);
+                const isUserKept = userKept.has(globalIdx);
+                if (isAutoRemoved && !isUserKept && !showRemoved) return null;
+                const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
+                return (
+                  <div key={globalIdx} className="flex items-center justify-center gap-0.5" style={{ height: '15px' }}>
+                    <button
+                      title={isUserKept ? '取消保留' : '删除'}
+                      onClick={() => {
+                        if (isUserKept) {
+                          setUserKept(prev => { const n = new Set(prev); n.delete(globalIdx); return n; });
+                        } else if (line && !isRemoved) {
+                          toggleRemoved(globalIdx);
+                        }
+                      }}
+                      className={cn('p-0 rounded hover:bg-red-100 transition-colors', (isRemoved || isUserKept) && 'bg-red-100')}
+                    >
+                      <ArrowLeft className={cn('h-2.5 w-2.5', isUserKept ? 'text-red-500' : isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
+                    </button>
+                    <button
+                      title={isUserRemoved ? '恢复' : isAutoRemoved ? '保留原始' : ''}
+                      onClick={() => {
+                        if (isUserRemoved) { toggleRemoved(globalIdx); }
+                        else if (isAutoRemoved) { setUserKept(prev => { const n = new Set(prev); n.add(globalIdx); return n; }); }
+                      }}
+                      className={cn('p-0 rounded hover:bg-green-100 transition-colors', (!isRemoved || isUserKept) && 'bg-green-100', isUserKept && 'ring-1 ring-blue-300')}
+                    >
+                      <ArrowRight className={cn('h-2.5 w-2.5', (!isRemoved || isUserKept) ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          {/* Right */}
+          {/* Right: Padded result */}
           <div className="flex-1 min-w-0 flex flex-col">
             <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/10 shrink-0">
               <span className="text-[10px] text-muted-foreground">转换结果 ({dmlCount} 行 DML)</span>
               <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-amber-500 hover:text-amber-600" onClick={handleApply} disabled={!output.trim()}>应用</Button>
             </div>
-            <div className="flex-1 min-h-0">
-              {useVirtual ? (
-                listHeight > 0 && <List listRef={rightRef} rowCount={totalLines} rowHeight={ROW_H} overscanCount={OVERSCAN}
-                  rowComponent={RightRow} rowProps={{ rightLines, originalLines, userRemoved, userKept, showRemoved } as any}
-                  style={{ height: listHeight }} />
-              ) : (
-                <div ref={rightRef} className="h-full overflow-auto bg-background" onScroll={() => handleScroll('right')}>
-                  {rightLines.map((_l, i) => <RightRow key={i} index={i} style={{}} rightLines={rightLines} originalLines={originalLines} userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved} />)}
-                </div>
-              )}
+            <div ref={rightRef} className="flex-1 min-h-0 overflow-auto bg-background" onScroll={() => handleScroll('right')}>
+              {pageRightLines.map((line, idx) => {
+                const globalIdx = pageStart + idx;
+                const isAutoRemoved = !line;
+                const isUserRemoved = userRemoved.has(globalIdx);
+                const isUserKept = userKept.has(globalIdx);
+                const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
+                if (isRemoved && !showRemoved) return null;
+                const displayText = isUserRemoved || isAutoRemoved
+                  ? (originalLines[globalIdx] || '\u00A0')
+                  : line;
+                return (
+                  <div key={`r-${globalIdx}`} className={cn('flex items-start h-[15px]', isRemoved && 'bg-red-500/[0.06]', isUserKept && 'bg-blue-500/[0.06]')}>
+                    <span className={cn('w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]', isRemoved && !isUserKept ? 'text-red-400' : isUserKept ? 'text-blue-400' : 'text-muted-foreground')}>{globalIdx + 1}</span>
+                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, (isUserRemoved || (isAutoRemoved && !isUserKept)) && 'text-red-500 line-through', isUserKept && 'text-blue-500')}>{displayText}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-// ── Row components ──
-
-function LeftRow(props: any) {
-  const { index, style, originalLines } = props;
-  return (
-    <div style={style} className="flex items-start h-[15px]">
-      <span className="w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px] text-muted-foreground/40">{index + 1}</span>
-      <span className="flex-1 whitespace-pre pr-2 overflow-hidden font-mono text-[10px] leading-[15px]">{originalLines[index]}</span>
-    </div>
-  );
-}
-
-function MiddleRow(props: any) {
-  const { index, style, rightLines, userRemoved, userKept, showRemoved, toggleRemoved, handleKeptChange } = props;
-  const line = rightLines[index];
-  const isAutoRemoved = !line;
-  const isUserRemoved = userRemoved.has(index);
-  const isUserKept = userKept.has(index);
-  if (isAutoRemoved && !isUserKept && !showRemoved) return null;
-  const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
-  return (
-    <div style={style} className="flex items-center justify-center gap-0.5 h-[15px]">
-      <button
-        title={isUserKept ? '取消保留' : '删除'}
-        onClick={() => {
-          if (isUserKept) handleKeptChange(index, false);
-          else if (line && !isRemoved) toggleRemoved(index);
-        }}
-        className={cn('p-0 rounded hover:bg-red-100 transition-colors', (isRemoved || isUserKept) && 'bg-red-100')}
-      >
-        <ArrowLeft className={cn('h-2.5 w-2.5', isUserKept ? 'text-red-500' : isRemoved ? 'text-red-500' : 'text-muted-foreground/40 hover:text-red-400')} />
-      </button>
-      <button
-        title={isUserRemoved ? '恢复' : isAutoRemoved ? '保留原始' : ''}
-        onClick={() => {
-          if (isUserRemoved) toggleRemoved(index);
-          else if (isAutoRemoved) handleKeptChange(index, true);
-        }}
-        className={cn('p-0 rounded hover:bg-green-100 transition-colors', (!isRemoved || isUserKept) && 'bg-green-100', isUserKept && 'ring-1 ring-blue-300')}
-      >
-        <ArrowRight className={cn('h-2.5 w-2.5', (!isRemoved || isUserKept) ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-400')} />
-      </button>
-    </div>
-  );
-}
-
-function RightRow(props: any) {
-  const { index, style, rightLines, originalLines, userRemoved, userKept, showRemoved } = props;
-  const line = rightLines[index];
-  const isAutoRemoved = !line;
-  const isUserRemoved = userRemoved.has(index);
-  const isUserKept = userKept.has(index);
-  const isRemoved = (isAutoRemoved && !isUserKept) || isUserRemoved;
-  if (isRemoved && !showRemoved) return null;
-  const displayText = isUserRemoved || isAutoRemoved ? (originalLines[index] || '\u00A0') : line;
-  return (
-    <div style={style} className={cn('flex items-start h-[15px]', isRemoved && 'bg-red-500/[0.06]', isUserKept && 'bg-blue-500/[0.06]')}>
-      <span className={cn('w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]', isRemoved && !isUserKept ? 'text-red-400' : isUserKept ? 'text-blue-400' : 'text-muted-foreground')}>{index + 1}</span>
-      <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono text-[10px] leading-[15px]', (isUserRemoved || (isAutoRemoved && !isUserKept)) && 'text-red-500 line-through', isUserKept && 'text-blue-500')}>{displayText}</span>
-    </div>
   );
 }
