@@ -857,10 +857,10 @@
     "@tybys/wasm-util" "^0.10.1"
 
 "@pondpilot/flowscope-core@file:packages/core":
-  version "0.6.0"
+  version "1.0.0"
 
 "@pondpilot/flowscope-react@file:packages/react":
-  version "0.6.0"
+  version "1.0.0"
   dependencies:
     "@codemirror/autocomplete" "^6.18.0"
     "@codemirror/lang-sql" "^6.8.0"
@@ -870,6 +870,7 @@
     "@codemirror/state" "^6.4.0"
     "@codemirror/theme-one-dark" "^6.1.0"
     "@codemirror/view" "^6.35.0"
+    "@monaco-editor/react" "^4.7.0"
     "@radix-ui/react-dropdown-menu" "^2.1.16"
     "@radix-ui/react-slot" "^1.2.3"
     "@radix-ui/react-tooltip" "^1.2.8"
@@ -882,6 +883,7 @@
     elkjs "^0.11.0"
     html-to-image "^1.11.13"
     lucide-react "^0.562.0"
+    monaco-editor "^0.56.0"
     react-window "^2.2.5"
     tailwind-merge "^3.4.0"
     xlsx "^0.18.5"
@@ -1818,7 +1820,7 @@
 
 "@types/react-window@^2.0.0":
   version "2.0.0"
-  resolved "https://registry.npmjs.org/@types/react-window/-/react-window-2.0.0.tgz"
+  resolved "https://registry.yarnpkg.com/@types/react-window/-/react-window-2.0.0.tgz#9fe45015d6f98ec98a069362518c855fcc1fa8d0"
   integrity sha512-E8hMDtImEpMk1SjswSvqoSmYvk7GEtyVaTa/GJV++FdDNuMVVEzpAClyJ0nqeKYBrMkGiyH6M1+rPLM0Nu1exQ==
   dependencies:
     react-window "*"
@@ -3454,6 +3456,11 @@ react-window@*, react-window@^2.2.5:
   version "2.2.7"
   resolved "https://registry.npmjs.org/react-window/-/react-window-2.2.7.tgz"
   integrity sha512-SH5nvfUQwGHYyriDUAOt7wfPsfG9Qxd6OdzQxl5oQ4dsSsUicqQvjV7dR+NqZ4coY0fUn3w1jnC5PwzIUWEg5w==
+
+react-window@^2.3.0:
+  version "2.3.0"
+  resolved "https://registry.yarnpkg.com/react-window/-/react-window-2.3.0.tgz#92fefee75b7de56a31204dfffc492b84136e4783"
+  integrity sha512-FW6TIpaOH646k51X7yE+LSCWGkt5Pfsnc1fVyq/sCI9h0pTqmMiBXM04pzFKg3Bt7NGkeV6kqbU8d/QjmFS7Ug==
 
 react@^19.1.0:
   version "19.2.3"
