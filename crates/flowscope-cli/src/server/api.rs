@@ -2375,23 +2375,18 @@ pub(crate) async fn analyze_batch(
         if result.statements.is_empty() {
             errors += 1;
             error_details.push(format!("{}: no statements parsed", f.path));
-            // Record as anomaly
+            // Record as anomaly with the actual SQL that was analyzed
             let db = state.db.lock().ok();
             if let Some(db) = db {
-                let msg = result.issues.iter()
-                    .filter(|i| matches!(i.severity, flowscope_core::Severity::Error))
-                    .map(|i| i.message.clone())
-                    .collect::<Vec<_>>()
-                    .join("; ");
                 let _ = store::insert_anomaly(&db, &store::LineageAnomalyRow {
                     id: 0,
                     project_id: req.project_id.clone(),
                     file_path: f.path.clone(),
                     script_name: f.name.clone(),
-                    script_content: f.content.clone(),
+                    script_content: sql.clone(),
                     severity: "error".to_string(),
                     anomaly_type: "analysis_error".to_string(),
-                    message: if msg.is_empty() { "分析出错".to_string() } else { msg },
+                    message: "no statements parsed".to_string(),
                     detail: String::new(),
                     is_test: 0,
                     created_at: String::new(),
