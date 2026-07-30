@@ -2371,9 +2371,10 @@ pub(crate) async fn analyze_batch(
 
         let result = flowscope_core::analyzer::analyze(&request);
 
-        if result.summary.has_errors {
+        // Only count as error if no statements were parsed at all
+        if result.statements.is_empty() {
             errors += 1;
-            error_details.push(format!("{}: analysis errors", f.path));
+            error_details.push(format!("{}: no statements parsed", f.path));
             // Record as anomaly
             let db = state.db.lock().ok();
             if let Some(db) = db {
