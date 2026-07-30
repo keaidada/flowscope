@@ -583,12 +583,14 @@ export async function analyzeBatch(
   projectId: string,
   folderPath?: string,
   dialect?: string,
-  templateMode?: string
+  templateMode?: string,
+  paths?: string[]
 ): Promise<AnalyzeBatchResult> {
   return api<AnalyzeBatchResult>('POST', '/analyze-batch', {
     projectId,
     folderPath,
     dialect,
     templateMode,
+    paths,
   });
 }

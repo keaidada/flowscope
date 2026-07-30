@@ -2264,6 +2264,7 @@ struct AnalyzeBatchRequest {
     project_id: String,
     #[serde(alias = "folderPath")]
     folder_path: Option<String>,
+    paths: Option<Vec<String>>,
     dialect: Option<String>,
     #[serde(alias = "templateMode")]
     template_mode: Option<String>,
@@ -2308,10 +2309,14 @@ pub(crate) async fn analyze_batch(
     #[allow(unused_variables)]
     let template_config = resolve_template_config(req.template_mode.as_deref(), state.as_ref());
 
+    let path_set: Option<std::collections::HashSet<String>> = req.paths.as_ref().map(|p| p.iter().cloned().collect());
+
     let sql_files: Vec<store::ProjectFileRow> = all_files
         .into_iter()
         .filter(|f| {
-            if let Some(ref pfx) = prefix {
+            if let Some(ref set) = path_set {
+                if !set.contains(&f.path) { return false; }
+            } else if let Some(ref pfx) = prefix {
                 if !f.path.starts_with(pfx.as_str()) { return false; }
             }
             let lower = f.name.to_lowercase();

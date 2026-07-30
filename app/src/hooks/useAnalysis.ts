@@ -543,15 +543,17 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
       if (context.files.length > 1) {
         setAnalyzing(true);
         setError(null);
-        setLoadingContext({ fileName: requestedFileName, runMode, fileCount: project.files.length, stage: 'preparing' });
+        setLoadingContext({ fileName: requestedFileName, runMode, fileCount: context.files.length, stage: 'preparing' });
 
         try {
           const { analyzeBatch } = await import('@/lib/server-db');
+          const filePaths = context.files.map((f: { name: string; path?: string }) => f.path ?? f.name);
           const result = await analyzeBatch(
             activeProjectId ?? project.id,
             undefined,
             project.dialect,
-            project.templateMode
+            project.templateMode,
+            filePaths
           );
           console.log(`[analysis] batch complete: success=${result.success}, errors=${result.errors}, empty=${result.empty}`);
           // Reload files from backend
