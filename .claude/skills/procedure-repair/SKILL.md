@@ -118,6 +118,23 @@ sanitize_with_line_map
 ### 弹窗 rightLines
 
 ```typescript
+// react-window v2 virtual scrolling (only renders visible rows, not all 20000+)
+import { List } from 'react-window';
+const ROW_H = 15;
+const OVERSCAN = 80;
+
+<FixedSizeList  →  <List
+  itemCount       →  rowCount
+  itemSize        →  rowHeight
+  children        →  rowComponent (function component receiving { index, style, ...rowProps })
+  ref             →  listRef
+  onScroll        →  DOM scroll event listener on listRef.element
+/>
+
+// Scroll sync: attach 'scroll' event listeners to listRef.current.element
+// Row props: react-window v2 passes rowProps directly to rowComponent (spread into props)
+// Use `as any` for rowProps type (v2 has strict ExcludeForbiddenKeys type)
+```
 const dmlLines = transformedContent.split('\n');
 const result = new Array(originalLines.length).fill('');
 for (let i = 0; i < Math.min(lineMap.length, originalLines.length); i++) {
