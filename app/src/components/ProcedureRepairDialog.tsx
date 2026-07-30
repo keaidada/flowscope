@@ -42,6 +42,9 @@ export function ProcedureRepairDialog({
   const leftRef = useRef<any>(null);
   const middleRef = useRef<any>(null);
   const rightRef = useRef<any>(null);
+  const leftDivRef = useRef<HTMLDivElement>(null);
+  const middleDivRef = useRef<HTMLDivElement>(null);
+  const rightDivRef = useRef<HTMLDivElement>(null);
   const syncing = useRef(false);
 
   useEffect(() => {
@@ -141,30 +144,38 @@ export function ProcedureRepairDialog({
     onOpenChange(false);
   }, [output, onApply, onOpenChange]);
 
-  // 3-way scroll sync via DOM
+  // 3-way scroll sync via DOM — attach to correct elements based on render path
+  const getEls = useCallback(() => {
+    const l = useVirtual ? leftRef.current?.element : leftDivRef.current;
+    const m = useVirtual ? middleRef.current?.element : middleDivRef.current;
+    const r = useVirtual ? rightRef.current?.element : rightDivRef.current;
+    return { l: l as HTMLElement | null, m: m as HTMLElement | null, r: r as HTMLElement | null };
+  }, [useVirtual]);
+
   useEffect(() => {
-    const leftEl = leftRef.current?.element as HTMLElement | null;
-    const middleEl = middleRef.current?.element as HTMLElement | null;
-    const rightEl = rightRef.current?.element as HTMLElement | null;
-    if (!leftEl || !rightEl) return;
+    const { l, r } = getEls();
+    if (!l || !r) return;
 
     const sync = (source: HTMLElement) => {
       if (syncing.current) return;
       syncing.current = true;
       const st = source.scrollTop;
-      if (source !== leftEl) leftEl.scrollTop = st;
-      if (source !== middleEl && middleEl) middleEl.scrollTop = st;
-      if (source !== rightEl) rightEl.scrollTop = st;
+      const { l: el, m: me, r: re } = getEls();
+      if (source !== el && el) el.scrollTop = st;
+      if (source !== me && me) me.scrollTop = st;
+      if (source !== re && re) re.scrollTop = st;
       requestAnimationFrame(() => { syncing.current = false; });
     };
 
-    leftEl.addEventListener('scroll', () => sync(leftEl), { passive: true });
-    rightEl.addEventListener('scroll', () => sync(rightEl), { passive: true });
+    const onL = () => sync(l);
+    const onR = () => sync(r);
+    l.addEventListener('scroll', onL, { passive: true });
+    r.addEventListener('scroll', onR, { passive: true });
     return () => {
-      leftEl.removeEventListener('scroll', () => sync(leftEl));
-      rightEl.removeEventListener('scroll', () => sync(rightEl));
+      l.removeEventListener('scroll', onL);
+      r.removeEventListener('scroll', onR);
     };
-  }, []);
+  }, [getEls]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -224,7 +235,7 @@ export function ProcedureRepairDialog({
                   />
                 )
               ) : (
-                <div className="h-full overflow-auto" ref={(el) => { if (el) leftRef.current = { element: el }; }}>
+                <div className="h-full overflow-auto" ref={leftDivRef}>
                   {originalLines.map((_line, idx) => (
                     <LeftRow key={idx} index={idx} style={{}} originalLines={originalLines} />
                   ))}
@@ -252,7 +263,7 @@ export function ProcedureRepairDialog({
                   />
                 )
               ) : (
-                <div className="h-full overflow-auto" ref={(el) => { if (el) middleRef.current = { element: el }; }}>
+                <div className="h-full overflow-auto" ref={middleDivRef}>
                   {rightLines.map((_line, idx) => (
                     <MiddleRow key={idx} index={idx} style={{}} rightLines={rightLines} originalLines={originalLines}
                       userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved}
@@ -283,7 +294,7 @@ export function ProcedureRepairDialog({
                   />
                 )
               ) : (
-                <div className="h-full overflow-auto" ref={(el) => { if (el) rightRef.current = { element: el }; }}>
+                <div className="h-full overflow-auto" ref={rightDivRef}>
                   {rightLines.map((_line, idx) => (
                     <RightRow key={idx} index={idx} style={{}} rightLines={rightLines} originalLines={originalLines}
                       userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved} />
