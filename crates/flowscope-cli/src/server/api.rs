@@ -2342,14 +2342,10 @@ pub(crate) async fn analyze_batch(
         .flat_map_iter(|chunk| {
             chunk.iter().map(|f| {
             let sql = if f.is_procedure != 0 {
-                let tc = f.transformed_content.trim();
-                if !tc.is_empty() && !tc.starts_with(')') && !tc.starts_with(";\n") {
-                    f.transformed_content.clone()
-                } else {
-                    flowscope_core::parser::sanitize_bigquery_raw_double_quoted_literals(&f.content)
-                        .unwrap_or_else(|| f.content.clone())
-                }
-            } else { f.content.clone() };
+                f.transformed_content.clone()
+            } else {
+                f.content.clone()
+            };
 
             let request = flowscope_core::AnalyzeRequest {
                 sql: sql.clone(),
