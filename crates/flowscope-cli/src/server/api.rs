@@ -2339,7 +2339,9 @@ pub(crate) async fn analyze_batch(
 
         // For procedures, use stored transformed_content if available
         let sql = if f.is_procedure != 0 {
-            if !f.transformed_content.is_empty() {
+            let tc = f.transformed_content.trim();
+            // Use stored transformed_content only if it looks valid (doesn't start with garbage)
+            if !tc.is_empty() && !tc.starts_with(')') && !tc.starts_with(";\n") {
                 f.transformed_content.clone()
             } else {
                 flowscope_core::parser::sanitize_bigquery_raw_double_quoted_literals(&f.content)
@@ -2402,6 +2404,10 @@ pub(crate) async fn analyze_batch(
             let db = state.db.lock().ok();
             if let Some(db) = db {
                 let _ = store::save_lineage_batch(&db, &req.project_id, &nodes, &columns, &edges);
+                // If we re-sanitized, write back fresh transformed_content
+                if f.is_procedure != 0 && sql != f.transformed_content && !f.transformed_content.is_empty() {
+                    let _ = store::batch_update_transformed(&db, &req.project_id, &[(f.path.clone(), sql.clone())]);
+                }
             }
             success += 1;
         }
