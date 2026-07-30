@@ -2321,6 +2321,8 @@ pub(crate) async fn analyze_batch(
 
     let total = sql_files.len();
     eprintln!("[api] analyze_batch: project={}, files={total}", req.project_id);
+    let start = std::time::Instant::now();
+    let progress = std::sync::atomic::AtomicUsize::new(0);
 
     // Phase 1: parallel per-file analysis via rayon
     use rayon::prelude::*;
@@ -2382,6 +2384,7 @@ pub(crate) async fn analyze_batch(
         })
     })
     .collect();
+    eprintln!("[api] analyze_batch: phase1 (parallel analysis) done in {:?}", start.elapsed());
 
     // Phase 2: aggregate and save to DB
     let mut all_nodes = Vec::new();
@@ -2421,7 +2424,7 @@ pub(crate) async fn analyze_batch(
         }
     }
 
-    eprintln!("[api] analyze_batch: done — success={success}, errors={errors}, empty={empty}");
+    eprintln!("[api] analyze_batch: done in {:?} — success={success}, errors={errors}, empty={empty}", start.elapsed());
 
     Ok(Json(AnalyzeBatchResponse {
         total,
