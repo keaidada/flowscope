@@ -33,6 +33,8 @@ export function ProcedureRepairDialog({
   const [showRemoved, setShowRemoved] = useState(true);
   const [copied, setCopied] = useState(false);
   const [page, setPage] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [editedText, setEditedText] = useState<Map<number, string>>(new Map());
 
   const leftRef = useRef<HTMLDivElement>(null);
   const middleRef = useRef<HTMLDivElement>(null);
@@ -78,11 +80,11 @@ export function ProcedureRepairDialog({
       if (userKept.has(i)) {
         kept.push(originalLines[i].trimEnd());
       } else if (rightLines[i] && !userRemoved.has(i)) {
-        kept.push(rightLines[i]);
+        kept.push(editedText.get(i) ?? rightLines[i]);
       }
     }
     return kept.join('\n');
-  }, [rightLines, userRemoved, userKept, originalLines]);
+  }, [rightLines, userRemoved, userKept, originalLines, editedText]);
 
   const removedCount = rightLines.filter((l) => !l).length + userRemoved.size;
 
@@ -187,6 +189,9 @@ export function ProcedureRepairDialog({
           <div className="flex items-center gap-1.5">
             <Button size="sm" className="h-7 gap-1 bg-amber-500 hover:bg-amber-600 text-white text-[11px] px-2.5" onClick={handleReExtract}>
               <RotateCcw className="h-3 w-3" />重新提取
+            </Button>
+            <Button size="sm" variant={editing ? 'default' : 'outline'} className="h-7 px-2 text-[10px]" onClick={() => { setEditing(v => !v); if (editing) setEditedText(new Map()); }}>
+              ✎ {editing ? '完成' : '编辑'}
             </Button>
             {removedCount > 0 && (
               <Button size="sm" variant="outline" className="h-7 px-2 text-[10px] gap-1" onClick={() => setShowRemoved((v) => !v)}>
@@ -295,7 +300,16 @@ export function ProcedureRepairDialog({
                 return (
                   <div key={`r-${globalIdx}`} className={cn('flex items-start h-[15px]', isRemoved && 'bg-red-500/[0.06]', isUserKept && 'bg-blue-500/[0.06]')}>
                     <span className={cn('w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]', isRemoved && !isUserKept ? 'text-red-400' : isUserKept ? 'text-blue-400' : 'text-muted-foreground')}>{globalIdx + 1}</span>
-                    <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, (isUserRemoved || (isAutoRemoved && !isUserKept)) && 'text-red-500 line-through', isUserKept && 'text-blue-500')}>{displayText}</span>
+                    {editing && !isRemoved ? (
+                      <input
+                        type="text"
+                        value={editedText.get(globalIdx) ?? (line || '')}
+                        onChange={e => setEditedText(prev => { const n = new Map(prev); n.set(globalIdx, e.target.value); return n; })}
+                        className={cn('flex-1 font-mono', fSizeMono, 'bg-yellow-50 border-0 outline-none px-1')}
+                      />
+                    ) : (
+                      <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, (isUserRemoved || (isAutoRemoved && !isUserKept)) && 'text-red-500 line-through', isUserKept && 'text-blue-500')}>{displayText}</span>
+                    )}
                   </div>
                 );
               })}
