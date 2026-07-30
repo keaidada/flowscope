@@ -560,6 +560,12 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           if (activeProjectId) {
             const { writeTableLevelEdges } = await import('@/lib/analysis-cache');
             await writeTableLevelEdges(activeProjectId);
+            // Load lineage from DB and render
+            const { buildGlobalLineageFromNodes } = await import('@/lib/analysis-cache');
+            const lineageResult = await buildGlobalLineageFromNodes(activeProjectId);
+            if (lineageResult) {
+              setLineageResult(lineageResult);
+            }
           }
           setLoadingContext({
             fileName: requestedFileName,
