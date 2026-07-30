@@ -301,9 +301,9 @@ export function ProcedureRepairDialog({
                     ) : (
                       <input
                         type="text"
-                        value={isUserRemoved ? originalLines[globalIdx] : editedText.get(globalIdx) ?? (line || '')}
+                        value={isUserRemoved ? originalLines[globalIdx] : isUserKept ? (editedText.get(globalIdx) ?? originalLines[globalIdx]) : (editedText.get(globalIdx) ?? (line || ''))}
                         onChange={e => setEditedText(prev => { const n = new Map(prev); n.set(globalIdx, e.target.value); return n; })}
-                        className={cn('flex-1 font-mono border-0 outline-none bg-transparent px-1', fSizeMono, isUserRemoved && 'text-red-500 line-through', 'hover:bg-yellow-50 focus:bg-yellow-50')}
+                        className={cn('flex-1 font-mono border-0 outline-none bg-transparent px-1', fSizeMono, isUserRemoved && 'text-red-500 line-through', isUserKept && 'text-blue-500', 'hover:bg-yellow-50 focus:bg-yellow-50')}
                       />
                     )}
                   </div>
