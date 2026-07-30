@@ -560,13 +560,16 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           if (activeProjectId) {
             const { writeTableLevelEdges } = await import('@/lib/analysis-cache');
             await writeTableLevelEdges(activeProjectId);
-            // Skip rendering for large batches (>100 files) — user can open global lineage manually
-            if (filePaths.length <= 100) {
-              const { buildGlobalLineageFromNodes } = await import('@/lib/analysis-cache');
-              const scriptFilter = runMode === 'all' ? undefined : new Set(filePaths);
-              const lineageResult = await buildGlobalLineageFromNodes(activeProjectId, scriptFilter);
-              if (lineageResult) setLineageResult(lineageResult);
-            }
+          // For large batches, ask user if they want to render lineage
+          const shouldRender = filePaths.length <= 100 || window.confirm(
+            `批量分析完成：${result.success} 成功，${result.errors} 失败，${result.empty} 空。\n\n是否渲染全局血缘？（文件较多，渲染可能需要一些时间）`
+          );
+          if (shouldRender) {
+            const { buildGlobalLineageFromNodes } = await import('@/lib/analysis-cache');
+            const scriptFilter = runMode === 'all' ? undefined : new Set(filePaths);
+            const lineageResult = await buildGlobalLineageFromNodes(activeProjectId, scriptFilter);
+            if (lineageResult) setLineageResult(lineageResult);
+          }
           }
           setLoadingContext({
             fileName: requestedFileName,
