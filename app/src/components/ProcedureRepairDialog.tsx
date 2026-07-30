@@ -100,6 +100,10 @@ export function ProcedureRepairDialog({
   const totalLines = originalLines.length;
   const useVirtual = originalContent.length > 100_000;
 
+  useEffect(() => {
+    console.log('[ProcedureRepair] useVirtual:', useVirtual, 'contentLen:', originalContent.length, 'totalLines:', totalLines, 'listHeight:', listHeight);
+  }, [useVirtual, originalContent.length, totalLines, listHeight]);
+
   // Scroll sync for direct render path (virtual lists sync via useEffect below)
   const handleScroll = useCallback((source: 'left' | 'right') => {
     if (useVirtual || syncing.current) return;
@@ -292,6 +296,7 @@ export function ProcedureRepairDialog({
 
 function LeftRow(props: any) {
   const { index, style, originalLines } = props;
+  if (index === 0) console.log('[ProcedureRepair] LeftRow rendering, originalLines:', originalLines?.length);
   return (
     <div style={style} className="flex items-start h-[15px]">
       <span className="w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px] text-muted-foreground/40">{index + 1}</span>
