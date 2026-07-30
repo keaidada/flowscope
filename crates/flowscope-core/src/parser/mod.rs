@@ -637,7 +637,7 @@ fn sanitize_bigquery_procedure(sql: &str) -> Option<String> {
         if before_proc.ends_with("CREATE") || before_proc.ends_with("REPLACE") {
             if let Some(begin_idx) = upper[proc_pos..].find("BEGIN").map(|i| proc_pos + i) {
                 return extract_begin_end_body(sql, &upper, begin_idx)
-                    .map(|body| backtick_quote_hyphenated_identifiers(&body));
+                    .map(|body| backtick_quote_hyphenated_identifiers(&body).replace("``", "`"));
             }
         }
     }
@@ -906,6 +906,8 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
             _ => {}
         }
     }
+    // Clean up double backticks from backtick_quote_hyphenated_identifiers
+    let out = out.replace("``", "`");
     // Remove standalone -- comment lines and empty lines from output
     let filtered: Vec<&str> = out.lines().filter(|l| {
         let t = l.trim();
