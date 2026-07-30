@@ -2322,27 +2322,24 @@ pub(crate) async fn analyze_batch(
     let total = sql_files.len();
     eprintln!("[api] analyze_batch: project={}, files={total}", req.project_id);
 
+    // Phase 1: parallel per-file analysis via rayon
+    use rayon::prelude::*;
     let empty = sql_files.iter().filter(|f| f.content.trim().is_empty()).count();
     let non_empty: Vec<_> = sql_files.iter().filter(|f| !f.content.trim().is_empty()).collect();
 
-    // Process in batches of 200 files per analyze() call
-    const BATCH: usize = 50;
-    let mut all_nodes = Vec::new();
-    let mut all_columns = Vec::new();
-    let mut all_edges = Vec::new();
-    let mut success = 0usize;
-    let mut errors = 0usize;
-    let mut error_details = Vec::new();
+    struct FileResult {
+        path: String,
+        name: String,
+        sql: String,
+        nodes: Vec<store::LineageNodeRow>,
+        columns: Vec<store::LineageColumnRow>,
+        edges: Vec<store::LineageEdgeRow>,
+        ok: bool,
+    }
 
-    for chunk in non_empty.chunks(BATCH) {
-        if success + errors > 0 && (success + errors) % 1000 == 0 {
-            eprintln!("[api] analyze_batch: progress {}/{}", success + errors, non_empty.len());
-        }
-
-        let mut file_sources = Vec::with_capacity(chunk.len());
-        let mut file_sqls: Vec<(String, String)> = Vec::with_capacity(chunk.len());
-
-        for f in chunk {
+    let results: Vec<FileResult> = non_empty
+        .par_iter()
+        .map(|f| {
             let sql = if f.is_procedure != 0 {
                 let tc = f.transformed_content.trim();
                 if !tc.is_empty() && !tc.starts_with(')') && !tc.starts_with(";\n") {
@@ -2353,55 +2350,76 @@ pub(crate) async fn analyze_batch(
                 }
             } else { f.content.clone() };
 
-            file_sources.push(flowscope_core::FileSource {
-                name: f.path.clone(),
-                content: f.content.clone(),
-                is_procedure: f.is_procedure != 0,
-                transformed_content: if sql != f.content { Some(sql.clone()) } else { None },
-            });
-            file_sqls.push((sql, f.path.clone()));
-        }
+            let request = flowscope_core::AnalyzeRequest {
+                sql: sql.clone(),
+                files: Some(vec![flowscope_core::FileSource {
+                    name: f.name.clone(),
+                    content: f.content.clone(),
+                    is_procedure: f.is_procedure != 0,
+                    transformed_content: if sql != f.content { Some(sql.clone()) } else { None },
+                }]),
+                dialect,
+                source_name: Some(f.path.clone()),
+                options: None,
+                schema: None,
+                #[cfg(feature = "templating")]
+                template_config: None,
+            };
 
-        let first_sql = &file_sqls[0].0;
-        let request = flowscope_core::AnalyzeRequest {
-            sql: first_sql.clone(),
-            files: Some(file_sources),
-            dialect,
-            source_name: None,
-            options: None,
-            schema: None,
-            #[cfg(feature = "templating")]
-            template_config: None,
-        };
+            let result = flowscope_core::analyzer::analyze(&request);
 
-        let result = flowscope_core::analyzer::analyze(&request);
-
-        let mut file_stmt_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        for stmt in &result.statements {
-            if let Some(ref src) = stmt.source_name {
-                *file_stmt_count.entry(src.clone()).or_default() += 1;
-            }
-        }
-
-        for (_, fp) in &file_sqls {
-            if file_stmt_count.contains_key(fp) {
-                let (nodes, columns, edges) = convert_to_lineage_rows(&result, fp);
-                all_nodes.extend(nodes);
-                all_columns.extend(columns);
-                all_edges.extend(edges);
-                success += 1;
+            if result.statements.is_empty() {
+                FileResult {
+                    path: f.path.clone(),
+                    name: f.name.clone(),
+                    sql,
+                    nodes: vec![],
+                    columns: vec![],
+                    edges: vec![],
+                    ok: false,
+                }
             } else {
-                errors += 1;
-                error_details.push(format!("{fp}: no statements parsed"));
+                let (nodes, columns, edges) = convert_to_lineage_rows(&result, &f.path);
+                FileResult { path: f.path.clone(), name: f.name.clone(), sql, nodes, columns, edges, ok: true }
             }
+        })
+        .collect();
+
+    // Phase 2: aggregate and save to DB
+    let mut all_nodes = Vec::new();
+    let mut all_columns = Vec::new();
+    let mut all_edges = Vec::new();
+    let mut success = 0;
+    let mut errors = 0;
+    let mut error_details = Vec::new();
+
+    for r in &results {
+        if r.ok {
+            all_nodes.extend(r.nodes.iter().cloned());
+            all_columns.extend(r.columns.iter().cloned());
+            all_edges.extend(r.edges.iter().cloned());
+            success += 1;
+        } else {
+            errors += 1;
+            error_details.push(format!("{}: no statements parsed", r.path));
         }
     }
 
-    // Save all lineage in one batch
     let db = state.db.lock().ok();
     if let Some(db) = db {
         if !all_nodes.is_empty() {
             let _ = store::save_lineage_batch(&db, &req.project_id, &all_nodes, &all_columns, &all_edges);
+        }
+        for r in &results {
+            if !r.ok {
+                let _ = store::insert_anomaly(&db, &store::LineageAnomalyRow {
+                    id: 0, project_id: req.project_id.clone(), file_path: r.path.clone(),
+                    script_name: r.name.clone(), script_content: r.sql.clone(),
+                    severity: "error".to_string(), anomaly_type: "analysis_error".to_string(),
+                    message: "no statements parsed".to_string(), detail: String::new(),
+                    is_test: 0, created_at: String::new(), updated_at: String::new(), status: 1,
+                });
+            }
         }
     }
 
