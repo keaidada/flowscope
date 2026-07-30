@@ -2375,50 +2375,67 @@ pub(crate) async fn analyze_batch(
         }
     }
 
-    // Count success: any file that has at least 1 statement
+    // Build lineage rows for ALL successful files in one pass
+    let mut all_nodes = Vec::new();
+    let mut all_columns = Vec::new();
+    let mut all_edges = Vec::new();
     let mut success = 0usize;
     let mut errors = 0usize;
     let mut error_details = Vec::new();
 
     for (sql, name, is_proc, orig_tc) in &file_sqls {
-        // Find the file's path by matching name
         let fp = non_empty.iter()
             .find(|f| f.name == *name)
             .map(|f| f.path.as_str())
             .unwrap_or(name);
 
-        if file_stmt_count.get(fp).copied().unwrap_or(0) > 0 {
-            // Save lineage for this file
+        if file_stmt_count.contains_key(fp) {
             let (nodes, columns, edges) = convert_to_lineage_rows(&result, fp);
-            let db = state.db.lock().ok();
-            if let Some(db) = db {
-                let _ = store::save_lineage_batch(&db, &req.project_id, &nodes, &columns, &edges);
-                if *is_proc && *sql != *orig_tc && !orig_tc.is_empty() {
-                    let _ = store::batch_update_transformed(&db, &req.project_id, &[(fp.to_string(), sql.clone())]);
-                }
-            }
+            all_nodes.extend(nodes);
+            all_columns.extend(columns);
+            all_edges.extend(edges);
             success += 1;
         } else {
             errors += 1;
             error_details.push(format!("{fp}: no statements parsed"));
-            let db = state.db.lock().ok();
-            if let Some(db) = db {
-                let _ = store::insert_anomaly(&db, &store::LineageAnomalyRow {
-                    id: 0,
-                    project_id: req.project_id.clone(),
-                    file_path: fp.to_string(),
-                    script_name: name.to_string(),
-                    script_content: sql.clone(),
-                    severity: "error".to_string(),
-                    anomaly_type: "analysis_error".to_string(),
-                    message: "no statements parsed".to_string(),
-                    detail: String::new(),
-                    is_test: 0,
-                    created_at: String::new(),
-                    updated_at: String::new(),
-                    status: 1,
-                });
-            }
+        }
+    }
+
+    // Batch save all lineage at once
+    let db = state.db.lock().ok();
+    if let Some(db) = db {
+        if !all_nodes.is_empty() {
+            let _ = store::save_lineage_batch(&db, &req.project_id, &all_nodes, &all_columns, &all_edges);
+        }
+        // Bulk save anomalies for errors
+        let anomaly_rows: Vec<store::LineageAnomalyRow> = file_sqls.iter()
+            .filter_map(|(sql, name, _, _)| {
+                let fp = non_empty.iter()
+                    .find(|f| f.name == *name)
+                    .map(|f| f.path.as_str())
+                    .unwrap_or(name);
+                if file_stmt_count.contains_key(fp) { None }
+                else {
+                    Some(store::LineageAnomalyRow {
+                        id: 0,
+                        project_id: req.project_id.clone(),
+                        file_path: fp.to_string(),
+                        script_name: name.to_string(),
+                        script_content: sql.clone(),
+                        severity: "error".to_string(),
+                        anomaly_type: "analysis_error".to_string(),
+                        message: "no statements parsed".to_string(),
+                        detail: String::new(),
+                        is_test: 0,
+                        created_at: String::new(),
+                        updated_at: String::new(),
+                        status: 1,
+                    })
+                }
+            })
+            .collect();
+        for row in &anomaly_rows {
+            let _ = store::insert_anomaly(&db, row);
         }
     }
 
