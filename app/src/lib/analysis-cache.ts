@@ -657,7 +657,8 @@ export async function repopulateTableLevelEdges(projectId: string): Promise<numb
  * 不再做 reads×writes 交叉积推测。
  */
 export async function buildGlobalLineageFromNodes(
-  projectId: string
+  projectId: string,
+  scriptFilter?: Set<string>
 ): Promise<AnalyzeResult | null> {
   // 加载预计算的表级边
   let tleEdges: Array<[string, string, string]> = [];
@@ -665,6 +666,10 @@ export async function buildGlobalLineageFromNodes(
     tleEdges = await serverDb.loadTableLevelEdges(projectId);
   } catch {
     tleEdges = [];
+  }
+  // Apply script filter if provided
+  if (scriptFilter && scriptFilter.size > 0) {
+    tleEdges = tleEdges.filter(([,,script]) => scriptFilter.has(script));
   }
   if (tleEdges.length === 0) return null;
 

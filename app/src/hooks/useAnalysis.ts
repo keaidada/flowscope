@@ -558,20 +558,12 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           console.log(`[analysis] batch complete: success=${result.success}, errors=${result.errors}, empty=${result.empty}`);
           await refreshBackendFiles();
           if (activeProjectId) {
-            const { writeTableLevelEdges } = await import('@/lib/analysis-cache');
+            const { writeTableLevelEdges, buildGlobalLineageFromNodes } = await import('@/lib/analysis-cache');
             await writeTableLevelEdges(activeProjectId);
-            // For 'all' mode: render global lineage. For selected files: render first file
-            if (runMode === 'all') {
-              const { buildGlobalLineageFromNodes } = await import('@/lib/analysis-cache');
-              const lineageResult = await buildGlobalLineageFromNodes(activeProjectId);
-              if (lineageResult) setLineageResult(lineageResult);
-            } else if (context.files.length > 0) {
-              // Trigger single-file analysis for first selected file to render lineage detail
-              setAnalyzing(false);
-              const firstFile = context.files[0] as { name: string; content: string; path?: string };
-              runAnalysis(firstFile.content, firstFile.path ?? firstFile.name, { runModeOverride: 'current' });
-              return;
-            }
+            // Build lineage view for analyzed files
+            const scriptFilter = runMode === 'all' ? undefined : new Set(filePaths);
+            const lineageResult = await buildGlobalLineageFromNodes(activeProjectId, scriptFilter);
+            if (lineageResult) setLineageResult(lineageResult);
           }
           setLoadingContext({
             fileName: requestedFileName,
