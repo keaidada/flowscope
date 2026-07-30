@@ -100,25 +100,6 @@ export function ProcedureRepairDialog({
   const totalLines = originalLines.length;
   const useVirtual = originalContent.length > 100_000;
 
-  useEffect(() => {
-    console.log('[ProcedureRepair] useVirtual:', useVirtual, 'contentLen:', originalContent.length, 'totalLines:', totalLines, 'listHeight:', listHeight);
-  }, [useVirtual, originalContent.length, totalLines, listHeight]);
-
-  // Scroll sync for direct render path (virtual lists sync via useEffect below)
-  const handleScroll = useCallback((source: 'left' | 'right') => {
-    if (useVirtual || syncing.current) return;
-    syncing.current = true;
-    const l = leftRef.current as HTMLDivElement | null;
-    const m = middleRef.current as HTMLDivElement | null;
-    const r = rightRef.current as HTMLDivElement | null;
-    if (!l || !r) { syncing.current = false; return; }
-    const st = source === 'left' ? l.scrollTop : r.scrollTop;
-    if (source === 'left') r.scrollTop = st;
-    else l.scrollTop = st;
-    if (m) m.scrollTop = st;
-    requestAnimationFrame(() => { syncing.current = false; });
-  }, [useVirtual]);
-
   const toggleRemoved = useCallback((idx: number) => {
     setUserRemoved((prev) => {
       const next = new Set(prev);
@@ -159,6 +140,19 @@ export function ProcedureRepairDialog({
     onApply(output.trim() || null);
     onOpenChange(false);
   }, [output, onApply, onOpenChange]);
+
+  // Scroll sync for direct render path
+  const handleScroll = useCallback((source: 'left' | 'right') => {
+    if (syncing.current) return;
+    syncing.current = true;
+    const l = leftRef.current, m = middleRef.current, r = rightRef.current;
+    if (!l || !r) { syncing.current = false; return; }
+    const st = source === 'left' ? l.scrollTop : r.scrollTop;
+    if (source === 'left') r.scrollTop = st;
+    else l.scrollTop = st;
+    if (m) m.scrollTop = st;
+    requestAnimationFrame(() => { syncing.current = false; });
+  }, []);
 
   // 3-way scroll sync via DOM
   useEffect(() => {
@@ -235,9 +229,7 @@ export function ProcedureRepairDialog({
                   rowComponent={LeftRow} rowProps={{ originalLines } as any} style={{ height: listHeight }} />
               ) : (
                 <div ref={leftRef} className="h-full overflow-auto bg-background" onScroll={() => handleScroll('left')}>
-                  {originalLines.map((_line, idx) => (
-                    <LeftRow key={idx} index={idx} style={{}} originalLines={originalLines} />
-                  ))}
+                  {originalLines.map((_l, i) => <LeftRow key={i} index={i} style={{}} originalLines={originalLines} />)}
                 </div>
               )}
             </div>
@@ -255,11 +247,7 @@ export function ProcedureRepairDialog({
                   style={{ height: listHeight }} />
               ) : (
                 <div ref={middleRef} className="h-full overflow-hidden">
-                  {rightLines.map((_line, idx) => (
-                    <MiddleRow key={idx} index={idx} style={{}} rightLines={rightLines} originalLines={originalLines}
-                      userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved}
-                      toggleRemoved={toggleRemoved} handleKeptChange={handleKeptChange} />
-                  ))}
+                  {rightLines.map((_l, i) => <MiddleRow key={i} index={i} style={{}} rightLines={rightLines} originalLines={originalLines} userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved} toggleRemoved={toggleRemoved} handleKeptChange={handleKeptChange} />)}
                 </div>
               )}
             </div>
@@ -278,10 +266,7 @@ export function ProcedureRepairDialog({
                   style={{ height: listHeight }} />
               ) : (
                 <div ref={rightRef} className="h-full overflow-auto bg-background" onScroll={() => handleScroll('right')}>
-                  {rightLines.map((_line, idx) => (
-                    <RightRow key={idx} index={idx} style={{}} rightLines={rightLines} originalLines={originalLines}
-                      userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved} />
-                  ))}
+                  {rightLines.map((_l, i) => <RightRow key={i} index={i} style={{}} rightLines={rightLines} originalLines={originalLines} userRemoved={userRemoved} userKept={userKept} showRemoved={showRemoved} />)}
                 </div>
               )}
             </div>
@@ -296,7 +281,6 @@ export function ProcedureRepairDialog({
 
 function LeftRow(props: any) {
   const { index, style, originalLines } = props;
-  if (index === 0) console.log('[ProcedureRepair] LeftRow rendering, originalLines:', originalLines?.length);
   return (
     <div style={style} className="flex items-start h-[15px]">
       <span className="w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px] text-muted-foreground/40">{index + 1}</span>
