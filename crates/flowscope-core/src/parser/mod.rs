@@ -835,7 +835,7 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
         match first_word {
             "DECLARE" | "IF" | "ELSE" | "ELSEIF" | "WHILE" | "LOOP" | "FOR" | "BREAK"
             | "CONTINUE" | "RETURN" | "RAISE" | "BEGIN" | "END" | "CALL" | "DROP" | "ALTER"
-            | "GRANT" | "REVOKE" | "UPDATE" => {} // UPDATE with CASE WHEN may not parse in Generic dialect
+            | "GRANT" | "REVOKE" => {}
             "SET" => {
                 // SET variable = "SQL text" — extract the SQL if it contains DML keywords
                 if let Some(sql_text) = extract_sql_from_set_stmt(trimmed) {
@@ -888,21 +888,19 @@ fn extract_begin_end_body(sql: &str, upper: &str, begin_idx: usize) -> Option<St
                     || (upper_stmt.contains(" AS ") && upper_stmt.contains("SELECT"));
                 if has_as_select {
                     out.push_str(content);
-                    if !out.ends_with('\n') { out.push('\n'); }
                     if !content.ends_with(';') {
                         out.push(';');
-                        out.push('\n');
                     }
+                    out.push('\n');
                     has_any = true;
                 }
             }
-            "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" => {
+            "SELECT" | "INSERT" | "DELETE" | "MERGE" | "TRUNCATE" | "WITH" | "UPDATE" => {
                 out.push_str(content);
-                if !out.ends_with('\n') { out.push('\n'); }
                 if !content.ends_with(';') {
                     out.push(';');
-                    out.push('\n');
                 }
+                out.push('\n');
                 has_any = true;
             }
             _ => {}
