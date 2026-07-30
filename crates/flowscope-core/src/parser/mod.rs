@@ -1383,7 +1383,7 @@ pub fn sanitize_with_line_map(sql: &str) -> Option<(String, Vec<i32>)> {
         .unwrap_or(0);
 
     let skip_words: std::collections::HashSet<&str> =
-        ["END;", "BEGIN"].iter().cloned().collect();
+        ["END;", "BEGIN", ";", ");"].iter().cloned().collect();
 
     // Filter DML lines to exclude fragments that will never match
     // (separators like ) on their own line inside expressions)
