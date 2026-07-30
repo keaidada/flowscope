@@ -560,13 +560,17 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           if (activeProjectId) {
             const { writeTableLevelEdges } = await import('@/lib/analysis-cache');
             await writeTableLevelEdges(activeProjectId);
-            // Only show global lineage for 'all' mode — selected files show per-file detail
+            // For 'all' mode: render global lineage. For selected files: render first file
             if (runMode === 'all') {
               const { buildGlobalLineageFromNodes } = await import('@/lib/analysis-cache');
               const lineageResult = await buildGlobalLineageFromNodes(activeProjectId);
-              if (lineageResult) {
-                setLineageResult(lineageResult);
-              }
+              if (lineageResult) setLineageResult(lineageResult);
+            } else if (context.files.length > 0) {
+              // Trigger single-file analysis for first selected file to render lineage detail
+              setAnalyzing(false);
+              const firstFile = context.files[0] as { name: string; content: string; path?: string };
+              runAnalysis(firstFile.content, firstFile.path ?? firstFile.name, { runModeOverride: 'current' });
+              return;
             }
           }
           setLoadingContext({
