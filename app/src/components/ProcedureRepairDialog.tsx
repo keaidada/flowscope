@@ -296,15 +296,15 @@ export function ProcedureRepairDialog({
                 return (
                   <div key={`r-${globalIdx}`} className={cn('flex items-start h-[15px]', isRemoved && 'bg-red-500/[0.06]', isUserKept && 'bg-blue-500/[0.06]')}>
                     <span className={cn('w-8 shrink-0 text-right pr-1 select-none font-mono text-[9px] leading-[15px]', isRemoved && !isUserKept ? 'text-red-400' : isUserKept ? 'text-blue-400' : 'text-muted-foreground')}>{globalIdx + 1}</span>
-                    {!isRemoved ? (
+                    {isAutoRemoved && !isUserKept ? (
+                      <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, 'text-red-500 line-through')}>{displayText}</span>
+                    ) : (
                       <input
                         type="text"
-                        value={editedText.get(globalIdx) ?? (line || '')}
+                        value={isUserRemoved ? originalLines[globalIdx] : editedText.get(globalIdx) ?? (line || '')}
                         onChange={e => setEditedText(prev => { const n = new Map(prev); n.set(globalIdx, e.target.value); return n; })}
-                        className={cn('flex-1 font-mono border-0 outline-none bg-transparent px-1', fSizeMono, 'hover:bg-yellow-50 focus:bg-yellow-50')}
+                        className={cn('flex-1 font-mono border-0 outline-none bg-transparent px-1', fSizeMono, isUserRemoved && 'text-red-500 line-through', 'hover:bg-yellow-50 focus:bg-yellow-50')}
                       />
-                    ) : (
-                      <span className={cn('flex-1 whitespace-pre pr-2 overflow-hidden font-mono', fSizeMono, (isUserRemoved || (isAutoRemoved && !isUserKept)) && 'text-red-500 line-through', isUserKept && 'text-blue-500')}>{displayText}</span>
                     )}
                   </div>
                 );
