@@ -138,6 +138,9 @@ export function ProcedureRepairDialog({
         setLineMap(result.lineMap);
       }
       setUserRemoved(new Set());
+      setUserKept(new Set());
+      setEditedText(new Map());
+      setPage(0);
     });
   }, [originalContent]);
 
