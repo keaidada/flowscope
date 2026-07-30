@@ -558,12 +558,15 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           console.log(`[analysis] batch complete: success=${result.success}, errors=${result.errors}, empty=${result.empty}`);
           await refreshBackendFiles();
           if (activeProjectId) {
-            const { writeTableLevelEdges, buildGlobalLineageFromNodes } = await import('@/lib/analysis-cache');
+            const { writeTableLevelEdges } = await import('@/lib/analysis-cache');
             await writeTableLevelEdges(activeProjectId);
-            // Build lineage view for analyzed files
-            const scriptFilter = runMode === 'all' ? undefined : new Set(filePaths);
-            const lineageResult = await buildGlobalLineageFromNodes(activeProjectId, scriptFilter);
-            if (lineageResult) setLineageResult(lineageResult);
+            // Skip rendering for large batches (>100 files) — user can open global lineage manually
+            if (filePaths.length <= 100) {
+              const { buildGlobalLineageFromNodes } = await import('@/lib/analysis-cache');
+              const scriptFilter = runMode === 'all' ? undefined : new Set(filePaths);
+              const lineageResult = await buildGlobalLineageFromNodes(activeProjectId, scriptFilter);
+              if (lineageResult) setLineageResult(lineageResult);
+            }
           }
           setLoadingContext({
             fileName: requestedFileName,
