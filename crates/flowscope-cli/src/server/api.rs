@@ -2322,60 +2322,11 @@ pub(crate) async fn analyze_batch(
     let total = sql_files.len();
     eprintln!("[api] analyze_batch: project={}, files={total}", req.project_id);
 
-    // Build one AnalyzeRequest with all files (like the frontend does)
     let empty = sql_files.iter().filter(|f| f.content.trim().is_empty()).count();
     let non_empty: Vec<_> = sql_files.iter().filter(|f| !f.content.trim().is_empty()).collect();
 
-    let mut file_sources = Vec::with_capacity(non_empty.len());
-    let mut file_sqls: Vec<(String, &str, bool, String)> = Vec::with_capacity(non_empty.len()); // (sql, name, is_proc, orig_tc)
-
-    for f in &non_empty {
-        let sql = if f.is_procedure != 0 {
-            let tc = f.transformed_content.trim();
-            if !tc.is_empty() && !tc.starts_with(')') && !tc.starts_with(";\n") {
-                f.transformed_content.clone()
-            } else {
-                flowscope_core::parser::sanitize_bigquery_raw_double_quoted_literals(&f.content)
-                    .unwrap_or_else(|| f.content.clone())
-            }
-        } else { f.content.clone() };
-
-        file_sources.push(flowscope_core::FileSource {
-            name: f.path.clone(),  // Use full path for source_name grouping
-            content: f.content.clone(),
-            is_procedure: f.is_procedure != 0,
-            transformed_content: if sql != f.content { Some(sql.clone()) } else { None },
-        });
-        file_sqls.push((sql, f.name.as_str(), f.is_procedure != 0, f.transformed_content.clone()));
-    }
-
-    // Single analyze() call for all files — like the frontend does
-    let first_sql = file_sources.first().map(|fs| {
-        fs.transformed_content.as_deref().unwrap_or(&fs.content).to_string()
-    }).unwrap_or_default();
-
-    let request = flowscope_core::AnalyzeRequest {
-        sql: first_sql,
-        files: if file_sources.is_empty() { None } else { Some(file_sources) },
-        dialect,
-        source_name: None,
-        options: None,
-        schema: None,
-        #[cfg(feature = "templating")]
-        template_config: None,
-    };
-
-    let result = flowscope_core::analyzer::analyze(&request);
-
-    // Group statements by file path for per-file counting
-    let mut file_stmt_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for stmt in &result.statements {
-        if let Some(ref src) = stmt.source_name {
-            *file_stmt_count.entry(src.clone()).or_default() += 1;
-        }
-    }
-
-    // Build lineage rows for ALL successful files in one pass
+    // Process in batches of 200 files per analyze() call
+    const BATCH: usize = 200;
     let mut all_nodes = Vec::new();
     let mut all_columns = Vec::new();
     let mut all_edges = Vec::new();
@@ -2383,59 +2334,74 @@ pub(crate) async fn analyze_batch(
     let mut errors = 0usize;
     let mut error_details = Vec::new();
 
-    for (sql, name, is_proc, orig_tc) in &file_sqls {
-        let fp = non_empty.iter()
-            .find(|f| f.name == *name)
-            .map(|f| f.path.as_str())
-            .unwrap_or(name);
+    for chunk in non_empty.chunks(BATCH) {
+        if success + errors > 0 && (success + errors) % 1000 == 0 {
+            eprintln!("[api] analyze_batch: progress {}/{}", success + errors, non_empty.len());
+        }
 
-        if file_stmt_count.contains_key(fp) {
-            let (nodes, columns, edges) = convert_to_lineage_rows(&result, fp);
-            all_nodes.extend(nodes);
-            all_columns.extend(columns);
-            all_edges.extend(edges);
-            success += 1;
-        } else {
-            errors += 1;
-            error_details.push(format!("{fp}: no statements parsed"));
+        let mut file_sources = Vec::with_capacity(chunk.len());
+        let mut file_sqls: Vec<(String, String)> = Vec::with_capacity(chunk.len());
+
+        for f in chunk {
+            let sql = if f.is_procedure != 0 {
+                let tc = f.transformed_content.trim();
+                if !tc.is_empty() && !tc.starts_with(')') && !tc.starts_with(";\n") {
+                    f.transformed_content.clone()
+                } else {
+                    flowscope_core::parser::sanitize_bigquery_raw_double_quoted_literals(&f.content)
+                        .unwrap_or_else(|| f.content.clone())
+                }
+            } else { f.content.clone() };
+
+            file_sources.push(flowscope_core::FileSource {
+                name: f.path.clone(),
+                content: f.content.clone(),
+                is_procedure: f.is_procedure != 0,
+                transformed_content: if sql != f.content { Some(sql.clone()) } else { None },
+            });
+            file_sqls.push((sql, f.path.clone()));
+        }
+
+        let first_sql = &file_sqls[0].0;
+        let request = flowscope_core::AnalyzeRequest {
+            sql: first_sql.clone(),
+            files: Some(file_sources),
+            dialect,
+            source_name: None,
+            options: None,
+            schema: None,
+            #[cfg(feature = "templating")]
+            template_config: None,
+        };
+
+        let result = flowscope_core::analyzer::analyze(&request);
+
+        let mut file_stmt_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for stmt in &result.statements {
+            if let Some(ref src) = stmt.source_name {
+                *file_stmt_count.entry(src.clone()).or_default() += 1;
+            }
+        }
+
+        for (_, fp) in &file_sqls {
+            if file_stmt_count.contains_key(fp) {
+                let (nodes, columns, edges) = convert_to_lineage_rows(&result, fp);
+                all_nodes.extend(nodes);
+                all_columns.extend(columns);
+                all_edges.extend(edges);
+                success += 1;
+            } else {
+                errors += 1;
+                error_details.push(format!("{fp}: no statements parsed"));
+            }
         }
     }
 
-    // Batch save all lineage at once
+    // Save all lineage in one batch
     let db = state.db.lock().ok();
     if let Some(db) = db {
         if !all_nodes.is_empty() {
             let _ = store::save_lineage_batch(&db, &req.project_id, &all_nodes, &all_columns, &all_edges);
-        }
-        // Bulk save anomalies for errors
-        let anomaly_rows: Vec<store::LineageAnomalyRow> = file_sqls.iter()
-            .filter_map(|(sql, name, _, _)| {
-                let fp = non_empty.iter()
-                    .find(|f| f.name == *name)
-                    .map(|f| f.path.as_str())
-                    .unwrap_or(name);
-                if file_stmt_count.contains_key(fp) { None }
-                else {
-                    Some(store::LineageAnomalyRow {
-                        id: 0,
-                        project_id: req.project_id.clone(),
-                        file_path: fp.to_string(),
-                        script_name: name.to_string(),
-                        script_content: sql.clone(),
-                        severity: "error".to_string(),
-                        anomaly_type: "analysis_error".to_string(),
-                        message: "no statements parsed".to_string(),
-                        detail: String::new(),
-                        is_test: 0,
-                        created_at: String::new(),
-                        updated_at: String::new(),
-                        status: 1,
-                    })
-                }
-            })
-            .collect();
-        for row in &anomaly_rows {
-            let _ = store::insert_anomaly(&db, row);
         }
     }
 
