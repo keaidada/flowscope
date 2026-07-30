@@ -77,7 +77,7 @@ export function ProcedureRepairDialog({
     const kept: string[] = [];
     for (let i = 0; i < rightLines.length; i++) {
       if (userKept.has(i)) {
-        kept.push(originalLines[i].trimEnd());
+        kept.push(editedText.get(i) ?? originalLines[i].trimEnd());
       } else if (rightLines[i] && !userRemoved.has(i)) {
         kept.push(editedText.get(i) ?? rightLines[i]);
       }
