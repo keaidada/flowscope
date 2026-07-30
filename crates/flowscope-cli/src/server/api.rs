@@ -2416,17 +2416,18 @@ pub(crate) async fn analyze_batch(
         if !all_nodes.is_empty() {
             let _ = store::save_lineage_batch(&db, &req.project_id, &all_nodes, &all_columns, &all_edges);
         }
-        for r in &results {
-            if !r.ok {
-                let _ = store::insert_anomaly(&db, &store::LineageAnomalyRow {
-                    id: 0, project_id: req.project_id.clone(), file_path: r.path.clone(),
-                    script_name: r.name.clone(), script_content: r.sql.clone(),
-                    severity: "error".to_string(), anomaly_type: "analysis_error".to_string(),
-                    message: "no statements parsed".to_string(), detail: String::new(),
-                    is_test: 0, created_at: String::new(), updated_at: String::new(), status: 1,
-                });
-            }
-        }
+        // Bulk save anomalies
+        let anomaly_rows: Vec<store::LineageAnomalyRow> = results.iter()
+            .filter(|r| !r.ok)
+            .map(|r| store::LineageAnomalyRow {
+                id: 0, project_id: req.project_id.clone(), file_path: r.path.clone(),
+                script_name: r.name.clone(), script_content: r.sql.clone(),
+                severity: "error".to_string(), anomaly_type: "analysis_error".to_string(),
+                message: "no statements parsed".to_string(), detail: String::new(),
+                is_test: 0, created_at: String::new(), updated_at: String::new(), status: 1,
+            })
+            .collect();
+        let _ = store::insert_anomalies_bulk(&db, &anomaly_rows);
     }
 
     eprintln!("[api] analyze_batch: done in {:?} — success={success}, errors={errors}, empty={empty}", start.elapsed());

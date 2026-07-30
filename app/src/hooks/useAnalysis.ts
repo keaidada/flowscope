@@ -547,7 +547,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
 
         try {
           const { analyzeBatch } = await import('@/lib/server-db');
-          const filePaths = context.files.map((f: { name: string; path?: string }) => f.path ?? f.name);
+          const filePaths = [...new Set(context.files.map((f: { name: string; path?: string }) => f.path ?? f.name))];
           const result = await analyzeBatch(
             activeProjectId ?? project.id,
             undefined,

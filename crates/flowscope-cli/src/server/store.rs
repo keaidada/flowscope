@@ -2136,6 +2136,22 @@ pub fn insert_anomaly(conn: &Connection, row: &LineageAnomalyRow) -> Result<i64,
     Ok(conn.last_insert_rowid())
 }
 
+/// Bulk insert anomalies in a single transaction
+pub fn insert_anomalies_bulk(conn: &Connection, rows: &[LineageAnomalyRow]) -> Result<(), rusqlite::Error> {
+    if rows.is_empty() { return Ok(()); }
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO lineage_anomalies (project_id, file_path, script_name, script_content, severity, anomaly_type, message, detail, is_test, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+        )?;
+        let now = chrono::Local::now().to_rfc3339();
+        for row in rows {
+            stmt.execute(params![row.project_id, row.file_path, row.script_name, row.script_content, row.severity, row.anomaly_type, row.message, row.detail, row.is_test, now, now, 1])?;
+        }
+    }
+    tx.commit()
+}
+
 /// Compute table-level edges from lineage_nodes and lineage_edges.
 /// Simplifies column-level data_flow edges into (from_table, to_table, script) triples.
 pub fn rebuild_table_level_edges(conn: &Connection, project_id: &str) -> Result<(), rusqlite::Error> {
