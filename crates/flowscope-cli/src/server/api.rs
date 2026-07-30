@@ -2338,8 +2338,9 @@ pub(crate) async fn analyze_batch(
     }
 
     let results: Vec<FileResult> = non_empty
-        .par_iter()
-        .map(|f| {
+        .par_chunks(100)
+        .flat_map_iter(|chunk| {
+            chunk.iter().map(|f| {
             let sql = if f.is_procedure != 0 {
                 let tc = f.transformed_content.trim();
                 if !tc.is_empty() && !tc.starts_with(')') && !tc.starts_with(";\n") {
@@ -2383,7 +2384,8 @@ pub(crate) async fn analyze_batch(
                 FileResult { path: f.path.clone(), name: f.name.clone(), sql, nodes, columns, edges, ok: true }
             }
         })
-        .collect();
+    })
+    .collect();
 
     // Phase 2: aggregate and save to DB
     let mut all_nodes = Vec::new();
@@ -2395,9 +2397,9 @@ pub(crate) async fn analyze_batch(
 
     for r in &results {
         if r.ok {
-            all_nodes.extend(r.nodes.iter().cloned());
-            all_columns.extend(r.columns.iter().cloned());
-            all_edges.extend(r.edges.iter().cloned());
+            all_nodes.extend(r.nodes.clone());
+            all_columns.extend(r.columns.clone());
+            all_edges.extend(r.edges.clone());
             success += 1;
         } else {
             errors += 1;
