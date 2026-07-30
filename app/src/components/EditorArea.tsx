@@ -335,10 +335,10 @@ export function EditorArea({
       if (!activeFile || !activeProjectId) return;
       const content = activeFile.content;
       updateFiles([{ fileId: activeFile.id, content, isProcedure: true, transformedContent }]);
-      // Persist to DB
       upsertProjectFiles(activeProjectId, [
         { ...activeFile, isProcedure: true, transformedContent },
       ]).catch((e) => console.error('Failed to save transformed content:', e));
+      setShowTransformed(true);
     },
     [activeFile, activeProjectId, updateFiles]
   );
