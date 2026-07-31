@@ -4,10 +4,11 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Search, Box, Tag } from 'lucide-react';
+import { Sparkles, Search, Box, Tag, GitGraph, List } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { governanceApi, type ModelEntry } from '@/lib/governance-api';
+import { ModelFlowView } from './ModelFlowView';
 
 const LAYER_COLORS: Record<string, string> = {
   ODS: 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-400',
@@ -25,6 +26,7 @@ export function ModelManager({ projectId }: { projectId: string | null }) {
   const [search, setSearch] = useState('');
   const [layerFilter, setLayerFilter] = useState('');
   const [selected, setSelected] = useState<ModelEntry | null>(null);
+  const [viewMode, setViewMode] = useState<'flow' | 'list'>('flow');
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -48,10 +50,36 @@ export function ModelManager({ projectId }: { projectId: string | null }) {
 
   if (!projectId) return <Center>{t('governance.selectProject')}</Center>;
 
+  if (viewMode === 'flow') {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b shrink-0">
+          <Button variant="ghost" size="sm" onClick={() => setViewMode('list')} className="h-7 text-xs">
+            <List className="h-3.5 w-3.5 mr-1" />{t('governance.designer', '列表')}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={handleAutoDiscover} disabled={loading} className="h-7 text-xs">
+            <Sparkles className="h-3.5 w-3.5 mr-1" />{t('governance.autoDiscover')}
+          </Button>
+          <div className="ml-auto text-xs text-muted-foreground">{models.length} models</div>
+        </div>
+        <div className="flex-1 min-h-0">
+          <ModelFlowView projectId={projectId} />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-full">
-      {/* Sidebar: list */}
-      <div className="w-72 border-r flex flex-col shrink-0">
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b shrink-0">
+        <Button variant="ghost" size="sm" onClick={() => setViewMode('flow')} className="h-7 text-xs">
+          <GitGraph className="h-3.5 w-3.5 mr-1" />{t('governance.designer', '流转')}
+        </Button>
+        <div className="ml-auto text-xs text-muted-foreground">{models.length} models</div>
+      </div>
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar: list */}
+        <div className="w-72 border-r flex flex-col shrink-0">
         <div className="flex items-center gap-1.5 px-3 py-2 border-b">
           <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('governance.searchModels')}
@@ -90,6 +118,7 @@ export function ModelManager({ projectId }: { projectId: string | null }) {
       {/* Detail panel */}
       <div className="flex-1 overflow-auto min-w-0">
         {selected ? <ModelDetail model={selected} projectId={projectId} onUpdate={refresh} /> : <Center>{t('governance.selectModel')}</Center>}
+      </div>
       </div>
     </div>
   );
