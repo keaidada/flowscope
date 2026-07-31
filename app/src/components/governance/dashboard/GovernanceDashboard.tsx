@@ -205,12 +205,14 @@ function ViolationGroups({ violations }: { violations: ContractViolation[] }) {
                   ? <DuplicateComparison v={selectedV} />
                   : selectedV.rule_id === 'no_orphan_output'
                     ? <OrphanTableList v={selectedV} />
-                    : (
-                      <div className="space-y-3">
-                        <ViolationInterpretation v={selectedV} />
-                        <ViolationDetail detail={selectedV.detail} />
-                      </div>
-                    )}
+                    : selectedV.rule_id === 'no_write_conflict'
+                      ? <WriteConflictDetail v={selectedV} />
+                      : (
+                        <div className="space-y-3">
+                          <ViolationInterpretation v={selectedV} />
+                          <ViolationDetail detail={selectedV.detail} />
+                        </div>
+                      )}
               </div>
             </>
           )}
@@ -352,6 +354,38 @@ function ViolationSection({ severity, items, onSelect }: { severity: Severity; i
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Write conflict detail — shows conflicting table and scripts. */
+function WriteConflictDetail({ v }: { v: ContractViolation }) {
+  const d = v.detail || {};
+  const table = String(d.table || '');
+  const totalWrites = typeof d.total_writes === 'number' ? d.total_writes : 0;
+  const uniqueScripts = typeof d.unique_scripts === 'number' ? d.unique_scripts : 0;
+  const scripts = (Array.isArray(d.scripts) ? d.scripts : []) as string[];
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="space-y-1 mb-3 shrink-0">
+        <p className="text-sm font-semibold font-mono break-all">{table}</p>
+        <p className="text-xs text-muted-foreground">
+          {uniqueScripts} 个独立脚本写入该表
+          {totalWrites > uniqueScripts ? `（总共 ${totalWrites} 次写入，去重后 ${uniqueScripts} 个）` : ''}
+        </p>
+      </div>
+      <p className="text-xs text-muted-foreground mb-2 shrink-0">写入该表的脚本列表：</p>
+      <div className="flex-1 min-h-0 overflow-auto">
+        <div className="border rounded-lg divide-y">
+          {scripts.map((s, i) => (
+            <div key={i} className="flex items-center gap-2 px-3 py-1.5 font-mono text-xs hover:bg-accent/30">
+              <span className="text-muted-foreground text-[10px] w-6 text-right shrink-0">{i + 1}</span>
+              <span className="truncate">{s}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
