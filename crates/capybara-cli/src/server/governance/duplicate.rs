@@ -97,13 +97,13 @@ pub fn detect_duplicates(
 }
 
 /// Detect write conflicts: multiple scripts writing to the same table.
-/// Skips temporary tables (_tmp, _temp suffix) since they're expected to have multiple writers.
+/// Skips editor scratchpad, temp tables, and sync tables.
 pub fn detect_write_conflicts(
     table_writes: &[(String, String)], // (file_path, table_name)
 ) -> Vec<ContractViolation> {
     let mut table_groups: HashMap<&str, Vec<&str>> = HashMap::new();
     for (file, table) in table_writes {
-        if is_temp_or_sync_table(table) {
+        if should_skip_write_conflict(table, file) {
             continue;
         }
         table_groups
@@ -114,27 +114,36 @@ pub fn detect_write_conflicts(
 
     let mut violations = Vec::new();
     for (table, files) in &table_groups {
-        if files.len() > 1 {
+        // Deduplicate scripts
+        let mut unique_files: Vec<&str> = files.iter().copied().collect();
+        unique_files.sort();
+        unique_files.dedup();
+        if unique_files.len() > 1 {
             violations.push(ContractViolation {
                 contract_id: "auto".to_string(),
                 contract_name: "auto".to_string(),
                 rule_id: "no_write_conflict".to_string(),
                 rule_section: "metric_rules".to_string(),
-                severity: Severity::P1,
-                title: format!("写入冲突: {} 个脚本写入表 {}", files.len(), table),
+                severity: Severity::P2,
+                title: format!("写入冲突: {} 个脚本写入表 {}", unique_files.len(), table),
                 detail: serde_json::json!({
                     "table": table,
-                    "scripts": files,
+                    "total_writes": files.len(),
+                    "unique_scripts": unique_files.len(),
+                    "scripts": unique_files,
                 }),
-                file_paths: files.iter().map(|s| s.to_string()).collect(),
+                file_paths: unique_files.iter().map(|s| s.to_string()).collect(),
             });
         }
     }
     violations
 }
 
-/// Temporary tables (_tmp, _temp) and sync database tables are expected to have multiple writers.
-fn is_temp_or_sync_table(table_name: &str) -> bool {
+/// Skip editor scratchpads, temp tables, and sync database tables.
+fn should_skip_write_conflict(table_name: &str, script: &str) -> bool {
+    if script == "scratchpad.sql" || script.is_empty() {
+        return true;
+    }
     let lower = table_name.to_lowercase();
     lower.contains("_tmp") || lower.contains("_temp") || lower.starts_with("syncdb.")
 }
