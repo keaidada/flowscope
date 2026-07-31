@@ -4,11 +4,10 @@
 
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, LayoutDashboard, Box, BarChart3, FileText, Settings, Palette } from 'lucide-react';
+import { Shield, LayoutDashboard, Box, BarChart3, Settings, Palette } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useGovernanceData } from '@/hooks/useGovernanceData';
 import { GovernanceDashboard } from './dashboard/GovernanceDashboard';
-import { ContractManager } from './contract/ContractManager';
 import { ModelManager } from './model/ModelManager';
 import { MetricManager } from './metric/MetricManager';
 import { VisualModelDesigner } from './designer/VisualModelDesigner';
@@ -23,7 +22,6 @@ const TABS: Array<{ id: GovernanceTab; icon: React.ElementType; labelKey: string
   { id: 'dashboard', icon: LayoutDashboard, labelKey: 'governance.dashboard' },
   { id: 'models', icon: Box, labelKey: 'governance.models' },
   { id: 'metrics', icon: BarChart3, labelKey: 'governance.metrics' },
-  { id: 'contracts', icon: FileText, labelKey: 'governance.contracts' },
   { id: 'designer', icon: Palette, labelKey: 'governance.designer' },
   { id: 'settings', icon: Settings, labelKey: 'governance.settings' },
 ];
@@ -84,7 +82,6 @@ export function GovernanceWorkspace({ projectId }: GovernanceWorkspaceProps) {
       {/* Content — fills remaining space */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === 'dashboard' && <GovernanceDashboard gov={gov} projectId={projectId} />}
-        {activeTab === 'contracts' && <ContractManager contracts={gov.contracts} onRefresh={gov.refreshContracts} />}
         {activeTab === 'models' && <ModelManager projectId={projectId} />}
         {activeTab === 'metrics' && <MetricManager projectId={projectId} />}
         {activeTab === 'designer' && <VisualModelDesigner />}
