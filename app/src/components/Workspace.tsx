@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { Share2, Github, Settings, Network, Trash2, Bug, Loader2 } from 'lucide-react';
+import { Share2, Github, Settings, Network, Trash2, Bug, Loader2, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useLineageActions, useLineageState } from '@pondpilot/capybara-react';
@@ -36,6 +36,7 @@ import { LanguageToggle } from './LanguageToggle';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { CommandPalette } from './CommandPalette';
 import { GlobalLineageView, type GlobalLineageMode } from './GlobalLineageView';
+import { GovernanceWorkspace } from './governance/GovernanceWorkspace';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './ui/sheet';
 import { useProject } from '@/lib/project-store';
 import { NavigationProvider } from '@/lib/navigation-context';
@@ -90,6 +91,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   const [editorOpen, setEditorOpen] = useState(true);
   const [lineageWorkspaceOpen, setLineageWorkspaceOpen] = useState(false);
   const [globalLineageOpen, setGlobalLineageOpen] = useState(false);
+  const [governanceOpen, setGovernanceOpen] = useState(false);
   const [globalLineageLoading, setGlobalLineageLoading] = useState(false);
   const [globalLineageView, setGlobalLineageView] = useState<GlobalLineageMode>('list');
   const [globalFocusNodeId, setGlobalFocusNodeId] = useState<string | undefined>(undefined);
@@ -590,6 +592,20 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
             <Network className="h-3.5 w-3.5" />
             {t('app.globalLineage')}
           </Button>
+
+          {/* Governance Toggle */}
+          <Button
+            variant={governanceOpen ? 'secondary' : 'ghost'}
+            size="sm"
+            className="h-7 gap-1.5 text-xs"
+            onClick={() => {
+              setGovernanceOpen(!governanceOpen);
+              if (!governanceOpen) setGlobalLineageOpen(false);
+            }}
+          >
+            <Shield className="h-3.5 w-3.5" />
+            {t('governance.title', '数据治理')}
+          </Button>
         </div>
 
         {/* Header Actions */}
@@ -724,7 +740,12 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
       <NavigationProvider projectId={activeProjectId} onNavigateToEditor={handleNavigateToEditor}>
         <FocusRegistryProvider>
           <div className="flex-1 overflow-hidden flex">
-            {globalLineageOpen ? (
+            {governanceOpen ? (
+              /* Governance Workspace — full-screen governance dashboard */
+              <div className="flex min-w-0 flex-1 flex-col">
+                <GovernanceWorkspace projectId={activeProjectId} />
+              </div>
+            ) : globalLineageOpen ? (
               /* Global Lineage — full-screen graph/list/matrix view */
               <div className="flex min-w-0 flex-1 flex-col">
                 {result ? (
