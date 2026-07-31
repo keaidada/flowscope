@@ -6,7 +6,7 @@ import {
   type EdgeProps,
   useInternalNode,
 } from '@xyflow/react';
-import type { ScriptNodeData } from '@pondpilot/flowscope-react';
+import type { ScriptNodeData } from '@pondpilot/capybara-react';
 import { shouldHighlightEdge, onHighlightChange } from './highlightState';
 import { computeScriptNodeLayout } from './scriptNodeLayout';
 import { getHandleY } from './handlePositionCache';

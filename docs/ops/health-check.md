@@ -9,7 +9,7 @@
 # scripts/precheck.sh
 set -euo pipefail
 
-echo "=== FlowScope 部署前检查 ==="
+echo "=== Capybara 部署前检查 ==="
 
 # 1. 依赖版本检查
 echo ""
@@ -23,14 +23,14 @@ echo "  just:     $(just --version 2>/dev/null || echo '未安装')"
 # 2. 构建产物检查
 echo ""
 echo "[2] 构建产物"
-BINS=("./target/debug/flowscope" "./target/release/flowscope")
+BINS=("./target/debug/capybara" "./target/release/capybara")
 for bin in "${BINS[@]}"; do
     if [ -f "$bin" ]; then
         SIZE=$(du -h "$bin" | cut -f1)
         echo "  ✅ $bin ($SIZE)"
     fi
 done
-WASM="packages/core/wasm/flowscope_wasm_bg.wasm"
+WASM="packages/core/wasm/capybara_wasm_bg.wasm"
 if [ -f "$WASM" ]; then
     echo "  ✅ $WASM ($(du -h $WASM | cut -f1))"
 else
@@ -52,7 +52,7 @@ done
 # 4. 数据库检查
 echo ""
 echo "[4] 数据库"
-DB="./app/flowscope.db"
+DB="./app/capybara.db"
 if [ -f "$DB" ]; then
     SIZE=$(du -h "$DB" | cut -f1)
     TABLES=$(sqlite3 "$DB" "SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "?")
@@ -117,7 +117,7 @@ check_api() {
     fi
 }
 
-echo "=== FlowScope 服务健康检查 ==="
+echo "=== Capybara 服务健康检查 ==="
 echo ""
 
 # 前端
@@ -134,7 +134,7 @@ echo ""
 
 # 数据库
 echo "[3] 数据库"
-DB="./app/flowscope.db"
+DB="./app/capybara.db"
 if [ -f "$DB" ]; then
     SIZE=$(du -h "$DB" | cut -f1)
     PROJECTS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM projects WHERE status=1;" 2>/dev/null || echo "?")
@@ -150,12 +150,12 @@ echo ""
 
 # 进程检查
 echo "[4] 进程"
-if pgrep -f "flowscope --serve" >/dev/null; then
-    PID=$(pgrep -f "flowscope --serve" | head -1)
-    echo "  ✅ flowscope --serve 运行中 (PID: $PID)"
+if pgrep -f "capybara --serve" >/dev/null; then
+    PID=$(pgrep -f "capybara --serve" | head -1)
+    echo "  ✅ capybara --serve 运行中 (PID: $PID)"
     PASS=$((PASS + 1))
 else
-    echo "  ❌ flowscope --serve 未运行"
+    echo "  ❌ capybara --serve 未运行"
     FAIL=$((FAIL + 1))
 fi
 echo ""
@@ -186,7 +186,7 @@ curl -o /dev/null -w "%{http_code}" http://localhost:5173/
 # 200
 
 # 数据库统计
-sqlite3 app/flowscope.db "
+sqlite3 app/capybara.db "
 SELECT 'projects', COUNT(*) FROM projects WHERE status=1
 UNION ALL SELECT 'files', COUNT(*) FROM project_files WHERE status=1
 UNION ALL SELECT 'lineage_nodes', COUNT(*) FROM lineage_nodes WHERE status=1

@@ -1,15 +1,15 @@
-# FlowScope v1.0 - Windows PowerShell Installer
+# Capybara v1.0 - Windows PowerShell Installer
 # Run: powershell -ExecutionPolicy Bypass -File install.ps1
 
 $ErrorActionPreference = "Stop"
 
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  FlowScope v1.0 - Windows Installer" -ForegroundColor Cyan
+Write-Host "  Capybara v1.0 - Windows Installer" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
-$FLOWSCOPE_HOME = "D:\tmp\flowscope"
-$FLOWSCOPE_DATA = "D:\tmp\flowscope-data"
+$FLOWSCOPE_HOME = "D:\tmp\capybara"
+$FLOWSCOPE_DATA = "D:\tmp\capybara-data"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Write-Host "Installation directory: $FLOWSCOPE_HOME"
@@ -28,30 +28,30 @@ try {
 } catch {
     Write-Host "[ERROR] Cannot create directories: $_" -ForegroundColor Red
     Write-Host "Falling back to script directory..."
-    $FLOWSCOPE_HOME = Join-Path $ScriptDir "flowscope"
-    $FLOWSCOPE_DATA = Join-Path $ScriptDir "flowscope-data"
+    $FLOWSCOPE_HOME = Join-Path $ScriptDir "capybara"
+    $FLOWSCOPE_DATA = Join-Path $ScriptDir "capybara-data"
 }
 
 # Copy binary
-$sourceExe = Join-Path $ScriptDir "flowscope.exe"
-$destExe = Join-Path $FLOWSCOPE_HOME "flowscope.exe"
+$sourceExe = Join-Path $ScriptDir "capybara.exe"
+$destExe = Join-Path $FLOWSCOPE_HOME "capybara.exe"
 
 if (Test-Path $sourceExe) {
     try {
         Copy-Item $sourceExe $destExe -Force
-        Write-Host "[OK] flowscope.exe installed" -ForegroundColor Green
+        Write-Host "[OK] capybara.exe installed" -ForegroundColor Green
     } catch {
         Write-Host "[ERROR] Failed to copy: $_" -ForegroundColor Red
     }
 } else {
-    Write-Host "[INFO] flowscope.exe not found in package" -ForegroundColor Yellow
-    Write-Host "       Download from: https://github.com/keaidada/flowscope/releases/tag/v1.0"
+    Write-Host "[INFO] capybara.exe not found in package" -ForegroundColor Yellow
+    Write-Host "       Download from: https://github.com/keaidada/capybara/releases/tag/v1.0"
 }
 
 # Add to PATH
 $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($currentPath -notlike "*$FLOWSCOPE_HOME*") {
-    $answer = Read-Host "Add FlowScope to user PATH? (Y/n)"
+    $answer = Read-Host "Add Capybara to user PATH? (Y/n)"
     if ($answer -eq "" -or $answer -eq "Y" -or $answer -eq "y") {
         [Environment]::SetEnvironmentVariable("Path", "$currentPath;$FLOWSCOPE_HOME", "User")
         Write-Host "[OK] Added to PATH. Restart terminal to take effect." -ForegroundColor Green
@@ -63,6 +63,6 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Installation Complete!" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Start server: flowscope --serve --port 3000 --watch $FLOWSCOPE_DATA"
+Write-Host "  Start server: capybara --serve --port 3000 --watch $FLOWSCOPE_DATA"
 Write-Host "  Web UI:       http://localhost:3000"
 Write-Host ""

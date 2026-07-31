@@ -1,6 +1,6 @@
-# FlowScope 运维脚本指南
+# Capybara 运维脚本指南
 
-本目录包含 FlowScope 项目部署、安装、运维相关的全部脚本和说明。
+本目录包含 Capybara 项目部署、安装、运维相关的全部脚本和说明。
 
 ## 文档索引
 
@@ -15,12 +15,12 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/keaidada/flowscope.git
-cd flowscope
+git clone https://github.com/keaidada/capybara.git
+cd capybara
 
 # 2. 一键安装 + 构建 + 启动
 just setup && just build-cli-serve
-./target/release/flowscope --serve --port 3000
+./target/release/capybara --serve --port 3000
 
 # 3. 打开浏览器
 open http://localhost:3000
@@ -29,11 +29,11 @@ open http://localhost:3000
 ## 架构概览
 
 ```
-FlowScope 运行模式
+Capybara 运行模式
 ├── 开发模式 (dev)
 │   ├── 前端: Vite Dev Server (:5173)
 │   └── 后端: CLI Serve (:3000)
-│       └── 数据库: SQLite (./app/flowscope.db)
+│       └── 数据库: SQLite (./app/capybara.db)
 │
 ├── 生产模式 (serve)
 │   ├── 单体: CLI --serve --features serve

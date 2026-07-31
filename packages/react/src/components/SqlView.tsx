@@ -130,10 +130,10 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
       const endPos = model.getPositionAt(h.to);
       const sevClass =
         h.className === 'error'
-          ? 'flowscope-sql-highlight-error'
+          ? 'capybara-sql-highlight-error'
           : h.className === 'warning'
-            ? 'flowscope-sql-highlight-warning'
-            : 'flowscope-sql-highlight-info';
+            ? 'capybara-sql-highlight-warning'
+            : 'capybara-sql-highlight-info';
 
       newDecorations.push({
         range: {
@@ -158,7 +158,7 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
           endColumn: endPos.column,
         },
         options: {
-          inlineClassName: 'flowscope-sql-highlight-active',
+          inlineClassName: 'capybara-sql-highlight-active',
         },
       });
       // Scroll to highlight
@@ -169,15 +169,15 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
   }, [highlightedSpan, issueHighlights]);
 
   return (
-    <div className={`flowscope-sql-view monaco-editor-wrapper ${className || ''}`}>
+    <div className={`capybara-sql-view monaco-editor-wrapper ${className || ''}`}>
       <style>{`
         .monaco-editor-wrapper { position: relative; }
         .monaco-editor-wrapper .monaco-editor { border-radius: 4px; }
         .monaco-editor-wrapper .monaco-editor .find-widget.visible { top: 32px !important; }
-        .flowscope-sql-highlight-active { background-color: rgba(253,224,71,0.6); }
-        .flowscope-sql-highlight-error { background-color: rgba(239,72,111,0.25); }
-        .flowscope-sql-highlight-warning { background-color: rgba(244,164,98,0.25); }
-        .flowscope-sql-highlight-info { background-color: rgba(76,97,255,0.15); }
+        .capybara-sql-highlight-active { background-color: rgba(253,224,71,0.6); }
+        .capybara-sql-highlight-error { background-color: rgba(239,72,111,0.25); }
+        .capybara-sql-highlight-warning { background-color: rgba(244,164,98,0.25); }
+        .capybara-sql-highlight-info { background-color: rgba(76,97,255,0.15); }
       `}</style>
       <Editor
         height="100%"

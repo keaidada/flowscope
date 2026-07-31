@@ -25,7 +25,7 @@
     "dismiss": "关闭"
   },
   "app": {
-    "brandName": "FlowScope",
+    "brandName": "Capybara",
     "systemError": "系统错误：{{error}}",
     "viewOnGithub": "在 GitHub 上查看",
     "shareProject": "分享项目",
@@ -42,7 +42,7 @@
     "changed": "主题：{{theme}}"
   },
   "welcome": {
-    "title": "欢迎使用 FlowScope",
+    "title": "欢迎使用 Capybara",
     "description": "一个隐私优先的 SQL 血缘分析引擎，完全在浏览器中运行。",
     "sqlLineage": "SQL 血缘分析",
     "sqlLineageDesc": "可视化数据在查询中的流向，涵盖表、CTE 和列。",
@@ -333,7 +333,7 @@
   },
   "errors": {
     "somethingWentWrong": "出了点问题",
-    "unexpectedError": "FlowScope 发生了意外错误，请尝试刷新页面。",
+    "unexpectedError": "Capybara 发生了意外错误，请尝试刷新页面。",
     "errorDetails": "错误详情",
     "tryAgain": "重试",
     "reloadPage": "刷新页面",

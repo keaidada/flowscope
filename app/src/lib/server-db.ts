@@ -1,7 +1,7 @@
 /**
  * Server-side SQLite client for serve mode.
  *
- * When flowscope-cli is running in serve mode, browser-side storage
+ * When capybara-cli is running in serve mode, browser-side storage
  * is delegated to the local SQLite database via REST API.
  * This module replaces the sql.js WASM layer in serve mode.
  */

@@ -6,8 +6,8 @@ import type {
   ResolvedSchemaMetadata,
   GlobalLineage,
   GlobalNode,
-} from '@pondpilot/flowscope-core';
-import { isTableLikeType } from '@pondpilot/flowscope-core';
+} from '@pondpilot/capybara-core';
+import { isTableLikeType } from '@pondpilot/capybara-core';
 import type {
   TableNodeData,
   ColumnNodeInfo,

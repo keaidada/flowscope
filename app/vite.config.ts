@@ -15,13 +15,13 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@pondpilot/flowscope-core': path.resolve(__dirname, '../packages/core/src'),
-      '@pondpilot/flowscope-react': path.resolve(__dirname, '../packages/react/src'),
+      '@pondpilot/capybara-core': path.resolve(__dirname, '../packages/core/src'),
+      '@pondpilot/capybara-react': path.resolve(__dirname, '../packages/react/src'),
       '@': path.resolve(__dirname, './src'),
     },
   },
   optimizeDeps: {
-    exclude: ['@pondpilot/flowscope-core', '@pondpilot/flowscope-react'],
+    exclude: ['@pondpilot/capybara-core', '@pondpilot/capybara-react'],
   },
   build: {
     target: 'esnext',

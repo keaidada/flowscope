@@ -1,4 +1,4 @@
-# FlowScope — SQL 血缘分析平台
+# Capybara — SQL 血缘分析平台
 
 > 拖入 SQL 文件，秒出血缘关系图。隐私优先，全程浏览器/WASM，SQL 不上传服务器。
 
@@ -80,30 +80,30 @@ Serve 模式下，分析在本地 Rust 引擎运行，数据不外发。
 
 ### 在线体验
 
-**[flowscope.pondpilot.io](https://flowscope.pondpilot.io)** — 拖拽 SQL 文件即可，无需注册。
+**[capybara.pondpilot.io](https://capybara.pondpilot.io)** — 拖拽 SQL 文件即可，无需注册。
 
 ### CLI
 
 ```bash
-cargo install flowscope-cli
+cargo install capybara-cli
 
 # 分析单个文件
-flowscope query.sql
+capybara query.sql
 
 # 分析整个目录
-flowscope -d hive etl/*.sql
+capybara -d hive etl/*.sql
 
 # 导出 Mermaid 血缘图
-flowscope -f mermaid -v column query.sql > lineage.mmd
+capybara -f mermaid -v column query.sql > lineage.mmd
 
 # Lint + 自动修复
-flowscope --lint --fix queries/*.sql
+capybara --lint --fix queries/*.sql
 ```
 
 ### Serve 模式（本地服务器 + Web UI + REST API）
 
 ```bash
-flowscope --serve --watch ./sql --open
+capybara --serve --watch ./sql --open
 ```
 
 - Web UI: `http://localhost:3000`
@@ -113,11 +113,11 @@ flowscope --serve --watch ./sql --open
 ### NPM
 
 ```bash
-npm install @pondpilot/flowscope-core @pondpilot/flowscope-react
+npm install @pondpilot/capybara-core @pondpilot/capybara-react
 ```
 
 ```typescript
-import { initWasm, analyzeSql } from '@pondpilot/flowscope-core';
+import { initWasm, analyzeSql } from '@pondpilot/capybara-core';
 
 await initWasm();
 const result = await analyzeSql({
@@ -156,15 +156,15 @@ const result = await analyzeSql({
 ## 📦 项目结构
 
 ```
-flowscope/
+capybara/
 ├── crates/                  Rust 引擎
-│   ├── flowscope-core/      核心血缘引擎
-│   ├── flowscope-wasm/      WASM 绑定
-│   ├── flowscope-cli/       CLI + Serve 模式
-│   └── flowscope-export/    导出（Mermaid/HTML/CSV/XLSX/DuckDB）
+│   ├── capybara-core/      核心血缘引擎
+│   ├── capybara-wasm/      WASM 绑定
+│   ├── capybara-cli/       CLI + Serve 模式
+│   └── capybara-export/    导出（Mermaid/HTML/CSV/XLSX/DuckDB）
 ├── packages/                NPM 包
-│   ├── core/                @pondpilot/flowscope-core
-│   └── react/               @pondpilot/flowscope-react
+│   ├── core/                @pondpilot/capybara-core
+│   └── react/               @pondpilot/capybara-react
 ├── app/                     Web 应用
 ├── vscode/                  VS Code 扩展
 └── docs/                    文档
@@ -187,4 +187,4 @@ PostgreSQL · Snowflake · BigQuery · DuckDB · Redshift · Hive · MySQL · SQ
 
 ---
 
-**Part of the [PondPilot](https://github.com/keaidada/flowscope) project.**
+**Part of the [PondPilot](https://github.com/keaidada/capybara) project.**

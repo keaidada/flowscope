@@ -8,7 +8,7 @@ import React, {
   useRef,
   startTransition,
 } from 'react';
-import type { FileSource, SchemaMetadata } from '@pondpilot/flowscope-core';
+import type { FileSource, SchemaMetadata } from '@pondpilot/capybara-core';
 import {
   STORAGE_KEYS,
   FILE_EXTENSIONS,

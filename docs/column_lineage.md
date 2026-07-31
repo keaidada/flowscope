@@ -1,6 +1,6 @@
 # Column Lineage Semantics
 
-This document summarizes how FlowScope represents column-level lineage in statement graphs.
+This document summarizes how Capybara represents column-level lineage in statement graphs.
 
 ## Edge Types
 

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
-import { LineageProvider } from '@pondpilot/flowscope-react';
-import '@pondpilot/flowscope-react/styles.css';
+import { LineageProvider } from '@pondpilot/capybara-react';
+import '@pondpilot/capybara-react/styles.css';
 
 import { ProjectProvider } from './lib/project-store';
 import { BackendProvider, useBackendReady } from './lib/backend-context';

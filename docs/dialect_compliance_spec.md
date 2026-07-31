@@ -1,10 +1,10 @@
 # SQL Dialect Compliance Specification
 
-This document describes how FlowScope applies dialect-specific semantics during analysis. The canonical data lives in `crates/flowscope-core/specs/dialect-semantics/` and is compiled into Rust via `build.rs`.
+This document describes how Capybara applies dialect-specific semantics during analysis. The canonical data lives in `crates/capybara-core/specs/dialect-semantics/` and is compiled into Rust via `build.rs`.
 
 ## Supported Dialects
 
-FlowScope currently exposes these dialects through its public API:
+Capybara currently exposes these dialects through its public API:
 
 - `generic`
 - `ansi`
@@ -34,10 +34,10 @@ The analyzer applies dialect-aware rules for:
 
 See the dialect semantic specs for precise behavior:
 
-- `crates/flowscope-core/specs/dialect-semantics/dialects.json`
-- `crates/flowscope-core/specs/dialect-semantics/scoping_rules.toml`
-- `crates/flowscope-core/specs/dialect-semantics/dialect_behavior.toml`
-- `crates/flowscope-core/specs/dialect-semantics/functions.json`
-- `crates/flowscope-core/specs/dialect-semantics/normalization_overrides.toml`
+- `crates/capybara-core/specs/dialect-semantics/dialects.json`
+- `crates/capybara-core/specs/dialect-semantics/scoping_rules.toml`
+- `crates/capybara-core/specs/dialect-semantics/dialect_behavior.toml`
+- `crates/capybara-core/specs/dialect-semantics/functions.json`
+- `crates/capybara-core/specs/dialect-semantics/normalization_overrides.toml`
 
 If the public API does not expose a dialect listed in the specs, it is considered internal reference data.

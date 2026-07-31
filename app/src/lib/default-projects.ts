@@ -1,5 +1,5 @@
 /**
- * Default demo projects for FlowScope.
+ * Default demo projects for Capybara.
  * Separated from project-store.tsx to keep the store logic focused on state management.
  */
 import type { Project } from './project-store';

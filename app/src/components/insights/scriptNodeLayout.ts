@@ -1,4 +1,4 @@
-import type { OutputGroup } from '@pondpilot/flowscope-react';
+import type { OutputGroup } from '@pondpilot/capybara-react';
 
 export const ROW = 22;
 const HEADER_H = 55;

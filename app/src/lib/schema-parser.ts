@@ -13,7 +13,7 @@ import type {
   StatementLineage,
   Issue,
   StatementRef,
-} from '@pondpilot/flowscope-core';
+} from '@pondpilot/capybara-core';
 import { SCHEMA_LIMITS } from './constants';
 
 export interface ParsedSchema {

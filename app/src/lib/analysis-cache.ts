@@ -4,7 +4,7 @@
  * All storage goes through the Rust backend SQLite via REST API.
  */
 
-import type { AnalyzeResult, StatementLineage, Node, Edge } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult, StatementLineage, Node, Edge } from '@pondpilot/capybara-core';
 import * as serverDb from './server-db';
 
 // ── 统一异常拦截器 ──────────────────────────────────────────────

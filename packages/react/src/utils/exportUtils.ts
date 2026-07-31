@@ -1,9 +1,9 @@
 /**
  * Export utilities for lineage data.
- * Delegates export generation to flowscope-export via WASM bindings.
+ * Delegates export generation to capybara-export via WASM bindings.
  */
 
-import type { AnalyzeResult, ExportFormat, MermaidView } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult, ExportFormat, MermaidView } from '@pondpilot/capybara-core';
 import {
   exportCsvArchive,
   exportFilename,
@@ -11,7 +11,7 @@ import {
   exportJson,
   exportMermaid,
   exportXlsx,
-} from '@pondpilot/flowscope-core';
+} from '@pondpilot/capybara-core';
 
 export type MermaidGraphType = MermaidView;
 

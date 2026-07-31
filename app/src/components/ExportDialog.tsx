@@ -41,15 +41,15 @@ import {
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Checkbox } from './ui/checkbox';
-import type { AnalyzeResult, ExportFormat, MermaidView } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult, ExportFormat, MermaidView } from '@pondpilot/capybara-core';
 import {
   exportFilename,
   exportHtml,
   exportMermaid,
   formatSchemaError,
   validateSchemaName,
-} from '@pondpilot/flowscope-core';
-import { useIsDarkMode } from '@pondpilot/flowscope-react';
+} from '@pondpilot/capybara-core';
+import { useIsDarkMode } from '@pondpilot/capybara-react';
 import {
   base64UrlEncode,
   formatBytes,

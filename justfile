@@ -20,15 +20,15 @@ build-rust-release:
 
 # Build CLI binary
 build-cli:
-    cargo build -p flowscope-cli --release
+    cargo build -p capybara-cli --release
 
 # Build CLI with serve feature (embeds web UI - requires app to be built first)
 build-cli-serve: sync-cli-serve-assets
-    cargo build -p flowscope-cli --features serve --release
+    cargo build -p capybara-cli --features serve --release
 
 # Build CLI with serve feature in debug mode
 build-cli-serve-debug: sync-cli-serve-assets
-    cargo build -p flowscope-cli --features serve
+    cargo build -p capybara-cli --features serve
 
 # Internal: Build app dist for embedding into CLI
 _build-app-dist:
@@ -36,36 +36,36 @@ _build-app-dist:
 
 # Internal: Sync compiled app assets into the CLI crate
 sync-cli-serve-assets: _build-app-dist
-    rm -rf crates/flowscope-cli/embedded-app
-    mkdir -p crates/flowscope-cli/embedded-app
-    cp -R app/dist/. crates/flowscope-cli/embedded-app/
+    rm -rf crates/capybara-cli/embedded-app
+    mkdir -p crates/capybara-cli/embedded-app
+    cp -R app/dist/. crates/capybara-cli/embedded-app/
 
 # Install CLI locally
 install-cli:
-    cargo install --path crates/flowscope-cli --force
+    cargo install --path crates/capybara-cli --force
 
 # Run CLI with arguments
 cli *ARGS:
-    cargo run -p flowscope-cli -- {{ARGS}}
+    cargo run -p capybara-cli -- {{ARGS}}
 
 # Run CLI with arguments in release mode
 cli-release *ARGS:
-    cargo run -p flowscope-cli --release -- {{ARGS}}
+    cargo run -p capybara-cli --release -- {{ARGS}}
 
 # Run CLI tests
 test-cli:
-    cargo test -p flowscope-cli
+    cargo test -p capybara-cli
 
 # Run CLI tests with serve feature
 test-cli-serve: sync-cli-serve-assets
-    cargo test -p flowscope-cli --features serve
+    cargo test -p capybara-cli --features serve
 
 # Run CLI integration tests (SQLite + PostgreSQL + MySQL)
 test-integration: test-integration-sqlite test-integration-postgres test-integration-mysql
 
 # Run SQLite integration tests (no external dependencies)
 test-integration-sqlite:
-    cargo test -p flowscope-cli --features integration-tests --test integration sqlite -- --test-threads=1
+    cargo test -p capybara-cli --features integration-tests --test integration sqlite -- --test-threads=1
 
 # Run PostgreSQL integration tests (starts Docker container)
 test-integration-postgres: _postgres-start
@@ -75,7 +75,7 @@ test-integration-postgres: _postgres-start
     # Wait for PostgreSQL to be ready
     echo "Waiting for PostgreSQL to be ready..."
     for i in {1..30}; do
-        if docker exec flowscope-test-postgres pg_isready -U flowscope > /dev/null 2>&1; then
+        if docker exec capybara-test-postgres pg_isready -U capybara > /dev/null 2>&1; then
             echo "PostgreSQL is ready"
             break
         fi
@@ -88,7 +88,7 @@ test-integration-postgres: _postgres-start
     done
 
     # Create test tables
-    docker exec flowscope-test-postgres psql -U flowscope -d flowscope -c "
+    docker exec capybara-test-postgres psql -U capybara -d capybara -c "
         DROP TABLE IF EXISTS order_items CASCADE;
         DROP TABLE IF EXISTS orders CASCADE;
         DROP TABLE IF EXISTS users CASCADE;
@@ -116,7 +116,7 @@ test-integration-postgres: _postgres-start
     "
 
     # Run tests
-    cargo test -p flowscope-cli --features integration-tests --test integration postgres -- --test-threads=1
+    cargo test -p capybara-cli --features integration-tests --test integration postgres -- --test-threads=1
 
     # Stop PostgreSQL
     just _postgres-stop
@@ -127,14 +127,14 @@ _postgres-start:
     set -euo pipefail
 
     # Stop existing container if running
-    docker rm -f flowscope-test-postgres 2>/dev/null || true
+    docker rm -f capybara-test-postgres 2>/dev/null || true
 
     # Start PostgreSQL on port 5433 to avoid conflicts
     docker run -d \
-        --name flowscope-test-postgres \
-        -e POSTGRES_USER=flowscope \
-        -e POSTGRES_PASSWORD=flowscope \
-        -e POSTGRES_DB=flowscope \
+        --name capybara-test-postgres \
+        -e POSTGRES_USER=capybara \
+        -e POSTGRES_PASSWORD=capybara \
+        -e POSTGRES_DB=capybara \
         -p 5433:5432 \
         postgres:16-alpine
 
@@ -142,7 +142,7 @@ _postgres-start:
 
 # Stop PostgreSQL container
 _postgres-stop:
-    docker rm -f flowscope-test-postgres 2>/dev/null || true
+    docker rm -f capybara-test-postgres 2>/dev/null || true
 
 # Run MySQL integration tests (starts Docker container)
 test-integration-mysql: _mysql-start
@@ -152,7 +152,7 @@ test-integration-mysql: _mysql-start
     # Wait for MySQL to be ready (check with actual user connection, not just ping)
     echo "Waiting for MySQL to be ready..."
     for i in {1..60}; do
-        if docker exec flowscope-test-mysql mysql -uflowscope -pflowscope -e "SELECT 1" > /dev/null 2>&1; then
+        if docker exec capybara-test-mysql mysql -ucapybara -pcapybara -e "SELECT 1" > /dev/null 2>&1; then
             echo "MySQL is ready"
             break
         fi
@@ -165,7 +165,7 @@ test-integration-mysql: _mysql-start
     done
 
     # Create test tables
-    docker exec flowscope-test-mysql mysql -uflowscope -pflowscope flowscope -e "
+    docker exec capybara-test-mysql mysql -ucapybara -pcapybara capybara -e "
         DROP TABLE IF EXISTS order_items;
         DROP TABLE IF EXISTS orders;
         DROP TABLE IF EXISTS users;
@@ -195,7 +195,7 @@ test-integration-mysql: _mysql-start
     "
 
     # Run tests
-    cargo test -p flowscope-cli --features integration-tests --test integration mysql -- --test-threads=1
+    cargo test -p capybara-cli --features integration-tests --test integration mysql -- --test-threads=1
 
     # Stop MySQL
     just _mysql-stop
@@ -206,15 +206,15 @@ _mysql-start:
     set -euo pipefail
 
     # Stop existing container if running
-    docker rm -f flowscope-test-mysql 2>/dev/null || true
+    docker rm -f capybara-test-mysql 2>/dev/null || true
 
     # Start MySQL on port 3307 to avoid conflicts
     docker run -d \
-        --name flowscope-test-mysql \
+        --name capybara-test-mysql \
         -e MYSQL_ROOT_PASSWORD=root \
-        -e MYSQL_USER=flowscope \
-        -e MYSQL_PASSWORD=flowscope \
-        -e MYSQL_DATABASE=flowscope \
+        -e MYSQL_USER=capybara \
+        -e MYSQL_PASSWORD=capybara \
+        -e MYSQL_DATABASE=capybara \
         -p 3307:3306 \
         mysql:8.0
 
@@ -222,7 +222,7 @@ _mysql-start:
 
 # Stop MySQL container
 _mysql-stop:
-    docker rm -f flowscope-test-mysql 2>/dev/null || true
+    docker rm -f capybara-test-mysql 2>/dev/null || true
 
 # Build WASM module and TypeScript packages
 build-wasm:
@@ -245,19 +245,19 @@ test-rust:
 
 # Run lineage engine tests specifically
 test-lineage:
-    cargo test -p flowscope-core --test lineage_engine
+    cargo test -p capybara-core --test lineage_engine
 
 # Run lineage engine tests with output
 test-lineage-verbose:
-    cargo test -p flowscope-core --test lineage_engine -- --nocapture
+    cargo test -p capybara-core --test lineage_engine -- --nocapture
 
 # Run specific lineage engine test by name
 test-lineage-filter PATTERN:
-    cargo test -p flowscope-core --test lineage_engine {{PATTERN}}
+    cargo test -p capybara-core --test lineage_engine {{PATTERN}}
 
-# Run flowscope-core unit tests
+# Run capybara-core unit tests
 test-core:
-    cargo test -p flowscope-core
+    cargo test -p capybara-core
 
 # Run TypeScript tests
 test-ts:
@@ -283,7 +283,7 @@ dev:
 lint: lint-rust lint-ts
 
 check-schema:
-    cargo test -p flowscope-core --test schema_guard --locked
+    cargo test -p capybara-core --test schema_guard --locked
     cd packages/core && yarn test schema-compat.test.ts --silent
 
 # Regenerate the API schema snapshot from Rust definitions
@@ -332,7 +332,7 @@ clean:
     rm -rf node_modules
     rm -rf packages/*/node_modules
     rm -rf app/node_modules
-    rm -rf crates/flowscope-cli/embedded-app
+    rm -rf crates/capybara-cli/embedded-app
 
 # Install dependencies
 install:
@@ -364,7 +364,7 @@ watch-test:
 
 # Watch and run lineage tests on changes
 watch-lineage:
-    cargo watch -x "test -p flowscope-core --test lineage_engine"
+    cargo watch -x "test -p capybara-core --test lineage_engine"
 
 # Run Rust tests in release mode (faster execution)
 test-rust-release:
@@ -379,26 +379,26 @@ check: fmt-check-rust fmt-check-ts lint typecheck test-rust check-schema
 # All checks (Rust + TS + schema compatibility)
 check-all:
     cargo test --workspace --locked
-    yarn workspace @pondpilot/flowscope-core test --silent
+    yarn workspace @pondpilot/capybara-core test --silent
     just check-schema
 
 # Deploy app to Cloudflare Pages
 deploy: build-wasm build-ts
     cd app && yarn build
-    wrangler pages deploy app/dist --project-name flowscope-app
+    wrangler pages deploy app/dist --project-name capybara-app
 
 # Pre-release check: verify generated code is committed
 check-generated:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Building to regenerate code..."
-    cargo build -p flowscope-core --quiet
-    if ! git diff --quiet crates/flowscope-core/src/generated/; then
+    cargo build -p capybara-core --quiet
+    if ! git diff --quiet crates/capybara-core/src/generated/; then
         echo "ERROR: Generated code is out of sync!"
         echo "The following files have uncommitted changes:"
-        git diff --name-only crates/flowscope-core/src/generated/
+        git diff --name-only crates/capybara-core/src/generated/
         echo ""
-        echo "Run 'cargo build -p flowscope-core' and commit the changes."
+        echo "Run 'cargo build -p capybara-core' and commit the changes."
         exit 1
     fi
     echo "Generated code is up to date."

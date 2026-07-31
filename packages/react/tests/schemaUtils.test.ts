@@ -6,7 +6,7 @@ import {
   collectTableLookupKeys,
   resolveForeignKeyTarget,
 } from '../src/utils/schemaUtils';
-import type { SchemaTable, ResolvedSchemaTable } from '@pondpilot/flowscope-core';
+import type { SchemaTable, ResolvedSchemaTable } from '@pondpilot/capybara-core';
 
 describe('stripIdentifierQuotes', () => {
   it('strips double quotes', () => {

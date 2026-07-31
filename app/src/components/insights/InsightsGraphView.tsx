@@ -5,7 +5,7 @@ import {
   GraphView,
   createLineageStore,
   LineageStoreProvider,
-} from '@pondpilot/flowscope-react';
+} from '@pondpilot/capybara-react';
 import { useProject } from '@/lib/project-store';
 import { searchLineageForInsights } from '@/lib/analysis-cache';
 import { Input } from '@/components/ui/input';

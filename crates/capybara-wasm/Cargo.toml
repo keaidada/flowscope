@@ -1,0 +1,30 @@
+[package]
+name = "capybara-wasm"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "WASM bindings for capybara-core"
+
+[features]
+default = ["templating"]
+templating = ["capybara-core/templating"]
+tracing = ["capybara-core/tracing", "tracing-wasm"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+capybara-core = { workspace = true, default-features = false }
+capybara-export = { workspace = true, default-features = false }
+wasm-bindgen.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+tracing-wasm = { version = "0.2", optional = true }
+console_error_panic_hook = "0.1"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

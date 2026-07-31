@@ -43,8 +43,8 @@
 | `just test-rust` | `cargo test --workspace` |
 | `just test-rust-release` | `cargo test --workspace --release` |
 | `just test-ts` | `yarn workspaces run test` |
-| `just test-core` | `cargo test -p flowscope-core` |
-| `just test-cli` | `cargo test -p flowscope-cli` |
+| `just test-core` | `cargo test -p capybara-core` |
+| `just test-cli` | `cargo test -p capybara-cli` |
 | `just test-cli-serve` | CLI serve 模式测试（含构建 app） |
 | `just test-lineage` | 血缘引擎测试 |
 | `just test-lineage-verbose` | 血缘测试（含输出） |
@@ -103,11 +103,11 @@
 just build-cli-serve
 
 # 启动服务
-./target/release/flowscope --serve --port 3000 --watch ./app
+./target/release/capybara --serve --port 3000 --watch ./app
 
 # 后台运行
-nohup ./target/release/flowscope --serve --port 3000 --watch ./app \
-    > /tmp/flowscope-logs/serve.log 2>&1 &
+nohup ./target/release/capybara --serve --port 3000 --watch ./app \
+    > /tmp/capybara-logs/serve.log 2>&1 &
 
 # 验证
 curl http://127.0.0.1:3000/api/health
@@ -123,8 +123,8 @@ just build-wasm-dev && just build-ts
 just dev
 
 # 启动后端（另一终端）
-cargo build -p flowscope-cli --features serve
-./target/debug/flowscope --serve --port 3000 --watch ./app
+cargo build -p capybara-cli --features serve
+./target/debug/capybara --serve --port 3000 --watch ./app
 
 # 验证
 curl -o /dev/null -w "前端: %{http_code}\n" http://localhost:5173/

@@ -230,7 +230,7 @@ export const useViewStateStore = create<ViewStateStore>()(
         }),
     }),
     {
-      name: 'flowscope-view-states',
+      name: 'capybara-view-states',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({ viewStates: state.viewStates }),
     }

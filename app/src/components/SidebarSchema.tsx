@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect, createContext, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
-import { SqlView } from '@pondpilot/flowscope-react';
+import { SqlView } from '@pondpilot/capybara-react';
 import {
   Upload,
   Trash2,

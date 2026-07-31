@@ -25,7 +25,7 @@
     "dismiss": "Dismiss"
   },
   "app": {
-    "brandName": "FlowScope",
+    "brandName": "Capybara",
     "systemError": "System Error: {{error}}",
     "viewOnGithub": "View on GitHub",
     "shareProject": "Share project",
@@ -42,7 +42,7 @@
     "changed": "Theme: {{theme}}"
   },
   "welcome": {
-    "title": "Welcome to FlowScope",
+    "title": "Welcome to Capybara",
     "description": "A privacy-first SQL lineage engine that runs entirely in your browser.",
     "sqlLineage": "SQL Lineage Analysis",
     "sqlLineageDesc": "Visualize how data flows through your queries across tables, CTEs, and columns.",
@@ -333,7 +333,7 @@
   },
   "errors": {
     "somethingWentWrong": "Something went wrong",
-    "unexpectedError": "An unexpected error occurred in FlowScope. Please try reloading the page.",
+    "unexpectedError": "An unexpected error occurred in Capybara. Please try reloading the page.",
     "errorDetails": "Error Details",
     "tryAgain": "Try Again",
     "reloadPage": "Reload Page",

@@ -4,8 +4,8 @@
 
 // Re-export TemplateMode from core to maintain single source of truth
 // Application-specific utilities (validation, UI options) are defined below
-export type { TemplateMode } from '@pondpilot/flowscope-core';
-import type { TemplateMode } from '@pondpilot/flowscope-core';
+export type { TemplateMode } from '@pondpilot/capybara-core';
+import type { TemplateMode } from '@pondpilot/capybara-core';
 
 /**
  * Error codes for analysis worker operations.

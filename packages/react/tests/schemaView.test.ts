@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ResolvedSchemaTable, SchemaTable } from '@pondpilot/flowscope-core';
+import type { ResolvedSchemaTable, SchemaTable } from '@pondpilot/capybara-core';
 import { buildSchemaFlowEdges, buildSchemaFlowNodes } from '../src/components/SchemaView';
 
 describe('buildSchemaFlowNodes', () => {

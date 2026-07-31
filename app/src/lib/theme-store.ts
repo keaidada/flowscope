@@ -67,7 +67,7 @@ export const useThemeStore = create<ThemeState>()(
       setTheme: (theme) => set({ theme }),
     }),
     {
-      name: 'flowscope-theme',
+      name: 'capybara-theme',
       storage: createJSONStorage(() => localStorage),
     }
   )

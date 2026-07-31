@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { LineageActions } from '@pondpilot/flowscope-react';
+import type { LineageActions } from '@pondpilot/capybara-react';
 import {
   GraphErrorBoundary,
   GraphView,
   MatrixView,
   SchemaView,
   useLineage,
-} from '@pondpilot/flowscope-react';
-import type { AnalyzeResult, SchemaTable } from '@pondpilot/flowscope-core';
+} from '@pondpilot/capybara-react';
+import type { AnalyzeResult, SchemaTable } from '@pondpilot/capybara-core';
 import {
   ArrowRight,
   ChevronDown,
@@ -860,12 +860,12 @@ export function AnalysisView({
   const buildGraphExportFilename = useCallback(
     (extension: 'png' | 'svg') => {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const baseName = (currentProject?.name || 'flowscope')
+      const baseName = (currentProject?.name || 'capybara')
         .trim()
         .replace(/[^a-zA-Z0-9_-]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .toLowerCase();
-      return `${baseName || 'flowscope'}-lineage-${timestamp}.${extension}`;
+      return `${baseName || 'capybara'}-lineage-${timestamp}.${extension}`;
     },
     [currentProject?.name]
   );

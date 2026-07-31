@@ -17,7 +17,7 @@
 
 ## 实现细节
 
-### Rust 端 (`crates/flowscope-cli/src/server/mod.rs`)
+### Rust 端 (`crates/capybara-cli/src/server/mod.rs`)
 
 1. 删除 `SCALAR_HTML_CN` 常量和 Swagger UI 的 HTML 字符串
 2. 新增 `scalar_html(lang: &str, title: &str) -> String` 函数，生成 Scalar HTML
@@ -56,13 +56,13 @@
 
 | `lang` 参数 | html lang | locale | title |
 |-------------|-----------|--------|-------|
-| `zh` | `zh-CN` | `zh-CN` | FlowScope API 文档 |
-| `en` | `en` | `en` | FlowScope API Documentation |
+| `zh` | `zh-CN` | `zh-CN` | Capybara API 文档 |
+| `en` | `en` | `en` | Capybara API Documentation |
 | 未指定 | 检测 Accept-Language | 同上 | 同上 |
 
 ## 影响范围
 
-只修改 `crates/flowscope-cli/src/server/mod.rs` 一个文件。前端无需改动。
+只修改 `crates/capybara-cli/src/server/mod.rs` 一个文件。前端无需改动。
 
 ## 测试验证
 

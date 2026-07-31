@@ -3,8 +3,8 @@
  * These functions analyze lineage data to build dependency matrices.
  */
 
-import type { StatementLineage, Span } from '@pondpilot/flowscope-core';
-import { isTableLikeType } from '@pondpilot/flowscope-core';
+import type { StatementLineage, Span } from '@pondpilot/capybara-core';
+import { isTableLikeType } from '@pondpilot/capybara-core';
 import {
   getCreatedRelationNodeIds,
   OUTPUT_NODE_TYPE,

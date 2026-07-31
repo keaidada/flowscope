@@ -1,6 +1,6 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { byteOffsetToCharOffset } from '@pondpilot/flowscope-core';
+import { byteOffsetToCharOffset } from '@pondpilot/capybara-core';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -43,7 +43,7 @@ export async function isTextFile(file: File, sampleBytes = 8192): Promise<boolea
  * Lines are 1-indexed, columns are 1-indexed.
  *
  * Handles UTF-8 to UTF-16 conversion internally since JavaScript strings
- * use UTF-16 encoding while FlowScope spans use UTF-8 byte offsets.
+ * use UTF-16 encoding while Capybara spans use UTF-8 byte offsets.
  *
  * @param content - The string content
  * @param byteOffset - UTF-8 byte offset from the start of the string

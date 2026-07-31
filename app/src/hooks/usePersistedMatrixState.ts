@@ -11,7 +11,7 @@ import {
   getMatrixStateWithDefaults,
   type MatrixViewState,
 } from '@/lib/view-state-store';
-import type { MatrixViewControlledState } from '@pondpilot/flowscope-react';
+import type { MatrixViewControlledState } from '@pondpilot/capybara-react';
 
 const PERSIST_DEBOUNCE_MS = 300;
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { AnalyzeResult } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult } from '@pondpilot/capybara-core';
 import { generateMermaid } from '../src/utils/exportUtils';
 
 describe('exportUtils', () => {

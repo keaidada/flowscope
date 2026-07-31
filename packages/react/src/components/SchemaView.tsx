@@ -28,7 +28,7 @@ import type {
   ResolvedColumnSchema,
   SchemaOrigin,
   ForeignKeyRef,
-} from '@pondpilot/flowscope-core';
+} from '@pondpilot/capybara-core';
 
 // ============================================================================
 // Types

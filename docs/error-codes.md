@@ -1,7 +1,7 @@
 # Error Code Catalog
 
-This document lists the issue codes emitted by FlowScope. Codes are defined in:
-- `crates/flowscope-core/src/types/common.rs`
+This document lists the issue codes emitted by Capybara. Codes are defined in:
+- `crates/capybara-core/src/types/common.rs`
 - `packages/core/src/types.ts`
 
 ## Error Codes

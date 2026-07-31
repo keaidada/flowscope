@@ -17,7 +17,7 @@ import type { TableNodeData, ColumnNodeInfo } from '../types';
 import { sanitizeIdentifier } from '../utils/sanitize';
 import { GRAPH_CONFIG, MAX_FILTER_DISPLAY_LENGTH, getNamespaceColor } from '../constants';
 import { useColors, useIsDarkMode } from '../hooks/useColors';
-import type { AggregationInfo } from '@pondpilot/flowscope-core';
+import type { AggregationInfo } from '@pondpilot/capybara-core';
 
 // Virtualization thresholds
 const COLUMN_VIRTUALIZATION_THRESHOLD = 999999; // disabled — always render all columns

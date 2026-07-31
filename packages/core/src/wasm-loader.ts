@@ -39,7 +39,7 @@ export async function initWasm(
           }
         ).chrome?.runtime?.getURL;
         if (!wasmUrl && typeof runtimeGetUrl === 'function') {
-          wasmUrl = runtimeGetUrl('wasm/flowscope_wasm_bg.wasm');
+          wasmUrl = runtimeGetUrl('wasm/capybara_wasm_bg.wasm');
         }
         await wasm.default(wasmUrl ?? undefined);
         // Allow host apps to enable tracing via init option if supported by the build

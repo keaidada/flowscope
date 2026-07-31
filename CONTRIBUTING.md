@@ -1,6 +1,6 @@
-# Contributing to FlowScope
+# Contributing to Capybara
 
-Thank you for your interest in contributing to FlowScope! This document provides guidelines and instructions for setting up your development environment and contributing to the project.
+Thank you for your interest in contributing to Capybara! This document provides guidelines and instructions for setting up your development environment and contributing to the project.
 
 ## Development Setup
 
@@ -15,8 +15,8 @@ Thank you for your interest in contributing to FlowScope! This document provides
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/keaidada/flowscope.git
-cd flowscope
+git clone https://github.com/keaidada/capybara.git
+cd capybara
 ```
 
 2. Install dependencies:
@@ -36,16 +36,16 @@ just test
 
 ## Project Structure
 
-FlowScope is organized as a monorepo with the following structure:
+Capybara is organized as a monorepo with the following structure:
 
 - `crates/` - Rust workspace
-  - `flowscope-core/` - Core lineage engine
-  - `flowscope-wasm/` - WASM bindings
-  - `flowscope-cli/` - CLI wrapper
-  - `flowscope-export/` - Export helpers
+  - `capybara-core/` - Core lineage engine
+  - `capybara-wasm/` - WASM bindings
+  - `capybara-cli/` - CLI wrapper
+  - `capybara-export/` - Export helpers
 - `packages/` - NPM workspace
-  - `core/` - TypeScript wrapper (@pondpilot/flowscope-core)
-  - `react/` - React components (@pondpilot/flowscope-react)
+  - `core/` - TypeScript wrapper (@pondpilot/capybara-core)
+  - `react/` - React components (@pondpilot/capybara-react)
 - `app/` - Demo Vite application
 - `vscode/` - VS Code extension + webview UI
 - `docs/` - Documentation
@@ -101,7 +101,7 @@ just dev
 
 ## Code Generation
 
-- Dialect semantic specs in `crates/flowscope-core/specs/dialect-semantics/` are compiled into `crates/flowscope-core/src/generated/` by `build.rs`.
+- Dialect semantic specs in `crates/capybara-core/specs/dialect-semantics/` are compiled into `crates/capybara-core/src/generated/` by `build.rs`.
 - API schema snapshots live in `docs/api_schema.json` and can be refreshed with `just update-schema`.
 
 ## Testing
@@ -109,7 +109,7 @@ just dev
 - Write unit tests for all new functionality
 - Ensure all tests pass before submitting a PR
 - Add integration tests for complex features
-- Test fixtures should be added to `crates/flowscope-core/tests/fixtures/`
+- Test fixtures should be added to `crates/capybara-core/tests/fixtures/`
 
 ## Pull Request Process
 
@@ -124,7 +124,7 @@ just dev
 
 When reporting issues, please include:
 
-- FlowScope version
+- Capybara version
 - Operating system
 - Node.js and Rust versions
 - Steps to reproduce
@@ -133,7 +133,7 @@ When reporting issues, please include:
 
 ## License
 
-By contributing to FlowScope, you agree that your contributions will be licensed under the Apache 2.0 License.
+By contributing to Capybara, you agree that your contributions will be licensed under the Apache 2.0 License.
 
 ## Questions?
 

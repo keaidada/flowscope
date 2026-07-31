@@ -1,11 +1,11 @@
 # Database Storage Design
 
-**定义文件**：[`crates/flowscope-cli/src/server/store.rs`](../crates/flowscope-cli/src/server/store.rs)
+**定义文件**：[`crates/capybara-cli/src/server/store.rs`](../crates/capybara-cli/src/server/store.rs)
 
 ## 数据库文件
 
 ```
-flowscope.db    # SQLite，journal_mode=DELETE，9 张表
+capybara.db    # SQLite，journal_mode=DELETE，9 张表
 ```
 
 ## 模式（DDL）
@@ -213,13 +213,13 @@ CREATE INDEX IF NOT EXISTS idx_column_metadata_table ON column_metadata(table_id
 
 ```bash
 # 纯 API 后端（配合 Vite dev server 使用）：
-cargo run -p flowscope-cli --features serve -- --db-only --port 3000
+cargo run -p capybara-cli --features serve -- --db-only --port 3000
 
 # Vite 前端：
 cd app && yarn dev --port 5173
 ```
 
-前端 `http://localhost:5173` 通过 CORS 代理到 `http://localhost:3000`，数据库文件在项目根目录 `flowscope.db`。
+前端 `http://localhost:5173` 通过 CORS 代理到 `http://localhost:3000`，数据库文件在项目根目录 `capybara.db`。
 
 ## PRAGMA
 

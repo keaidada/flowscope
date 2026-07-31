@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { SqlView } from '@pondpilot/flowscope-react';
+import { SqlView } from '@pondpilot/capybara-react';
 import { Loader2 } from 'lucide-react';
 import {
   Dialog,

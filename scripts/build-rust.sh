@@ -31,7 +31,7 @@ cargo build --release --workspace
 
 echo "Building WASM module..."
 # Output to packages/core/wasm (same location as package.json build:wasm for npm publishing)
-wasm-pack build crates/flowscope-wasm --release --target web --out-dir ../../packages/core/wasm $NO_OPT
+wasm-pack build crates/capybara-wasm --release --target web --out-dir ../../packages/core/wasm $NO_OPT
 
 # Restore .gitignore to allow WASM artifacts to be committed
 # (wasm-pack generates a .gitignore that ignores everything)

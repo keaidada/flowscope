@@ -1,12 +1,12 @@
 # Linter Architecture Design
 
 Status: Active
-Owner: `flowscope-core`
+Owner: `capybara-core`
 Last updated: 2026-02-21
 
 ## Context
 
-FlowScope ships 72 lint rules across 9 families (AL, AM, CP, CV, JJ, LT, RF, ST, TQ),
+Capybara ships 72 lint rules across 9 families (AL, AM, CP, CV, JJ, LT, RF, ST, TQ),
 each implemented in a dedicated one-rule-per-file module under `linter/rules/`.
 
 The linter started with a handful of core AST rules plus a monolithic `parity.rs` that
@@ -163,7 +163,7 @@ Remaining work: SQLFluff configuration-depth parity gaps for some CP/LT/JJ rules
 - [x] Phase 1 AST migrations landed for: `AM_001`-`AM_009`, `CV_001`-`CV_012`, `RF_001`-`RF_006`, `ST_001`-`ST_012`, `AL_001`-`AL_009`.
 - [x] `LINT_AM_009` now follows SQLFluff AM09 semantics via AST query-clause analysis, flagging LIMIT/OFFSET usage without ORDER BY across top-level and nested SELECTs.
 - [x] `LINT_AM_004` now follows SQLFluff AM04 semantics via AST output-width analysis, flagging queries whose result column count is unknown due to unresolved wildcard expansion (`*`/`alias.*`) across CTE/subquery/set-operation scopes, and now resolves wildcard width through declared CTE column lists, table-factor alias column lists (`AS alias(col1, ...)`), and aliased nested-join factors (including `USING(...)` width deduction plus `NATURAL JOIN` overlap deduction when both sides expose deterministic output column names).
-- [x] `LINT_AM_002` now follows SQLFluff AM02 core semantics by flagging bare `UNION` (without explicit `ALL`/`DISTINCT`), with CLI fixer behavior inserting explicit `DISTINCT` through AST set-operation quantifier rewrites (text-regex path removed), and dialect-scoped execution aligned to SQLFluff-supported dialects available in FlowScope.
+- [x] `LINT_AM_002` now follows SQLFluff AM02 core semantics by flagging bare `UNION` (without explicit `ALL`/`DISTINCT`), with CLI fixer behavior inserting explicit `DISTINCT` through AST set-operation quantifier rewrites (text-regex path removed), and dialect-scoped execution aligned to SQLFluff-supported dialects available in Capybara.
 - [x] `LINT_CV_002` now follows SQLFluff CV02 semantics and fixer behavior by flagging IFNULL/NVL function usage and rewriting to COALESCE.
 - [x] `LINT_CV_005` now follows SQLFluff CV05 semantics and fixer behavior by flagging `= NULL`/`<> NULL` comparisons and rewriting to `IS [NOT] NULL`.
 - [x] `LINT_CV_008` fixer parity is now AST-driven across both simple and chained/nested RIGHT JOIN patterns, rewriting them to LEFT JOIN form by swapping join operands and normalizing join operators.
@@ -225,7 +225,7 @@ Remaining work: SQLFluff configuration-depth parity gaps for some CP/LT/JJ rules
 - [x] `LINT_AM_008` now follows SQLFluff AM08 semantics via AST join-operator analysis (implicit cross join detection, with `WHERE` deferral to CV12 and UNNEST/CROSS/NATURAL/USING exclusions); fixer parity now rewrites eligible implicit joins to explicit `CROSS JOIN`.
 - [x] `LINT_CV_012` now broadens AST join-operator handling to include `INNER JOIN` forms represented as `JoinOperator::Inner` without `ON/USING`, and now aligns closer to SQLFluff CV12 chain semantics by flagging only when all naked joins in a join chain are represented via WHERE join predicates.
 - [x] `LINT_AM_007` now performs AST set-expression branch-width checks with deterministic wildcard resolution for CTE/derived sources (including declared CTE column lists and table-factor alias column lists) and aliased nested-join factors (including `USING(...)` width deduction plus `NATURAL JOIN` overlap deduction when both sides expose deterministic output column names), while unresolved wildcard expansions remain non-violating (SQLFluff-aligned behavior).
-- [x] Parity monolith decommission is complete: migrated rule registrations and parity tests are removed, and `crates/flowscope-core/src/linter/rules/parity.rs` has been retired.
+- [x] Parity monolith decommission is complete: migrated rule registrations and parity tests are removed, and `crates/capybara-core/src/linter/rules/parity.rs` has been retired.
 - [~] SQLFluff fixture adoption is in progress; AM, CV, ST fixture cases adopted for most semantic rules. Additional rule-level coverage is still being expanded.
 - [~] SQLFluff parity quality gaps remain for a subset of rules. See `docs/sqlfluff-gap-matrix.md` for the current status of per-rule parity deltas.
 

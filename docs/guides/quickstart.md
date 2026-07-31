@@ -1,19 +1,19 @@
 # Quickstart: TypeScript Usage
 
-This guide shows how to use FlowScope in a TypeScript project.
+This guide shows how to use Capybara in a TypeScript project.
 
 ## Installation
 
 ```bash
-npm install @pondpilot/flowscope-core
+npm install @pondpilot/capybara-core
 # or
-yarn add @pondpilot/flowscope-core
+yarn add @pondpilot/capybara-core
 ```
 
 ## Basic Usage
 
 ```typescript
-import { initWasm, analyzeSql } from '@pondpilot/flowscope-core';
+import { initWasm, analyzeSql } from '@pondpilot/capybara-core';
 
 await initWasm();
 

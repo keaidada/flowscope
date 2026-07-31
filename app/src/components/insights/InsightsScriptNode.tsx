@@ -9,8 +9,8 @@ import {
 } from 'react';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { FileCode, Copy, Check, ChevronDown, ChevronUp, ClipboardList } from 'lucide-react';
-import { useLineageStore, useColors } from '@pondpilot/flowscope-react';
-import type { ScriptNodeData } from '@pondpilot/flowscope-react';
+import { useLineageStore, useColors } from '@pondpilot/capybara-react';
+import type { ScriptNodeData } from '@pondpilot/capybara-react';
 import { shouldHighlightRow, toggleHighlight, onHighlightChange } from './highlightState';
 import { computeScriptNodeLayout } from './scriptNodeLayout';
 import { getHandleY, setHandleY, clearNodeHandleY } from './handlePositionCache';

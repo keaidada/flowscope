@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "crates/flowscope-core",
-    "crates/flowscope-wasm",
-    "crates/flowscope-cli",
-    "crates/flowscope-export",
+    "crates/capybara-core",
+    "crates/capybara-wasm",
+    "crates/capybara-cli",
+    "crates/capybara-export",
 ]
 resolver = "2"
 
@@ -15,8 +15,8 @@ license = "Apache-2.0"
 repository = "https://github.com/keaidada/flowscope"
 
 [workspace.dependencies]
-flowscope-core = { version = "1.0.0", path = "crates/flowscope-core", default-features = false }
-flowscope-export = { version = "1.0.0", path = "crates/flowscope-export", default-features = false }
+capybara-core = { version = "1.0.0", path = "crates/capybara-core", default-features = false }
+capybara-export = { version = "1.0.0", path = "crates/capybara-export", default-features = false }
 sqlparser = "0.61"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"

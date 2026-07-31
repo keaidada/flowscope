@@ -1,4 +1,4 @@
-import type { StatementLineage, Node, Edge, AggregationInfo } from '@pondpilot/flowscope-core';
+import type { StatementLineage, Node, Edge, AggregationInfo } from '@pondpilot/capybara-core';
 import { JOIN_TYPE_LABELS } from '../constants';
 
 const CREATE_STATEMENT_TYPES = new Set(['CREATE_TABLE', 'CREATE_TABLE_AS', 'CREATE_VIEW']);

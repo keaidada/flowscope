@@ -19,7 +19,7 @@
 # scripts/precheck.sh — 部署前环境检查
 set -euo pipefail
 
-echo "=== FlowScope Precheck ==="
+echo "=== Capybara Precheck ==="
 
 PASS=0
 FAIL=0
@@ -78,19 +78,19 @@ cargo install just
 cargo install wasm-pack
 
 # 克隆并构建
-git clone https://github.com/keaidada/flowscope.git
-cd flowscope
+git clone https://github.com/keaidada/capybara.git
+cd capybara
 ```
 
 ## 数据库初始化
 
-FlowScope 使用 SQLite，**首次启动自动创建**（`open_db()` → `migrate()` → `create_tables()`），无需手动初始化。
+Capybara 使用 SQLite，**首次启动自动创建**（`open_db()` → `migrate()` → `create_tables()`），无需手动初始化。
 
 ### 自动初始化流程
 
 ```
-flowscope --serve 启动
-  └─ open_db("./app/flowscope.db")
+capybara --serve 启动
+  └─ open_db("./app/capybara.db")
        ├─ PRAGMA journal_mode = WAL
        ├─ PRAGMA foreign_keys = ON
        ├─ migrate()          ← 按 PRAGMA user_version 逐版本迁移 (v0→v1→...→v5)
@@ -102,16 +102,16 @@ flowscope --serve 启动
 如果需要在启动前预建数据库（如 CI 环境或容器构建时）：
 
 ```bash
-# 创建 app 目录（数据库默认路径 ./app/flowscope.db）
+# 创建 app 目录（数据库默认路径 ./app/capybara.db）
 mkdir -p ./app
 
 # 启动一次即自动建库，然后 Ctrl+C 退出
-./target/release/flowscope --serve --port 3000 &
+./target/release/capybara --serve --port 3000 &
 sleep 2 && kill %1
 
 # 验证
-sqlite3 ./app/flowscope.db ".tables"
-sqlite3 ./app/flowscope.db "SELECT name FROM pragma_table_info('projects');"
+sqlite3 ./app/capybara.db ".tables"
+sqlite3 ./app/capybara.db "SELECT name FROM pragma_table_info('projects');"
 ```
 
 ### 数据库迁移版本
@@ -138,9 +138,9 @@ sqlite3 ./app/flowscope.db "SELECT name FROM pragma_table_info('projects');"
 ### 自定义数据库路径
 
 ```bash
-# CLI 启动时指定（代码里暂未暴露 --db-path 参数，默认 ./app/flowscope.db）
+# CLI 启动时指定（代码里暂未暴露 --db-path 参数，默认 ./app/capybara.db）
 # 可通过环境变量或修改代码实现：
-FLOWSCOPE_DB=./data/custom.db ./target/release/flowscope --serve --port 3000
+FLOWSCOPE_DB=./data/custom.db ./target/release/capybara --serve --port 3000
 ```
 
 ## 部署方式
@@ -158,8 +158,8 @@ just build-ts
 just dev
 
 # 4. 启动后端 CLI Serve (:3000)
-cargo build -p flowscope-cli --features serve
-./target/debug/flowscope --serve --port 3000 --watch ./app
+cargo build -p capybara-cli --features serve
+./target/debug/capybara --serve --port 3000 --watch ./app
 ```
 
 ### 方式二：生产模式（单体 CLI，嵌入式前端）
@@ -169,11 +169,11 @@ cargo build -p flowscope-cli --features serve
 just build-cli-serve
 
 # 运行
-./target/release/flowscope --serve --port 3000 --watch ./app
+./target/release/capybara --serve --port 3000 --watch ./app
 
 # 后台运行 + 日志
-nohup ./target/release/flowscope --serve --port 3000 --watch ./app \
-  > /var/log/flowscope.log 2>&1 &
+nohup ./target/release/capybara --serve --port 3000 --watch ./app \
+  > /var/log/capybara.log 2>&1 &
 ```
 
 ### 方式三：纯前端模式（WASM）
@@ -194,17 +194,17 @@ just deploy
 
 ```bash
 #!/usr/bin/env bash
-# scripts/deploy.sh — 一键部署 FlowScope
+# scripts/deploy.sh — 一键部署 Capybara
 set -euo pipefail
 
 PORT=${1:-3000}
 WATCH_DIR=${2:-./app}
-LOG_DIR="/tmp/flowscope-logs"
-PID_FILE="/tmp/flowscope.pid"
+LOG_DIR="/tmp/capybara-logs"
+PID_FILE="/tmp/capybara.pid"
 
 mkdir -p "$LOG_DIR"
 
-echo "=== FlowScope 一键部署 ==="
+echo "=== Capybara 一键部署 ==="
 
 # Step 1: Precheck
 echo "[1/6] 环境检查..."
@@ -226,12 +226,12 @@ just build-cli-serve
 echo "[5/6] 初始化数据库..."
 mkdir -p "$WATCH_DIR"
 # 启动一次让 open_db() 自动建库，验证后停止
-./target/release/flowscope --serve --port "$PORT" &
+./target/release/capybara --serve --port "$PORT" &
 TMP_PID=$!
 sleep 2
 if curl -sf "http://127.0.0.1:$PORT/api/health" | grep -q "ok"; then
     echo "  数据库初始化成功"
-    TABLES=$(sqlite3 "$WATCH_DIR/flowscope.db" "SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "?")
+    TABLES=$(sqlite3 "$WATCH_DIR/capybara.db" "SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "?")
     echo "  表数量: $TABLES"
     kill $TMP_PID 2>/dev/null
     wait $TMP_PID 2>/dev/null
@@ -249,7 +249,7 @@ if [ -f "$PID_FILE" ] && kill -0 "$(cat $PID_FILE)" 2>/dev/null; then
     sleep 2
 fi
 
-nohup ./target/release/flowscope --serve --port "$PORT" --watch "$WATCH_DIR" \
+nohup ./target/release/capybara --serve --port "$PORT" --watch "$WATCH_DIR" \
     > "$LOG_DIR/serve.log" 2>&1 &
 echo $! > "$PID_FILE"
 
@@ -283,13 +283,13 @@ RUN just build-cli-serve
 
 FROM debian:bookworm-slim
 WORKDIR /app
-COPY --from=builder /app/target/release/flowscope .
+COPY --from=builder /app/target/release/capybara .
 COPY --from=builder /app/app ./app
 EXPOSE 3000
-CMD ["./flowscope", "--serve", "--port", "3000", "--watch", "./app"]
+CMD ["./capybara", "--serve", "--port", "3000", "--watch", "./app"]
 ```
 
 ```bash
-docker build -t flowscope .
-docker run -d -p 3000:3000 -v $(pwd)/app:/app/app flowscope
+docker build -t capybara .
+docker run -d -p 3000:3000 -v $(pwd)/app:/app/app capybara
 ```

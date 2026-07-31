@@ -28,17 +28,17 @@ function LineageExplorerInner({
   }, [sql, actions]);
 
   return (
-    <div className="flowscope-explorer-inner">
-      <div className="flowscope-main-layout">
-        <div className="flowscope-left-panel">
+    <div className="capybara-explorer-inner">
+      <div className="capybara-main-layout">
+        <div className="capybara-left-panel">
           <SqlView editable={!!onSqlChange} onChange={onSqlChange} />
           <IssuesPanel />
         </div>
-        <div className="flowscope-center-panel">
+        <div className="capybara-center-panel">
           <GraphView />
         </div>
         {/* ColumnPanel is removed as 'Details' tab is deprecated */}
-        {/* <div className="flowscope-right-panel">
+        {/* <div className="capybara-right-panel">
           <ColumnPanel />
         </div> */}
       </div>
@@ -62,7 +62,7 @@ export function LineageExplorer({
       initialSql={sql}
       defaultLayoutAlgorithm={defaultLayoutAlgorithm}
     >
-      <div className={`flowscope-explorer ${themeClass} ${className || ''}`.trim()}>
+      <div className={`capybara-explorer ${themeClass} ${className || ''}`.trim()}>
         <LineageExplorerInner result={result} sql={sql} onSqlChange={onSqlChange} />
       </div>
     </LineageProvider>

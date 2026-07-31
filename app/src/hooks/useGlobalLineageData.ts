@@ -1,5 +1,5 @@
 import { useMemo, useRef, useCallback } from 'react';
-import type { AnalyzeResult, Edge, Node } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult, Edge, Node } from '@pondpilot/capybara-core';
 
 // ============================================================================
 // Types (shared with GlobalLineageListView and MatrixView)

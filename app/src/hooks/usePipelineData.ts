@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import type { AnalyzeResult } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult } from '@pondpilot/capybara-core';
 import type { PipelineTask, TaskSchedule } from '@/types/pipeline-matrix';
 import { loadTableLevelEdges, saveTableLevelEdges } from '@/lib/server-db';
 import { useProject } from '@/lib/project-store';

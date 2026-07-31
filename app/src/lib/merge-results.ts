@@ -10,7 +10,7 @@ import type {
   GlobalNode,
   GlobalEdge,
   StatementLineage,
-} from '@pondpilot/flowscope-core';
+} from '@pondpilot/capybara-core';
 
 /** Check if a name looks like a Hive/Spark temp table */
 function isSparkTempTable(name: string): boolean {

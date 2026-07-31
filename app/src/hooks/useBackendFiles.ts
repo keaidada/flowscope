@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { FileSource, SchemaMetadata } from '@pondpilot/flowscope-core';
+import type { FileSource, SchemaMetadata } from '@pondpilot/capybara-core';
 import type { Dialect } from '@/lib/project-store';
 import { isValidDialect } from '@/lib/project-store';
 import type { TemplateMode } from '@/types';

@@ -1,6 +1,6 @@
-# Publishing @pondpilot/flowscope-core
+# Publishing @pondpilot/capybara-core
 
-This document covers the npm publishing flow for the FlowScope core package.
+This document covers the npm publishing flow for the Capybara core package.
 
 ## Prerequisites
 
@@ -22,7 +22,7 @@ just build-ts
 Or only the core package:
 
 ```bash
-yarn workspace @pondpilot/flowscope-core build
+yarn workspace @pondpilot/capybara-core build
 ```
 
 ## Local Pack Check

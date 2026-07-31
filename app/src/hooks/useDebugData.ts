@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
-import { useLineage } from '@pondpilot/flowscope-react';
+import { useLineage } from '@pondpilot/capybara-react';
 import { useProject } from '../lib/project-store';
 import { getLastParseResult } from '../lib/schema-parser';
 import { useAnalysisStore } from '../lib/analysis-store';
-import type { Issue, ResolvedSchemaTable } from '@pondpilot/flowscope-core';
+import type { Issue, ResolvedSchemaTable } from '@pondpilot/capybara-core';
 
 export interface DebugData {
   analysisResult: {

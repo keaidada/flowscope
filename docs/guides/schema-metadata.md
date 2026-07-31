@@ -1,6 +1,6 @@
 # Schema Metadata Format
 
-FlowScope accepts optional schema metadata to improve lineage accuracy and enable validation.
+Capybara accepts optional schema metadata to improve lineage accuracy and enable validation.
 
 ## Basic Structure
 

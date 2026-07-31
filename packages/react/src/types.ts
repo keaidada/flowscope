@@ -10,7 +10,7 @@ import type {
   SchemaTable,
   FilterPredicate,
   AggregationInfo,
-} from '@pondpilot/flowscope-core';
+} from '@pondpilot/capybara-core';
 
 /**
  * View mode for the lineage graph visualization.

@@ -2,7 +2,7 @@
  * Web Worker for matrix computation.
  * Builds table/script matrices and autocomplete data off the main thread.
  */
-import type { StatementLineage } from '@pondpilot/flowscope-core';
+import type { StatementLineage } from '@pondpilot/capybara-core';
 import type {
   MatrixData,
   TableDependencyWithDetails,

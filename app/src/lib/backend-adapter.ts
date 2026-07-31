@@ -1,11 +1,11 @@
 /**
- * Backend adapter for FlowScope analysis (REST only).
+ * Backend adapter for Capybara analysis (REST only).
  *
  * All analysis runs through the Rust CLI backend via REST API.
  * SQLite persistence is handled by the backend.
  */
 
-import type { AnalyzeResult, Dialect } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult, Dialect } from '@pondpilot/capybara-core';
 import type { TemplateMode } from '@/types';
 
 export interface AnalysisFile {

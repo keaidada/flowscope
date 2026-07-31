@@ -2,8 +2,8 @@ import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { Share2, Github, Settings, Network, Trash2, Bug, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { useLineageActions, useLineageState } from '@pondpilot/flowscope-react';
-import type { AnalyzeResult } from '@pondpilot/flowscope-core';
+import { useLineageActions, useLineageState } from '@pondpilot/capybara-react';
+import type { AnalyzeResult } from '@pondpilot/capybara-core';
 import { Button } from './ui/button';
 import {
   DropdownMenu,
@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
-import { FlowScopeLogo } from './FlowScopeLogo';
+import { CapybaraLogo } from './CapybaraLogo';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './ui/resizable';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
 
@@ -573,7 +573,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
         <div className="flex items-center gap-2">
           {/* Logo */}
           <div className="flex items-center gap-3">
-            <FlowScopeLogo className="w-8 h-8 text-foreground/30 dark:text-white/30" />
+            <CapybaraLogo className="w-8 h-8 text-foreground/30 dark:text-white/30" />
             <span className="text-lg font-semibold text-foreground">{t('app.brandName')}</span>
           </div>
 
@@ -638,7 +638,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
               )}
               <DropdownMenuItem asChild>
                 <a
-                  href="https://github.com/keaidada/flowscope"
+                  href="https://github.com/keaidada/capybara"
                   target="_blank"
                   rel="noopener noreferrer"
                 >

@@ -1,6 +1,6 @@
 # Error Handling Guide
 
-FlowScope returns structured issues for errors, warnings, and informational messages.
+Capybara returns structured issues for errors, warnings, and informational messages.
 
 ## Issue Structure
 
@@ -36,7 +36,7 @@ if (result.summary.hasErrors) {
 
 ## Partial Results
 
-FlowScope returns partial results whenever possible:
+Capybara returns partial results whenever possible:
 
 - A statement that fails to parse contributes a `PARSE_ERROR` issue.
 - Other statements continue to produce lineage.

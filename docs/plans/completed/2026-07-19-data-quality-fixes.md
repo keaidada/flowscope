@@ -24,7 +24,7 @@ serve mode. Each section covers root cause + fix + verification.
 integers (e.g. `1700000000000`), unreadable in DB viewers.
 
 ### Root cause
-Original schema in `crates/flowscope-cli/src/server/store.rs` declared every
+Original schema in `crates/capybara-cli/src/server/store.rs` declared every
 time column as `INTEGER NOT NULL DEFAULT 0`, populated via
 `chrono::Utc::now().timestamp_millis()`.
 
@@ -58,7 +58,7 @@ Migration tested on a synthetic v0 fixture; non-time data preserved.
 SELECT …` pattern and polluted physical-table-level lineage.
 
 ### Root cause
-`crates/flowscope-core/src/analyzer/ddl.rs`'s `analyze_create_table_as` and
+`crates/capybara-core/src/analyzer/ddl.rs`'s `analyze_create_table_as` and
 `analyze_create_table` unconditionally set `node_type: NodeType::Table`,
 ignoring the `is_temporary` flag. The cross-statement tracker had no concept
 of "temporary table", so `relation_identity()` always returned `Table`.
@@ -127,7 +127,7 @@ have a schema prefix (`sum_db.*`, `his_db.*`, …).
   in the same file_path.
 
 ### Root cause (analyzer side)
-In `crates/flowscope-core/src/analyzer/query.rs`, `resolve_table_alias` did
+In `crates/capybara-core/src/analyzer/query.rs`, `resolve_table_alias` did
 a **literal-string** lookup on `ctx.cte_definitions`. Hive is
 case-insensitive, so `with A1 as (…) … from a1.x` failed to resolve and
 fell back to `canonicalize_table_reference`, producing an owner node ID
@@ -249,22 +249,22 @@ These rules now apply to every agent session that touches the repo.
 ## Files Touched
 
 ### Rust
-- `crates/flowscope-cli/src/server/store.rs` — schema migration framework
+- `crates/capybara-cli/src/server/store.rs` — schema migration framework
   + 12 table rebuilds + 6 struct types + 5 write paths + `save_table_metadata`
   DELETE+INSERT.
-- `crates/flowscope-cli/src/server/api.rs` — `extract_and_save_ddl_metadata`
+- `crates/capybara-cli/src/server/api.rs` — `extract_and_save_ddl_metadata`
   RFC3339 `now` closure.
-- `crates/flowscope-core/src/analyzer/cross_statement.rs` — temp-table
+- `crates/capybara-core/src/analyzer/cross_statement.rs` — temp-table
   tracking + `relation_identity` returns `Cte`.
-- `crates/flowscope-core/src/analyzer/ddl.rs` — DDL branches on
+- `crates/capybara-core/src/analyzer/ddl.rs` — DDL branches on
   `is_temporary` + uses `canonicalize_table_reference`.
-- `crates/flowscope-core/src/analyzer/statements.rs` — INSERT/ALTER/RENAME/
+- `crates/capybara-core/src/analyzer/statements.rs` — INSERT/ALTER/RENAME/
   DROP/COPY call `canonicalize_table_reference`.
-- `crates/flowscope-core/src/analyzer.rs` — precollect uses
+- `crates/capybara-core/src/analyzer.rs` — precollect uses
   `canonicalize_table_reference`.
-- `crates/flowscope-core/src/analyzer/query.rs` —
+- `crates/capybara-core/src/analyzer/query.rs` —
   `resolve_table_alias` case-insensitive `cte_definitions` fallback.
-- `crates/flowscope-core/tests/lineage_engine.rs` — updated
+- `crates/capybara-core/tests/lineage_engine.rs` — updated
   `ddl_multi_statement_temp_table_pipeline` test.
 
 ### TypeScript

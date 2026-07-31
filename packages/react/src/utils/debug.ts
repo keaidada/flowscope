@@ -1,5 +1,5 @@
 /**
- * Shared debugging utilities for the flowscope-react package.
+ * Shared debugging utilities for the capybara-react package.
  */
 
 /**

@@ -1,6 +1,6 @@
 # Core Engine Spec (Rust)
 
-This document describes the behavior of the Rust lineage engine (`flowscope-core`). It focuses on runtime behavior rather than API surface.
+This document describes the behavior of the Rust lineage engine (`capybara-core`). It focuses on runtime behavior rather than API surface.
 
 ## Responsibilities
 
@@ -19,7 +19,7 @@ The core engine must:
 
 ## Supported Statement Types
 
-FlowScope analyzes the following statements when parsed successfully by `sqlparser-rs`:
+Capybara analyzes the following statements when parsed successfully by `sqlparser-rs`:
 
 - `SELECT` / `WITH` / set operations
 - `INSERT INTO ... SELECT`

@@ -27,7 +27,7 @@ export function IssuesPanel({ className, onIssueClick }: IssuesPanelProps): JSX.
 
   if (!result) {
     return (
-      <div className={`flowscope-issues-panel flowscope-panel-empty ${className || ''}`}>
+      <div className={`capybara-issues-panel capybara-panel-empty ${className || ''}`}>
         <p>No data available</p>
       </div>
     );
@@ -36,36 +36,36 @@ export function IssuesPanel({ className, onIssueClick }: IssuesPanelProps): JSX.
   const { errors, warnings, infos } = result.summary.issueCount;
 
   return (
-    <div className={`flowscope-issues-panel ${className || ''}`}>
-      <div className="flowscope-panel-header">
+    <div className={`capybara-issues-panel ${className || ''}`}>
+      <div className="capybara-panel-header">
         <h3>Issues</h3>
-        <div className="flowscope-issue-counts">
-          {errors > 0 && <span className="flowscope-count-error">{errors} errors</span>}
-          {warnings > 0 && <span className="flowscope-count-warning">{warnings} warnings</span>}
-          {infos > 0 && <span className="flowscope-count-info">{infos} info</span>}
-          {sortedIssues.length === 0 && <span className="flowscope-count-success">No issues</span>}
+        <div className="capybara-issue-counts">
+          {errors > 0 && <span className="capybara-count-error">{errors} errors</span>}
+          {warnings > 0 && <span className="capybara-count-warning">{warnings} warnings</span>}
+          {infos > 0 && <span className="capybara-count-info">{infos} info</span>}
+          {sortedIssues.length === 0 && <span className="capybara-count-success">No issues</span>}
         </div>
       </div>
-      <div className="flowscope-panel-content">
+      <div className="capybara-panel-content">
         {sortedIssues.length === 0 ? (
-          <p className="flowscope-hint">{t('issuesPanelReact.completedWithout')}</p>
+          <p className="capybara-hint">{t('issuesPanelReact.completedWithout')}</p>
         ) : (
-          <ul className="flowscope-issue-list">
+          <ul className="capybara-issue-list">
             {sortedIssues.map((issue, idx) => (
               <li
                 key={`${issue.code}-${idx}`}
-                className={`flowscope-issue flowscope-issue-${issue.severity}`}
+                className={`capybara-issue capybara-issue-${issue.severity}`}
                 onClick={() => handleIssueClick(issue)}
               >
-                <div className="flowscope-issue-header">
-                  <span className={`flowscope-severity flowscope-severity-${issue.severity}`}>
+                <div className="capybara-issue-header">
+                  <span className={`capybara-severity capybara-severity-${issue.severity}`}>
                     {issue.severity}
                   </span>
-                  <code className="flowscope-issue-code">{issue.code}</code>
+                  <code className="capybara-issue-code">{issue.code}</code>
                 </div>
-                <p className="flowscope-issue-message">{issue.message}</p>
+                <p className="capybara-issue-message">{issue.message}</p>
                 {issue.statementIndex !== undefined && (
-                  <span className="flowscope-issue-location">
+                  <span className="capybara-issue-location">
                     Statement {issue.statementIndex + 1}
                   </span>
                 )}

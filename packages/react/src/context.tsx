@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode, type JSX } from 'react';
-import type { AnalyzeResult } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult } from '@pondpilot/capybara-core';
 import { createLineageStore, LineageStoreProvider, type LineageState } from './store';
 import type { LayoutAlgorithm } from './types';
 import type { StoreApi } from 'zustand';

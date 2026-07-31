@@ -1,13 +1,13 @@
 # Dialect Support Gaps
 
-FlowScope uses [sqlparser-rs](https://github.com/sqlparser-rs/sqlparser-rs) for SQL parsing.
+Capybara uses [sqlparser-rs](https://github.com/sqlparser-rs/sqlparser-rs) for SQL parsing.
 Some dialects supported by SQLLineage (via SQLFluff) are not yet available.
 
 ## Supported Dialects
 
-| Dialect | FlowScope | SQLLineage | Notes |
+| Dialect | Capybara | SQLLineage | Notes |
 |---------|:---------:|:----------:|-------|
-| ANSI | Yes | Yes | FlowScope also supports Generic dialect |
+| ANSI | Yes | Yes | Capybara also supports Generic dialect |
 | BigQuery | Yes | Yes | |
 | ClickHouse | Yes | Yes | |
 | Databricks | Yes | Yes | |
@@ -22,7 +22,7 @@ Some dialects supported by SQLLineage (via SQLFluff) are not yet available.
 
 ## Missing Dialects
 
-These dialects are supported by SQLLineage (via SQLFluff) but not available in FlowScope:
+These dialects are supported by SQLLineage (via SQLFluff) but not available in Capybara:
 
 | Dialect | Blocking Issue | Workaround |
 |---------|----------------|------------|
@@ -62,10 +62,10 @@ The `Generic` dialect is the most permissive and accepts syntax from multiple di
 To add dialect support:
 
 1. Check if [sqlparser-rs](https://github.com/sqlparser-rs/sqlparser-rs) supports the dialect
-2. Add the variant to the `Dialect` enum in `crates/flowscope-core/src/types/request.rs`
+2. Add the variant to the `Dialect` enum in `crates/capybara-core/src/types/request.rs`
 3. Add the mapping in `to_sqlparser_dialect()` method
 4. Update `specs/dialect-semantics/dialects.json` with normalization rules
-5. Add dialect-specific test fixtures in `crates/flowscope-core/tests/fixtures/`
+5. Add dialect-specific test fixtures in `crates/capybara-core/tests/fixtures/`
 6. Document any syntax limitations
 
 ## Tracking Upstream

@@ -1,24 +1,24 @@
 # Workspace Structure
 
-This document captures the current FlowScope monorepo layout and the build organization used today.
+This document captures the current Capybara monorepo layout and the build organization used today.
 
 ## Directory Layout
 
 ```text
-flowscope/
+capybara/
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml
 │       └── publish-core.yml
 ├── app/                          # Demo Vite app
 ├── crates/                       # Rust workspace
-│   ├── flowscope-core/           # Core lineage engine
-│   ├── flowscope-wasm/           # WASM bindings
-│   ├── flowscope-cli/            # CLI
-│   └── flowscope-export/         # Export helpers
+│   ├── capybara-core/           # Core lineage engine
+│   ├── capybara-wasm/           # WASM bindings
+│   ├── capybara-cli/            # CLI
+│   └── capybara-export/         # Export helpers
 ├── packages/                     # NPM workspace
-│   ├── core/                     # @pondpilot/flowscope-core
-│   └── react/                    # @pondpilot/flowscope-react
+│   ├── core/                     # @pondpilot/capybara-core
+│   └── react/                    # @pondpilot/capybara-react
 ├── vscode/                       # VS Code extension
 │   └── webview-ui/               # Webview frontend
 ├── docs/                         # Documentation
@@ -51,13 +51,13 @@ See `justfile` for the full command list.
 ## Package Relationships
 
 ```text
-flowscope-core (Rust)
+capybara-core (Rust)
     ↓
-flowscope-wasm (Rust)
+capybara-wasm (Rust)
     ↓ (WASM artifacts)
-@pondpilot/flowscope-core (TS)
+@pondpilot/capybara-core (TS)
     ↓
-@pondpilot/flowscope-react (TS)
+@pondpilot/capybara-react (TS)
     ↓
 app/ and vscode/webview-ui
 ```

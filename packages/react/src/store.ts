@@ -1,7 +1,7 @@
 import { createContext, createElement, useContext, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { AnalyzeResult, Span } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult, Span } from '@pondpilot/capybara-core';
 import type {
   LineageViewMode,
   LayoutAlgorithm,
@@ -17,11 +17,11 @@ const DEFAULT_LAYOUT_ALGORITHM: LayoutAlgorithm = 'dagre';
 
 // Storage keys
 const STORAGE_KEYS = {
-  viewMode: 'flowscope-view-mode',
-  layoutAlgorithm: 'flowscope-layout-algorithm',
-  defaultCollapsed: 'flowscope-default-collapsed',
-  columnEdges: 'flowscope-column-edges',
-  hideCTEs: 'flowscope-hide-ctes',
+  viewMode: 'capybara-view-mode',
+  layoutAlgorithm: 'capybara-layout-algorithm',
+  defaultCollapsed: 'capybara-default-collapsed',
+  columnEdges: 'capybara-column-edges',
+  hideCTEs: 'capybara-hide-ctes',
 } as const;
 
 /**

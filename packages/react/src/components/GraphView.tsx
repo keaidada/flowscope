@@ -13,7 +13,7 @@ import {
 import type { Node as FlowNode, Edge as FlowEdge, Viewport } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { LayoutList, Maximize2, Minimize2, Route, GitBranch } from 'lucide-react';
-import type { AnalyzeResult, Node as LineageNode } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult, Node as LineageNode } from '@pondpilot/capybara-core';
 
 import { useLineage, useLineageStore } from '../store';
 import { useNodeFocus } from '../hooks/useNodeFocus';

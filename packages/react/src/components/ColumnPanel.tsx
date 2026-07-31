@@ -2,8 +2,8 @@ import { useMemo, type JSX } from 'react';
 import { ArrowRight, Columns3 } from 'lucide-react';
 import { useLineage } from '../store';
 import type { ColumnPanelProps } from '../types';
-import type { Node, Edge } from '@pondpilot/flowscope-core';
-import { isTableLikeType } from '@pondpilot/flowscope-core';
+import type { Node, Edge } from '@pondpilot/capybara-core';
+import { isTableLikeType } from '@pondpilot/capybara-core';
 import { COLORS } from '../constants';
 
 interface ColumnInfo {
@@ -92,7 +92,7 @@ export function ColumnPanel({ className }: ColumnPanelProps): JSX.Element {
 
   if (!result || !statement) {
     return (
-      <div className={`flowscope-column-panel flowscope-panel-empty ${className || ''}`}>
+      <div className={`capybara-column-panel capybara-panel-empty ${className || ''}`}>
         <p>No data available</p>
       </div>
     );
@@ -100,12 +100,12 @@ export function ColumnPanel({ className }: ColumnPanelProps): JSX.Element {
 
   if (!selectedNode) {
     return (
-      <div className={`flowscope-column-panel ${className || ''}`}>
-        <div className="flowscope-panel-header">
+      <div className={`capybara-column-panel ${className || ''}`}>
+        <div className="capybara-panel-header">
           <h3>Column Details</h3>
         </div>
-        <div className="flowscope-panel-content">
-          <p className="flowscope-hint">Select a node to view column details</p>
+        <div className="capybara-panel-content">
+          <p className="capybara-hint">Select a node to view column details</p>
         </div>
       </div>
     );
@@ -113,33 +113,33 @@ export function ColumnPanel({ className }: ColumnPanelProps): JSX.Element {
 
   if (isTableLikeType(selectedNode.type)) {
     return (
-      <div className={`flowscope-column-panel ${className || ''}`}>
-        <div className="flowscope-panel-header">
+      <div className={`capybara-column-panel ${className || ''}`}>
+        <div className="capybara-panel-header">
           <h3>{selectedNode.label}</h3>
-          <span className="flowscope-badge">{selectedNode.type}</span>
+          <span className="capybara-badge">{selectedNode.type}</span>
         </div>
-        <div className="flowscope-panel-content">
+        <div className="capybara-panel-content">
           {selectedNode.qualifiedName && (
-            <div className="flowscope-detail">
-              <span className="flowscope-label">Qualified Name:</span>
+            <div className="capybara-detail">
+              <span className="capybara-label">Qualified Name:</span>
               <code>{selectedNode.qualifiedName}</code>
             </div>
           )}
-          <div className="flowscope-section">
+          <div className="capybara-section">
             <h4>Columns ({tableColumns.length})</h4>
             {tableColumns.length === 0 ? (
-              <p className="flowscope-hint">No columns found</p>
+              <p className="capybara-hint">No columns found</p>
             ) : (
-              <ul className="flowscope-column-list">
+              <ul className="capybara-column-list">
                 {tableColumns.map((col) => (
                   <li
                     key={col.id}
                     onClick={() => handleColumnClick(col)}
-                    className="flowscope-column-item"
+                    className="capybara-column-item"
                   >
                     {col.label}
                     {col.expression && (
-                      <code className="flowscope-expression">{col.expression}</code>
+                      <code className="capybara-expression">{col.expression}</code>
                     )}
                   </li>
                 ))}
@@ -152,21 +152,21 @@ export function ColumnPanel({ className }: ColumnPanelProps): JSX.Element {
   }
 
   return (
-    <div className={`flowscope-column-panel ${className || ''}`}>
-      <div className="flowscope-panel-header">
+    <div className={`capybara-column-panel ${className || ''}`}>
+      <div className="capybara-panel-header">
         <h3>{selectedNode.label}</h3>
-        <span className="flowscope-badge">column</span>
+        <span className="capybara-badge">column</span>
       </div>
-      <div className="flowscope-panel-content">
+      <div className="capybara-panel-content">
         {selectedNode.expression && (
-          <div className="flowscope-detail">
-            <span className="flowscope-label">Expression:</span>
+          <div className="capybara-detail">
+            <span className="capybara-label">Expression:</span>
             <code>{selectedNode.expression}</code>
           </div>
         )}
 
         {columnInfo && columnInfo.upstream.length > 0 && (
-          <div className="flowscope-section">
+          <div className="capybara-section">
             <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span
                 style={{
@@ -178,12 +178,12 @@ export function ColumnPanel({ className }: ColumnPanelProps): JSX.Element {
               />
               Upstream ({columnInfo.upstream.length})
             </h4>
-            <ul className="flowscope-column-list">
+            <ul className="capybara-column-list">
               {columnInfo.upstream.map((node) => (
                 <li
                   key={node.id}
                   onClick={() => handleColumnClick(node)}
-                  className="flowscope-column-item"
+                  className="capybara-column-item"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -215,7 +215,7 @@ export function ColumnPanel({ className }: ColumnPanelProps): JSX.Element {
         )}
 
         {columnInfo && columnInfo.downstream.length > 0 && (
-          <div className="flowscope-section">
+          <div className="capybara-section">
             <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span
                 style={{
@@ -227,12 +227,12 @@ export function ColumnPanel({ className }: ColumnPanelProps): JSX.Element {
               />
               Downstream ({columnInfo.downstream.length})
             </h4>
-            <ul className="flowscope-column-list">
+            <ul className="capybara-column-list">
               {columnInfo.downstream.map((node) => (
                 <li
                   key={node.id}
                   onClick={() => handleColumnClick(node)}
-                  className="flowscope-column-item"
+                  className="capybara-column-item"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -255,10 +255,10 @@ export function ColumnPanel({ className }: ColumnPanelProps): JSX.Element {
         )}
 
         {flowPath.length > 1 && (
-          <div className="flowscope-section">
+          <div className="capybara-section">
             <h4>Data Flow</h4>
             <div
-              className="flowscope-flow-path"
+              className="capybara-flow-path"
               style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' }}
             >
               {flowPath.map((label, idx) => {
@@ -269,12 +269,12 @@ export function ColumnPanel({ className }: ColumnPanelProps): JSX.Element {
                     style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
                   >
                     <span
-                      className="flowscope-flow-chip"
+                      className="capybara-flow-chip"
                       style={{
                         backgroundColor: isSelected
                           ? COLORS.interactive.selection
-                          : 'var(--flowscope-surface-muted)',
-                        color: isSelected ? '#FFFFFF' : 'var(--flowscope-text)',
+                          : 'var(--capybara-surface-muted)',
+                        color: isSelected ? '#FFFFFF' : 'var(--capybara-text)',
                         padding: '2px 8px',
                         borderRadius: '4px',
                         fontSize: '12px',
@@ -285,7 +285,7 @@ export function ColumnPanel({ className }: ColumnPanelProps): JSX.Element {
                     </span>
                     {idx < flowPath.length - 1 && (
                       <ArrowRight
-                        className="flowscope-flow-arrow"
+                        className="capybara-flow-arrow"
                         style={{ width: '12px', height: '12px', color: COLORS.edges.dataFlow }}
                         aria-hidden="true"
                       />

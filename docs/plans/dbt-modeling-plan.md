@@ -2,7 +2,7 @@
 
 ## 核心思路
 
-dbt 最终产物是 `manifest.json`（编译后的所有模型、依赖、SQL）。FlowScope **不需要自己实现 Jinja 引擎**——直接解析 dbt 运行后生成的 `manifest.json` 即可拿到完整的模型依赖图和编译后的 SQL。
+dbt 最终产物是 `manifest.json`（编译后的所有模型、依赖、SQL）。Capybara **不需要自己实现 Jinja 引擎**——直接解析 dbt 运行后生成的 `manifest.json` 即可拿到完整的模型依赖图和编译后的 SQL。
 
 ## 分 4 步实施
 
@@ -85,7 +85,7 @@ struct DbtProjectConfig {
 
 | 来源字段 | 用途 |
 |---------|------|
-| `nodes[].unique_id` | FlowScope 文件标识 |
+| `nodes[].unique_id` | Capybara 文件标识 |
 | `nodes[].name` | 模型名 |
 | `nodes[].original_file_path` | 文件树路径 |
 | `nodes[].depends_on.nodes` | 模型依赖（含 `ref()` 和 `source()`） |
@@ -116,7 +116,7 @@ raw.customers ──→ stg_customers ──┘
 
 **3. 文件注册**
 
-将每个模型作为 FlowScope 项目文件注册：
+将每个模型作为 Capybara 项目文件注册：
 ```rust
 FileSource {
     name: node.original_file_path,        // "models/staging/stg_orders.sql"
@@ -157,7 +157,7 @@ let result = analyze(&request);
 ### 数据处理流
 
 ```
-dbt_project/                    FlowScope
+dbt_project/                    Capybara
 ├── dbt_project.yml       →    Step1: 解析项目配置
 ├── target/
 │   └── manifest.json     →    Step2: 解析模型DAG + compiled_sql

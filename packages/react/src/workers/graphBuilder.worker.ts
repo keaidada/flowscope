@@ -14,8 +14,8 @@ import type {
   GlobalNode,
   FilterPredicate,
   AggregationInfo,
-} from '@pondpilot/flowscope-core';
-import { isTableLikeType } from '@pondpilot/flowscope-core';
+} from '@pondpilot/capybara-core';
+import { isTableLikeType } from '@pondpilot/capybara-core';
 import { GRAPH_CONFIG } from '../constants';
 import {
   buildJoinedTableIds,

@@ -1,5 +1,5 @@
 /**
- * Types for the FlowScope SQL lineage analysis API.
+ * Types for the Capybara SQL lineage analysis API.
  * @module types
  */
 
@@ -807,7 +807,7 @@ function isLowSurrogate(charCode: number): boolean {
 /**
  * Convert a JavaScript string character index (UTF-16 code units) to a UTF-8 byte offset.
  *
- * JavaScript strings use UTF-16 internally, but the FlowScope WASM API expects
+ * JavaScript strings use UTF-16 internally, but the Capybara WASM API expects
  * UTF-8 byte offsets. This function converts a character index (as returned by
  * methods like `indexOf()` or cursor position in editors) to the corresponding
  * byte offset in the UTF-8 encoded string.

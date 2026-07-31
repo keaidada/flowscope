@@ -9,7 +9,7 @@
 
 ### 1.1 背景
 
-当前 FlowScope 已具备完整的 SQL 血缘解析能力和成熟的全局血缘关系图（GraphView），以"图"的形式展示**表与字段**的血缘关系。
+当前 Capybara 已具备完整的 SQL 血缘解析能力和成熟的全局血缘关系图（GraphView），以"图"的形式展示**表与字段**的血缘关系。
 
 **现有 GraphView 特性**：
 - 使用 React Flow 实现
@@ -114,7 +114,7 @@ export function GlobalLineageView({ result, mode, onModeChange, ... }) {
 
 ```typescript
 // app/src/components/InsightsGraphView.tsx
-import { GraphView } from '@pondpilot/flowscope-react';
+import { GraphView } from '@pondpilot/capybara-react';
 import { convertLineageToInsightsGraph } from './utils/data-mapper';
 
 export function InsightsGraphView({ result }: { result: AnalyzeResult | null }) {
@@ -135,7 +135,7 @@ export function InsightsGraphView({ result }: { result: AnalyzeResult | null }) 
 
 ```typescript
 // app/src/components/utils/data-mapper.ts
-import type { AnalyzeResult, Node, Edge } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult, Node, Edge } from '@pondpilot/capybara-core';
 
 /**
  * 将血缘数据转换为洞察视图的数据结构

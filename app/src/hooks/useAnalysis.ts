@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, startTransition } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLineageStore } from '@pondpilot/flowscope-react';
+import { useLineageStore } from '@pondpilot/capybara-react';
 import { toast } from 'sonner';
 import { analyzeWithWorker, getCachedAnalysis, syncAnalysisFiles } from '@/lib/analysis-worker';
 import type { BackendAdapter, AnalysisPayload } from '@/lib/backend-adapter';

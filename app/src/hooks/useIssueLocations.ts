@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react';
-import type { Issue, StatementLineage } from '@pondpilot/flowscope-core';
+import type { Issue, StatementLineage } from '@pondpilot/capybara-core';
 import { byteOffsetToLineColumn } from '@/lib/utils';
 
 export interface FileInfo {

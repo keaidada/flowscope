@@ -2,7 +2,7 @@ import { useEffect, useCallback, useRef, useMemo, useState } from 'react';
 import { Loader2, AlertCircle, FileX, FileCode, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { SqlView, useLineageState } from '@pondpilot/flowscope-react';
+import { SqlView, useLineageState } from '@pondpilot/capybara-react';
 import { cn } from '@/lib/utils';
 import { useProject } from '@/lib/project-store';
 import { upsertProjectFiles } from '@/lib/file-storage';

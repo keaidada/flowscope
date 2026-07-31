@@ -25,13 +25,13 @@ const wasmModuleMock = vi.hoisted(() => ({
   export_html: vi.fn(() => '<html></html>'),
   export_csv_bundle: vi.fn(() => new Uint8Array()),
   export_xlsx: vi.fn(() => new Uint8Array()),
-  export_filename: vi.fn(() => 'flowscope_export'),
+  export_filename: vi.fn(() => 'capybara_export'),
   completion_items_json: vi.fn(() => JSON.stringify({ clause: 'unknown', items: [] })),
   split_statements_json: vi.fn(() => JSON.stringify({ statements: [] })),
   set_panic_hook: vi.fn(() => undefined),
 }));
 
-vi.mock('../src/wasm/flowscope_wasm', () => wasmModuleMock);
+vi.mock('../src/wasm/capybara_wasm', () => wasmModuleMock);
 
 async function loadAnalyzer() {
   return import('../src/analyzer');

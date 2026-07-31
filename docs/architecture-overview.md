@@ -2,50 +2,50 @@
 
 ## Component Summary
 
-FlowScope is a Rust + TypeScript monorepo with a WASM boundary and optional UI layers.
+Capybara is a Rust + TypeScript monorepo with a WASM boundary and optional UI layers.
 
 1. **Core Engine (Rust)**
-   - `flowscope-core`: SQL parsing and lineage analysis.
-   - `flowscope-wasm`: WASM bindings exposing JSON APIs.
-   - `flowscope-export`: Export helpers (DuckDB/SQL text) used by CLI and JS tooling.
-   - `flowscope-cli`: CLI wrapper around the core engine.
+   - `capybara-core`: SQL parsing and lineage analysis.
+   - `capybara-wasm`: WASM bindings exposing JSON APIs.
+   - `capybara-export`: Export helpers (DuckDB/SQL text) used by CLI and JS tooling.
+   - `capybara-cli`: CLI wrapper around the core engine.
 
 2. **JS/TS Runtime Layer**
-   - `@pondpilot/flowscope-core`: TypeScript API + WASM loader.
+   - `@pondpilot/capybara-core`: TypeScript API + WASM loader.
 
 3. **UI & Integrations**
-   - `@pondpilot/flowscope-react`: React visualization components.
+   - `@pondpilot/capybara-react`: React visualization components.
    - `app/`: Demo Vite app.
    - `vscode/`: VS Code extension + webview UI.
 
 ## Data Flow
 
 ```text
-[Host App] --(SQL + schema + options)--> [@pondpilot/flowscope-core]
-    --(JSON)--> [flowscope-wasm]
-        --(Rust analysis)--> [flowscope-core]
-        --(JSON result)--> [@pondpilot/flowscope-core]
-            --(typed result)--> [Host App / @pondpilot/flowscope-react]
+[Host App] --(SQL + schema + options)--> [@pondpilot/capybara-core]
+    --(JSON)--> [capybara-wasm]
+        --(Rust analysis)--> [capybara-core]
+        --(JSON result)--> [@pondpilot/capybara-core]
+            --(typed result)--> [Host App / @pondpilot/capybara-react]
 ```
 
 ## Responsibilities
 
-### Core Engine (`flowscope-core`)
+### Core Engine (`capybara-core`)
 - Parses SQL with `sqlparser-rs`.
 - Produces statement-level lineage graphs and a global graph.
 - Emits structured issues for unsupported syntax and partial lineage.
-- Uses dialect semantics generated from `crates/flowscope-core/specs/dialect-semantics/`.
+- Uses dialect semantics generated from `crates/capybara-core/specs/dialect-semantics/`.
 
-### WASM Boundary (`flowscope-wasm`)
+### WASM Boundary (`capybara-wasm`)
 - Bridges JSON request/response payloads.
 - Avoids exposing Rust internals to JS consumers.
 
-### TypeScript Wrapper (`@pondpilot/flowscope-core`)
+### TypeScript Wrapper (`@pondpilot/capybara-core`)
 - Initializes WASM modules.
 - Provides `analyzeSql`, `splitStatements`, and completion APIs.
 - Exposes strongly typed results and issue codes.
 
-### UI Layer (`@pondpilot/flowscope-react`)
+### UI Layer (`@pondpilot/capybara-react`)
 - Renders lineage graphs and diagnostics.
 - Consumes typed results without re-running analysis.
 

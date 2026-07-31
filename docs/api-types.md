@@ -1,6 +1,6 @@
 # API Type Definitions
 
-This document summarizes the public TypeScript API for `@pondpilot/flowscope-core`.
+This document summarizes the public TypeScript API for `@pondpilot/capybara-core`.
 
 **Source of truth:**
 - `packages/core/src/types.ts` (authoritative)

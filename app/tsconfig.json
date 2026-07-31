@@ -18,8 +18,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@pondpilot/flowscope-core": ["../packages/core/src/index.ts"],
-      "@pondpilot/flowscope-react": ["../packages/react/src/index.ts"]
+      "@pondpilot/capybara-core": ["../packages/core/src/index.ts"],
+      "@pondpilot/capybara-react": ["../packages/react/src/index.ts"]
     }
   },
   "include": ["src"],

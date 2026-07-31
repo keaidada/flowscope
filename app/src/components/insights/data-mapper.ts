@@ -3,7 +3,7 @@ import type {
   GlobalNode,
   GlobalEdge,
   CanonicalName,
-} from '@pondpilot/flowscope-core';
+} from '@pondpilot/capybara-core';
 
 /**
  * 数据洞察视图的数据映射工具

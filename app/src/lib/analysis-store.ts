@@ -10,7 +10,7 @@
  */
 
 import { create } from 'zustand';
-import type { AnalyzeResult } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult } from '@pondpilot/capybara-core';
 
 interface CachedResult {
   result: AnalyzeResult;

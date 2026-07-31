@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { isTableLikeType } from '@pondpilot/flowscope-core';
+import { isTableLikeType } from '@pondpilot/capybara-core';
 import { useLineageStore } from '../store';
 
 export interface SearchResultItem {

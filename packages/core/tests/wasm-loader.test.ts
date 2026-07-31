@@ -6,7 +6,7 @@ const wasmModuleMock = vi.hoisted(() => ({
   __wbindgen_free: vi.fn(),
 }));
 
-vi.mock('../src/wasm/flowscope_wasm', () => wasmModuleMock);
+vi.mock('../src/wasm/capybara_wasm', () => wasmModuleMock);
 
 async function loadLoader() {
   return import('../src/wasm-loader');
@@ -46,9 +46,9 @@ describe('wasm-loader', () => {
   it('forwards wasmUrl option to the wasm initializer', async () => {
     const loader = await loadLoader();
 
-    await loader.initWasm({ wasmUrl: '/custom/flowscope.wasm' });
+    await loader.initWasm({ wasmUrl: '/custom/capybara.wasm' });
 
-    expect(wasmModuleMock.default).toHaveBeenCalledWith('/custom/flowscope.wasm');
+    expect(wasmModuleMock.default).toHaveBeenCalledWith('/custom/capybara.wasm');
   });
 
   it('throws if analyze_sql_json is missing on the wasm exports', async () => {

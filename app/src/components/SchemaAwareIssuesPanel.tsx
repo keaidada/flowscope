@@ -1,12 +1,12 @@
 import { useMemo } from 'react';
-import { useLineage } from '@pondpilot/flowscope-react';
+import { useLineage } from '@pondpilot/capybara-react';
 import { AlertCircle, Database } from 'lucide-react';
 import { useNavigation } from '@/lib/navigation-context';
 import { useProject } from '@/lib/project-store';
 import { useIssueLocations } from '@/hooks';
 import { IssuesFilterBar } from './IssuesFilterBar';
 import { useViewStateStore, getIssuesStateWithDefaults } from '@/lib/view-state-store';
-import type { Issue } from '@pondpilot/flowscope-core';
+import type { Issue } from '@pondpilot/capybara-core';
 
 interface SchemaAwareIssuesPanelProps {
   projectId: string;

@@ -30,10 +30,10 @@ export const KEYBOARD_SHORTCUTS = {
 } as const;
 
 export const STORAGE_KEYS = {
-  PROJECTS: 'flowscope-projects',
-  ACTIVE_PROJECT_ID: 'flowscope-active-project-id',
-  VIEW_MODE: 'flowscope-view-mode',
-  WELCOME_SHOWN: 'flowscope-welcome-shown',
+  PROJECTS: 'capybara-projects',
+  ACTIVE_PROJECT_ID: 'capybara-active-project-id',
+  VIEW_MODE: 'capybara-view-mode',
+  WELCOME_SHOWN: 'capybara-welcome-shown',
 } as const;
 
 export const UI_CONFIG = {

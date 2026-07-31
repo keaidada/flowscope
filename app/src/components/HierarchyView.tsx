@@ -29,7 +29,7 @@ import {
   SearchAutocomplete,
   type SearchSuggestion,
   type SearchAutocompleteRef,
-} from '@pondpilot/flowscope-react';
+} from '@pondpilot/capybara-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useNavigation } from '@/lib/navigation-context';

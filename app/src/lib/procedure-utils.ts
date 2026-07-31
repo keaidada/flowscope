@@ -7,8 +7,8 @@
  * FORMAT placeholders, EXECUTE IMMEDIATE, etc.
  */
 
-import { sanitizeProcedure, sanitizeProcedureWithMap, initWasm, isWasmInitialized } from '@pondpilot/flowscope-core';
-import type { SanitizeWithMapResult } from '@pondpilot/flowscope-core';
+import { sanitizeProcedure, sanitizeProcedureWithMap, initWasm, isWasmInitialized } from '@pondpilot/capybara-core';
+import type { SanitizeWithMapResult } from '@pondpilot/capybara-core';
 
 /**
  * Extract DML from a stored procedure.

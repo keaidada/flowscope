@@ -1,4 +1,4 @@
-import type { AnalyzeResult } from '@pondpilot/flowscope-core';
+import type { AnalyzeResult } from '@pondpilot/capybara-core';
 import type {
   AnalysisWorkerPayload,
   AnalysisWorkerRequest,

@@ -3,7 +3,7 @@ import { initReactI18next } from 'react-i18next';
 import en from './locales/en.json';
 import zh from './locales/zh.json';
 
-const STORAGE_KEY = 'flowscope-language';
+const STORAGE_KEY = 'capybara-language';
 
 function getInitialLanguage(): string {
   try {

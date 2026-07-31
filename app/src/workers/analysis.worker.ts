@@ -6,8 +6,8 @@ import {
   mergeProgressiveInit,
   mergeProgressiveAdd,
   mergeProgressiveExport,
-} from '@pondpilot/flowscope-core';
-import type { AnalyzeResult, Dialect } from '@pondpilot/flowscope-core';
+} from '@pondpilot/capybara-core';
+import type { AnalyzeResult, Dialect } from '@pondpilot/capybara-core';
 import { parseSchemaSQL } from '../lib/schema-parser';
 import {
   readCachedAnalysisResult,

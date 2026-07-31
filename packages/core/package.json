@@ -1,5 +1,5 @@
 {
-  "name": "@pondpilot/flowscope-core",
+  "name": "@pondpilot/capybara-core",
   "version": "1.0.0",
   "description": "SQL lineage analysis engine for the browser",
   "type": "module",

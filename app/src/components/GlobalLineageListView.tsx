@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import type { AnalyzeResult } from '@pondpilot/flowscope-core';
-import { useLineageActions } from '@pondpilot/flowscope-react';
+import type { AnalyzeResult } from '@pondpilot/capybara-core';
+import { useLineageActions } from '@pondpilot/capybara-react';
 import {
   ArrowDownToLine,
   ArrowUpDown,

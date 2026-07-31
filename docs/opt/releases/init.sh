@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# FS (FlowScope) Serve 模式 — 一键初始化 + 启动脚本
+# FS (Capybara) Serve 模式 — 一键初始化 + 启动脚本
 #
 # 功能：
 #   1. 检测运行环境（自动安装缺失依赖）
@@ -14,14 +14,14 @@
 #   ./init.sh                              # 前台运行，默认端口 3000
 #   ./init.sh --port 8080                  # 指定端口
 #   ./init.sh --daemon                     # 后台运行
-#   ./init.sh --target /tmp/flowscope      # 指定安装目录
+#   ./init.sh --target /tmp/capybara      # 指定安装目录
 #   ./init.sh --sql-dir /path/to/sql       # 指定 SQL 目录
 # ============================================================================
 
 set -euo pipefail
 
 # ── 默认参数 ──────────────────────────────────────────────────────────────
-INSTALL_DIR="/tmp/flowscope"
+INSTALL_DIR="/tmp/capybara"
 PORT=3000
 DAEMON=false
 SQL_DIR=""
@@ -54,7 +54,7 @@ while [[ $# -gt 0 ]]; do
             echo "用法: ./init.sh [选项]"
             echo ""
             echo "选项:"
-            echo "  --target <dir>     安装目录 (默认: /tmp/flowscope)"
+            echo "  --target <dir>     安装目录 (默认: /tmp/capybara)"
             echo "  --port <n>         端口号 (默认: 3000)"
             echo "  --daemon           后台运行"
             echo "  --sql-dir <dir>    SQL 文件目录 (默认: 安装目录/sql)"
@@ -103,8 +103,8 @@ info "CPU 架构: $ARCH"
 TARBALL=""
 if [[ "$OS_NAME" == "macOS" ]]; then
     case "$ARCH" in
-        arm64)  TARBALL="$SCRIPT_DIR/flowscope-1.0.0-darwin-arm64.tar.gz" ;;
-        x86_64) TARBALL="$SCRIPT_DIR/flowscope-1.0.0-darwin-x86_64.tar.gz" ;;
+        arm64)  TARBALL="$SCRIPT_DIR/capybara-1.0.0-darwin-arm64.tar.gz" ;;
+        x86_64) TARBALL="$SCRIPT_DIR/capybara-1.0.0-darwin-x86_64.tar.gz" ;;
     esac
 fi
 
@@ -132,20 +132,20 @@ log "环境检测通过 ✅"
 step "2/5 安装二进制..."
 
 # 备份旧数据库
-if [[ -f "$INSTALL_DIR/data/flowscope.db" ]]; then
-    BACKUP="$INSTALL_DIR/data/flowscope.db.bak.$(date +%Y%m%d%H%M%S)"
-    cp "$INSTALL_DIR/data/flowscope.db" "$BACKUP"
+if [[ -f "$INSTALL_DIR/data/capybara.db" ]]; then
+    BACKUP="$INSTALL_DIR/data/capybara.db.bak.$(date +%Y%m%d%H%M%S)"
+    cp "$INSTALL_DIR/data/capybara.db" "$BACKUP"
     info "已备份旧数据库: $BACKUP"
 fi
 
 mkdir -p "$INSTALL_DIR"/{bin,data,logs,sql}
 
 # 清理可能残留的旧数据库文件（避免 schema 不兼容）
-rm -f "$INSTALL_DIR/data/flowscope.db"*
+rm -f "$INSTALL_DIR/data/capybara.db"*
 
 
 tar -xzf "$TARBALL" -C "$INSTALL_DIR/bin/"
-chmod +x "$INSTALL_DIR/bin/flowscope"
+chmod +x "$INSTALL_DIR/bin/capybara"
 
 # 拷贝内置示例 SQL 文件
 for f in "$SCRIPT_DIR"/*.sql; do
@@ -165,7 +165,7 @@ echo ""
 # ============================================================================
 step "3/5 验证二进制..."
 
-BIN_VERSION="$("$INSTALL_DIR/bin/flowscope" --version 2>&1)" || error "二进制验证失败"
+BIN_VERSION="$("$INSTALL_DIR/bin/capybara" --version 2>&1)" || error "二进制验证失败"
 info "版本: $BIN_VERSION ✅"
 
 # ============================================================================
@@ -173,11 +173,11 @@ info "版本: $BIN_VERSION ✅"
 # ============================================================================
 step "4/5 启动服务..."
 
-PID_FILE="$INSTALL_DIR/logs/flowscope.pid"
-LOG_FILE="$INSTALL_DIR/logs/flowscope.log"
-DB_PATH="$INSTALL_DIR/data/flowscope.db"
+PID_FILE="$INSTALL_DIR/logs/capybara.pid"
+LOG_FILE="$INSTALL_DIR/logs/capybara.log"
+DB_PATH="$INSTALL_DIR/data/capybara.db"
 
-CMD="$INSTALL_DIR/bin/flowscope --serve --port $PORT --watch $SQL_DIR"
+CMD="$INSTALL_DIR/bin/capybara --serve --port $PORT --watch $SQL_DIR"
 
 if $DAEMON; then
     # --- 后台运行 ---
@@ -262,7 +262,7 @@ echo -e "${GREEN}║  ❤️  健康检查:     curl http://localhost:${PORT}/ap
 echo -e "${GREEN}║                                                      ║${NC}"
 echo -e "${GREEN}╠══════════════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║  📁 安装路径                                       ║${NC}"
-echo -e "${GREEN}║     二进制:   $INSTALL_DIR/bin/flowscope${NC}"
+echo -e "${GREEN}║     二进制:   $INSTALL_DIR/bin/capybara${NC}"
 printf "${GREEN}║     数据库:   %s${NC}\n" "$DB_PATH"
 printf "${GREEN}║     日志:     %s${NC}\n" "$LOG_FILE"
 printf "${GREEN}║     SQL:      %s${NC}\n" "$SQL_DIR"

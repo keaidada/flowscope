@@ -12,7 +12,7 @@
  * - Unicode identifiers are supported but not validated
  */
 
-import type { SchemaTable, ResolvedSchemaTable } from '@pondpilot/flowscope-core';
+import type { SchemaTable, ResolvedSchemaTable } from '@pondpilot/capybara-core';
 
 /**
  * Strip quote characters from a single identifier segment.

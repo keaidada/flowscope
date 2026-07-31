@@ -10,7 +10,7 @@ import type {
   ResolvedSchemaMetadata,
   GlobalLineage,
   Node as LineageNode,
-} from '@pondpilot/flowscope-core';
+} from '@pondpilot/capybara-core';
 import type { Node as FlowNode, Edge as FlowEdge, MarkerType } from '@xyflow/react';
 import type {
   GraphBuildRequest,

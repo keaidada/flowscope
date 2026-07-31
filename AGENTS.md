@@ -2,7 +2,7 @@
 
 ## Scope
 
-This file applies to the entire FlowScope monorepo.
+This file applies to the entire Capybara monorepo.
 
 ## Critical Rules (DO NOT VIOLATE)
 
@@ -45,10 +45,10 @@ When in doubt, **ask**. A 10-second confirmation beats an irreversible data loss
 
 ## Repo Overview
 
-FlowScope is a Rust + TypeScript monorepo.
+Capybara is a Rust + TypeScript monorepo.
 Key areas:
 - `crates/` Rust workspace (core engine, wasm, CLI, export).
-- `packages/` TypeScript packages (`@pondpilot/flowscope-core`, `@pondpilot/flowscope-react`).
+- `packages/` TypeScript packages (`@pondpilot/capybara-core`, `@pondpilot/capybara-react`).
 - `app/` demo web app (Vite + React).
 - `vscode/` VS Code extension + `vscode/webview-ui`.
 
@@ -81,7 +81,7 @@ Key areas:
 The CLI serve feature embeds the web app using rust-embed at compile time. This requires the app to be built first:
 
 1. `cd app && yarn build` - Build frontend assets to `app/dist/`
-2. `cargo build -p flowscope-cli --features serve` - Compile CLI with embedded assets
+2. `cargo build -p capybara-cli --features serve` - Compile CLI with embedded assets
 
 The `just build-cli-serve` target handles this dependency automatically.
 
@@ -102,22 +102,22 @@ Standard procedure to bring up a complete dev environment. All steps are mandato
    ```bash
    just build-wasm-dev
    ```
-   Output: `packages/core/wasm/flowscope_wasm_bg.wasm` and auto-symlinked into `app/node_modules`.
+   Output: `packages/core/wasm/capybara_wasm_bg.wasm` and auto-symlinked into `app/node_modules`.
 
 2. Build TypeScript packages:
    ```bash
    just build-ts
    ```
-   Builds `@pondpilot/flowscope-core`, `@pondpilot/flowscope-react`, and vscode webview.
+   Builds `@pondpilot/capybara-core`, `@pondpilot/capybara-react`, and vscode webview.
 
 ### Service 1: Frontend dev server (Vite)
 
 ```bash
-nohup just dev > /tmp/flowscope-logs/dev.log 2>&1 &
+nohup just dev > /tmp/capybara-logs/dev.log 2>&1 &
 ```
 - URL: http://localhost:5173/
 - Healthcheck: `curl -o /dev/null -w "%{http_code}\n" http://localhost:5173/` → `200`
-- Log: `/tmp/flowscope-logs/dev.log`
+- Log: `/tmp/capybara-logs/dev.log`
 - Stop: `pkill -f "vite"`
 - Requires: WASM + TS build steps above completed once.
 
@@ -125,16 +125,16 @@ nohup just dev > /tmp/flowscope-logs/dev.log 2>&1 &
 
 ```bash
 # Build CLI with serve feature (debug, fast). Only needed once or after CLI/embedded-app changes.
-cargo build -p flowscope-cli --features serve
+cargo build -p capybara-cli --features serve
 
 # Run server (watches ./app for SQL changes, port 3000)
-nohup ./target/debug/flowscope --serve --port 3000 --watch ./app > /tmp/flowscope-logs/serve.log 2>&1 &
+nohup ./target/debug/capybara --serve --port 3000 --watch ./app > /tmp/capybara-logs/serve.log 2>&1 &
 ```
 - URL: http://127.0.0.1:3000
 - Healthcheck: `curl http://127.0.0.1:3000/api/health` → `{"status":"ok","version":"1.0.0"}`
 - Config: `curl http://127.0.0.1:3000/api/config`
-- Log: `/tmp/flowscope-logs/serve.log`
-- Stop: `pkill -f "flowscope --serve"`
+- Log: `/tmp/capybara-logs/serve.log`
+- Stop: `pkill -f "capybara --serve"`
 - Requires: `embedded-app/` populated (run `just sync-cli-serve-assets` after frontend changes).
 
 ### REST API endpoints (serve mode)
@@ -179,10 +179,10 @@ Both should return `200`.
 - `just test-rust` (`cargo test --workspace`).
 - `just test-rust-release` (`cargo test --workspace --release`).
 - `just test-ts` (`yarn workspaces run test`).
-- `just test-core` (`cargo test -p flowscope-core`).
-- `just test-cli` (`cargo test -p flowscope-cli`).
+- `just test-core` (`cargo test -p capybara-core`).
+- `just test-cli` (`cargo test -p capybara-cli`).
 - `just test-cli-serve` (CLI tests with serve feature, builds app first).
-- `just test-lineage` (`cargo test -p flowscope-core --test lineage_engine`).
+- `just test-lineage` (`cargo test -p capybara-core --test lineage_engine`).
 - `just test-lineage-verbose` (same test with `--nocapture`).
 - `just check-schema` (Rust schema guard + TS schema compatibility).
 - `just coverage` (generate HTML coverage report in `coverage/`, requires `cargo-llvm-cov`).
@@ -214,8 +214,8 @@ Both should return `200`.
 ## Single Test Tips
 
 - Rust lineage tests: `just test-lineage-filter PATTERN`.
-- Rust lineage tests (manual): `cargo test -p flowscope-core --test lineage_engine PATTERN`.
-- Schema compatibility: `yarn workspace @pondpilot/flowscope-core test schema-compat.test.ts --silent`.
+- Rust lineage tests (manual): `cargo test -p capybara-core --test lineage_engine PATTERN`.
+- Schema compatibility: `yarn workspace @pondpilot/capybara-core test schema-compat.test.ts --silent`.
 - For other Rust crates, use `cargo test -p <crate>` then filter with a test name if needed.
 
 ## Code Style (Rust)
@@ -225,14 +225,14 @@ Both should return `200`.
 - Lint with `cargo clippy` and fix warnings.
 - Workspace uses Rust 2021 edition (see `Cargo.toml`).
 - Avoid unused variables; if intentionally unused, prefix with `_`.
-- Keep modules small and focused; `flowscope-core` uses a layered analyzer.
+- Keep modules small and focused; `capybara-core` uses a layered analyzer.
 
 ## Error Handling (Rust)
 
 - Use `ParseError` for fatal parsing failures returned via `Result<T, ParseError>`.
 - Use `Issue` for non-fatal analysis problems (collected and returned alongside results).
-- `flowscope-cli` uses `anyhow::Result` with `Context` for CLI errors.
-- `flowscope-export` and analyzer input use `thiserror::Error` for structured errors.
+- `capybara-cli` uses `anyhow::Result` with `Context` for CLI errors.
+- `capybara-export` and analyzer input use `thiserror::Error` for structured errors.
 
 ## Code Style (TypeScript)
 
@@ -254,7 +254,7 @@ Both should return `200`.
 
 - Add unit tests for new functionality (`CONTRIBUTING.md`).
 - Add integration tests for complex features.
-- Use fixtures under `crates/flowscope-core/tests/fixtures/` when needed.
+- Use fixtures under `crates/capybara-core/tests/fixtures/` when needed.
 - Keep test output clean; avoid noisy logs unless `--nocapture` is intended.
 
 ## Docs and Updates
@@ -262,8 +262,8 @@ Both should return `200`.
 - Update documentation and `CHANGELOG.md` if a change requires it (see `CONTRIBUTING.md`).
 - Docs index and specs live in `docs/README.md`.
 - Usage guides live in `docs/guides/`.
-- The CLI usage details live in `crates/flowscope-cli/README.md`.
-- Core engine overview lives in `crates/flowscope-core/README.md`.
+- The CLI usage details live in `crates/capybara-cli/README.md`.
+- Core engine overview lives in `crates/capybara-core/README.md`.
 
 ## Releases (Single Tag)
 
@@ -272,22 +272,22 @@ Use a single repo tag for each release (`vX.Y.Z`) and align Rust workspace + npm
 1. Update versions:
    - `Cargo.toml` workspace version + workspace dependencies
    - `packages/core/package.json`, `packages/react/package.json`, `packages/core/wasm/package.json`
-   - Update peer dependency on `@pondpilot/flowscope-core` in `packages/react`
+   - Update peer dependency on `@pondpilot/capybara-core` in `packages/react`
 2. Update `CHANGELOG.md`:
    - Move Unreleased entries to `## [X.Y.Z] - YYYY-MM-DD`
    - Summarize changes per crate/package
 3. Validate:
    - `just fmt-rust`
    - `just test-core`
-   - `yarn workspace @pondpilot/flowscope-react build`
-   - `yarn workspace @pondpilot/flowscope-core build`
+   - `yarn workspace @pondpilot/capybara-react build`
+   - `yarn workspace @pondpilot/capybara-core build`
 4. Publish crates (order matters):
-   - `cargo publish -p flowscope-core`
-   - `cargo publish -p flowscope-export`
-   - `cargo publish -p flowscope-cli`
+   - `cargo publish -p capybara-core`
+   - `cargo publish -p capybara-export`
+   - `cargo publish -p capybara-cli`
 5. Publish npm packages:
-   - `yarn workspace @pondpilot/flowscope-core publish --access public`
-   - `yarn workspace @pondpilot/flowscope-react publish --access public`
+   - `yarn workspace @pondpilot/capybara-core publish --access public`
+   - `yarn workspace @pondpilot/capybara-react publish --access public`
 6. Tag + release:
    - `git tag vX.Y.Z`
    - `git push origin vX.Y.Z`
@@ -352,7 +352,7 @@ Use a single repo tag for each release (`vX.Y.Z`) and align Rust workspace + npm
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **flowscope** (11078 symbols, 30744 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **capybara** (11078 symbols, 30744 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -368,7 +368,7 @@ This project is indexed by GitNexus as **flowscope** (11078 symbols, 30744 relat
 
 1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
 2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/flowscope/process/{processName}` — trace the full execution flow step by step
+3. `READ gitnexus://repo/capybara/process/{processName}` — trace the full execution flow step by step
 4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
 
 ## When Refactoring
@@ -407,10 +407,10 @@ This project is indexed by GitNexus as **flowscope** (11078 symbols, 30744 relat
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/flowscope/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/flowscope/clusters` | All functional areas |
-| `gitnexus://repo/flowscope/processes` | All execution flows |
-| `gitnexus://repo/flowscope/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/capybara/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/capybara/clusters` | All functional areas |
+| `gitnexus://repo/capybara/processes` | All execution flows |
+| `gitnexus://repo/capybara/process/{name}` | Step-by-step execution trace |
 
 ## Self-Check Before Finishing
 
