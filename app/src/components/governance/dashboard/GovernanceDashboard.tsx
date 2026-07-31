@@ -184,7 +184,8 @@ function ViolationGroups({ violations }: { violations: ContractViolation[] }) {
 }
 
 function ViolationSection({ severity, items }: { severity: Severity; items: ContractViolation[] }) {
-  const [open, setOpen] = useState(severity === 'P0');
+  const [groupOpen, setGroupOpen] = useState(severity === 'P0');
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const styles: Record<Severity, { dot: string; text: string; bg: string; border: string }> = {
     P0: { dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400', bg: 'bg-red-500/5', border: 'border-red-500/20' },
     P1: { dot: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/5', border: 'border-amber-500/20' },
@@ -194,28 +195,106 @@ function ViolationSection({ severity, items }: { severity: Severity; items: Cont
 
   return (
     <div className={cn('rounded-xl border overflow-hidden', s.bg, s.border)}>
-      <button onClick={() => setOpen(!open)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent/30 transition-colors">
-        {open ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+      <button onClick={() => setGroupOpen(!groupOpen)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent/30 transition-colors">
+        {groupOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
         <span className={cn('w-2 h-2 rounded-full', s.dot)} />
         <span className={cn('text-sm font-bold', s.text)}>{severity}</span>
         <span className="text-xs text-muted-foreground">· {items.length} issues</span>
       </button>
-      {open && (
+      {groupOpen && (
         <div className="divide-y divide-border/50">
-          {items.map((v, i) => (
-            <div key={i} className="flex items-start gap-3 px-3 py-2 pl-9 hover:bg-accent/20 transition-colors">
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium leading-snug">{v.title}</div>
-                <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground">
-                  <code className="px-1 py-0.5 bg-muted rounded font-mono text-[10px]">{v.rule_id}</code>
-                  <span>·</span><span>{v.rule_section}</span>
-                  {v.file_paths.length > 0 && (<><span>·</span><span className="truncate">{v.file_paths.join(', ')}</span></>)}
-                </div>
+          {items.map((v, i) => {
+            const isExpanded = expandedIdx === i;
+            return (
+              <div key={i}>
+                <button
+                  onClick={() => setExpandedIdx(isExpanded ? null : i)}
+                  className="w-full flex items-start gap-3 px-3 py-2 pl-9 hover:bg-accent/20 transition-colors text-left"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium leading-snug">{v.title}</div>
+                    <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground">
+                      <code className="px-1 py-0.5 bg-muted rounded font-mono text-[10px]">{v.rule_id}</code>
+                      <span>·</span><span>{v.rule_section}</span>
+                      {v.file_paths.length > 0 && (<><span>·</span><span className="truncate">{v.file_paths.join(', ')}</span></>)}
+                    </div>
+                  </div>
+                  <ChevronRight className={cn('h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0 transition-transform', isExpanded && 'rotate-90')} />
+                </button>
+                {isExpanded && (
+                  <div className="px-3 py-2 pl-9 bg-background/50 border-t">
+                    <ViolationDetail detail={v.detail} />
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Show violation detail in readable format. Long strings get code blocks, arrays get bullets. */
+function ViolationDetail({ detail }: { detail: Record<string, unknown> }) {
+  const entries = Object.entries(detail).filter(([, v]) => v != null);
+  if (entries.length === 0) return <p className="text-xs text-muted-foreground italic">No details available</p>;
+
+  return (
+    <div className="space-y-2 text-xs">
+      {entries.map(([key, val]) => (
+        <DetailField key={key} name={key} value={val} />
+      ))}
+    </div>
+  );
+}
+
+function DetailField({ name, value }: { name: string; value: unknown }) {
+  // Arrays → bullet list
+  if (Array.isArray(value)) {
+    return (
+      <div>
+        <span className="text-muted-foreground font-medium">{name}</span>
+        <ul className="mt-0.5 space-y-0.5">
+          {value.map((item, i) => (
+            <li key={i} className="pl-3 border-l-2 border-muted font-mono text-[11px] break-all text-foreground/80">{String(item)}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  // Long strings (>80 chars) or known code fields → code block
+  const strVal = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
+  const isLong = strVal.length > 80;
+  const codeLikeFields = ['normalized_sql', 'hash', 'sql', 'script', 'content', 'source'];
+
+  if (isLong || codeLikeFields.includes(name)) {
+    return (
+      <div>
+        <span className="text-muted-foreground font-medium">{name}</span>
+        <pre className="mt-0.5 p-2 bg-muted/50 rounded text-[11px] font-mono whitespace-pre-wrap break-all text-foreground/80 max-h-32 overflow-auto">
+          {strVal}
+        </pre>
+      </div>
+    );
+  }
+
+  // Numbers → just the value
+  if (typeof value === 'number') {
+    return (
+      <div className="flex gap-2">
+        <span className="text-muted-foreground">{name}</span>
+        <span className="tabular-nums font-mono font-bold">{value}</span>
+      </div>
+    );
+  }
+
+  // Short strings → inline
+  return (
+    <div className="flex gap-2">
+      <span className="text-muted-foreground">{name}</span>
+      <span className="font-mono text-[11px] break-all text-foreground/80">{strVal}</span>
     </div>
   );
 }
