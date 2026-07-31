@@ -86,6 +86,15 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/governance/report", get(gov_get_report))
         .route("/governance/health", get(gov_get_health))
         .route("/governance/export/{format}", post(gov_export))
+        // Model management
+        .route("/governance/models", get(gov_list_models))
+        .route("/governance/models/auto", post(gov_auto_discover_models))
+        .route("/governance/models/{name}", get(gov_get_model).put(gov_update_model))
+        .route("/governance/models/stats", get(gov_model_stats))
+        // Metric management
+        .route("/governance/metrics", get(gov_list_metrics))
+        .route("/governance/metrics/conflicts", get(gov_metric_conflicts))
+        .route("/governance/metrics/stats", get(gov_metric_stats))
 }
 
 // === Request/Response types ===
@@ -3071,4 +3080,238 @@ fn load_governance_inputs(
     }
 
     (file_results, file_contents, table_edges)
+}
+
+// ============================================================
+// Model management handlers
+// ============================================================
+
+#[derive(Deserialize)]
+struct GovModelQuery {
+    project_id: String,
+    #[serde(default)]
+    layer: Option<String>,
+    #[serde(default)]
+    domain: Option<String>,
+    #[serde(default)]
+    owner: Option<String>,
+    #[serde(default)]
+    q: Option<String>,
+}
+
+/// GET /api/governance/models
+async fn gov_list_models(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovModelQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::model::list_models(
+        &conn, &q.project_id, q.layer.as_deref(), q.domain.as_deref(), q.owner.as_deref(), q.q.as_deref(),
+    ) {
+        Ok(models) => Json(models).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Query failed: {e}")).into_response(),
+    }
+}
+
+/// GET /api/governance/models/{name}
+async fn gov_get_model(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Query(q): Query<GovReportQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::model::get_model(&conn, &q.project_id, &name) {
+        Ok(Some(model)) => Json(model).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "Model not found").into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Query failed: {e}")).into_response(),
+    }
+}
+
+/// PUT /api/governance/models/{name}
+#[derive(Deserialize)]
+struct GovUpdateModelRequest {
+    project_id: String,
+    #[serde(default)]
+    layer: Option<String>,
+    #[serde(default)]
+    domain: Option<String>,
+    #[serde(default)]
+    owner: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    lifecycle: Option<String>,
+}
+
+async fn gov_update_model(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(req): Json<GovUpdateModelRequest>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::model::update_model(
+        &conn, &req.project_id, &name,
+        req.layer.as_deref(), req.domain.as_deref(), req.owner.as_deref(),
+        req.description.as_deref(), req.lifecycle.as_deref(),
+    ) {
+        Ok(()) => Json(serde_json::json!({"status": "updated"})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {e}")).into_response(),
+    }
+}
+
+/// POST /api/governance/models/auto — auto-discover from lineage + contracts
+#[derive(Deserialize)]
+struct GovAutoDiscoverRequest {
+    project_id: String,
+}
+
+async fn gov_auto_discover_models(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GovAutoDiscoverRequest>,
+) -> impl IntoResponse {
+    // Load table edges from main DB
+    let table_edges = {
+        let conn = match state.db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+        };
+        let mut edges = Vec::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT from_table, to_table, script FROM table_level_edges WHERE project_id = ?1 AND status = 1",
+        ) {
+            if let Ok(rows) = stmt.query_map(rusqlite::params![req.project_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            }) {
+                edges = rows.filter_map(|r| r.ok()).collect();
+            }
+        }
+        edges
+    };
+
+    // Load contracts
+    let contract_files = super::governance::contract::scan_contract_files(&state.contracts_dir);
+    let mut contracts = Vec::new();
+    for path in &contract_files {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(contract) = super::governance::contract::parse_contract(&content) {
+                if contract.status == "active" {
+                    contracts.push(contract);
+                }
+            }
+        }
+    }
+
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Gov DB lock: {e}")).into_response(),
+    };
+
+    match super::governance::model::auto_discover_models(
+        &conn, &req.project_id, &table_edges, &contracts,
+    ) {
+        Ok((created, updated)) => {
+            Json(serde_json::json!({
+                "discovered": created + updated,
+                "created": created,
+                "updated": updated,
+            }))
+            .into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Discovery failed: {e}")).into_response(),
+    }
+}
+
+/// GET /api/governance/models/stats
+async fn gov_model_stats(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::model::get_model_stats(&conn, &q.project_id) {
+        Ok(stats) => Json(stats).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Stats failed: {e}")).into_response(),
+    }
+}
+
+// ============================================================
+// Metric management handlers
+// ============================================================
+
+#[derive(Deserialize)]
+struct GovMetricQuery {
+    project_id: String,
+    #[serde(default)]
+    layer: Option<String>,
+    #[serde(default)]
+    owner: Option<String>,
+    #[serde(default)]
+    q: Option<String>,
+}
+
+/// GET /api/governance/metrics
+async fn gov_list_metrics(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovMetricQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::list_metrics(
+        &conn, &q.project_id, q.layer.as_deref(), q.owner.as_deref(), q.q.as_deref(),
+    ) {
+        Ok(metrics) => Json(metrics).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Query failed: {e}")).into_response(),
+    }
+}
+
+/// GET /api/governance/metrics/conflicts
+async fn gov_metric_conflicts(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::detect_conflicts(&conn, &q.project_id) {
+        Ok(conflicts) => Json(conflicts).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Conflict detection failed: {e}")).into_response(),
+    }
+}
+
+/// GET /api/governance/metrics/stats
+async fn gov_metric_stats(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::get_metric_stats(&conn, &q.project_id) {
+        Ok(stats) => Json(stats).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Stats failed: {e}")).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct GovProjectIdQuery {
+    project_id: String,
 }

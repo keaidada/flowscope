@@ -10,6 +10,8 @@ pub mod duplicate;
 pub mod evaluator;
 pub mod fingerprint;
 pub mod health;
+pub mod metric;
+pub mod model;
 pub mod report;
 
 use std::collections::BTreeMap;
