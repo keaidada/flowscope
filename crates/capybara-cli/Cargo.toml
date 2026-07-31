@@ -31,7 +31,7 @@ metadata-provider = ["sqlx", "tokio"]
 # Integration tests require database connectivity
 integration-tests = ["metadata-provider"]
 # Serve mode: embedded web UI with REST API
-serve = ["dep:axum", "dep:tower-http", "dep:rust-embed", "dep:notify-debouncer-mini", "dep:mime_guess", "dep:open", "dep:walkdir", "dep:chrono", "dep:utoipa", "dep:utoipa-axum", "dep:utoipa-scalar", "tokio/macros", "tokio/signal"]
+serve = ["dep:axum", "dep:tower-http", "dep:rust-embed", "dep:notify-debouncer-mini", "dep:mime_guess", "dep:open", "dep:walkdir", "dep:chrono", "dep:utoipa", "dep:utoipa-axum", "dep:utoipa-scalar", "dep:serde_yaml", "dep:sha2", "tokio/macros", "tokio/signal"]
 
 [dependencies]
 capybara-core.workspace = true
@@ -40,6 +40,8 @@ sqlparser.workspace = true
 clap = { version = "4", features = ["derive"] }
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
 anyhow = "1.0"
 thiserror = "2.0"
 tabled = "0.20"

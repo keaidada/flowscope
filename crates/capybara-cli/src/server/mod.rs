@@ -5,6 +5,7 @@
 
 pub mod api;
 mod assets;
+pub mod governance;
 mod openapi;
 pub mod state;
 pub mod store;
