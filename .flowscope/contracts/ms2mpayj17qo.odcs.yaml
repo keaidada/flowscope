@@ -1,0 +1,81 @@
+apiVersion: v3.1.0
+kind: DataContract
+id: ms2mpayj17qo_governance
+name: ms2mpayj17qo Governance
+version: 1.0.0
+status: active
+schema: []
+semantics: []
+references: []
+quality: []
+sla: null
+owners: []
+custom:
+  flowscope:
+    lineage_rules:
+    - id: no_cross_layer
+      description: 禁止跨层依赖
+      forbidden_edges:
+      - - ODS
+        - DWS
+      - - ODS
+        - ADS
+      - - DWD
+        - ADS
+      severity: P1
+    - id: no_orphan_output
+      description: 产出表必须有下游消费
+      forbidden_edges: []
+      severity: P2
+    - id: lineage_completeness
+      description: 核心链路不能有血缘断裂
+      forbidden_edges: []
+      severity: P0
+    sql_rules:
+    - id: no_select_star
+      description: 生产脚本禁止 SELECT *
+      threshold: null
+      severity: P2
+    - id: no_update_without_where
+      description: UPDATE/DELETE 必须有 WHERE
+      threshold: null
+      severity: P0
+    - id: max_complexity
+      description: 单脚本复杂度不超过阈值
+      threshold: 80
+      severity: P2
+    metric_rules:
+    - id: no_duplicate_computation
+      description: 禁止重复计算
+      similarity_threshold: 0.85
+      severity: P1
+    - id: no_write_conflict
+      description: 禁止多个脚本写入同一物理表
+      similarity_threshold: 0.0
+      severity: P2
+    security_rules:
+    - id: no_hardcoded_secrets
+      description: SQL 中禁止硬编码密码/令牌
+      patterns:
+      - password
+      - token
+      - secret
+      - api_key
+      column_patterns: []
+      severity: P0
+    modeling_rules:
+    - id: naming_must_match_layer
+      description: 表名前缀必须与层级匹配
+      patterns:
+        ODS: ^ods_
+        ADS: ^(ads_|app_)
+        DWS: ^dws_
+        DIM: ^dim_
+        DWD: ^dwd_
+      forbidden_edges: []
+      severity: P2
+    - id: layer_must_be_assigned
+      description: 所有表必须有层级标注
+      patterns: {}
+      forbidden_edges: []
+      severity: P2

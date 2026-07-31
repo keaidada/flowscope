@@ -7,10 +7,17 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   RefreshCw, Download, AlertCircle, ChevronDown, ChevronRight,
-  Activity, Shield, Code2, Database, Lock, Boxes, Clock,
+  Activity, Shield, Code2, Database, Lock, Boxes, Clock, ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import type { useGovernanceData } from '@/hooks/useGovernanceData';
 import type { ContractViolation, Severity } from '@/lib/governance-api';
 import { governanceApi } from '@/lib/governance-api';
@@ -171,6 +178,7 @@ function ViolationGroups({ violations }: { violations: ContractViolation[] }) {
   const { t } = useTranslation();
   const sevList: Severity[] = ['P0', 'P1', 'P2'];
   const groups = sevList.map(s => ({ severity: s, items: violations.filter(v => v.severity === s) })).filter(g => g.items.length > 0);
+  const [selectedV, setSelectedV] = useState<ContractViolation | null>(null);
 
   return (
     <div className="space-y-2">
@@ -178,14 +186,110 @@ function ViolationGroups({ violations }: { violations: ContractViolation[] }) {
         <AlertCircle className="h-3.5 w-3.5" />
         {t('governance.violations')} ({violations.length})
       </h3>
-      {groups.map(g => <ViolationSection key={g.severity} severity={g.severity} items={g.items} />)}
+      {groups.map(g => <ViolationSection key={g.severity} severity={g.severity} items={g.items} onSelect={setSelectedV} />)}
+
+      {/* Sheet for duplicate detail comparison */}
+      <Sheet open={!!selectedV} onOpenChange={(open) => { if (!open) setSelectedV(null); }}>
+        <SheetContent className="w-[800px] sm:max-w-[800px] overflow-auto">
+            {selectedV && (
+            <>
+              <SheetHeader className="mb-3">
+                <SheetTitle className="text-base flex items-center gap-2">
+                  <span className={cn('px-1.5 py-0.5 rounded text-xs font-bold',
+                    selectedV.severity === 'P0' ? 'bg-red-500/10 text-red-600' : selectedV.severity === 'P1' ? 'bg-amber-500/10 text-amber-600' : 'bg-blue-500/10 text-blue-600'
+                  )}>{selectedV.severity}</span>
+                  {selectedV.title}
+                </SheetTitle>
+                <SheetDescription className="text-xs">
+                  <code className="px-1 py-0.5 bg-muted rounded font-mono text-[10px]">{selectedV.rule_id}</code>
+                  <span className="mx-1">·</span>{selectedV.rule_section}
+                </SheetDescription>
+              </SheetHeader>
+              {selectedV.rule_id === 'no_duplicate_computation'
+                ? <DuplicateComparison v={selectedV} />
+                : (
+                  <div className="space-y-3">
+                    <ViolationInterpretation v={selectedV} />
+                    <ViolationDetail detail={selectedV.detail} />
+                  </div>
+                )}
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
 
-function ViolationSection({ severity, items }: { severity: Severity; items: ContractViolation[] }) {
+/** Side-by-side SQL comparison for duplicate violations. */
+function DuplicateComparison({ v }: { v: ContractViolation }) {
+  const d = v.detail || {};
+  const sqlMap = (d.script_sqls as Record<string, string>) || {};
+  const scripts = (Array.isArray(d.scripts) ? d.scripts as string[] : []).filter((s: string) => sqlMap[s]);
+  const sim = typeof d.similarity === 'number' ? d.similarity : 1;
+
+  if (scripts.length < 2) {
+    return <p className="text-xs text-muted-foreground">No script contents available for comparison.</p>;
+  }
+
+  const left = scripts[0];
+  const right = scripts[1];
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        {/* Left panel */}
+        <div className="rounded-lg border overflow-hidden">
+          <div className="flex items-center gap-1.5 px-3 py-2 bg-muted/50 border-b">
+            <span className="text-xs font-semibold">脚本 A</span>
+            <span className="text-[11px] text-muted-foreground font-mono truncate">{left}</span>
+          </div>
+          <pre className="p-3 text-[12px] font-mono whitespace-pre-wrap break-all leading-relaxed text-foreground/85 max-h-[60vh] overflow-auto">
+            {sqlMap[left] || '(content not available)'}
+          </pre>
+        </div>
+        {/* Right panel */}
+        <div className="rounded-lg border overflow-hidden">
+          <div className="flex items-center gap-1.5 px-3 py-2 bg-muted/50 border-b">
+            <span className="text-xs font-semibold">脚本 B</span>
+            <span className="text-[11px] text-muted-foreground font-mono truncate">{right}</span>
+          </div>
+          <pre className="p-3 text-[12px] font-mono whitespace-pre-wrap break-all leading-relaxed text-foreground/85 max-h-[60vh] overflow-auto">
+            {sqlMap[right] || '(content not available)'}
+          </pre>
+        </div>
+      </div>
+
+      {/* Similarity indicator */}
+      {sim < 1 && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>相似度：</span>
+          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="h-full bg-amber-500 rounded-full" style={{ width: `${Math.round(sim * 100)}%` }} />
+          </div>
+          <span className="tabular-nums font-bold">{Math.round(sim * 100)}%</span>
+        </div>
+      )}
+
+      {/* Normalized pattern */}
+      {Boolean(d.normalized_sql) && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">公共计算模式</summary>
+          <pre className="mt-1 p-2 bg-muted/30 rounded text-[11px] font-mono whitespace-pre-wrap break-all text-foreground/60 max-h-32 overflow-auto">
+            {String(d.normalized_sql)}
+          </pre>
+        </details>
+      )}
+
+      {scripts.length > 2 && (
+        <p className="text-xs text-muted-foreground">+ {scripts.length - 2} 个其他脚本也有相同计算逻辑（未展开）</p>
+      )}
+    </div>
+  );
+}
+
+function ViolationSection({ severity, items, onSelect }: { severity: Severity; items: ContractViolation[]; onSelect: (v: ContractViolation) => void }) {
   const [groupOpen, setGroupOpen] = useState(severity === 'P0');
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const styles: Record<Severity, { dot: string; text: string; bg: string; border: string }> = {
     P0: { dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400', bg: 'bg-red-500/5', border: 'border-red-500/20' },
     P1: { dot: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/5', border: 'border-amber-500/20' },
@@ -203,33 +307,23 @@ function ViolationSection({ severity, items }: { severity: Severity; items: Cont
       </button>
       {groupOpen && (
         <div className="divide-y divide-border/50">
-          {items.map((v, i) => {
-            const isExpanded = expandedIdx === i;
-            return (
-              <div key={i}>
-                <button
-                  onClick={() => setExpandedIdx(isExpanded ? null : i)}
-                  className="w-full flex items-start gap-3 px-3 py-2 pl-9 hover:bg-accent/20 transition-colors text-left"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium leading-snug">{v.title}</div>
-                    <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground">
-                      <code className="px-1 py-0.5 bg-muted rounded font-mono text-[10px]">{v.rule_id}</code>
-                      <span>·</span><span>{v.rule_section}</span>
-                      {v.file_paths.length > 0 && (<><span>·</span><span className="truncate">{v.file_paths.join(', ')}</span></>)}
-                    </div>
-                  </div>
-                  <ChevronRight className={cn('h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0 transition-transform', isExpanded && 'rotate-90')} />
-                </button>
-                {isExpanded && (
-                  <div className="px-3 py-3 pl-9 bg-background/50 border-t space-y-3">
-                    <ViolationInterpretation v={v} />
-                    <ViolationDetail detail={v.detail} />
-                  </div>
-                )}
+          {items.map((v, i) => (
+            <button
+              key={i}
+              onClick={() => onSelect(v)}
+              className="w-full flex items-start gap-3 px-3 py-2 pl-9 hover:bg-accent/20 transition-colors text-left"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium leading-snug">{v.title}</div>
+                <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground">
+                  <code className="px-1 py-0.5 bg-muted rounded font-mono text-[10px]">{v.rule_id}</code>
+                  <span>·</span><span>{v.rule_section}</span>
+                  {v.file_paths.length > 0 && (<><span>·</span><span className="truncate">{v.file_paths.join(', ')}</span></>)}
+                </div>
               </div>
-            );
-          })}
+              <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0 opacity-50" />
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -248,7 +342,7 @@ function ViolationInterpretation({ v }: { v: ContractViolation }) {
 
   switch (v.rule_id) {
     case 'no_duplicate_computation': {
-      const sim = typeof d.similarity === 'number' ? d.similarity : 1;
+  const sim: number = typeof d.similarity === 'number' ? (d.similarity as number) : 1;
       const sqlMap = (d.script_sqls as Record<string, string>) || {};
       const scriptList = scripts.filter(s => sqlMap[s]);
       return (
