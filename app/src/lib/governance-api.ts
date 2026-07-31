@@ -234,4 +234,26 @@ export const governanceApi = {
   async metricStats(projectId: string): Promise<MetricStats> {
     return govFetch(`/metrics/stats?project_id=${encodeURIComponent(projectId)}`);
   },
+
+  // === Designer ===
+  async genDdl(model: unknown, dialect: string): Promise<{ ddl: string }> {
+    return govFetch('/gen-ddl', {
+      method: 'POST',
+      body: JSON.stringify({ model, dialect }),
+    });
+  },
+
+  async reverseEngineer(sql: string): Promise<Record<string, unknown>[]> {
+    return govFetch('/reverse-engineer', {
+      method: 'POST',
+      body: JSON.stringify({ sql }),
+    });
+  },
+
+  async modelDiff(oldModel: unknown, newModel: unknown): Promise<{ added: string[]; removed: string[]; modified: Array<{ column: string; old_type: string; new_type: string }> }> {
+    return govFetch('/model-diff', {
+      method: 'POST',
+      body: JSON.stringify({ old: oldModel, new: newModel }),
+    });
+  },
 };

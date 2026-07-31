@@ -4,13 +4,14 @@
 
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, LayoutDashboard, Box, BarChart3, FileText, Settings } from 'lucide-react';
+import { Shield, LayoutDashboard, Box, BarChart3, FileText, Settings, Palette } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useGovernanceData } from '@/hooks/useGovernanceData';
 import { GovernanceDashboard } from './dashboard/GovernanceDashboard';
 import { ContractManager } from './contract/ContractManager';
 import { ModelManager } from './model/ModelManager';
 import { MetricManager } from './metric/MetricManager';
+import { VisualModelDesigner } from './designer/VisualModelDesigner';
 import type { GovernanceTab } from '@/lib/governance-api';
 
 interface GovernanceWorkspaceProps {
@@ -22,6 +23,7 @@ const TABS: Array<{ id: GovernanceTab; icon: React.ElementType; labelKey: string
   { id: 'contracts', icon: FileText, labelKey: 'governance.contracts' },
   { id: 'models', icon: Box, labelKey: 'governance.models' },
   { id: 'metrics', icon: BarChart3, labelKey: 'governance.metrics' },
+  { id: 'designer', icon: Palette, labelKey: 'governance.designer' },
   { id: 'settings', icon: Settings, labelKey: 'governance.settings' },
 ];
 
@@ -86,6 +88,9 @@ export function GovernanceWorkspace({ projectId }: GovernanceWorkspaceProps) {
         )}
         {activeTab === 'metrics' && (
           <MetricManager projectId={projectId} />
+        )}
+        {activeTab === 'designer' && (
+          <VisualModelDesigner />
         )}
         {activeTab === 'settings' && (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">

@@ -95,6 +95,10 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/governance/metrics", get(gov_list_metrics))
         .route("/governance/metrics/conflicts", get(gov_metric_conflicts))
         .route("/governance/metrics/stats", get(gov_metric_stats))
+        // Designer
+        .route("/governance/gen-ddl", post(gov_gen_ddl))
+        .route("/governance/reverse-engineer", post(gov_reverse_engineer))
+        .route("/governance/model-diff", post(gov_model_diff))
 }
 
 // === Request/Response types ===
@@ -3314,4 +3318,45 @@ async fn gov_metric_stats(
 #[derive(Deserialize)]
 struct GovProjectIdQuery {
     project_id: String,
+}
+
+// ============================================================
+// Designer handlers
+// ============================================================
+
+#[derive(Deserialize, ToSchema)]
+struct GovGenDdlRequest {
+    model: super::governance::designer::ModelDefinition,
+    #[serde(default)]
+    dialect: String,
+}
+
+/// POST /api/governance/gen-ddl
+async fn gov_gen_ddl(Json(req): Json<GovGenDdlRequest>) -> impl IntoResponse {
+    let dialect = if req.dialect.is_empty() { "postgresql" } else { &req.dialect };
+    let ddl = super::governance::designer::generate_ddl(&req.model, dialect);
+    Json(serde_json::json!({ "ddl": ddl }))
+}
+
+#[derive(Deserialize, ToSchema)]
+struct GovReverseEngineerRequest {
+    sql: String,
+}
+
+/// POST /api/governance/reverse-engineer
+async fn gov_reverse_engineer(Json(req): Json<GovReverseEngineerRequest>) -> impl IntoResponse {
+    let models = super::governance::designer::reverse_engineer(&req.sql);
+    Json(models)
+}
+
+#[derive(Deserialize, ToSchema)]
+struct GovModelDiffRequest {
+    old: super::governance::designer::ModelDefinition,
+    new: super::governance::designer::ModelDefinition,
+}
+
+/// POST /api/governance/model-diff
+async fn gov_model_diff(Json(req): Json<GovModelDiffRequest>) -> impl IntoResponse {
+    let diff = super::governance::designer::diff_models(&req.old, &req.new);
+    Json(diff)
 }

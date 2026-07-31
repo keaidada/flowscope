@@ -6,6 +6,7 @@
 
 pub mod contract;
 pub mod db;
+pub mod designer;
 pub mod duplicate;
 pub mod evaluator;
 pub mod fingerprint;
