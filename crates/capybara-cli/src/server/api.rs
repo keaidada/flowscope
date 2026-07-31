@@ -3339,20 +3339,20 @@ async fn gov_metric_stats(
     }
 }
 
-/// POST /api/governance/metrics/auto — auto-detect metrics from analysis results
+/// POST /api/governance/metrics/auto — auto-detect metrics from SQL analysis
 async fn gov_auto_detect_metrics(
     State(state): State<Arc<AppState>>,
     Json(req): Json<GovAutoDetectMetricsRequest>,
 ) -> impl IntoResponse {
-    // Load file results from main DB
-    let file_results_raw = {
+    // Read file contents from main DB (result_json may be empty, so we analyze ourselves)
+    let file_contents: Vec<(String, String)> = {
         let conn = match state.db.lock() {
             Ok(c) => c,
             Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
         };
         let mut results = Vec::new();
         if let Ok(mut stmt) = conn.prepare(
-            "SELECT file_path, result_json FROM project_file_results WHERE project_id = ?1 AND status = 1",
+            "SELECT path, content FROM project_files WHERE project_id = ?1 AND status = 1",
         ) {
             if let Ok(rows) = stmt.query_map(rusqlite::params![req.project_id], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -3363,21 +3363,61 @@ async fn gov_auto_detect_metrics(
         results
     };
 
-    let file_results: Vec<(String, capybara_core::AnalyzeResult)> = file_results_raw
-        .into_iter()
-        .filter_map(|(path, json)| {
-            serde_json::from_str::<capybara_core::AnalyzeResult>(&json)
-                .ok()
-                .map(|r| (path, r))
-        })
-        .collect();
+    // Also check existing file_results (if any have actual json)
+    let file_results: Vec<(String, capybara_core::AnalyzeResult)> = {
+        let conn = match state.db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+        };
+        let mut results = Vec::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT file_path, result_json FROM project_file_results WHERE project_id = ?1 AND status = 1 AND length(result_json) > 0",
+        ) {
+            if let Ok(rows) = stmt.query_map(rusqlite::params![req.project_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
+                results = rows.filter_map(|r| r.ok()).collect();
+            }
+        }
+        results
+            .into_iter()
+            .filter_map(|(path, json)| {
+                serde_json::from_str::<capybara_core::AnalyzeResult>(&json)
+                    .ok()
+                    .map(|r| (path, r))
+            })
+            .collect()
+    };
+
+    // If no existing results, analyze file contents (limited to prevent timeout)
+    let analyze_results = if file_results.is_empty() && !file_contents.is_empty() {
+        let mut results = Vec::new();
+        for (path, content) in file_contents.iter().take(500) {
+            if content.trim().is_empty() { continue; }
+            let request = capybara_core::AnalyzeRequest {
+                sql: content.clone(),
+                files: None,
+                dialect: state.config.dialect,
+                source_name: Some(path.clone()),
+                options: None,
+                schema: None,
+                #[cfg(feature = "templating")]
+                template_config: None,
+            };
+            let result = capybara_core::analyze(&request);
+            results.push((path.clone(), result));
+        }
+        results
+    } else {
+        file_results
+    };
 
     let conn = match state.gov_db.lock() {
         Ok(c) => c,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Gov DB lock: {e}")).into_response(),
     };
 
-    match super::governance::metric::auto_detect_metrics(&conn, &req.project_id, &file_results) {
+    match super::governance::metric::auto_detect_metrics(&conn, &req.project_id, &analyze_results) {
         Ok(count) => Json(serde_json::json!({"detected": count})).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Auto-detect failed: {e}")).into_response(),
     }

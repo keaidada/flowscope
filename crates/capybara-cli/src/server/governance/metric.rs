@@ -173,24 +173,28 @@ pub fn auto_detect_metrics(
                 };
 
                 let col_name = node.label.as_ref();
-                let agg_func = agg.function.as_deref().unwrap_or("UNKNOWN");
+                let mut agg_func = agg.function.as_deref().unwrap_or("UNKNOWN").to_string();
+                let is_distinct = agg.distinct.unwrap_or(false);
 
-                // Use qualified_name or label as metric name
-                let parent_table = node
-                    .qualified_name
-                    .as_deref()
-                    .or_else(|| source_tables.first().map(|s| s.as_str()))
-                    .unwrap_or(col_name);
+                // Handle COUNT(DISTINCT ...) as a distinct metric type
+                if is_distinct {
+                    agg_func = format!("{}_DISTINCT", agg_func);
+                }
+
+                // Use qualified_name or first source table as parent model
+                let parent_table = source_tables.first().map(|s| s.as_str()).unwrap_or("unknown");
                 let metric_name = format!("{}_{}_{}", parent_table, col_name, agg_func).to_lowercase();
 
-                let signature = compute_signature(agg_func, col_name);
+                let metric_type = if is_distinct { "distinct" } else { "atomic" };
+
+                let signature = compute_signature(&agg_func, col_name);
 
                 conn.execute(
                     "INSERT INTO metrics_registry
                         (project_id, metric_name, metric_type, definition, sql_signature, expression,
                          aggregation, business_filter, period, source_tables, dimensions, layer,
                          lifecycle, bound_model, bound_column, created_at, updated_at, status)
-                     VALUES (?1, ?2, 'atomic', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'active', ?12, ?13, ?14, ?14, 1)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'active', ?13, ?14, ?15, ?15, 1)
                      ON CONFLICT(project_id, metric_name) DO UPDATE SET
                         aggregation = excluded.aggregation,
                         expression = excluded.expression,
@@ -204,6 +208,7 @@ pub fn auto_detect_metrics(
                     rusqlite::params![
                         project_id,
                         metric_name,
+                        metric_type,
                         &metric_name,
                         signature,
                         agg_func,
