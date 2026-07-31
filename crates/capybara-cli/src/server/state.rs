@@ -61,6 +61,10 @@ pub struct AppState {
     pub merge_sessions: RwLock<HashMap<String, MergeSession>>,
     /// SQLite database connection for persistence
     pub db: Mutex<Connection>,
+    /// Governance database connection (independent governance.db)
+    pub gov_db: Mutex<Connection>,
+    /// Governance contracts directory path
+    pub contracts_dir: PathBuf,
 }
 
 impl AppState {
@@ -93,6 +97,23 @@ impl AppState {
         let db = super::store::open_db(&db_path)?;
         println!("flowscope: database at {}", db_path.display());
 
+        // Open (or create) governance database
+        let gov_db_path = config
+            .watch_dirs
+            .first()
+            .map(|d| d.join("governance.db"))
+            .unwrap_or_else(|| PathBuf::from("app/governance.db"));
+        let gov_db = super::governance::db::open_gov_db(&gov_db_path)?;
+        println!("flowscope: governance database at {}", gov_db_path.display());
+
+        // Initialize contracts directory and default contract
+        let contracts_dir = config
+            .watch_dirs
+            .first()
+            .map(|d| d.join("contracts"))
+            .unwrap_or_else(|| PathBuf::from("app/contracts"));
+        super::governance::init_contracts(&contracts_dir);
+
         if file_count > 0 {
             println!("flowscope: loaded {} SQL file(s)", file_count);
         }
@@ -104,6 +125,8 @@ impl AppState {
             mtimes: RwLock::new(mtimes),
             merge_sessions: RwLock::new(HashMap::new()),
             db,
+            gov_db,
+            contracts_dir,
         })
     }
 

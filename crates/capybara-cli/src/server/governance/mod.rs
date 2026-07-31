@@ -13,9 +13,26 @@ pub mod health;
 pub mod report;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+/// Initialize contracts directory: create dir + write default contract if not exists.
+pub fn init_contracts(dir: &Path) {
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        eprintln!("flowscope: warning: failed to create contracts dir: {e}");
+        return;
+    }
+    let default_path = dir.join("_default.odcs.yaml");
+    if !default_path.exists() {
+        if let Err(e) = std::fs::write(&default_path, contract::DEFAULT_CONTRACT_YAML) {
+            eprintln!("flowscope: warning: failed to write default contract: {e}");
+        } else {
+            println!("flowscope: created default governance contract at {}", default_path.display());
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub enum Severity {

@@ -78,6 +78,14 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/db/anomalies", get(get_anomalies_api))
         .route("/db/convert-procedures", post(convert_procedures))
         .route("/db/analyze-batch", post(analyze_batch))
+        // Governance endpoints
+        .route("/governance/contracts", get(gov_list_contracts).post(gov_create_contract))
+        .route("/governance/contracts/{name}", get(gov_get_contract).put(gov_update_contract).delete(gov_delete_contract))
+        .route("/governance/contracts/{name}/validate", post(gov_validate_contract))
+        .route("/governance/scan", post(gov_scan))
+        .route("/governance/report", get(gov_get_report))
+        .route("/governance/health", get(gov_get_health))
+        .route("/governance/export/{format}", post(gov_export))
 }
 
 // === Request/Response types ===
@@ -2529,4 +2537,538 @@ fn convert_to_lineage_rows(
     }
 
     (nodes, columns, edges)
+}
+
+// ============================================================
+// Governance API handlers
+// ============================================================
+
+#[derive(Serialize, ToSchema)]
+struct GovContractInfo {
+    name: String,
+    file_path: String,
+    status: String,
+    violation_count: i64,
+}
+
+/// GET /api/governance/contracts — list all contracts.
+async fn gov_list_contracts(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let dir = &state.contracts_dir;
+    let files = super::governance::contract::scan_contract_files(dir);
+    let mut result = Vec::new();
+    for path in files {
+        let name = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let content = std::fs::read_to_string(&path).unwrap_or_default();
+        let hash = super::governance::contract::compute_file_hash(&content);
+        let contract = super::governance::contract::parse_contract(&content).ok();
+        let status = contract
+            .as_ref()
+            .map(|c| c.status.clone())
+            .unwrap_or_else(|| "error".to_string());
+        result.push(GovContractInfo {
+            name,
+            file_path: path.to_string_lossy().to_string(),
+            status,
+            violation_count: 0,
+        });
+        // Register in DB
+        if let Ok(conn) = state.gov_db.lock() {
+            let _ = super::governance::db::upsert_contract(
+                &conn, "default", &result.last().unwrap().name,
+                &result.last().unwrap().file_path, &hash,
+            );
+        }
+    }
+    Json(result)
+}
+
+#[derive(Deserialize, ToSchema)]
+struct GovCreateContractRequest {
+    name: String,
+    content: String,
+}
+
+/// POST /api/governance/contracts — create a new contract.
+async fn gov_create_contract(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GovCreateContractRequest>,
+) -> impl IntoResponse {
+    let safe_name = sanitize_contract_name(&req.name);
+    let path = state.contracts_dir.join(format!("{safe_name}.odcs.yaml"));
+    if path.exists() {
+        return (
+            StatusCode::CONFLICT,
+            "Contract already exists".to_string(),
+        )
+            .into_response();
+    }
+    if let Err(e) = std::fs::write(&path, &req.content) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to write contract: {e}"),
+        )
+            .into_response();
+    }
+    let hash = super::governance::contract::compute_file_hash(&req.content);
+    if let Ok(conn) = state.gov_db.lock() {
+        let _ = super::governance::db::upsert_contract(
+            &conn, "default", &safe_name,
+            &path.to_string_lossy().to_string(), &hash,
+        );
+    }
+    Json(serde_json::json!({"status": "created", "name": safe_name})).into_response()
+}
+
+/// GET /api/governance/contracts/{name} — get contract content.
+async fn gov_get_contract(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    let path = find_contract_path(&state.contracts_dir, &name);
+    match path {
+        Some(p) => match std::fs::read_to_string(&p) {
+            Ok(content) => {
+                let contract = super::governance::contract::parse_contract(&content).ok();
+                Json(serde_json::json!({
+                    "name": name,
+                    "content": content,
+                    "version": contract.as_ref().map(|c| c.version.clone()).unwrap_or_default(),
+                    "status": contract.as_ref().map(|c| c.status.clone()).unwrap_or_default(),
+                }))
+                .into_response()
+            }
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to read contract: {e}"),
+            )
+                .into_response(),
+        },
+        None => (StatusCode::NOT_FOUND, "Contract not found".to_string()).into_response(),
+    }
+}
+
+/// PUT /api/governance/contracts/{name} — update contract.
+async fn gov_update_contract(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    body: String,
+) -> impl IntoResponse {
+    let path = find_contract_path(&state.contracts_dir, &name);
+    let path = match path {
+        Some(p) => p,
+        None => {
+            // Create new file if not found
+            let safe_name = sanitize_contract_name(&name);
+            state.contracts_dir.join(format!("{safe_name}.odcs.yaml"))
+        }
+    };
+    // Parse body as JSON to extract content, or treat body as raw YAML
+    let content = if let Ok(req) = serde_json::from_str::<GovCreateContractRequest>(&body) {
+        req.content
+    } else {
+        // Treat as raw YAML
+        body
+    };
+    if let Err(e) = std::fs::write(&path, &content) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to write contract: {e}"),
+        )
+            .into_response();
+    }
+    let hash = super::governance::contract::compute_file_hash(&content);
+    if let Ok(conn) = state.gov_db.lock() {
+        let _ = super::governance::db::upsert_contract(
+            &conn,
+            "default",
+            &name,
+            &path.to_string_lossy().to_string(),
+            &hash,
+        );
+    }
+    Json(serde_json::json!({"status": "updated", "contract_hash": hash})).into_response()
+}
+
+/// DELETE /api/governance/contracts/{name} — delete contract.
+async fn gov_delete_contract(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    let path = find_contract_path(&state.contracts_dir, &name);
+    match path {
+        Some(p) => {
+            if let Err(e) = std::fs::remove_file(&p) {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to delete: {e}"),
+                )
+                    .into_response();
+            }
+            Json(serde_json::json!({"status": "deleted"})).into_response()
+        }
+        None => (StatusCode::NOT_FOUND, "Contract not found".to_string()).into_response(),
+    }
+}
+
+/// POST /api/governance/contracts/{name}/validate — validate YAML format.
+async fn gov_validate_contract(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    let path = find_contract_path(&state.contracts_dir, &name);
+    match path {
+        Some(p) => match std::fs::read_to_string(&p) {
+            Ok(content) => {
+                match super::governance::contract::validate_contract(&content) {
+                    Ok(()) => Json(serde_json::json!({"valid": true})).into_response(),
+                    Err(errors) => Json(serde_json::json!({"valid": false, "errors": errors}))
+                        .into_response(),
+                }
+            }
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to read: {e}"),
+            )
+                .into_response(),
+        },
+        None => (StatusCode::NOT_FOUND, "Contract not found".to_string()).into_response(),
+    }
+}
+
+/// POST /api/governance/scan — run governance evaluation.
+async fn gov_scan(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<super::governance::ScanRequest>,
+) -> impl IntoResponse {
+    let project_id = &req.project_id;
+
+    // 1. Load all active contracts
+    let contract_files =
+        super::governance::contract::scan_contract_files(&state.contracts_dir);
+    let mut contracts = Vec::new();
+    for path in &contract_files {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(contract) = super::governance::contract::parse_contract(&content) {
+                if contract.status == "active" {
+                    contracts.push(contract);
+                }
+            }
+        }
+    }
+
+    // Always include default contract even if parsing fails for others
+    if contracts.is_empty() {
+        if let Ok(default) =
+            super::governance::contract::parse_contract(
+                super::governance::contract::DEFAULT_CONTRACT_YAML,
+            )
+        {
+            contracts.push(default);
+        }
+    }
+
+    // 2. Load file results from main DB
+    let (file_results_raw, file_contents, table_edges) = {
+        let conn = match state.db.lock() {
+            Ok(c) => c,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("DB lock error: {e}"),
+                )
+                    .into_response();
+            }
+        };
+        load_governance_inputs(&conn, project_id)
+    };
+
+    // 3. Parse AnalyzeResult JSONs
+    let file_results: Vec<(String, capybara_core::AnalyzeResult)> = file_results_raw
+        .into_iter()
+        .filter_map(|(path, json)| {
+            serde_json::from_str::<capybara_core::AnalyzeResult>(&json)
+                .ok()
+                .map(|r| (path, r))
+        })
+        .collect();
+
+    // 4. Build context and evaluate
+    let ctx = super::governance::evaluator::GovernanceContext {
+        project_id,
+        file_results: &file_results,
+        file_contents: &file_contents,
+        table_edges: &table_edges,
+    };
+
+    let (violations, pending) = super::governance::evaluator::evaluate_all_contracts(&contracts, &ctx);
+
+    // 5. Build report
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let total_files = file_results.len();
+    let report = super::governance::health::build_report(
+        project_id,
+        violations,
+        pending,
+        total_files,
+        &now,
+    );
+
+    let health_score = report.health_score;
+    let violation_count = report.summary.total_violations;
+
+    // 6. Save to governance DB
+    let report_id = {
+        let conn = match state.gov_db.lock() {
+            Ok(c) => c,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Gov DB lock error: {e}"),
+                )
+                    .into_response();
+            }
+        };
+        match super::governance::db::save_report(&conn, project_id, &report) {
+            Ok(id) => id,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to save report: {e}"),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    Json(super::governance::ScanResponse {
+        report_id,
+        health_score,
+        violation_count,
+    })
+    .into_response()
+}
+
+/// GET /api/governance/report — get latest reports.
+#[derive(Deserialize)]
+struct GovReportQuery {
+    project_id: String,
+    #[serde(default = "default_report_limit")]
+    limit: usize,
+}
+
+fn default_report_limit() -> usize {
+    5
+}
+
+async fn gov_get_report(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovReportQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("DB lock error: {e}"),
+            )
+                .into_response();
+        }
+    };
+    match super::governance::db::get_reports(&conn, &q.project_id, q.limit) {
+        Ok(reports) => Json(reports).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to get reports: {e}"),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /api/governance/health — get health score with trend.
+async fn gov_get_health(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovReportQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("DB lock error: {e}"),
+            )
+                .into_response();
+        }
+    };
+    let reports = super::governance::db::get_reports(&conn, &q.project_id, 1).unwrap_or_default();
+    let trend = super::governance::db::get_health_trend(&conn, &q.project_id, 10).unwrap_or_default();
+
+    if let Some(latest) = reports.first() {
+        Json(serde_json::json!({
+            "total_score": latest.health_score,
+            "dimension_scores": latest.dimension_scores,
+            "summary": latest.summary,
+            "trend": trend,
+        }))
+        .into_response()
+    } else {
+        Json(serde_json::json!({
+            "total_score": null,
+            "dimension_scores": {},
+            "trend": [],
+        }))
+        .into_response()
+    }
+}
+
+/// POST /api/governance/export/{format} — export report.
+#[derive(Deserialize)]
+struct GovExportRequest {
+    project_id: String,
+}
+
+async fn gov_export(
+    State(state): State<Arc<AppState>>,
+    Path(format): Path<String>,
+    Json(req): Json<GovExportRequest>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("DB lock error: {e}"),
+            )
+                .into_response();
+        }
+    };
+    let reports = super::governance::db::get_reports(&conn, &req.project_id, 1).unwrap_or_default();
+    let report = match reports.first() {
+        Some(r) => r.clone(),
+        None => {
+            return (StatusCode::NOT_FOUND, "No report found".to_string()).into_response();
+        }
+    };
+
+    match format.as_str() {
+        "json" => {
+            let json = super::governance::report::export_json(&report);
+            (
+                StatusCode::OK,
+                [
+                    ("content-type", "application/json"),
+                    (
+                        "content-disposition",
+                        "attachment; filename=\"governance-report.json\"",
+                    ),
+                ],
+                json,
+            )
+                .into_response()
+        }
+        "html" => {
+            let html = super::governance::report::export_html(&report);
+            (
+                StatusCode::OK,
+                [
+                    ("content-type", "text/html; charset=utf-8"),
+                    (
+                        "content-disposition",
+                        "attachment; filename=\"governance-report.html\"",
+                    ),
+                ],
+                html,
+            )
+                .into_response()
+        }
+        _ => (StatusCode::BAD_REQUEST, "Unsupported format".to_string()).into_response(),
+    }
+}
+
+// ============================================================
+// Governance helpers
+// ============================================================
+
+fn sanitize_contract_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn find_contract_path(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    let safe_name = sanitize_contract_name(name);
+    // Try multiple extensions
+    for ext in &[".odcs.yaml", ".odcs.yml", ".yaml", ".yml"] {
+        let path = dir.join(format!("{safe_name}{ext}"));
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Load governance inputs from the main flowscope.db.
+fn load_governance_inputs(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+) -> (
+    Vec<(String, String)>,                  // (file_path, result_json)
+    Vec<(String, String)>,                  // (file_path, content)
+    Vec<(String, String, String)>,          // (from_table, to_table, script)
+) {
+    // Load file results
+    let mut file_results = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT file_path, result_json FROM project_file_results WHERE project_id = ?1 AND status = 1",
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![project_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+            ))
+        }) {
+            file_results = rows.filter_map(|r| r.ok()).collect();
+        }
+    }
+
+    // Load file contents
+    let mut file_contents = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT path, content FROM project_files WHERE project_id = ?1 AND status = 1",
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![project_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+            ))
+        }) {
+            file_contents = rows.filter_map(|r| r.ok()).collect();
+        }
+    }
+
+    // Load table-level edges
+    let mut table_edges = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT from_table, to_table, script FROM table_level_edges WHERE project_id = ?1 AND status = 1",
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![project_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }) {
+            table_edges = rows.filter_map(|r| r.ok()).collect();
+        }
+    }
+
+    (file_results, file_contents, table_edges)
 }
