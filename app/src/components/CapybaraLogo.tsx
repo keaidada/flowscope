@@ -14,16 +14,16 @@ export function CapybaraLogo({ className }: CapybaraLogoProps) {
       role="img"
       aria-label="Capybara logo"
     >
-      {/* Body - warm brown */}
-      <ellipse cx="32" cy="44" rx="16" ry="12" fill="#A0722B" />
+      {/* Body - rich amber brown */}
+      <ellipse cx="32" cy="44" rx="16" ry="12" fill="#D4873A" />
       {/* Lighter belly */}
-      <ellipse cx="32" cy="46" rx="10" ry="6" fill="#C49848" />
+      <ellipse cx="32" cy="46" rx="10" ry="6" fill="#E6B06A" />
       {/* Head */}
-      <ellipse cx="32" cy="28" rx="12" ry="9" fill="#A0722B" />
+      <ellipse cx="32" cy="28" rx="12" ry="9" fill="#D4873A" />
       {/* Snout - lighter */}
-      <ellipse cx="32" cy="30" rx="7" ry="4" fill="#C49848" />
+      <ellipse cx="32" cy="30" rx="7" ry="4" fill="#E6B06A" />
       {/* Nose - dark */}
-      <ellipse cx="32" cy="28" rx="2.5" ry="1.5" fill="#5C3516" />
+      <ellipse cx="32" cy="28" rx="2.5" ry="1.5" fill="#6B3A14" />
       {/* Left eye */}
       <circle cx="27" cy="24" r="2.2" fill="#1A1A1A" />
       <circle cx="27.6" cy="23.4" r="0.7" fill="white" />
@@ -31,20 +31,20 @@ export function CapybaraLogo({ className }: CapybaraLogoProps) {
       <circle cx="37" cy="24" r="2.2" fill="#1A1A1A" />
       <circle cx="37.6" cy="23.4" r="0.7" fill="white" />
       {/* Left ear */}
-      <ellipse cx="23" cy="20" rx="3" ry="4" fill="#8B6120" />
-      <ellipse cx="23" cy="20" rx="1.5" ry="2.5" fill="#C49848" />
+      <ellipse cx="23" cy="20" rx="3" ry="4" fill="#B8702D" />
+      <ellipse cx="23" cy="20" rx="1.5" ry="2.5" fill="#E6B06A" />
       {/* Right ear */}
-      <ellipse cx="41" cy="20" rx="3" ry="4" fill="#8B6120" />
-      <ellipse cx="41" cy="20" rx="1.5" ry="2.5" fill="#C49848" />
+      <ellipse cx="41" cy="20" rx="3" ry="4" fill="#B8702D" />
+      <ellipse cx="41" cy="20" rx="1.5" ry="2.5" fill="#E6B06A" />
       {/* Happy mouth */}
-      <path d="M28 30 Q32 33 36 30" stroke="#5C3516" strokeWidth="0.8" fill="none" strokeLinecap="round" />
+      <path d="M28 30 Q32 33 36 30" stroke="#6B3A14" strokeWidth="0.8" fill="none" strokeLinecap="round" />
       {/* Rosy cheeks */}
-      <circle cx="24" cy="28" r="2.5" fill="#E8A0A0" opacity="0.5" />
-      <circle cx="40" cy="28" r="2.5" fill="#E8A0A0" opacity="0.5" />
+      <circle cx="24" cy="28" r="2.5" fill="#FFB5B5" opacity="0.5" />
+      <circle cx="40" cy="28" r="2.5" fill="#FFB5B5" opacity="0.5" />
       {/* Left foot */}
-      <ellipse cx="24" cy="55" rx="4" ry="2" fill="#8B6120" />
+      <ellipse cx="24" cy="55" rx="4" ry="2" fill="#B8702D" />
       {/* Right foot */}
-      <ellipse cx="40" cy="55" rx="4" ry="2" fill="#8B6120" />
+      <ellipse cx="40" cy="55" rx="4" ry="2" fill="#B8702D" />
     </svg>
   );
 }
