@@ -95,7 +95,7 @@ export function GovernanceSettings({ projectId }: { projectId: string | null }) 
             placeholder="0 9 * * * (每天9点)"
             className="w-full px-3 py-2 border rounded text-sm font-mono"
           />
-          <p className="text-xs text-muted-foreground">留空则不启用定时扫描</p>
+          <p className="text-xs text-muted-foreground">{t('governance.scanCronHint', '留空则不启用定时扫描')}</p>
         </div>
         <div className="space-y-2">
           <label className="text-xs text-muted-foreground">{t('governance.alertThreshold', '告警阈值（健康分低于此值时告警）')}</label>

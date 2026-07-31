@@ -35,10 +35,10 @@ export function VisualModelDesigner() {
   const [ddlModel, setDdlModel] = useState<ModelDef>({
     table_name: 'dws_example',
     columns: [
-      { name: 'dt', data_type: 'DATE', primary_key: true, nullable: false, description: '业务日期' },
-      { name: 'amount', data_type: 'DECIMAL(10,2)', primary_key: false, nullable: false, description: '金额' },
+      { name: 'dt', data_type: 'DATE', primary_key: true, nullable: false, description: '' },
+      { name: 'amount', data_type: 'DECIMAL(10,2)', primary_key: false, nullable: false, description: '' },
     ],
-    description: '示例模型',
+    description: '',
   });
   const [dialect, setDialect] = useState('postgresql');
   const [ddlOutput, setDdlOutput] = useState('');
@@ -135,11 +135,11 @@ export function VisualModelDesigner() {
               {/* Columns */}
               <div className="border rounded">
                 <div className="grid grid-cols-[1fr_1fr_auto_auto_1fr_32px] gap-2 px-2 py-1 bg-muted/50 text-xs text-muted-foreground">
-                  <span>列名</span>
-                  <span>类型</span>
+                  <span>{t('governance.sourceTables', '列名')}</span>
+                  <span>{t('governance.type', '类型')}</span>
                   <span>PK</span>
                   <span>NOT NULL</span>
-                  <span>注释</span>
+                  <span>{t('governance.description', '注释')}</span>
                   <span></span>
                 </div>
                 {ddlModel.columns.map((col, idx) => (
@@ -217,9 +217,9 @@ export function VisualModelDesigner() {
                     <table className="w-full mt-2 text-xs">
                       <thead>
                         <tr className="text-muted-foreground border-b">
-                          <th className="text-left py-1">列名</th>
-                          <th className="text-left py-1">类型</th>
-                          <th className="text-left py-1">约束</th>
+                          <th className="text-left py-1">{t('governance.sourceTables', '列名')}</th>
+                          <th className="text-left py-1">{t('governance.type', '类型')}</th>
+                          <th className="text-left py-1">{t('governance.description', '约束')}</th>
                         </tr>
                       </thead>
                       <tbody>
