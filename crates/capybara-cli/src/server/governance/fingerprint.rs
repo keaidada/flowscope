@@ -19,9 +19,9 @@ pub struct Fingerprint {
 ///
 /// Normalization rules:
 /// - Lowercase all keywords
-/// - Replace table identifiers with `<T>`
-/// - Replace column identifiers with `<COL>` (but keep aggregate function names)
-/// - Replace string/number literals with `<LITERAL>`
+/// - Replace table identifiers with `<table>`
+/// - Replace column identifiers with `<column>` (but keep aggregate function names)
+/// - Replace string/number literals with `<value>`
 /// - Collapse whitespace
 pub fn fingerprint_sql(sql: &str) -> (String, String, Vec<String>) {
     let normalized = normalize_sql(sql);
@@ -101,7 +101,7 @@ fn normalize_tokens(tokens: &[String]) -> String {
         if tok == "'" || tok == "\"" || tok == "`" {
             // Skip until closing delimiter
             let delim = tok.as_str();
-            result.push(if delim == "'" { "<literal>" } else { "<t>" }.to_string());
+            result.push(if delim == "'" { "<value>" } else { "<table>" }.to_string());
             i += 1;
             while i < tokens.len() && tokens[i] != delim {
                 i += 1;
@@ -112,7 +112,7 @@ fn normalize_tokens(tokens: &[String]) -> String {
 
         // Number
         if tok.chars().all(|c| c.is_ascii_digit() || c == '.') && !tok.is_empty() {
-            result.push("<literal>".to_string());
+            result.push("<value>".to_string());
             i += 1;
             continue;
         }
@@ -120,7 +120,7 @@ fn normalize_tokens(tokens: &[String]) -> String {
         // Check if previous token was a table keyword → this is a table name
         if i > 0 && TABLE_KEYWORDS.contains(&tokens[i - 1].as_str()) {
             // Skip schema prefix (e.g., "db.schema.table" → already one token due to '.' handling)
-            result.push("<t>".to_string());
+            result.push("<table>".to_string());
             i += 1;
             continue;
         }
@@ -151,7 +151,7 @@ fn normalize_tokens(tokens: &[String]) -> String {
         }
 
         // Everything else → column identifier
-        result.push("<col>".to_string());
+        result.push("<column>".to_string());
         i += 1;
     }
 
@@ -183,7 +183,7 @@ fn extract_structured_tokens(normalized: &str) -> Vec<String> {
         "union", "intersect", "except", "with", "as", "distinct",
         "case", "when", "then", "else", "end",
         "and", "or", "not", "in", "exists", "between", "like", "is",
-        "<col>", "<literal>", "<t>",
+        "<column>", "<value>", "<table>",
     ];
 
     let funcs = [
@@ -265,7 +265,7 @@ mod tests {
     fn test_normalize_literals() {
         let sql = "SELECT * FROM t WHERE x = 123 AND y = 'hello'";
         let (_, normalized, _) = fingerprint_sql(sql);
-        assert!(normalized.contains("<literal>"), "Numbers should be normalized");
+        assert!(normalized.contains("<value>"), "Numbers should be normalized");
         assert!(!normalized.contains("123"), "Raw numbers should be removed");
         assert!(!normalized.contains("hello"), "String literals should be removed");
     }

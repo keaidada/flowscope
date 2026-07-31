@@ -222,7 +222,8 @@ function ViolationSection({ severity, items }: { severity: Severity; items: Cont
                   <ChevronRight className={cn('h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0 transition-transform', isExpanded && 'rotate-90')} />
                 </button>
                 {isExpanded && (
-                  <div className="px-3 py-2 pl-9 bg-background/50 border-t">
+                  <div className="px-3 py-3 pl-9 bg-background/50 border-t space-y-3">
+                    <ViolationInterpretation v={v} />
                     <ViolationDetail detail={v.detail} />
                   </div>
                 )}
@@ -235,67 +236,125 @@ function ViolationSection({ severity, items }: { severity: Severity; items: Cont
   );
 }
 
-/** Show violation detail in readable format. Long strings get code blocks, arrays get bullets. */
-function ViolationDetail({ detail }: { detail: Record<string, unknown> }) {
-  const entries = Object.entries(detail).filter(([, v]) => v != null);
-  if (entries.length === 0) return <p className="text-xs text-muted-foreground italic">No details available</p>;
+/** Plain-language explanation of what this violation means. */
+function ViolationInterpretation({ v }: { v: ContractViolation }) {
+  const d = v.detail || {};
+  const scripts = (Array.isArray(d.scripts) ? d.scripts as string[] : []).filter(Boolean);
+  const tables = (Array.isArray(d.orphan_tables) ? d.orphan_tables as unknown[] : [])
+    .concat(Array.isArray(d.table) ? [String(d.table)] : d.table ? [String(d.table)] : [] as string[])
+    .filter(Boolean);
+  const files = (Array.isArray(d.file) ? d.file as string[] : d.file ? [String(d.file)] : [])
+    .concat(scripts).filter((f, i, a) => a.indexOf(f) === i);
 
-  return (
-    <div className="space-y-2 text-xs">
-      {entries.map(([key, val]) => (
-        <DetailField key={key} name={key} value={val} />
-      ))}
-    </div>
-  );
+  switch (v.rule_id) {
+    case 'no_duplicate_computation': {
+      const sim = typeof d.similarity === 'number' ? d.similarity : 1;
+      return (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-foreground">
+            {sim >= 1
+              ? `${scripts.length} 个脚本计算逻辑完全相同`
+              : `${scripts.length} 个脚本计算逻辑相似（${Math.round(sim * 100)}%）`}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            这些脚本使用相同的 INSERT/SELECT/SUM 模式，只是目标表不同。建议抽取为通用 ETL，用参数区分目标表。
+          </p>
+          {scripts.length > 0 && (
+            <ul className="text-xs space-y-0.5 mt-1">
+              {scripts.map((s, i) => <li key={i} className="font-mono text-[11px] pl-3 border-l-2 border-amber-300">▸ {s}</li>)}
+            </ul>
+          )}
+        </div>
+      );
+    }
+    case 'no_write_conflict':
+      return (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-foreground">{scripts.length} 个脚本写入同一个表</p>
+          <p className="text-xs text-muted-foreground">
+            {tables.join(', ')} 被 {scripts.length} 个不同的脚本写入，可能导致数据覆盖或不一致。
+          </p>
+          {scripts.length > 0 && (
+            <ul className="text-xs space-y-0.5 mt-1">
+              {scripts.map((s, i) => <li key={i} className="font-mono text-[11px] pl-3 border-l-2 border-amber-300">▸ {s}</li>)}
+            </ul>
+          )}
+        </div>
+      );
+    case 'no_orphan_output':
+      return (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-foreground">{tables.length} 个表没有下游消费</p>
+          <p className="text-xs text-muted-foreground">这些表被写入但没有任何脚本读取，可能是废弃的 ETL 产出。</p>
+        </div>
+      );
+    case 'lineage_completeness':
+      return (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-foreground">文件缺少血缘关系</p>
+          <p className="text-xs text-muted-foreground">
+            {files.join(', ')} 包含表操作但在 table_level_edges 中没有对应的血缘记录。
+          </p>
+        </div>
+      );
+    case 'no_hardcoded_secrets':
+      return (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-foreground">SQL 中疑似硬编码敏感信息</p>
+          <p className="text-xs text-muted-foreground">
+            {files.join(', ')} 匹配了敏感模式 "{String(d.pattern ?? 'N/A')}"。请改用环境变量或密钥管理服务。
+          </p>
+        </div>
+      );
+    case 'no_select_star':
+      return (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-foreground">使用了 SELECT *</p>
+          <p className="text-xs text-muted-foreground">{files.join(', ')} 中使用了 SELECT *，应显式指定列名。</p>
+        </div>
+      );
+    case 'max_complexity':
+      return (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-foreground">复杂度超标</p>
+          <p className="text-xs text-muted-foreground">
+            {files.join(', ')} 的复杂度 ({String(d.complexity_score ?? '?')}) 超过阈值 ({String(d.threshold ?? '?')})。建议拆分或简化查询。
+          </p>
+        </div>
+      );
+    default:
+      return null;
+  }
 }
 
-function DetailField({ name, value }: { name: string; value: unknown }) {
-  // Arrays → bullet list
-  if (Array.isArray(value)) {
-    return (
-      <div>
-        <span className="text-muted-foreground font-medium">{name}</span>
-        <ul className="mt-0.5 space-y-0.5">
-          {value.map((item, i) => (
-            <li key={i} className="pl-3 border-l-2 border-muted font-mono text-[11px] break-all text-foreground/80">{String(item)}</li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
+/** Show key-value details — clean format, skip interpreted fields. */
+function ViolationDetail({ detail }: { detail: Record<string, unknown> }) {
+  const skipKeys = new Set(['scripts', 'file', 'orphan_tables', 'table', 'threshold', 'complexity_score', 'pattern', 'similarity']);
+  const entries = Object.entries(detail).filter(([k, v]) => v != null && !skipKeys.has(k));
+  if (entries.length === 0) return null;
 
-  // Long strings (>80 chars) or known code fields → code block
-  const strVal = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
-  const isLong = strVal.length > 80;
-  const codeLikeFields = ['normalized_sql', 'hash', 'sql', 'script', 'content', 'source'];
-
-  if (isLong || codeLikeFields.includes(name)) {
-    return (
-      <div>
-        <span className="text-muted-foreground font-medium">{name}</span>
-        <pre className="mt-0.5 p-2 bg-muted/50 rounded text-[11px] font-mono whitespace-pre-wrap break-all text-foreground/80 max-h-32 overflow-auto">
-          {strVal}
-        </pre>
-      </div>
-    );
-  }
-
-  // Numbers → just the value
-  if (typeof value === 'number') {
-    return (
-      <div className="flex gap-2">
-        <span className="text-muted-foreground">{name}</span>
-        <span className="tabular-nums font-mono font-bold">{value}</span>
-      </div>
-    );
-  }
-
-  // Short strings → inline
   return (
-    <div className="flex gap-2">
-      <span className="text-muted-foreground">{name}</span>
-      <span className="font-mono text-[11px] break-all text-foreground/80">{strVal}</span>
-    </div>
+    <details className="text-xs">
+      <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">Technical details</summary>
+      <div className="mt-1.5 space-y-1.5">
+        {entries.map(([key, val]) => {
+          const str = Array.isArray(val) ? (val as unknown[]).join(', ') : typeof val === 'object' ? JSON.stringify(val) : String(val);
+          const isCode = key === 'normalized_sql' || key === 'hash' || str.length > 100;
+          return (
+            <div key={key}>
+              <span className="text-muted-foreground">{key}</span>
+              {isCode ? (
+                <pre className="mt-0.5 p-1.5 bg-muted/50 rounded text-[10px] font-mono whitespace-pre-wrap break-all max-h-24 overflow-auto text-foreground/70">
+                  {str}
+                </pre>
+              ) : (
+                <span className="ml-1.5 font-mono text-[11px] break-all text-foreground/70">{str}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </details>
   );
 }
 
