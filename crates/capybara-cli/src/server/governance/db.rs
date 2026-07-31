@@ -17,7 +17,33 @@ pub fn open_gov_db(path: &Path) -> Result<Mutex<Connection>, rusqlite::Error> {
          PRAGMA foreign_keys = ON;",
     )?;
     create_tables(&conn)?;
+    migrate_metrics_registry(&conn)?;
     Ok(Mutex::new(conn))
+}
+
+/// Add new columns to metrics_registry if they don't exist (for existing databases).
+fn migrate_metrics_registry(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let cols: Vec<String> = conn
+        .prepare("PRAGMA table_info(metrics_registry)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !cols.iter().any(|c| c == "metric_type") {
+        conn.execute_batch(
+            "ALTER TABLE metrics_registry ADD COLUMN metric_type TEXT NOT NULL DEFAULT 'atomic';",
+        )?;
+    }
+    if !cols.iter().any(|c| c == "business_filter") {
+        conn.execute_batch(
+            "ALTER TABLE metrics_registry ADD COLUMN business_filter TEXT NOT NULL DEFAULT '';",
+        )?;
+    }
+    if !cols.iter().any(|c| c == "period") {
+        conn.execute_batch(
+            "ALTER TABLE metrics_registry ADD COLUMN period TEXT NOT NULL DEFAULT '';",
+        )?;
+    }
+    Ok(())
 }
 
 fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -198,10 +224,13 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id      TEXT    NOT NULL,
             metric_name     TEXT    NOT NULL,
+            metric_type     TEXT    NOT NULL DEFAULT 'atomic',
             definition      TEXT    NOT NULL,
             sql_signature   TEXT    NOT NULL,
             expression      TEXT    NOT NULL DEFAULT '',
             aggregation     TEXT    NOT NULL DEFAULT '',
+            business_filter TEXT    NOT NULL DEFAULT '',
+            period          TEXT    NOT NULL DEFAULT '',
             source_tables   TEXT    NOT NULL DEFAULT '',
             dimensions      TEXT    NOT NULL DEFAULT '[]',
             owner           TEXT    NOT NULL DEFAULT '',

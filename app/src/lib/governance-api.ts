@@ -87,10 +87,13 @@ export interface ModelStats {
 export interface MetricEntry {
   id: number;
   metric_name: string;
+  metric_type: string;
   definition: string;
   sql_signature: string;
   expression: string;
   aggregation: string;
+  business_filter: string;
+  period: string;
   source_tables: string;
   dimensions: string[];
   owner: string;
@@ -233,6 +236,13 @@ export const governanceApi = {
 
   async metricStats(projectId: string): Promise<MetricStats> {
     return govFetch(`/metrics/stats?project_id=${encodeURIComponent(projectId)}`);
+  },
+
+  async autoDetectMetrics(projectId: string): Promise<{ detected: number }> {
+    return govFetch('/metrics/auto', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId }),
+    });
   },
 
   // === Designer ===

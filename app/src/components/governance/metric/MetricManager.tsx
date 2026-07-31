@@ -4,8 +4,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, BarChart3 } from 'lucide-react';
+import { AlertTriangle, BarChart3, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { governanceApi, type MetricEntry, type MetricConflict, type MetricStats } from '@/lib/governance-api';
 
 export function MetricManager({ projectId }: { projectId: string | null }) {
@@ -18,18 +19,25 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
   const refresh = useCallback(async () => {
     if (!projectId) return;
     try {
-      const ms = await governanceApi['listMetrics'](new URLSearchParams({ project_id: projectId }).toString());
+      const ms = await governanceApi.listMetrics(new URLSearchParams({ project_id: projectId }).toString());
       setMetrics(ms);
-      const cs = await governanceApi['metricConflicts'](projectId);
+      const cs = await governanceApi.metricConflicts(projectId);
       setConflicts(cs);
-      const s = await governanceApi['metricStats'](projectId);
+      const s = await governanceApi.metricStats(projectId);
       setStats(s);
-    } catch (e) {
-      console.error('Metric list failed:', e);
-    }
+    } catch (e) { console.error('Metric list failed:', e); }
   }, [projectId]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  const handleAutoDetect = async () => {
+    if (!projectId) return;
+    try {
+      const r = await governanceApi.autoDetectMetrics(projectId);
+      console.log(`Auto-detected ${r.detected} metrics`);
+      await refresh();
+    } catch (e) { console.error('Auto-detect failed:', e); }
+  };
 
   if (!projectId) {
     return <div className="flex items-center justify-center h-full text-muted-foreground text-sm">{t('governance.selectProject', '请先选择项目')}</div>;
@@ -39,6 +47,11 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
     <div className="flex h-full">
       {/* Left: list */}
       <div className="w-80 border-r flex flex-col">
+        <div className="flex items-center gap-1 px-2 py-1.5 border-b">
+          <Button variant="ghost" size="sm" onClick={handleAutoDetect} className="h-6 px-2 text-xs">
+            <Sparkles className="h-3 w-3 mr-1" />Auto-detect
+          </Button>
+        </div>
         {stats && (
           <div className="flex gap-3 px-3 py-2 border-b bg-muted/20 text-xs text-muted-foreground">
             <span>{t('governance.total', '总计')}: <b className="text-foreground">{stats.total}</b></span>
@@ -107,7 +120,10 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
             <div className="grid grid-cols-2 gap-3">
               <Field label={t('governance.definition', '定义')} value={selected.definition} />
               <Field label={t('governance.aggregation', '聚合')} value={selected.aggregation} />
+              <Field label={t('governance.metricType', '指标类型')} value={selected.metric_type || 'atomic'} />
               <Field label={t('governance.expression', '表达式')} value={selected.expression} mono />
+              <Field label={t('governance.businessFilter', '业务限定')} value={selected.business_filter} />
+              <Field label={t('governance.period', '周期')} value={selected.period} />
               <Field label={t('governance.sourceTables', '来源表')} value={selected.source_tables} />
               <Field label={t('governance.layer', '层级')} value={selected.layer} />
               <Field label={t('governance.owner', '负责人')} value={selected.owner} />

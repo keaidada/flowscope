@@ -95,6 +95,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/governance/metrics", get(gov_list_metrics))
         .route("/governance/metrics/conflicts", get(gov_metric_conflicts))
         .route("/governance/metrics/stats", get(gov_metric_stats))
+        .route("/governance/metrics/auto", post(gov_auto_detect_metrics))
         // Designer
         .route("/governance/gen-ddl", post(gov_gen_ddl))
         .route("/governance/reverse-engineer", post(gov_reverse_engineer))
@@ -3336,6 +3337,55 @@ async fn gov_metric_stats(
         Ok(stats) => Json(stats).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Stats failed: {e}")).into_response(),
     }
+}
+
+/// POST /api/governance/metrics/auto — auto-detect metrics from analysis results
+async fn gov_auto_detect_metrics(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GovAutoDetectMetricsRequest>,
+) -> impl IntoResponse {
+    // Load file results from main DB
+    let file_results_raw = {
+        let conn = match state.db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+        };
+        let mut results = Vec::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT file_path, result_json FROM project_file_results WHERE project_id = ?1 AND status = 1",
+        ) {
+            if let Ok(rows) = stmt.query_map(rusqlite::params![req.project_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
+                results = rows.filter_map(|r| r.ok()).collect();
+            }
+        }
+        results
+    };
+
+    let file_results: Vec<(String, capybara_core::AnalyzeResult)> = file_results_raw
+        .into_iter()
+        .filter_map(|(path, json)| {
+            serde_json::from_str::<capybara_core::AnalyzeResult>(&json)
+                .ok()
+                .map(|r| (path, r))
+        })
+        .collect();
+
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Gov DB lock: {e}")).into_response(),
+    };
+
+    match super::governance::metric::auto_detect_metrics(&conn, &req.project_id, &file_results) {
+        Ok(count) => Json(serde_json::json!({"detected": count})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Auto-detect failed: {e}")).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct GovAutoDetectMetricsRequest {
+    project_id: String,
 }
 
 #[derive(Deserialize)]

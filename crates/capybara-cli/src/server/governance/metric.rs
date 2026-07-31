@@ -13,10 +13,13 @@ pub struct MetricEntry {
     pub id: i64,
     pub project_id: String,
     pub metric_name: String,
+    pub metric_type: String,
     pub definition: String,
     pub sql_signature: String,
     pub expression: String,
     pub aggregation: String,
+    pub business_filter: String,
+    pub period: String,
     pub source_tables: String,
     pub dimensions: Vec<String>,
     pub owner: String,
@@ -102,6 +105,127 @@ pub fn import_from_contracts(
     Ok(imported)
 }
 
+/// Auto-detect metrics from analysis results.
+/// Scans for aggregation columns and registers them as atomic metrics,
+/// extracting business filters and time periods where available.
+pub fn auto_detect_metrics(
+    conn: &Connection,
+    project_id: &str,
+    file_results: &[(String, capybara_core::AnalyzeResult)],
+) -> Result<usize, rusqlite::Error> {
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let mut detected = 0usize;
+
+    for (_file_path, result) in file_results {
+        for stmt in &result.statements {
+            // Collect source table names from table nodes
+            let source_tables: Vec<String> = stmt
+                .nodes
+                .iter()
+                .filter(|n| n.node_type == capybara_core::NodeType::Table)
+                .map(|n| n.label.as_ref().to_string())
+                .collect();
+
+            // Collect all grouping dimensions
+            let dims: Vec<String> = stmt
+                .nodes
+                .iter()
+                .filter_map(|n| {
+                    n.aggregation.as_ref().and_then(|a| {
+                        if a.is_grouping_key {
+                            Some(n.label.as_ref().to_string())
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect();
+
+            // Detect time period from group-by columns
+            let period = if dims.iter().any(|d| {
+                let dl = d.to_lowercase();
+                dl.contains("dt") || dl.contains("date") || dl.contains("time") || dl == "day" || dl == "month"
+            }) {
+                "daily"
+            } else {
+                ""
+            };
+
+            // Collect filter expressions from node filters
+            let filter_texts: Vec<String> = stmt
+                .nodes
+                .iter()
+                .flat_map(|n| &n.filters)
+                .map(|f| f.expression.clone())
+                .collect();
+            let filter_str = filter_texts.join("; ");
+
+            // Process each aggregation column
+            for node in &stmt.nodes {
+                let agg = match &node.aggregation {
+                    Some(a) => {
+                        if a.is_grouping_key || a.function.is_none() {
+                            continue;
+                        }
+                        a
+                    }
+                    None => continue,
+                };
+
+                let col_name = node.label.as_ref();
+                let agg_func = agg.function.as_deref().unwrap_or("UNKNOWN");
+
+                // Use qualified_name or label as metric name
+                let parent_table = node
+                    .qualified_name
+                    .as_deref()
+                    .or_else(|| source_tables.first().map(|s| s.as_str()))
+                    .unwrap_or(col_name);
+                let metric_name = format!("{}_{}_{}", parent_table, col_name, agg_func).to_lowercase();
+
+                let signature = compute_signature(agg_func, col_name);
+
+                conn.execute(
+                    "INSERT INTO metrics_registry
+                        (project_id, metric_name, metric_type, definition, sql_signature, expression,
+                         aggregation, business_filter, period, source_tables, dimensions, layer,
+                         lifecycle, bound_model, bound_column, created_at, updated_at, status)
+                     VALUES (?1, ?2, 'atomic', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'active', ?12, ?13, ?14, ?14, 1)
+                     ON CONFLICT(project_id, metric_name) DO UPDATE SET
+                        aggregation = excluded.aggregation,
+                        expression = excluded.expression,
+                        business_filter = excluded.business_filter,
+                        period = excluded.period,
+                        source_tables = excluded.source_tables,
+                        dimensions = excluded.dimensions,
+                        bound_model = excluded.bound_model,
+                        bound_column = excluded.bound_column,
+                        updated_at = excluded.updated_at",
+                    rusqlite::params![
+                        project_id,
+                        metric_name,
+                        &metric_name,
+                        signature,
+                        agg_func,
+                        agg_func,
+                        filter_str,
+                        period.to_string(),
+                        source_tables.join(","),
+                        serde_json::to_string(&dims).unwrap_or_default(),
+                        super::model::infer_layer(&source_tables.join("_")),
+                        parent_table,
+                        col_name,
+                        now,
+                    ],
+                )?;
+                detected += 1;
+            }
+        }
+    }
+
+    Ok(detected)
+}
+
 /// Simple SQL signature: hash the expression for conflict detection.
 fn compute_signature(expression: &str, table: &str) -> String {
     let combined = format!("{table}:{expression}");
@@ -120,8 +244,8 @@ pub fn list_metrics(
     query: Option<&str>,
 ) -> Result<Vec<MetricEntry>, rusqlite::Error> {
     let mut sql = String::from(
-        "SELECT id, project_id, metric_name, definition, sql_signature, expression, aggregation,
-                source_tables, dimensions, owner, layer, lifecycle, contract_id, bound_model, bound_column
+        "SELECT id, project_id, metric_name, metric_type, definition, sql_signature, expression, aggregation,
+                business_filter, period, source_tables, dimensions, owner, layer, lifecycle, contract_id, bound_model, bound_column
          FROM metrics_registry WHERE project_id = ?1 AND status = 1",
     );
     let mut idx = 2;
@@ -146,24 +270,27 @@ pub fn list_metrics(
     let mut stmt = conn.prepare(&sql)?;
     let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
     let rows = stmt.query_map(param_refs.as_slice(), |row| {
-        let dims_json: String = row.get(8)?;
+        let dims_json: String = row.get(11)?;
         let dims: Vec<String> = serde_json::from_str(&dims_json).unwrap_or_default();
         Ok(MetricEntry {
             id: row.get(0)?,
             project_id: row.get(1)?,
             metric_name: row.get(2)?,
-            definition: row.get(3)?,
-            sql_signature: row.get(4)?,
-            expression: row.get(5)?,
-            aggregation: row.get(6)?,
-            source_tables: row.get(7)?,
+            metric_type: row.get::<_, String>(3).unwrap_or_default(),
+            definition: row.get(4)?,
+            sql_signature: row.get(5)?,
+            expression: row.get(6)?,
+            aggregation: row.get(7)?,
+            business_filter: row.get::<_, String>(8).unwrap_or_default(),
+            period: row.get::<_, String>(9).unwrap_or_default(),
+            source_tables: row.get(10)?,
             dimensions: dims,
-            owner: row.get(9)?,
-            layer: row.get(10)?,
-            lifecycle: row.get(11)?,
-            contract_id: row.get(12)?,
-            bound_model: row.get(13)?,
-            bound_column: row.get(14)?,
+            owner: row.get(12)?,
+            layer: row.get(13)?,
+            lifecycle: row.get(14)?,
+            contract_id: row.get(15)?,
+            bound_model: row.get(16)?,
+            bound_column: row.get(17)?,
         })
     })?;
 
