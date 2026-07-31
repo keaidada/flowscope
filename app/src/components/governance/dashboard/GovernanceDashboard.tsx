@@ -3,21 +3,20 @@
  * Fills full available space, scrolls internally.
  */
 
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   RefreshCw, Download, AlertCircle, ChevronDown, ChevronRight,
-  Activity, Shield, Code2, Database, Lock, Boxes, Clock, ExternalLink,
+  Activity, Shield, Code2, Database, Lock, Boxes, Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import type { useGovernanceData } from '@/hooks/useGovernanceData';
 import type { ContractViolation, Severity } from '@/lib/governance-api';
 import { governanceApi } from '@/lib/governance-api';
@@ -188,101 +187,115 @@ function ViolationGroups({ violations }: { violations: ContractViolation[] }) {
       </h3>
       {groups.map(g => <ViolationSection key={g.severity} severity={g.severity} items={g.items} onSelect={setSelectedV} />)}
 
-      {/* Sheet for duplicate detail comparison */}
-      <Sheet open={!!selectedV} onOpenChange={(open) => { if (!open) setSelectedV(null); }}>
-        <SheetContent className="w-[800px] sm:max-w-[800px] overflow-auto">
-            {selectedV && (
+      {/* Dialog for violation detail */}
+      <Dialog open={!!selectedV} onOpenChange={(open) => { if (!open) setSelectedV(null); }}>
+        <DialogContent className="max-w-[90vw] max-h-[85vh] flex flex-col">
+          {selectedV && (
             <>
-              <SheetHeader className="mb-3">
-                <SheetTitle className="text-base flex items-center gap-2">
+              <DialogHeader className="shrink-0">
+                <DialogTitle className="text-base flex items-center gap-2">
                   <span className={cn('px-1.5 py-0.5 rounded text-xs font-bold',
                     selectedV.severity === 'P0' ? 'bg-red-500/10 text-red-600' : selectedV.severity === 'P1' ? 'bg-amber-500/10 text-amber-600' : 'bg-blue-500/10 text-blue-600'
                   )}>{selectedV.severity}</span>
                   {selectedV.title}
-                </SheetTitle>
-                <SheetDescription className="text-xs">
-                  <code className="px-1 py-0.5 bg-muted rounded font-mono text-[10px]">{selectedV.rule_id}</code>
-                  <span className="mx-1">·</span>{selectedV.rule_section}
-                </SheetDescription>
-              </SheetHeader>
-              {selectedV.rule_id === 'no_duplicate_computation'
-                ? <DuplicateComparison v={selectedV} />
-                : (
-                  <div className="space-y-3">
-                    <ViolationInterpretation v={selectedV} />
-                    <ViolationDetail detail={selectedV.detail} />
-                  </div>
-                )}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="flex-1 min-h-0 overflow-auto mt-2">
+                {selectedV.rule_id === 'no_duplicate_computation'
+                  ? <DuplicateComparison v={selectedV} />
+                  : (
+                    <div className="space-y-3">
+                      <ViolationInterpretation v={selectedV} />
+                      <ViolationDetail detail={selectedV.detail} />
+                    </div>
+                  )}
+              </div>
             </>
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-/** Side-by-side SQL comparison for duplicate violations. */
+/** Side-by-side SQL comparison with synchronized scrolling — ETL-diff style. */
 function DuplicateComparison({ v }: { v: ContractViolation }) {
   const d = v.detail || {};
   const sqlMap = (d.script_sqls as Record<string, string>) || {};
-  const scripts = (Array.isArray(d.scripts) ? d.scripts as string[] : []).filter((s: string) => sqlMap[s]);
-  const sim = typeof d.similarity === 'number' ? d.similarity : 1;
+  const rawScripts = (Array.isArray(d.scripts) ? d.scripts : []) as string[];
+  const scripts = rawScripts.filter((s: string) => (sqlMap as Record<string, string>)[s]);
+  const sim: number = typeof d.similarity === 'number' ? (d.similarity as number) : 1;
+
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const syncLock = useRef(false);
+
+  const syncScroll = useCallback((source: 'left' | 'right') => {
+    if (syncLock.current) return;
+    syncLock.current = true;
+    const src = source === 'left' ? leftRef.current : rightRef.current;
+    const dst = source === 'left' ? rightRef.current : leftRef.current;
+    if (src && dst) {
+      dst.scrollTop = src.scrollTop;
+      dst.scrollLeft = src.scrollLeft;
+    }
+    requestAnimationFrame(() => { syncLock.current = false; });
+  }, []);
 
   if (scripts.length < 2) {
-    return <p className="text-xs text-muted-foreground">No script contents available for comparison.</p>;
+    return <p className="text-xs text-muted-foreground p-4">No script contents available for comparison.</p>;
   }
 
   const left = scripts[0];
   const right = scripts[1];
+  const leftLines = (sqlMap[left] || '').split('\n');
+  const rightLines = (sqlMap[right] || '').split('\n');
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        {/* Left panel */}
-        <div className="rounded-lg border overflow-hidden">
-          <div className="flex items-center gap-1.5 px-3 py-2 bg-muted/50 border-b">
-            <span className="text-xs font-semibold">脚本 A</span>
-            <span className="text-[11px] text-muted-foreground font-mono truncate">{left}</span>
-          </div>
-          <pre className="p-3 text-[12px] font-mono whitespace-pre-wrap break-all leading-relaxed text-foreground/85 max-h-[60vh] overflow-auto">
-            {sqlMap[left] || '(content not available)'}
-          </pre>
-        </div>
-        {/* Right panel */}
-        <div className="rounded-lg border overflow-hidden">
-          <div className="flex items-center gap-1.5 px-3 py-2 bg-muted/50 border-b">
-            <span className="text-xs font-semibold">脚本 B</span>
-            <span className="text-[11px] text-muted-foreground font-mono truncate">{right}</span>
-          </div>
-          <pre className="p-3 text-[12px] font-mono whitespace-pre-wrap break-all leading-relaxed text-foreground/85 max-h-[60vh] overflow-auto">
-            {sqlMap[right] || '(content not available)'}
-          </pre>
-        </div>
+    <div className="flex flex-col h-full min-h-0 gap-2">
+      {/* Script name headers */}
+      <div className="grid grid-cols-2 gap-3 shrink-0">
+        <div className="text-xs font-semibold font-mono truncate bg-muted/50 px-2 py-1 rounded">A: {left}</div>
+        <div className="text-xs font-semibold font-mono truncate bg-muted/50 px-2 py-1 rounded">B: {right}</div>
       </div>
-
-      {/* Similarity indicator */}
       {sim < 1 && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>相似度：</span>
-          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[11px] text-muted-foreground">相似度</span>
+          <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
             <div className="h-full bg-amber-500 rounded-full" style={{ width: `${Math.round(sim * 100)}%` }} />
           </div>
-          <span className="tabular-nums font-bold">{Math.round(sim * 100)}%</span>
+          <span className="text-[11px] tabular-nums font-bold">{Math.round(sim * 100)}%</span>
         </div>
       )}
-
-      {/* Normalized pattern */}
+      {/* Code panels — sync scroll */}
+      <div className="flex-1 min-h-0 grid grid-cols-2 gap-3">
+        <div ref={leftRef} onScroll={() => syncScroll('left')} className="border rounded-lg overflow-auto font-mono text-xs leading-relaxed bg-muted/20">
+          <table className="w-full">
+            <tbody>{leftLines.map((line, i) => (
+              <tr key={i} className={cn('hover:bg-accent/30', line !== (rightLines[i] || '') && line.trim() ? 'bg-amber-500/10' : '')}>
+                <td className="text-right text-muted-foreground select-none pr-2 pl-1 w-8 border-r text-[10px] py-px">{i + 1}</td>
+                <td className="pl-2 pr-2 whitespace-pre-wrap break-all py-px">{line}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+        <div ref={rightRef} onScroll={() => syncScroll('right')} className="border rounded-lg overflow-auto font-mono text-xs leading-relaxed bg-muted/20">
+          <table className="w-full">
+            <tbody>{rightLines.map((line, i) => (
+              <tr key={i} className={cn('hover:bg-accent/30', line !== (leftLines[i] || '') && line.trim() ? 'bg-amber-500/10' : '')}>
+                <td className="text-right text-muted-foreground select-none pr-2 pl-1 w-8 border-r text-[10px] py-px">{i + 1}</td>
+                <td className="pl-2 pr-2 whitespace-pre-wrap break-all py-px">{line}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </div>
+      {scripts.length > 2 && <p className="text-xs text-muted-foreground shrink-0">+ {scripts.length - 2} more scripts with same logic</p>}
       {Boolean(d.normalized_sql) && (
-        <details className="text-xs">
+        <details className="text-xs shrink-0">
           <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">公共计算模式</summary>
-          <pre className="mt-1 p-2 bg-muted/30 rounded text-[11px] font-mono whitespace-pre-wrap break-all text-foreground/60 max-h-32 overflow-auto">
-            {String(d.normalized_sql)}
-          </pre>
+          <pre className="mt-1 p-2 bg-muted/30 rounded text-[11px] font-mono whitespace-pre-wrap break-all text-foreground/60 max-h-20 overflow-auto">{String(d.normalized_sql)}</pre>
         </details>
-      )}
-
-      {scripts.length > 2 && (
-        <p className="text-xs text-muted-foreground">+ {scripts.length - 2} 个其他脚本也有相同计算逻辑（未展开）</p>
       )}
     </div>
   );
@@ -321,7 +334,7 @@ function ViolationSection({ severity, items, onSelect }: { severity: Severity; i
                   {v.file_paths.length > 0 && (<><span>·</span><span className="truncate">{v.file_paths.join(', ')}</span></>)}
                 </div>
               </div>
-              <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0 opacity-50" />
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0 opacity-50" />
             </button>
           ))}
         </div>
