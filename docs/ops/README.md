@@ -15,7 +15,7 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/keaidada/capybara.git
+git clone https://github.com/keaidada/flowscope.git
 cd capybara
 
 # 2. 一键安装 + 构建 + 启动

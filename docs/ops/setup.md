@@ -78,7 +78,7 @@ cargo install just
 cargo install wasm-pack
 
 # 克隆并构建
-git clone https://github.com/keaidada/capybara.git
+git clone https://github.com/keaidada/flowscope.git
 cd capybara
 ```
 

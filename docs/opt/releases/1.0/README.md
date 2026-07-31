@@ -7,7 +7,7 @@
 - No other dependencies required
 
 ### Quick Install
-1. Download `capybara.exe` from [GitHub Releases](https://github.com/keaidada/capybara/releases/tag/v1.0)
+1. Download `capybara.exe` from [GitHub Releases](https://github.com/keaidada/flowscope/releases/tag/v1.0)
 2. Place `capybara.exe` and `install.bat` in the same directory
 3. Run `install.bat` as Administrator
 

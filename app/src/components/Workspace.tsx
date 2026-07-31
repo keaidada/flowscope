@@ -638,7 +638,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
               )}
               <DropdownMenuItem asChild>
                 <a
-                  href="https://github.com/keaidada/capybara"
+                  href="https://github.com/keaidada/flowscope"
                   target="_blank"
                   rel="noopener noreferrer"
                 >

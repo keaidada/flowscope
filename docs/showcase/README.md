@@ -187,4 +187,4 @@ PostgreSQL · Snowflake · BigQuery · DuckDB · Redshift · Hive · MySQL · SQ
 
 ---
 
-**Part of the [PondPilot](https://github.com/keaidada/capybara) project.**
+**Part of the [PondPilot](https://github.com/keaidada/flowscope) project.**
