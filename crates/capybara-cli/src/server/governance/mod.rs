@@ -5,6 +5,7 @@
 //! and health scores.
 
 pub mod contract;
+pub mod contract_generator;
 pub mod db;
 pub mod designer;
 pub mod duplicate;

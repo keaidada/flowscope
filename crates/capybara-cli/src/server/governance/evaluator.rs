@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use capybara_core::AnalyzeResult;
 
 use super::contract::{Contract, FlowScopeRules, LineageRule};
+use super::contract_generator::{generate_models, GenerationInput, TableModel};
 use super::duplicate::{detect_duplicates, detect_orphan_outputs, detect_write_conflicts};
 use super::fingerprint::{fingerprint_sql, Fingerprint};
 use super::{ContractViolation, PendingRuntimeCheck, Severity};
@@ -21,6 +22,8 @@ pub struct GovernanceContext<'a> {
     pub file_contents: &'a [(String, String)],
     /// (from_table, to_table, script) — from table_level_edges
     pub table_edges: &'a [(String, String, String)],
+    /// Generated models from lineage data
+    pub models: &'a [TableModel],
 }
 
 /// Evaluate a single contract against the governance context.
@@ -64,7 +67,8 @@ pub fn evaluate_all_contracts(
         all_pending.extend(ps);
     }
 
-    // Also run cross-contract checks (duplicates, orphans, write conflicts)
+    // Cross-contract checks: duplicates + orphans
+    // Write conflicts are now model-aware (skip dimension/source tables)
     let (cross_vs, _) = run_cross_file_checks(ctx);
     for v in cross_vs {
         all_violations.push(ContractViolation {
@@ -450,12 +454,23 @@ fn run_cross_file_checks(ctx: &GovernanceContext) -> (Vec<ContractViolation>, ()
     let (dup_vs, _) = detect_duplicates(&fingerprints);
     violations.extend(dup_vs);
 
-    // Write conflict detection
+    // Write conflict detection — filtered by model type
+    // Build a set of tables that should be checked (skip dimension/source/temp)
+    let write_check_tables: std::collections::HashSet<&str> = ctx
+        .models
+        .iter()
+        .filter(|m| {
+            // Only flag write conflicts for fact/aggregate/unknown tables
+            m.model_type == "fact" || m.model_type == "aggregate" || m.model_type == "unknown"
+        })
+        .map(|m| m.table_name.as_str())
+        .collect();
+
     let table_writes: Vec<(String, String)> = ctx
         .table_edges
         .iter()
         .filter_map(|(from, to, script)| {
-            if !to.is_empty() && !script.is_empty() {
+            if !to.is_empty() && !script.is_empty() && write_check_tables.contains(to.as_str()) {
                 Some((script.clone(), to.clone()))
             } else {
                 None

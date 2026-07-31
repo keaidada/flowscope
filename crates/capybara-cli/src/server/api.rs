@@ -2812,12 +2812,31 @@ async fn gov_scan(
         })
         .collect();
 
-    // 4. Build context and evaluate
+    // 4. Generate models from lineage data (the contract)
+    let gen_input = super::governance::contract_generator::GenerationInput {
+        project_id: project_id.clone(),
+        table_edges: table_edges.clone(),
+    };
+    let models = super::governance::contract_generator::generate_models(&gen_input);
+
+    // 5. Generate governance contract and save it
+    let generated_contract =
+        super::governance::contract_generator::generate_governance_contract(project_id, &models);
+    let _ = super::governance::contract_generator::save_contract(
+        &state.contracts_dir, project_id, &generated_contract,
+    );
+    // Add generated contract to evaluation list
+    if !contracts.iter().any(|c: &super::governance::contract::Contract| c.id == generated_contract.id) {
+        contracts.push(generated_contract);
+    }
+
+    // 6. Build context and evaluate
     let ctx = super::governance::evaluator::GovernanceContext {
         project_id,
         file_results: &file_results,
         file_contents: &file_contents,
         table_edges: &table_edges,
+        models: &models,
     };
 
     let (violations, pending) = super::governance::evaluator::evaluate_all_contracts(&contracts, &ctx);
