@@ -1,0 +1,57 @@
+apiVersion: v3.1.0
+kind: DataContract
+id: flowscope_default_governance
+name: FlowScope Default Governance
+version: 1.0.0
+status: active
+
+custom:
+  flowscope:
+    lineage_rules:
+      - id: no_orphan_output
+        description: "产出表必须有下游消费"
+        severity: P2
+      - id: lineage_completeness
+        description: "核心链路不能有血缘断裂"
+        severity: P0
+
+    sql_rules:
+      - id: no_select_star
+        description: "生产脚本禁止 SELECT *"
+        severity: P2
+      - id: no_update_without_where
+        description: "UPDATE/DELETE 必须有 WHERE"
+        severity: P0
+      - id: max_complexity
+        description: "单脚本复杂度不超过阈值"
+        threshold: 80
+        severity: P2
+
+    metric_rules:
+      - id: no_duplicate_computation
+        description: "禁止重复计算（相同指纹的脚本）"
+        similarity_threshold: 0.85
+        severity: P1
+      - id: no_write_conflict
+        description: "禁止多个脚本写入同一物理表"
+        severity: P1
+
+    security_rules:
+      - id: no_hardcoded_secrets
+        description: "SQL 中禁止硬编码密码/令牌"
+        patterns: ["password", "token", "secret", "api_key"]
+        severity: P0
+
+    modeling_rules:
+      - id: naming_must_match_layer
+        description: "表名前缀必须与层级匹配"
+        severity: P2
+        patterns:
+          ODS: "^ods_"
+          DWD: "^dwd_"
+          DWS: "^dws_"
+          ADS: "^(ads_|app_)"
+          DIM: "^dim_"
+      - id: layer_must_be_assigned
+        description: "所有表必须有层级标注"
+        severity: P2

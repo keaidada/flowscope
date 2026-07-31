@@ -106,12 +106,13 @@ impl AppState {
         let gov_db = super::governance::db::open_gov_db(&gov_db_path)?;
         println!("flowscope: governance database at {}", gov_db_path.display());
 
-        // Initialize contracts directory and default contract
+        // Initialize contracts directory (OUTSIDE app/ to avoid Vite HMR)
         let contracts_dir = config
             .watch_dirs
             .first()
-            .map(|d| d.join("contracts"))
-            .unwrap_or_else(|| PathBuf::from("app/contracts"));
+            .and_then(|d| d.parent())
+            .map(|p| p.join(".flowscope").join("contracts"))
+            .unwrap_or_else(|| PathBuf::from(".flowscope/contracts"));
         super::governance::init_contracts(&contracts_dir);
 
         if file_count > 0 {

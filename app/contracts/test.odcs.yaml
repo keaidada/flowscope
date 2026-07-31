@@ -1,7 +1,7 @@
 apiVersion: v3.1.0
 kind: DataContract
-id: ms2mpayj17qo_governance
-name: ms2mpayj17qo Governance
+id: test_governance
+name: test Governance
 version: 1.0.0
 status: active
 schema: []
@@ -69,8 +69,8 @@ custom:
       patterns:
         DIM: ^dim_
         ODS: ^ods_
-        ADS: ^(ads_|app_)
         DWD: ^dwd_
+        ADS: ^(ads_|app_)
         DWS: ^dws_
       forbidden_edges: []
       severity: P2
