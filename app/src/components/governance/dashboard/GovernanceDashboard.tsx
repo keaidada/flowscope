@@ -293,8 +293,19 @@ function DuplicateComparison({ v }: { v: ContractViolation }) {
       {scripts.length > 2 && <p className="text-xs text-muted-foreground shrink-0">+ {scripts.length - 2} more scripts with same logic</p>}
       {Boolean(d.normalized_sql) && (
         <details className="text-xs shrink-0">
-          <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">公共计算模式</summary>
-          <pre className="mt-1 p-2 bg-muted/30 rounded text-[11px] font-mono whitespace-pre-wrap break-all text-foreground/60 max-h-20 overflow-auto">{String(d.normalized_sql)}</pre>
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+            为什么判定为重复？查看结构化模式对比
+          </summary>
+          <p className="text-xs text-muted-foreground mt-1 mb-1.5">
+            以下是两个脚本归一化后的 SQL 结构。
+            <code className="px-1 bg-muted rounded mx-0.5">&lt;table&gt;</code> = 表名占位，
+            <code className="px-1 bg-muted rounded mx-0.5">&lt;column&gt;</code> = 列名占位，
+            <code className="px-1 bg-muted rounded mx-0.5">&lt;value&gt;</code> = 常量占位。
+            两边的脚本在这个层面完全一致，意味着它们的计算逻辑相同。
+          </p>
+          <pre className="p-2 bg-muted/20 rounded text-[11px] font-mono whitespace-pre-wrap break-all text-emerald-700 dark:text-emerald-400 max-h-24 overflow-auto leading-relaxed">
+            {String(d.normalized_sql)}
+          </pre>
         </details>
       )}
     </div>

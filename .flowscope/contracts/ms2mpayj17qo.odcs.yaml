@@ -67,11 +67,11 @@ custom:
     - id: naming_must_match_layer
       description: 表名前缀必须与层级匹配
       patterns:
-        ADS: ^(ads_|app_)
-        DIM: ^dim_
         ODS: ^ods_
-        DWS: ^dws_
+        DIM: ^dim_
         DWD: ^dwd_
+        DWS: ^dws_
+        ADS: ^(ads_|app_)
       forbidden_edges: []
       severity: P2
     - id: layer_must_be_assigned
