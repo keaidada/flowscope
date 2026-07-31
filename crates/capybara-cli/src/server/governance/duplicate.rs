@@ -97,11 +97,15 @@ pub fn detect_duplicates(
 }
 
 /// Detect write conflicts: multiple scripts writing to the same table.
+/// Skips temporary tables (_tmp, _temp suffix) since they're expected to have multiple writers.
 pub fn detect_write_conflicts(
     table_writes: &[(String, String)], // (file_path, table_name)
 ) -> Vec<ContractViolation> {
     let mut table_groups: HashMap<&str, Vec<&str>> = HashMap::new();
     for (file, table) in table_writes {
+        if is_temp_or_sync_table(table) {
+            continue;
+        }
         table_groups
             .entry(table.as_str())
             .or_default()
@@ -127,6 +131,12 @@ pub fn detect_write_conflicts(
         }
     }
     violations
+}
+
+/// Temporary tables (_tmp, _temp) and sync database tables are expected to have multiple writers.
+fn is_temp_or_sync_table(table_name: &str) -> bool {
+    let lower = table_name.to_lowercase();
+    lower.contains("_tmp") || lower.contains("_temp") || lower.starts_with("syncdb.")
 }
 
 /// Detect orphan outputs: tables written but never read by any downstream.
@@ -214,6 +224,18 @@ mod tests {
         ];
         let vs = detect_write_conflicts(&writes);
         assert_eq!(vs.len(), 1);
+    }
+
+    #[test]
+    fn test_write_conflict_skips_temp() {
+        let writes = vec![
+            ("a.sql".to_string(), "dws_gmv_tmp".to_string()),
+            ("b.sql".to_string(), "dws_gmv_tmp".to_string()),
+            ("c.sql".to_string(), "syncdb.data_temp".to_string()),
+            ("d.sql".to_string(), "syncdb.data_temp".to_string()),
+        ];
+        let vs = detect_write_conflicts(&writes);
+        assert_eq!(vs.len(), 0, "Temp tables should be skipped");
     }
 
     #[test]
