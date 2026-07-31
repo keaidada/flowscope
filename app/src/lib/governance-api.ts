@@ -61,6 +61,63 @@ export interface ContractDetail {
   status: string;
 }
 
+export interface ModelEntry {
+  id: number;
+  project_id: string;
+  table_name: string;
+  model_layer: string;
+  model_type: string;
+  business_domain: string;
+  owner: string;
+  lifecycle: string;
+  description: string;
+  tags: string[];
+  source: string;
+  contract_id: string;
+}
+
+export interface ModelStats {
+  total: number;
+  by_layer: Record<string, number>;
+  by_type: Record<string, number>;
+  by_domain: Record<string, number>;
+  by_lifecycle: Record<string, number>;
+}
+
+export interface MetricEntry {
+  id: number;
+  metric_name: string;
+  definition: string;
+  sql_signature: string;
+  expression: string;
+  aggregation: string;
+  source_tables: string;
+  dimensions: string[];
+  owner: string;
+  layer: string;
+  lifecycle: string;
+  contract_id: string;
+  bound_model: string;
+  bound_column: string;
+}
+
+export interface MetricConflict {
+  id: number;
+  conflict_type: string;
+  metric_names: string[];
+  detail: Record<string, unknown>;
+  resolution: string;
+  resolved: boolean;
+}
+
+export interface MetricStats {
+  total: number;
+  by_layer: Record<string, number>;
+  by_owner: Record<string, number>;
+  by_lifecycle: Record<string, number>;
+  conflict_count: number;
+}
+
 export type GovernanceTab = 'dashboard' | 'models' | 'metrics' | 'contracts' | 'designer' | 'settings';
 
 function apiBase(): string {
@@ -140,5 +197,41 @@ export const governanceApi = {
       body: JSON.stringify({ project_id: projectId }),
     });
     return res.blob();
+  },
+
+  // === Model management ===
+  async listModels(queryString: string): Promise<ModelEntry[]> {
+    return govFetch(`/models?${queryString}`);
+  },
+
+  async modelStats(projectId: string): Promise<ModelStats> {
+    return govFetch(`/models/stats?project_id=${encodeURIComponent(projectId)}`);
+  },
+
+  async autoDiscover(projectId: string): Promise<{ discovered: number; created: number; updated: number }> {
+    return govFetch('/models/auto', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId }),
+    });
+  },
+
+  async updateModel(projectId: string, name: string, data: Record<string, string>): Promise<void> {
+    await govFetch(`/models/${encodeURIComponent(name)}?project_id=${encodeURIComponent(projectId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ project_id: projectId, ...data }),
+    });
+  },
+
+  // === Metric management ===
+  async listMetrics(queryString: string): Promise<MetricEntry[]> {
+    return govFetch(`/metrics?${queryString}`);
+  },
+
+  async metricConflicts(projectId: string): Promise<MetricConflict[]> {
+    return govFetch(`/metrics/conflicts?project_id=${encodeURIComponent(projectId)}`);
+  },
+
+  async metricStats(projectId: string): Promise<MetricStats> {
+    return govFetch(`/metrics/stats?project_id=${encodeURIComponent(projectId)}`);
   },
 };

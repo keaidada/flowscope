@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils';
 import { useGovernanceData } from '@/hooks/useGovernanceData';
 import { GovernanceDashboard } from './dashboard/GovernanceDashboard';
 import { ContractManager } from './contract/ContractManager';
+import { ModelManager } from './model/ModelManager';
+import { MetricManager } from './metric/MetricManager';
 import type { GovernanceTab } from '@/lib/governance-api';
 
 interface GovernanceWorkspaceProps {
@@ -80,14 +82,10 @@ export function GovernanceWorkspace({ projectId }: GovernanceWorkspaceProps) {
         )}
         {activeTab === 'contracts' && <ContractManager contracts={gov.contracts} onRefresh={gov.refreshContracts} />}
         {activeTab === 'models' && (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-            {t('governance.comingSoon', 'Tier 2 功能')}
-          </div>
+          <ModelManager projectId={projectId} />
         )}
         {activeTab === 'metrics' && (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-            {t('governance.comingSoon', 'Tier 2 功能')}
-          </div>
+          <MetricManager projectId={projectId} />
         )}
         {activeTab === 'settings' && (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
