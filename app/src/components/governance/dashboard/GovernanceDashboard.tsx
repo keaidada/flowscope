@@ -249,17 +249,34 @@ function ViolationInterpretation({ v }: { v: ContractViolation }) {
   switch (v.rule_id) {
     case 'no_duplicate_computation': {
       const sim = typeof d.similarity === 'number' ? d.similarity : 1;
+      const sqlMap = (d.script_sqls as Record<string, string>) || {};
+      const scriptList = scripts.filter(s => sqlMap[s]);
       return (
-        <div className="space-y-1">
+        <div className="space-y-2">
           <p className="text-xs font-semibold text-foreground">
             {sim >= 1
               ? `${scripts.length} 个脚本计算逻辑完全相同`
               : `${scripts.length} 个脚本计算逻辑相似（${Math.round(sim * 100)}%）`}
           </p>
-          <p className="text-xs text-muted-foreground">
-            这些脚本使用相同的 INSERT/SELECT/SUM 模式，只是目标表不同。建议抽取为通用 ETL，用参数区分目标表。
-          </p>
-          {scripts.length > 0 && (
+          {scriptList.length >= 2 ? (
+            <div className="grid grid-cols-2 gap-2">
+              {scriptList.slice(0, 2).map((script, idx) => (
+                <div key={idx} className="rounded border overflow-hidden">
+                  <div className="px-2 py-1 bg-muted/50 border-b text-[11px] font-mono font-semibold truncate">
+                    {sim >= 1 ? (idx === 0 ? '脚本 A' : '脚本 B') : '▶'} {script}
+                  </div>
+                  <pre className="p-2 text-[11px] font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto leading-relaxed text-foreground/80">
+                    {sqlMap[script] || '(content not available)'}
+                  </pre>
+                </div>
+              ))}
+              {scriptList.length > 2 && (
+                <div className="col-span-2 text-[11px] text-muted-foreground">
+                  + {scriptList.length - 2} more scripts
+                </div>
+              )}
+            </div>
+          ) : (
             <ul className="text-xs space-y-0.5 mt-1">
               {scripts.map((s, i) => <li key={i} className="font-mono text-[11px] pl-3 border-l-2 border-amber-300">▸ {s}</li>)}
             </ul>
@@ -329,7 +346,7 @@ function ViolationInterpretation({ v }: { v: ContractViolation }) {
 
 /** Show key-value details — clean format, skip interpreted fields. */
 function ViolationDetail({ detail }: { detail: Record<string, unknown> }) {
-  const skipKeys = new Set(['scripts', 'file', 'orphan_tables', 'table', 'threshold', 'complexity_score', 'pattern', 'similarity']);
+  const skipKeys = new Set(['scripts', 'file', 'orphan_tables', 'table', 'threshold', 'complexity_score', 'pattern', 'similarity', 'script_sqls']);
   const entries = Object.entries(detail).filter(([k, v]) => v != null && !skipKeys.has(k));
   if (entries.length === 0) return null;
 

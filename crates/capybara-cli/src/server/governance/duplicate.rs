@@ -7,8 +7,10 @@ use super::fingerprint::{fingerprint_sql, jaccard_similarity, Fingerprint};
 use super::{ContractViolation, Severity};
 
 /// Detect duplicates among a set of file fingerprints.
+/// Optionally includes the actual SQL content for display purposes.
 pub fn detect_duplicates(
     fingerprints: &[Fingerprint],
+    file_contents: &[(String, String)],
 ) -> (Vec<ContractViolation>, Vec<DuplicateGroup>) {
     let mut violations = Vec::new();
     let mut groups = Vec::new();
@@ -43,6 +45,7 @@ pub fn detect_duplicates(
                     "hash": hash,
                     "scripts": scripts,
                     "normalized_sql": normalized,
+                    "script_sqls": lookup_scripts(file_contents, &fps.iter().map(|f| f.file_path.clone()).collect::<Vec<_>>()),
                 }),
                 file_paths: scripts,
             });
@@ -85,7 +88,8 @@ pub fn detect_duplicates(
                     ),
                     detail: serde_json::json!({
                         "similarity": sim,
-                        "scripts": scripts,
+                        "scripts": scripts.clone(),
+                        "script_sqls": lookup_scripts(file_contents, &scripts.iter().cloned().collect::<Vec<_>>()),
                     }),
                     file_paths: scripts,
                 });
@@ -188,6 +192,28 @@ pub struct DuplicateGroup {
     pub recommendation: String,
 }
 
+/// Look up script SQL content by file path.
+fn lookup_scripts(
+    file_contents: &[(String, String)],
+    scripts: &[String],
+) -> serde_json::Value {
+    let content_map: std::collections::HashMap<&str, &str> = file_contents
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let mut result = serde_json::Map::new();
+    for script in scripts {
+        if let Some(content) = content_map.get(script.as_str()) {
+            let truncated: String = content.lines().take(30).collect::<Vec<_>>().join("\n");
+            result.insert(
+                script.clone(),
+                serde_json::Value::String(truncated),
+            );
+        }
+    }
+    serde_json::Value::Object(result)
+}
+
 // Re-export for convenience
 impl From<SeverityDef> for Severity {
     fn from(s: SeverityDef) -> Self {
@@ -207,7 +233,7 @@ mod tests {
             Fingerprint { file_path: "a.sql".into(), canonical_hash: hash.clone(), normalized_sql: norm.clone(), structured_tokens: tokens.clone() },
             Fingerprint { file_path: "b.sql".into(), canonical_hash: hash.clone(), normalized_sql: norm.clone(), structured_tokens: tokens.clone() },
         ];
-        let (violations, groups) = detect_duplicates(&fps);
+        let (violations, groups) = detect_duplicates(&fps, &[]);
         assert_eq!(violations.len(), 1);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].group_type, "exact_fingerprint");
@@ -221,7 +247,7 @@ mod tests {
             Fingerprint { file_path: "a.sql".into(), canonical_hash: h1, normalized_sql: n1, structured_tokens: t1 },
             Fingerprint { file_path: "b.sql".into(), canonical_hash: h2, normalized_sql: n2, structured_tokens: t2 },
         ];
-        let (violations, _) = detect_duplicates(&fps);
+        let (violations, _) = detect_duplicates(&fps, &[]);
         assert_eq!(violations.len(), 0);
     }
 

@@ -451,7 +451,7 @@ fn run_cross_file_checks(ctx: &GovernanceContext) -> (Vec<ContractViolation>, ()
         .collect();
 
     // Duplicate detection
-    let (dup_vs, _) = detect_duplicates(&fingerprints);
+    let (dup_vs, _) = detect_duplicates(&fingerprints, ctx.file_contents);
     violations.extend(dup_vs);
 
     // Write conflict detection — filtered by model type
