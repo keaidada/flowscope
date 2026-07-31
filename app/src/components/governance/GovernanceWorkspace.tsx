@@ -12,6 +12,7 @@ import { ContractManager } from './contract/ContractManager';
 import { ModelManager } from './model/ModelManager';
 import { MetricManager } from './metric/MetricManager';
 import { VisualModelDesigner } from './designer/VisualModelDesigner';
+import { GovernanceSettings } from './settings/GovernanceSettings';
 import type { GovernanceTab } from '@/lib/governance-api';
 
 interface GovernanceWorkspaceProps {
@@ -93,9 +94,7 @@ export function GovernanceWorkspace({ projectId }: GovernanceWorkspaceProps) {
           <VisualModelDesigner />
         )}
         {activeTab === 'settings' && (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-            {t('governance.comingSoon', 'Tier 2 功能')}
-          </div>
+          <GovernanceSettings projectId={projectId} />
         )}
       </div>
     </div>

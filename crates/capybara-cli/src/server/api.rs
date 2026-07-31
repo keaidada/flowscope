@@ -99,6 +99,10 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/governance/gen-ddl", post(gov_gen_ddl))
         .route("/governance/reverse-engineer", post(gov_reverse_engineer))
         .route("/governance/model-diff", post(gov_model_diff))
+        // Settings
+        .route("/governance/settings", get(gov_get_settings).put(gov_update_settings))
+        // Contract templates
+        .route("/governance/contracts/templates", get(gov_contract_templates))
 }
 
 // === Request/Response types ===
@@ -3360,3 +3364,222 @@ async fn gov_model_diff(Json(req): Json<GovModelDiffRequest>) -> impl IntoRespon
     let diff = super::governance::designer::diff_models(&req.old, &req.new);
     Json(diff)
 }
+
+// ============================================================
+// Settings handlers
+// ============================================================
+
+#[derive(Serialize, Deserialize, ToSchema, Default)]
+struct GovSettings {
+    #[serde(default)]
+    scan_cron: String,
+    #[serde(default = "default_alert_threshold")]
+    alert_threshold: i64,
+    #[serde(default)]
+    webhook_url: String,
+    #[serde(default)]
+    notify_emails: Vec<String>,
+}
+
+fn default_alert_threshold() -> i64 {
+    60
+}
+
+/// GET /api/governance/settings
+async fn gov_get_settings(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+
+    let result: Result<GovSettings, _> = conn.query_row(
+        "SELECT scan_cron, alert_threshold, webhook_url, notify_emails FROM governance_settings WHERE project_id = ?1 AND status = 1",
+        rusqlite::params![q.project_id],
+        |row| {
+            let emails_json: String = row.get(3)?;
+            let emails: Vec<String> = serde_json::from_str(&emails_json).unwrap_or_default();
+            Ok(GovSettings {
+                scan_cron: row.get(0)?,
+                alert_threshold: row.get(1)?,
+                webhook_url: row.get(2)?,
+                notify_emails: emails,
+            })
+        },
+    );
+
+    match result {
+        Ok(s) => Json(s).into_response(),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Json(GovSettings::default()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Query failed: {e}")).into_response(),
+    }
+}
+
+/// PUT /api/governance/settings
+async fn gov_update_settings(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GovSettingsUpdate>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let emails_json = serde_json::to_string(&req.notify_emails).unwrap_or_default();
+
+    match conn.execute(
+        "INSERT INTO governance_settings (project_id, scan_cron, alert_threshold, webhook_url, notify_emails, settings_json, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, '{}', 1, ?6, ?6)
+         ON CONFLICT(project_id) DO UPDATE SET
+            scan_cron = excluded.scan_cron,
+            alert_threshold = excluded.alert_threshold,
+            webhook_url = excluded.webhook_url,
+            notify_emails = excluded.notify_emails,
+            updated_at = excluded.updated_at",
+        rusqlite::params![req.project_id, req.scan_cron, req.alert_threshold, req.webhook_url, emails_json, now],
+    ) {
+        Ok(_) => Json(serde_json::json!({"status": "updated"})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {e}")).into_response(),
+    }
+}
+
+#[derive(Deserialize, ToSchema)]
+struct GovSettingsUpdate {
+    project_id: String,
+    #[serde(default)]
+    scan_cron: String,
+    #[serde(default = "default_alert_threshold")]
+    alert_threshold: i64,
+    #[serde(default)]
+    webhook_url: String,
+    #[serde(default)]
+    notify_emails: Vec<String>,
+}
+
+// ============================================================
+// Contract templates
+// ============================================================
+
+/// GET /api/governance/contracts/templates — list available templates
+async fn gov_contract_templates() -> impl IntoResponse {
+    Json(vec![
+        serde_json::json!({
+            "name": "default",
+            "description": "FlowScope default governance rules",
+            "content": super::governance::contract::DEFAULT_CONTRACT_YAML,
+        }),
+        serde_json::json!({
+            "name": "ecommerce",
+            "description": "E-commerce data warehouse template",
+            "content": TEMPLATE_ECOMMERCE,
+        }),
+        serde_json::json!({
+            "name": "finance",
+            "description": "Finance risk control template (enforced masking + audit)",
+            "content": TEMPLATE_FINANCE,
+        }),
+        serde_json::json!({
+            "name": "blank",
+            "description": "Blank template",
+            "content": TEMPLATE_BLANK,
+        }),
+    ])
+}
+
+const TEMPLATE_ECOMMERCE: &str = r#"apiVersion: v3.1.0
+kind: DataContract
+id: ecommerce_governance
+name: E-commerce Data Warehouse Governance
+version: 1.0.0
+status: active
+
+custom:
+  flowscope:
+    lineage_rules:
+      - id: no_cross_layer
+        description: "禁止跨层依赖"
+        forbidden_edges: [[ODS, DWS], [ODS, ADS], [DWD, ADS]]
+        severity: P1
+      - id: no_orphan_output
+        severity: P2
+      - id: lineage_completeness
+        severity: P0
+
+    sql_rules:
+      - id: no_select_star
+        severity: P2
+      - id: no_update_without_where
+        severity: P0
+      - id: max_complexity
+        threshold: 80
+        severity: P2
+
+    metric_rules:
+      - id: no_duplicate_computation
+        similarity_threshold: 0.85
+        severity: P1
+      - id: no_write_conflict
+        severity: P1
+
+    modeling_rules:
+      - id: naming_must_match_layer
+        severity: P2
+        patterns: {ODS: "^ods_", DWD: "^dwd_", DWS: "^dws_", ADS: "^(ads_|app_)", DIM: "^dim_"}
+      - id: layer_must_be_assigned
+        severity: P2
+"#;
+
+const TEMPLATE_FINANCE: &str = r#"apiVersion: v3.1.0
+kind: DataContract
+id: finance_governance
+name: Finance & Risk Control Governance
+version: 1.0.0
+status: active
+
+custom:
+  flowscope:
+    security_rules:
+      - id: no_hardcoded_secrets
+        description: "禁止硬编码密码/令牌/密钥"
+        patterns: ["password", "token", "secret", "api_key", "private_key"]
+        severity: P0
+      - id: sensitive_column_exposure
+        description: "敏感字段必须脱敏"
+        column_patterns: ["id_card", "credit", "phone", "email", "account"]
+        severity: P0
+
+    sql_rules:
+      - id: no_update_without_where
+        severity: P0
+      - id: no_select_star
+        severity: P1
+      - id: max_complexity
+        threshold: 60
+        severity: P1
+
+    lineage_rules:
+      - id: lineage_completeness
+        severity: P0
+      - id: no_cross_layer
+        forbidden_edges: [[ODS, DWS], [ODS, ADS], [DWD, ADS]]
+        severity: P0
+
+    modeling_rules:
+      - id: naming_must_match_layer
+        severity: P1
+        patterns: {ODS: "^ods_", DWD: "^dwd_", DWS: "^dws_", ADS: "^(ads_|app_)", DIM: "^dim_"}
+"#;
+
+const TEMPLATE_BLANK: &str = r#"apiVersion: v3.1.0
+kind: DataContract
+id: blank_contract
+name: Blank Contract
+version: 1.0.0
+status: draft
+
+custom:
+  flowscope: {}
+"#;

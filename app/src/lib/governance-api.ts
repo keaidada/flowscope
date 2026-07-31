@@ -256,4 +256,21 @@ export const governanceApi = {
       body: JSON.stringify({ old: oldModel, new: newModel }),
     });
   },
+
+  // === Settings ===
+  async getSettings(projectId: string): Promise<Record<string, unknown>> {
+    return govFetch(`/settings?project_id=${encodeURIComponent(projectId)}`);
+  },
+
+  async updateSettings(projectId: string, data: Record<string, unknown>): Promise<void> {
+    await govFetch(`/settings`, {
+      method: 'PUT',
+      body: JSON.stringify({ project_id: projectId, ...data }),
+    });
+  },
+
+  // === Contract templates ===
+  async contractTemplates(): Promise<Array<{ name: string; description: string; content: string }>> {
+    return govFetch('/contracts/templates');
+  },
 };
