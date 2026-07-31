@@ -742,9 +742,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
           <div className="flex-1 overflow-hidden flex">
             {governanceOpen ? (
               /* Governance Workspace — full-screen governance dashboard */
-              <div className="flex min-w-0 flex-1 flex-col">
-                <GovernanceWorkspace projectId={activeProjectId} />
-              </div>
+              <GovernanceWorkspace projectId={activeProjectId} />
             ) : globalLineageOpen ? (
               /* Global Lineage — full-screen graph/list/matrix view */
               <div className="flex min-w-0 flex-1 flex-col">
