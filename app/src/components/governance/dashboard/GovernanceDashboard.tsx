@@ -203,12 +203,14 @@ function ViolationGroups({ violations }: { violations: ContractViolation[] }) {
               <div className="flex-1 min-h-0 overflow-auto mt-2">
                 {selectedV.rule_id === 'no_duplicate_computation'
                   ? <DuplicateComparison v={selectedV} />
-                  : (
-                    <div className="space-y-3">
-                      <ViolationInterpretation v={selectedV} />
-                      <ViolationDetail detail={selectedV.detail} />
-                    </div>
-                  )}
+                  : selectedV.rule_id === 'no_orphan_output'
+                    ? <OrphanTableList v={selectedV} />
+                    : (
+                      <div className="space-y-3">
+                        <ViolationInterpretation v={selectedV} />
+                        <ViolationDetail detail={selectedV.detail} />
+                      </div>
+                    )}
               </div>
             </>
           )}
@@ -350,6 +352,32 @@ function ViolationSection({ severity, items, onSelect }: { severity: Severity; i
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Orphan table list — shows all tables with no downstream consumers. */
+function OrphanTableList({ v }: { v: ContractViolation }) {
+  const d = v.detail || {};
+  const tables = (Array.isArray(d.orphan_tables) ? d.orphan_tables : []) as string[];
+
+  if (tables.length === 0) {
+    return <p className="text-xs text-muted-foreground p-4">No orphan table data available.</p>;
+  }
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <p className="text-xs text-muted-foreground mb-2 shrink-0">以下表被写入但没有任何下游脚本读取，可能为废弃ETL产出：</p>
+      <div className="flex-1 min-h-0 overflow-auto">
+        <div className="border rounded-lg divide-y">
+          {tables.map((t, i) => (
+            <div key={i} className="flex items-center gap-2 px-3 py-1.5 font-mono text-xs hover:bg-accent/30">
+              <span className="text-muted-foreground text-[10px] w-6 text-right shrink-0">{i + 1}</span>
+              <span className="truncate">{t}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
