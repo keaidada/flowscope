@@ -16,9 +16,15 @@ pub fn open_gov_db(path: &Path) -> Result<Mutex<Connection>, rusqlite::Error> {
          PRAGMA synchronous = NORMAL;
          PRAGMA foreign_keys = ON;",
     )?;
-    create_tables(&conn)?;
-    migrate_metrics_registry(&conn)?;
+    init_gov_db(&conn)?;
     Ok(Mutex::new(conn))
+}
+
+/// Initialize schema on an existing connection (used in tests too).
+pub fn init_gov_db(conn: &Connection) -> Result<(), rusqlite::Error> {
+    create_tables(conn)?;
+    migrate_metrics_registry(conn)?;
+    Ok(())
 }
 
 /// Add new columns to metrics_registry if they don't exist (for existing databases).

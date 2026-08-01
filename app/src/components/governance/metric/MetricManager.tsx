@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, BarChart3, Sparkles } from 'lucide-react';
+import { AlertTriangle, BarChart3, Database, GitBranch, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { governanceApi, type MetricEntry, type MetricConflict, type MetricStats } from '@/lib/governance-api';
@@ -39,6 +39,37 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
     } catch (e) { console.error('Auto-detect failed:', e); }
   };
 
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+
+  const handleImportDbt = async () => {
+    if (!projectId) return;
+    try {
+      setImportMsg(null);
+      const r = await governanceApi.importDbtMetrics(projectId);
+      const msg = r.imported > 0
+        ? `${t('governance.importDbtDone', '已导入')} ${r.imported} ${t('governance.metrics', '个指标')}${r.skipped.length > 0 ? `（跳过 ${r.skipped.length}）` : ''}`
+        : t('governance.importDbtEmpty', '未发现 dbt MetricFlow 定义（semantic_models.yml / metrics.yml）');
+      setImportMsg(msg);
+      await refresh();
+    } catch (e) {
+      console.error('dbt import failed:', e);
+      setImportMsg(String(e));
+    }
+  };
+
+  const handleExtractLineage = async () => {
+    if (!projectId) return;
+    try {
+      setImportMsg(null);
+      const r = await governanceApi.extractLineageMetrics(projectId);
+      setImportMsg(`${t('governance.extractLineageDone', '从血缘提取')} ${r.extracted} ${t('governance.metrics', '个指标')}`);
+      await refresh();
+    } catch (e) {
+      console.error('Lineage extraction failed:', e);
+      setImportMsg(String(e));
+    }
+  };
+
   if (!projectId) {
     return <div className="flex items-center justify-center h-full text-muted-foreground text-sm">{t('governance.selectProject', '请先选择项目')}</div>;
   }
@@ -51,7 +82,16 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
           <Button variant="ghost" size="sm" onClick={handleAutoDetect} className="h-6 px-2 text-xs">
             <Sparkles className="h-3 w-3 mr-1" />Auto-detect
           </Button>
+          <Button variant="ghost" size="sm" onClick={handleImportDbt} className="h-6 px-2 text-xs" title="从 dbt MetricFlow (semantic_models.yml / metrics.yml) 导入指标">
+            <Database className="h-3 w-3 mr-1" />Import dbt
+          </Button>
+          <Button variant="ghost" size="sm" onClick={handleExtractLineage} className="h-6 px-2 text-xs" title="从字段级血缘提取指标（覆盖全部文件）">
+            <GitBranch className="h-3 w-3 mr-1" />From Lineage
+          </Button>
         </div>
+        {importMsg && (
+          <div className="px-3 py-1.5 border-b text-xs text-muted-foreground">{importMsg}</div>
+        )}
         {stats && (
           <div className="flex gap-3 px-3 py-2 border-b bg-muted/20 text-xs text-muted-foreground">
             <span>{t('governance.total', '总计')}: <b className="text-foreground">{stats.total}</b></span>

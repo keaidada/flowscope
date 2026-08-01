@@ -245,6 +245,24 @@ export const governanceApi = {
     });
   },
 
+  async importDbtMetrics(projectId: string): Promise<{
+    imported: number;
+    metrics: Array<Record<string, unknown>>;
+    skipped: string[];
+  }> {
+    return govFetch('/metrics/import-dbt', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId }),
+    });
+  },
+
+  async extractLineageMetrics(projectId: string): Promise<{ extracted: number }> {
+    return govFetch('/metrics/extract-lineage', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId }),
+    });
+  },
+
   // === Designer ===
   async genDdl(model: unknown, dialect: string): Promise<{ ddl: string }> {
     return govFetch('/gen-ddl', {

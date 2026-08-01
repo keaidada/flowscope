@@ -1,6 +1,6 @@
 //! Metric management: ODCS metric definitions + conflict detection + CRUD.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -232,7 +232,7 @@ pub fn auto_detect_metrics(
 }
 
 /// Simple SQL signature: hash the expression for conflict detection.
-fn compute_signature(expression: &str, table: &str) -> String {
+pub fn compute_signature(expression: &str, table: &str) -> String {
     let combined = format!("{table}:{expression}");
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
@@ -359,6 +359,349 @@ pub fn get_metric_stats(conn: &Connection, project_id: &str) -> Result<MetricSta
     Ok(stats)
 }
 
+// ============================================================
+// Lineage-based metric extraction
+// ============================================================
+
+/// Row extracted from lineage_edges.
+struct ExtractedRow {
+    expression: String,
+    file_path: String,
+    output_col: String,
+    output_table: String,
+    #[allow(dead_code)]
+    output_type: String,
+    source_col: String,
+    source_table: String,
+}
+
+/// Parsed expression classification.
+enum ParsedExpr {
+    Atomic { agg: String, inner: String },
+    Derived,
+    NotMetric,
+}
+
+/// Parse an SQL expression to classify it as an atomic aggregation,
+/// a compound/derived expression, or not a metric at all.
+fn parse_metric_expression(expr: &str) -> ParsedExpr {
+    let trimmed = expr.trim();
+    let lower = trimmed.to_lowercase();
+
+    let aggs = ["sum", "count", "avg", "average", "min", "max"];
+
+    for agg in &aggs {
+        let prefix = format!("{}(", agg);
+        if lower.starts_with(&prefix) {
+            // Find matching closing paren for the first '('.
+            let open_pos = agg.len();
+            let mut depth = 0i32;
+            let mut close_pos = None;
+            for (i, c) in trimmed[open_pos..].char_indices() {
+                match c {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            close_pos = Some(open_pos + i);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(cp) = close_pos {
+                let inner = trimmed[open_pos + 1..cp].trim();
+                let trailing = trimmed[cp + 1..].trim();
+
+                if trailing.is_empty() {
+                    let (clean_inner, is_distinct) =
+                        if inner.to_lowercase().strip_prefix("distinct ").is_some() {
+                            (inner[9..].trim(), true)
+                        } else {
+                            (inner, false)
+                        };
+
+                    let agg_name = match (*agg, is_distinct) {
+                        ("count", true) => "count_distinct",
+                        ("average", _) => "avg",
+                        (a, _) => a,
+                    };
+
+                    return ParsedExpr::Atomic {
+                        agg: agg_name.to_string(),
+                        inner: strip_table_alias(clean_inner),
+                    };
+                }
+                // trailing content → compound like "sum(a) + sum(b)"
+                return ParsedExpr::Derived;
+            }
+        }
+    }
+
+    // Doesn't start with a known aggregation but may contain one → derived.
+    if lower.contains("sum(")
+        || lower.contains("count(")
+        || lower.contains("avg(")
+        || lower.contains("average(")
+        || lower.contains("max(")
+        || lower.contains("min(")
+    {
+        ParsedExpr::Derived
+    } else {
+        ParsedExpr::NotMetric
+    }
+}
+
+/// Strip a simple table alias from a column reference: `tab1.pid` → `pid`.
+/// Leaves complex expressions (CASE WHEN, spaces) untouched.
+fn strip_table_alias(expr: &str) -> String {
+    if expr.contains(' ') || expr.to_lowercase().contains("case") {
+        return expr.to_string();
+    }
+    if let Some(pos) = expr.rfind('.') {
+        expr[pos + 1..].to_string()
+    } else {
+        expr.to_string()
+    }
+}
+
+/// Build a unique metric name from output table + output column (+ fallback).
+fn build_metric_name(output_table: &str, output_col: &str, agg: &str, source_col: &str) -> String {
+    let generic = matches!(
+        output_col.to_lowercase().as_str(),
+        "sum" | "count" | "avg" | "average" | "min" | "max" | "" | "cnt" | "value" | "result"
+    );
+
+    let name = if generic {
+        let src = if source_col.is_empty() || source_col == "*" {
+            "all"
+        } else {
+            &strip_table_alias(source_col)
+        };
+        format!("{output_table}_{src}_{agg}")
+    } else {
+        format!("{output_table}_{output_col}")
+    };
+
+    name.to_lowercase().replace([' ', '.', '`', '"'], "_")
+}
+
+/// Infer time period from table / column naming conventions.
+fn infer_period(table: &str, column: &str) -> String {
+    let combined = format!("{table} {column}").to_lowercase();
+    if combined.contains("hour") {
+        "hourly"
+    } else if combined.contains("day") || combined.contains("_dt") || combined.contains("daily") {
+        "daily"
+    } else if combined.contains("week") {
+        "weekly"
+    } else if combined.contains("month") || combined.contains("_mon") {
+        "monthly"
+    } else if combined.contains("quarter") {
+        "quarterly"
+    } else if combined.contains("year") || combined.contains("annual") {
+        "yearly"
+    } else {
+        ""
+    }
+    .to_string()
+}
+
+/// Extract metrics from column-level lineage data stored in the main DB.
+///
+/// Uses three lightweight queries (no JOINs) + in-memory HashMap lookups
+/// to resolve column/table names, then upserts normalized metrics in a
+/// single transaction. This covers **all** analysed files (no 500-file
+/// limit) and is far faster than re-parsing SQL.
+pub fn extract_metrics_from_lineage(
+    main_conn: &Connection,
+    gov_conn: &Connection,
+    project_id: &str,
+) -> Result<usize, rusqlite::Error> {
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+
+    // --- 1. Load column lookup: column_id → (label, parent_node_id) ---
+    let mut col_label: HashMap<String, String> = HashMap::new();
+    let mut col_parent: HashMap<String, String> = HashMap::new();
+    {
+        let mut stmt = main_conn.prepare(
+            "SELECT column_id, label, COALESCE(parent_node_id, '')
+             FROM lineage_columns WHERE project_id = ?1 AND status = 1",
+        )?;
+        let rows = stmt.query_map(params![project_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })?;
+        for row in rows {
+            let (id, label, parent) = row?;
+            col_label.insert(id.clone(), label);
+            col_parent.insert(id, parent);
+        }
+    }
+
+    // --- 2. Load node lookup: node_id → (label, node_type) ---
+    let mut node_label: HashMap<String, String> = HashMap::new();
+    {
+        let mut stmt = main_conn.prepare(
+            "SELECT node_id, label FROM lineage_nodes WHERE project_id = ?1 AND status = 1",
+        )?;
+        let rows = stmt.query_map(params![project_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (id, label) = row?;
+            node_label.insert(id, label);
+        }
+    }
+
+    // Helper closures for resolving references.
+    let resolve_col = |id: &str| -> String {
+        col_label.get(id).cloned().unwrap_or_default()
+    };
+    let resolve_table_for = |id: &str| -> String {
+        // If id is a column, trace to its parent node; if id is itself a node, use directly.
+        if let Some(parent) = col_parent.get(id) {
+            if !parent.is_empty() {
+                return node_label.get(parent).cloned().unwrap_or_default();
+            }
+        }
+        node_label.get(id).cloned().unwrap_or_default()
+    };
+
+    // --- 3. Query aggregation edges (no JOINs, fast table scan) ---
+    let mut stmt = main_conn.prepare(
+        "SELECT DISTINCT expression, COALESCE(to_id, ''), COALESCE(from_id, ''), COALESCE(file_path, '')
+         FROM lineage_edges
+         WHERE project_id = ?1 AND status = 1
+           AND expression IS NOT NULL AND length(expression) > 0
+           AND LOWER(edge_type) = 'derivation'
+           AND (LOWER(expression) LIKE '%sum(%' OR LOWER(expression) LIKE '%count(%'
+             OR LOWER(expression) LIKE '%avg(%' OR LOWER(expression) LIKE '%average(%'
+             OR LOWER(expression) LIKE '%max(%' OR LOWER(expression) LIKE '%min(%')",
+    )?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,  // expression
+            row.get::<_, String>(1)?,  // to_id
+            row.get::<_, String>(2)?,  // from_id
+            row.get::<_, String>(3)?,  // file_path
+        ))
+    })?;
+
+    // --- 4. Collect + deduplicate by (output_table, output_col) ---
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut metrics: Vec<ExtractedRow> = Vec::new();
+    for row in rows {
+        let (expression, to_id, from_id, file_path) = row?;
+        let output_col = resolve_col(&to_id);
+        if output_col.is_empty() {
+            continue;
+        }
+        let output_table = resolve_table_for(&to_id);
+        let key = format!("{}|{}", output_table, output_col);
+        if seen.insert(key) {
+            metrics.push(ExtractedRow {
+                expression,
+                file_path,
+                output_col,
+                output_table,
+                output_type: String::new(),
+                source_col: resolve_col(&from_id),
+                source_table: resolve_table_for(&from_id),
+            });
+        }
+    }
+
+    // --- 5. Parse + normalize + upsert in a single transaction ---
+    gov_conn.execute_batch("BEGIN")?;
+    let result = (|| {
+        let mut count = 0usize;
+        for m in &metrics {
+            let parsed = parse_metric_expression(&m.expression);
+            let (metric_type, agg, inner_expr) = match parsed {
+                ParsedExpr::NotMetric => continue,
+                ParsedExpr::Atomic { agg, inner } => ("atomic", agg, inner),
+                ParsedExpr::Derived => ("derived", String::new(), String::new()),
+            };
+
+            let metric_name =
+                build_metric_name(&m.output_table, &m.output_col, &agg, &m.source_col);
+            let signature = compute_signature(&m.expression, &m.output_table);
+            let layer = super::model::infer_layer(&m.output_table);
+            let period = infer_period(&m.output_table, &m.output_col);
+
+            let definition = if metric_type == "atomic" {
+                format!("{agg}({inner_expr}) → {}.{}", m.output_table, m.output_col)
+            } else {
+                format!("derived → {}.{}", m.output_table, m.output_col)
+            };
+            let definition = if definition.chars().count() > 200 {
+                let truncated: String = definition.chars().take(200).collect();
+                format!("{truncated}...")
+            } else {
+                definition
+            };
+
+            let contract_id = if m.file_path.is_empty() {
+                "lineage".to_string()
+            } else {
+                format!("lineage:{}", m.file_path)
+            };
+
+            gov_conn.execute(
+                "INSERT INTO metrics_registry
+                    (project_id, metric_name, metric_type, definition, sql_signature, expression,
+                     aggregation, business_filter, period, source_tables, dimensions, layer,
+                     lifecycle, contract_id, bound_model, bound_column, created_at, updated_at, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', ?8, ?9, '[]', ?10, 'active', ?11, ?12, ?13, ?14, ?14, 1)
+                 ON CONFLICT(project_id, metric_name) DO UPDATE SET
+                    metric_type = excluded.metric_type,
+                    definition = excluded.definition,
+                    sql_signature = excluded.sql_signature,
+                    expression = excluded.expression,
+                    aggregation = excluded.aggregation,
+                    period = excluded.period,
+                    source_tables = excluded.source_tables,
+                    layer = excluded.layer,
+                    contract_id = excluded.contract_id,
+                    bound_model = excluded.bound_model,
+                    bound_column = excluded.bound_column,
+                    updated_at = excluded.updated_at",
+                params![
+                    project_id,
+                    metric_name,
+                    metric_type,
+                    definition,
+                    signature,
+                    m.expression,
+                    if metric_type == "atomic" { agg.as_str() } else { "" },
+                    period,
+                    m.source_table,
+                    layer,
+                    contract_id,
+                    m.output_table,
+                    m.output_col,
+                    now,
+                ],
+            )?;
+            count += 1;
+        }
+        Ok(count)
+    })();
+
+    match result {
+        Ok(n) => {
+            gov_conn.execute_batch("COMMIT")?;
+            Ok(n)
+        }
+        Err(e) => {
+            let _ = gov_conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,5 +713,109 @@ mod tests {
         let sig3 = compute_signature("COUNT(*)", "dws_gmv");
         assert_eq!(sig1, sig2, "Same input should produce same signature");
         assert_ne!(sig1, sig3, "Different input should produce different signature");
+    }
+
+    #[test]
+    fn test_parse_simple_sum() {
+        match parse_metric_expression("sum(lvtm)") {
+            ParsedExpr::Atomic { agg, inner } => {
+                assert_eq!(agg, "sum");
+                assert_eq!(inner, "lvtm");
+            }
+            _ => panic!("expected atomic"),
+        }
+    }
+
+    #[test]
+    fn test_parse_count_distinct() {
+        match parse_metric_expression("count(DISTINCT usr_id)") {
+            ParsedExpr::Atomic { agg, inner } => {
+                assert_eq!(agg, "count_distinct");
+                assert_eq!(inner, "usr_id");
+            }
+            _ => panic!("expected atomic"),
+        }
+    }
+
+    #[test]
+    fn test_parse_count_star() {
+        match parse_metric_expression("count(*)") {
+            ParsedExpr::Atomic { agg, inner } => {
+                assert_eq!(agg, "count");
+                assert_eq!(inner, "*");
+            }
+            _ => panic!("expected atomic"),
+        }
+    }
+
+    #[test]
+    fn test_parse_compound_derived() {
+        match parse_metric_expression("sum(a) + sum(b)") {
+            ParsedExpr::Derived => {}
+            _ => panic!("expected derived"),
+        }
+    }
+
+    #[test]
+    fn test_parse_round_division() {
+        match parse_metric_expression("round(sum(a) / sum(b), 2)") {
+            ParsedExpr::Derived => {}
+            _ => panic!("expected derived"),
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_case_when() {
+        match parse_metric_expression(
+            "SUM(CASE WHEN x > 0 THEN y ELSE 0 END)",
+        ) {
+            ParsedExpr::Atomic { agg, .. } => {
+                assert_eq!(agg, "sum");
+            }
+            _ => panic!("expected atomic for SUM(CASE WHEN ...)"),
+        }
+    }
+
+    #[test]
+    fn test_parse_not_metric() {
+        assert!(matches!(parse_metric_expression("a + b"), ParsedExpr::NotMetric));
+        assert!(matches!(parse_metric_expression("CAST(x AS INT)"), ParsedExpr::NotMetric));
+    }
+
+    #[test]
+    fn test_strip_table_alias() {
+        assert_eq!(strip_table_alias("tab1.pid"), "pid");
+        assert_eq!(strip_table_alias("t.col_name"), "col_name");
+        assert_eq!(strip_table_alias("plain_col"), "plain_col");
+        // Complex expressions left untouched
+        assert_eq!(strip_table_alias("CASE WHEN x THEN y"), "CASE WHEN x THEN y");
+    }
+
+    #[test]
+    fn test_build_metric_name() {
+        // Meaningful output column
+        assert_eq!(
+            build_metric_name("M01_ACCM_USR", "accm_rgst_usr_cnt", "count_distinct", "usr_id"),
+            "m01_accm_usr_accm_rgst_usr_cnt"
+        );
+        // Generic output column → fallback to source+agg
+        assert_eq!(
+            build_metric_name("app_appout_lvtm", "sum", "sum", "lvtm"),
+            "app_appout_lvtm_lvtm_sum"
+        );
+        // count(*) with no source col
+        assert_eq!(
+            build_metric_name("dws_daily", "count", "count", ""),
+            "dws_daily_all_count"
+        );
+    }
+
+    #[test]
+    fn test_infer_period() {
+        assert_eq!(infer_period("dws_daily_sales", ""), "daily");
+        assert_eq!(infer_period("dws_monthly_report", ""), "monthly");
+        assert_eq!(infer_period("dws_weekly_stats", ""), "weekly");
+        assert_eq!(infer_period("ods_raw", "total_amt"), "");
+        assert_eq!(infer_period("dws_hourly_log", ""), "hourly");
     }
 }

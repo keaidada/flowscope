@@ -96,6 +96,8 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/governance/metrics/conflicts", get(gov_metric_conflicts))
         .route("/governance/metrics/stats", get(gov_metric_stats))
         .route("/governance/metrics/auto", post(gov_auto_detect_metrics))
+        .route("/governance/metrics/import-dbt", post(gov_import_dbt_metrics))
+        .route("/governance/metrics/extract-lineage", post(gov_extract_lineage_metrics))
         // Designer
         .route("/governance/gen-ddl", post(gov_gen_ddl))
         .route("/governance/reverse-engineer", post(gov_reverse_engineer))
@@ -3423,8 +3425,54 @@ async fn gov_auto_detect_metrics(
     }
 }
 
+/// POST /api/governance/metrics/import-dbt — import metrics from dbt MetricFlow definitions
+async fn gov_import_dbt_metrics(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GovImportDbtRequest>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    let watch_dirs = state.config.watch_dirs.clone();
+    match super::governance::dbt::import_dbt_metrics(&conn, &req.project_id, &watch_dirs) {
+        Ok(result) => Json(result).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("dbt import failed: {e}")).into_response(),
+    }
+}
+
+/// POST /api/governance/metrics/extract-lineage — extract metrics from column-level lineage
+async fn gov_extract_lineage_metrics(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GovProjectIdBody>,
+) -> impl IntoResponse {
+    // Lock main DB (read lineage) and governance DB (write metrics)
+    let main_conn = match state.db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Main DB lock: {e}")).into_response(),
+    };
+    let gov_conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Gov DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::extract_metrics_from_lineage(&main_conn, &gov_conn, &req.project_id) {
+        Ok(count) => Json(serde_json::json!({"extracted": count})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Lineage extraction failed: {e}")).into_response(),
+    }
+}
+
 #[derive(Deserialize)]
 struct GovAutoDetectMetricsRequest {
+    project_id: String,
+}
+
+#[derive(Deserialize)]
+struct GovImportDbtRequest {
+    project_id: String,
+}
+
+#[derive(Deserialize)]
+struct GovProjectIdBody {
     project_id: String,
 }
 

@@ -1,0 +1,240 @@
+# ============================================================================
+# ODCS v3.1.0 数据契约模板
+# ============================================================================
+# 如何使用本模板：
+#   1. 复制到 .flowscope/contracts/<your-name>.odcs.yaml
+#   2. 修改 id / name / version 为你自己的
+#   3. 按需保留或删除各 Section
+#   4. 契约管理页签 → Validate → 下次 Scan 自动加载
+#
+# 官方规范：https://bitol-io.github.io/open-data-contract-standard/v3.1.0/
+# ============================================================================
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 1: 基本信息（必填）
+# ═══════════════════════════════════════════════════════════════════════════
+apiVersion: v3.1.0                          # 标准版本，固定值
+kind: DataContract                          # 文件类型，固定值 DataContract
+id: e3b0c442-98fc-4c19-b123-72344a91553a  # ← 改：UUID 唯一标识
+name: my_dataset_v1                         # ← 改：契约名称
+version: 1.0.0                              # ← 改：语义化版本号
+status: active                              # proposed | draft | active | deprecated | retired
+domain: sales                               # 可选：数据域
+
+description:                                # 可选
+  purpose: 为下游 BI 报表提供数据
+  limitations: 不得用于合规审计
+  usage: 按日增量更新
+
+tags: [e-commerce, pii]                     # 可选：标签
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 2: 数据模式（Schema）
+# 定义表结构、字段、类型、主键、示例值
+# ═══════════════════════════════════════════════════════════════════════════
+schema:
+  - name: orders                            # 逻辑表名（必填）
+    physicalType: TABLE                     # TABLE | VIEW | TOPIC | FILE
+    physicalName: ods_orders                # 物理表名
+    description: 全部成功及取消的订单
+    dataGranularityDescription: 每行一个订单
+    tags: [e-commerce]
+
+    properties:                             # 字段列表
+      - name: order_id                      # 字段名（必填）
+        businessName: 订单ID                # 业务名称
+        logicalType: string                 # string | number | integer | boolean | date | timestamp | time | object | array
+        physicalType: UUID                  # 物理类型（如 VARCHAR(40), INT, UUID）
+        primaryKey: true                    # 是否主键
+        primaryKeyPosition: 1               # 复合主键中的位置（1 起始）
+        required: true                      # 是否非空
+        unique: true                        # 是否唯一
+        description: 内部订单标识符
+        classification: internal            # public | internal | restricted | confidential
+        criticalDataElement: true           # 是否关键数据元素
+        examples:                           # 示例值
+          - "99e8bb10-3785-4634-9664-8dc79eb69d43"
+
+      - name: customer_id
+        logicalType: string
+        physicalType: TEXT
+        required: true
+        classification: restricted
+        quality:                            # ← 字段级质量规则
+          - metric: nullValues              # 不允许空值
+            mustBe: 0
+            description: customer_id 不允许为空
+
+      - name: order_status
+        logicalType: string
+        physicalType: TEXT
+        required: true
+        quality:
+          - metric: invalidValues           # 只允许这 4 种状态
+            arguments:
+              validValues: [pending, confirmed, shipped, cancelled]
+            mustBe: 0
+            description: 只允许 4 种有效状态
+
+      - name: order_total
+        logicalType: integer
+        physicalType: INTEGER
+        required: true
+        description: 订单总金额（分）
+        examples: [9999, 12500]
+
+      - name: order_timestamp
+        logicalType: timestamp
+        physicalType: TIMESTAMPTZ
+        logicalTypeOptions:
+          format: "yyyy-MM-ddTHH:mm:ssZ"
+          timezone: true
+        examples: ["2025-03-01T14:30:00+08:00"]
+
+      - name: order_email
+        logicalType: string
+        physicalType: TEXT
+        logicalTypeOptions:
+          format: email                     # string 格式：email | uuid | uri | hostname | ipv4 | ipv6
+        encryptedName: enc_order_email      # 加密列名（如有脱敏）
+        classification: restricted
+        description: 客户邮箱（脱敏列）
+
+    # 表级质量规则
+    quality:
+      - metric: rowCount                    # 行数检查
+        mustBeGreaterThan: 1000
+        description: 每天至少 1000 条订单
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 3: 团队
+# ═══════════════════════════════════════════════════════════════════════════
+team:
+  name: 销售数据团队
+  description: 负责所有销售域数据产品
+  members:
+    - email: alice@example.com
+      name: Alice Wang
+      role: Owner
+    - email: bob@example.com
+      name: Bob Li
+      role: Maintainer
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 4: 角色
+# ═══════════════════════════════════════════════════════════════════════════
+roles:
+  - name: analyst_full
+    description: 可查看全部数据
+  - name: analyst_masked
+    description: 仅可查看脱敏数据
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 5: 定价
+# ═══════════════════════════════════════════════════════════════════════════
+pricing:
+  priceAmount: 0
+  priceCurrency: USD
+  priceUnit: monthly
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 6: 服务等级协议（SLA）
+# ═══════════════════════════════════════════════════════════════════════════
+serviceLevelAgreements:
+  - property: freshness
+    value: 24
+    unit: hours
+    description: 下单后 24 小时内数据可用
+
+  - property: retention
+    value: 2
+    unit: years
+    description: 数据保留 2 年
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 7: 服务器
+# ═══════════════════════════════════════════════════════════════════════════
+servers:
+  - type: postgres
+    host: prod-db.example.com
+    port: 5432
+    database: sales
+    schema: dp_orders_v1
+    description: 生产环境 PostgreSQL
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 8: 支持渠道
+# ═══════════════════════════════════════════════════════════════════════════
+supportChannels:
+  - type: slack
+    url: https://slack.example.com/data-sales
+  - type: email
+    url: data-sales@example.com
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 9: 自定义属性
+# ═══════════════════════════════════════════════════════════════════════════
+customProperties:
+  - property: refRulesetName
+    value: gcsc.ruleset.name
+    description: REF 规则集
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FlowScope 治理契约（custom 字段）
+# 以下 rules 是 FlowScope 治理引擎的专属用法，遵循 ODCS 格式
+# ═══════════════════════════════════════════════════════════════════════════
+custom:
+  flowscope:
+    # ── 血缘规则 ──
+    lineage_rules:
+      - id: no_orphan_output
+        description: "产出表必须有下游消费"
+        severity: P2
+      - id: lineage_completeness
+        description: "核心链路不能有血缘断裂"
+        severity: P0
+
+    # ── SQL 规范 ──
+    sql_rules:
+      - id: no_select_star
+        description: "生产脚本禁止 SELECT *"
+        severity: P2
+      - id: no_update_without_where
+        description: "UPDATE/DELETE 必须有 WHERE"
+        severity: P0
+      - id: max_complexity
+        description: "单脚本复杂度不超阈值"
+        threshold: 80
+        severity: P2
+
+    # ── 指标规则 ──
+    metric_rules:
+      - id: no_duplicate_computation
+        description: "禁止重复计算"
+        similarity_threshold: 0.85
+        severity: P1
+      - id: no_write_conflict
+        description: "禁止多脚本写入同一物理表"
+        severity: P1
+
+    # ── 安全规则 ──
+    security_rules:
+      - id: no_hardcoded_secrets
+        description: "SQL 中禁止硬编码密码/令牌"
+        patterns: [password, token, secret, api_key]
+        severity: P0
+
+    # ── 建模规则 ──
+    modeling_rules:
+      - id: naming_must_match_layer
+        description: "表名前缀必须与层级匹配"
+        severity: P2
+        patterns:
+          ODS: "^ods_"
+          DWD: "^dwd_"
+          DWS: "^dws_"
+          ADS: "^(ads_|app_)"
+          DIM: "^dim_"
+      - id: layer_must_be_assigned
+        description: "所有表必须有层级标注"
+        severity: P2
