@@ -467,6 +467,92 @@ fn strip_table_alias(expr: &str) -> String {
     }
 }
 
+/// Extract business filter conditions from CASE WHEN patterns in an expression.
+///
+/// `SUM(CASE WHEN fee_code = 'F0001' THEN price ELSE 0 END)`
+///   → `fee_code = 'F0001'`
+///
+/// Filters out boilerplate conditions (`is_deleted = 0`, `_sign = 1`, etc.)
+/// and limits to the 5 most meaningful conditions to keep the filter readable.
+fn extract_business_filter(expr: &str) -> String {
+    let lower = expr.to_lowercase();
+    if !lower.contains("case when") {
+        return String::new();
+    }
+
+    // Patterns that are boilerplate, not meaningful business logic.
+    const NOISE_PATTERNS: &[&str] = &[
+        "is_deleted", "is_delete", "_sign", "is_valid", "is_active",
+        "row_rank", "rownum", "rk =", "rn =",
+    ];
+
+    let mut conditions: Vec<String> = Vec::new();
+    let mut search_from = 0usize;
+
+    while let Some(rel_pos) = lower[search_from..].find("when") {
+        let abs_pos = search_from + rel_pos + 4;
+        if abs_pos >= expr.len() {
+            break;
+        }
+        let after_when = &expr[abs_pos..];
+        let after_lower = after_when.to_lowercase();
+
+        if let Some(then_rel) = after_lower.find("then") {
+            let condition = after_when[..then_rel].trim();
+            let cleaned = clean_condition(condition);
+            // Skip empty / trivially-true / boilerplate conditions.
+            let is_noise = cleaned.is_empty()
+                || cleaned == "1"
+                || cleaned == "true"
+                || NOISE_PATTERNS.iter().any(|p| cleaned.to_lowercase().contains(p));
+            if !is_noise {
+                conditions.push(cleaned);
+            }
+            search_from = abs_pos + then_rel + 4;
+        } else {
+            break;
+        }
+    }
+
+    // Deduplicate while preserving order.
+    let mut seen = HashSet::new();
+    conditions.retain(|c| seen.insert(c.clone()));
+
+    // Keep at most 5 conditions, truncate total length.
+    let result = conditions.iter().take(5).cloned().collect::<Vec<_>>().join("; ");
+    if result.chars().count() > 200 {
+        let truncated: String = result.chars().take(200).collect();
+        format!("{truncated}...")
+    } else {
+        result
+    }
+}
+
+/// Clean a CASE WHEN condition: strip backticks, collapse whitespace.
+fn clean_condition(cond: &str) -> String {
+    cond.replace(['`', '"'], "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Infer metric owner / business domain from the file path.
+///
+/// `etl/M01_接口集市库-BI/M01_ACCM_USR.HQL` → `M01_接口集市库-BI`
+/// `dqc/DQC_数据质量检查区/DQC_CHK.HQL`       → `DQC_数据质量检查区`
+fn infer_owner_from_path(file_path: &str) -> String {
+    let normalized = file_path.replace('\\', "/");
+    let segments: Vec<&str> = normalized.split('/').filter(|s| !s.is_empty()).collect();
+    // Use the parent directory of the file (usually the module/team directory).
+    if segments.len() >= 2 {
+        return segments[segments.len() - 2].to_string();
+    }
+    if segments.len() == 1 {
+        return segments[0].to_string();
+    }
+    String::new()
+}
+
 /// Build a unique metric name from output table + output column (+ fallback).
 fn build_metric_name(output_table: &str, output_col: &str, agg: &str, source_col: &str) -> String {
     let generic = matches!(
@@ -631,10 +717,24 @@ pub fn extract_metrics_from_lineage(
             let layer = super::model::infer_layer(&m.output_table);
             let period = infer_period(&m.output_table, &m.output_col);
 
+            // Extract business filter from CASE WHEN conditions.
+            let business_filter = extract_business_filter(&m.expression);
+
+            // Infer owner/domain from file path.
+            let owner = infer_owner_from_path(&m.file_path);
+
             let definition = if metric_type == "atomic" {
-                format!("{agg}({inner_expr}) → {}.{}", m.output_table, m.output_col)
+                if business_filter.is_empty() {
+                    format!("{agg}({inner_expr}) → {}.{}", m.output_table, m.output_col)
+                } else {
+                    format!("{agg}({inner_expr}) [{business_filter}] → {}.{}", m.output_table, m.output_col)
+                }
             } else {
-                format!("derived → {}.{}", m.output_table, m.output_col)
+                if business_filter.is_empty() {
+                    format!("derived → {}.{}", m.output_table, m.output_col)
+                } else {
+                    format!("derived [{business_filter}] → {}.{}", m.output_table, m.output_col)
+                }
             };
             let definition = if definition.chars().count() > 200 {
                 let truncated: String = definition.chars().take(200).collect();
@@ -652,17 +752,19 @@ pub fn extract_metrics_from_lineage(
             gov_conn.execute(
                 "INSERT INTO metrics_registry
                     (project_id, metric_name, metric_type, definition, sql_signature, expression,
-                     aggregation, business_filter, period, source_tables, dimensions, layer,
+                     aggregation, business_filter, period, source_tables, dimensions, owner, layer,
                      lifecycle, contract_id, bound_model, bound_column, created_at, updated_at, status)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', ?8, ?9, '[]', ?10, 'active', ?11, ?12, ?13, ?14, ?14, 1)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, '[]', ?11, ?12, 'active', ?13, ?14, ?15, ?16, ?16, 1)
                  ON CONFLICT(project_id, metric_name) DO UPDATE SET
                     metric_type = excluded.metric_type,
                     definition = excluded.definition,
                     sql_signature = excluded.sql_signature,
                     expression = excluded.expression,
                     aggregation = excluded.aggregation,
+                    business_filter = excluded.business_filter,
                     period = excluded.period,
                     source_tables = excluded.source_tables,
+                    owner = excluded.owner,
                     layer = excluded.layer,
                     contract_id = excluded.contract_id,
                     bound_model = excluded.bound_model,
@@ -676,8 +778,10 @@ pub fn extract_metrics_from_lineage(
                     signature,
                     m.expression,
                     if metric_type == "atomic" { agg.as_str() } else { "" },
+                    business_filter,
                     period,
                     m.source_table,
+                    owner,
                     layer,
                     contract_id,
                     m.output_table,
@@ -817,5 +921,48 @@ mod tests {
         assert_eq!(infer_period("dws_weekly_stats", ""), "weekly");
         assert_eq!(infer_period("ods_raw", "total_amt"), "");
         assert_eq!(infer_period("dws_hourly_log", ""), "hourly");
+    }
+
+    #[test]
+    fn test_extract_business_filter_simple() {
+        let filter = extract_business_filter(
+            "max(CASE WHEN `fee_code` = 'F0001' THEN `price` ELSE 0 END)",
+        );
+        assert_eq!(filter, "fee_code = 'F0001'");
+    }
+
+    #[test]
+    fn test_extract_business_filter_multi_when() {
+        let filter = extract_business_filter(
+            "SUM(CASE WHEN status = 1 THEN amount WHEN status = 2 THEN 0 ELSE 0 END)",
+        );
+        assert_eq!(filter, "status = 1; status = 2");
+    }
+
+    #[test]
+    fn test_extract_business_filter_and_condition() {
+        let filter = extract_business_filter(
+            "SUM(CASE WHEN a.system_id = '1' AND group_id = 1 THEN amount ELSE 0 END)",
+        );
+        assert_eq!(filter, "a.system_id = '1' AND group_id = 1");
+    }
+
+    #[test]
+    fn test_extract_business_filter_none() {
+        assert_eq!(extract_business_filter("sum(lvtm)"), "");
+        assert_eq!(extract_business_filter("count(*)"), "");
+    }
+
+    #[test]
+    fn test_infer_owner_from_path() {
+        assert_eq!(
+            infer_owner_from_path("etl/M01_接口集市库-BI/M01_ACCM_USR.HQL"),
+            "M01_接口集市库-BI",
+        );
+        assert_eq!(
+            infer_owner_from_path("dqc/DQC_数据质量检查区/DQC_CHK.HQL"),
+            "DQC_数据质量检查区",
+        );
+        assert_eq!(infer_owner_from_path("single_file.sql"), "single_file.sql");
     }
 }
