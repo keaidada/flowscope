@@ -3,6 +3,9 @@
  *
  * Shows: quality scorecard, duplicate detection, metric families,
  * model load analysis, and optimization tips.
+ *
+ * Performance: limits rendered items per section to avoid browser freeze
+ * on large projects (e.g., 293 duplicate groups). Uses "show more" buttons.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -13,10 +16,16 @@ import {
 import { cn } from '@/lib/utils';
 import { governanceApi, type MetricAnalysis } from '@/lib/governance-api';
 
+const MAX_DUPS = 15;
+const MAX_LOADS = 15;
+const MAX_NAMES_IN_CARD = 20;
+
 export function MetricAnalysisView({ projectId }: { projectId: string | null }) {
   const { t } = useTranslation();
   const [analysis, setAnalysis] = useState<MetricAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showAllDups, setShowAllDups] = useState(false);
+  const [showAllLoads, setShowAllLoads] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -42,12 +51,23 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
   }
 
   if (!analysis) {
-    return <div className="flex items-center justify-center h-full text-muted-foreground text-sm">分析失败</div>;
+    return <div className="flex items-center justify-center h-full text-muted-foreground text-sm">{t('governance.analysisFailed', '分析失败')}</div>;
   }
 
   const { quality, duplicates, families, model_loads, tips } = analysis;
-  const crossModelDups = duplicates.filter((d) => d.dup_type === 'cross_model');
-  const sameModelDups = duplicates.filter((d) => d.dup_type === 'same_model');
+
+  // Sort duplicates by group size (largest first) for priority display
+  const crossModelDups = duplicates
+    .filter((d) => d.dup_type === 'cross_model')
+    .sort((a, b) => b.metric_names.length - a.metric_names.length);
+  const sameModelDups = duplicates
+    .filter((d) => d.dup_type === 'same_model')
+    .sort((a, b) => b.metric_names.length - a.metric_names.length);
+
+  const visibleCross = showAllDups ? crossModelDups : crossModelDups.slice(0, MAX_DUPS);
+  const visibleSame = showAllDups ? sameModelDups : sameModelDups.slice(0, MAX_DUPS);
+  const visibleLoads = showAllLoads ? model_loads : model_loads.slice(0, MAX_LOADS);
+  const hiddenDupCount = crossModelDups.length + sameModelDups.length - visibleCross.length - visibleSame.length;
 
   return (
     <div className="flex-1 overflow-auto p-4 space-y-4">
@@ -123,26 +143,24 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
             {t('governance.crossModelDup', '跨模型重复计算')} ({crossModelDups.length})
           </h3>
           <div className="space-y-2">
-            {crossModelDups.map((dup, i) => (
+            {visibleCross.map((dup, i) => (
               <ExpandableCard
                 key={i}
-                title={`${dup.aggregation.toUpperCase()} — ${dup.metric_names.length} 个指标`}
-                subtitle={`模型: ${dup.bound_models.join(' vs ')}`}
+                title={`${dup.aggregation.toUpperCase()} — ${dup.metric_names.length} ${t('governance.metrics', '个指标')}`}
+                subtitle={`${t('governance.models', '模型')}: ${dup.bound_models.join(' vs ')}`}
                 suggestion={dup.suggestion}
-              >
-                <div className="space-y-1">
-                  {dup.metric_names.map((name) => (
-                    <div key={name} className="text-xs font-mono flex items-center gap-1">
-                      <ChevronRight className="h-3 w-3 text-muted-foreground" /> {name}
-                    </div>
-                  ))}
-                  <div className="mt-2 p-2 bg-muted rounded text-xs font-mono break-all">
-                    {dup.normalized_expr}
-                  </div>
-                </div>
-              </ExpandableCard>
+                metricNames={dup.metric_names}
+                normalizedExpr={dup.normalized_expr}
+              />
             ))}
           </div>
+          {crossModelDups.length > MAX_DUPS && (
+            <ShowMoreButton
+              showAll={showAllDups}
+              count={hiddenDupCount}
+              onClick={() => setShowAllDups(!showAllDups)}
+            />
+          )}
         </section>
       )}
 
@@ -157,20 +175,11 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
             {families.map((fam, i) => (
               <ExpandableCard
                 key={i}
-                title={`${fam.bound_model} — ${fam.count} 个同模式指标`}
+                title={`${fam.bound_model} — ${fam.count} ${t('governance.metrics', '个同模式指标')}`}
                 subtitle={fam.suggestion}
-              >
-                <div className="flex flex-wrap gap-1">
-                  {fam.columns.map((col) => (
-                    <span key={col} className="px-1.5 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300">
-                      {col}
-                    </span>
-                  ))}
-                </div>
-                <div className="mt-2 p-2 bg-muted rounded text-xs font-mono break-all">
-                  {fam.pattern}
-                </div>
-              </ExpandableCard>
+                columnBadges={fam.columns}
+                normalizedExpr={fam.pattern}
+              />
             ))}
           </div>
         </section>
@@ -184,7 +193,7 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
             {t('governance.modelLoad', '模型负载分析')} ({model_loads.length})
           </h3>
           <div className="space-y-1">
-            {model_loads.map((ml) => (
+            {visibleLoads.map((ml) => (
               <div key={ml.table_name} className="flex items-center gap-3 p-2 rounded border text-sm">
                 <span className={cn(
                   'px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0',
@@ -193,41 +202,48 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
                 )}>
                   {ml.load_level.toUpperCase()}
                 </span>
-                <span className="flex-1 truncate font-medium">{ml.table_name}</span>
+                <span className="flex-1 truncate font-medium" title={ml.table_name}>{ml.table_name}</span>
                 <span className="text-xs text-muted-foreground shrink-0">
                   {ml.metric_count} {t('governance.metrics', '指标')} · {ml.source_count} {t('governance.sourceTables', '源表')}
                 </span>
-                <div className="flex gap-0.5 shrink-0">
-                  {ml.agg_types.map((a) => (
-                    <span key={a} className="px-1 rounded text-[9px] bg-muted">{a}</span>
-                  ))}
-                </div>
               </div>
             ))}
           </div>
+          {model_loads.length > MAX_LOADS && (
+            <ShowMoreButton
+              showAll={showAllLoads}
+              count={model_loads.length - MAX_LOADS}
+              onClick={() => setShowAllLoads(!showAllLoads)}
+            />
+          )}
         </section>
       )}
 
       {/* === Same-model Duplicates === */}
-      {sameModelDups.length > 0 && (
+      {visibleSame.length > 0 && (
         <section>
           <h3 className="text-sm font-semibold mb-2 flex items-center gap-1">
             <Copy className="h-4 w-4 text-yellow-500" />
             {t('governance.sameModelDup', '模型内重复')} ({sameModelDups.length})
           </h3>
           <div className="space-y-2">
-            {sameModelDups.map((dup, i) => (
+            {visibleSame.map((dup, i) => (
               <ExpandableCard
                 key={i}
-                title={`${dup.aggregation.toUpperCase()} — ${dup.metric_names.length} 个指标`}
+                title={`${dup.aggregation.toUpperCase()} — ${dup.metric_names.length} ${t('governance.metrics', '个指标')}`}
                 subtitle={dup.bound_models.join(', ')}
-              >
-                {dup.metric_names.map((name) => (
-                  <div key={name} className="text-xs font-mono">• {name}</div>
-                ))}
-              </ExpandableCard>
+                metricNames={dup.metric_names}
+                normalizedExpr={dup.normalized_expr}
+              />
             ))}
           </div>
+          {sameModelDups.length > MAX_DUPS && !showAllDups && (
+            <ShowMoreButton
+              showAll={false}
+              count={sameModelDups.length - MAX_DUPS}
+              onClick={() => setShowAllDups(true)}
+            />
+          )}
         </section>
       )}
 
@@ -240,6 +256,10 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
     </div>
   );
 }
+
+// ============================================================
+// Sub-components
+// ============================================================
 
 function ScoreBar({ label, pct, color }: { label: string; pct: number; color: string }) {
   const colorClass = {
@@ -261,15 +281,42 @@ function ScoreBar({ label, pct, color }: { label: string; pct: number; color: st
   );
 }
 
+function ShowMoreButton({ showAll, count, onClick }: { showAll: boolean; count: number; onClick: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      onClick={onClick}
+      className="mt-2 px-3 py-1 text-xs text-primary hover:underline"
+    >
+      {showAll
+        ? t('governance.showLess', '收起')
+        : `${t('governance.showMore', '显示更多')} (+${count})`}
+    </button>
+  );
+}
+
 function ExpandableCard({
-  title, subtitle, suggestion, children,
+  title, subtitle, suggestion, metricNames, columnBadges, normalizedExpr,
 }: {
   title: string;
   subtitle?: string;
   suggestion?: string;
-  children: React.ReactNode;
+  metricNames?: string[];
+  columnBadges?: string[];
+  normalizedExpr?: string;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+
+  // Limit names shown inside the card
+  const names = metricNames ?? [];
+  const visibleNames = names.slice(0, MAX_NAMES_IN_CARD);
+  const hiddenCount = names.length - visibleNames.length;
+
+  const badges = columnBadges ?? [];
+  const visibleBadges = badges.slice(0, MAX_NAMES_IN_CARD);
+  const hiddenBadgeCount = badges.length - visibleBadges.length;
+
   return (
     <div className="border rounded-lg overflow-hidden">
       <button
@@ -286,10 +333,36 @@ function ExpandableCard({
         <div className="px-3 pb-3 space-y-2">
           {suggestion && (
             <div className="text-xs p-2 bg-blue-50 dark:bg-blue-950/30 rounded text-blue-700 dark:text-blue-300">
-              💡 {suggestion}
+              {suggestion}
             </div>
           )}
-          {children}
+          {visibleBadges.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {visibleBadges.map((col) => (
+                <span key={col} className="px-1.5 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300">
+                  {col}
+                </span>
+              ))}
+              {hiddenBadgeCount > 0 && <span className="text-[10px] text-muted-foreground">+{hiddenBadgeCount}</span>}
+            </div>
+          )}
+          {visibleNames.length > 0 && (
+            <div className="space-y-0.5">
+              {visibleNames.map((name) => (
+                <div key={name} className="text-xs font-mono flex items-center gap-1">
+                  <ChevronRight className="h-3 w-3 text-muted-foreground" /> {name}
+                </div>
+              ))}
+              {hiddenCount > 0 && (
+                <div className="text-xs text-muted-foreground pl-4">+{hiddenCount} {t('governance.more', '更多')}</div>
+              )}
+            </div>
+          )}
+          {normalizedExpr && (
+            <div className="mt-1 p-2 bg-muted rounded text-xs font-mono break-all line-clamp-3">
+              {normalizedExpr}
+            </div>
+          )}
         </div>
       )}
     </div>
