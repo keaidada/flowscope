@@ -6,7 +6,7 @@
  *   each section shows that table's metrics with inline-expandable rows.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronDown, ChevronRight, Database, FileCode, GitBranch, LayoutGrid, Package, Search, Sparkles,
@@ -70,6 +70,9 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
   const [search, setSearch] = useState('');
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
+  // Ref to avoid cascading re-renders when selectedScript changes
+  const selectedScriptRef = useRef<string | null>(null);
+
   const refresh = useCallback(async () => {
     if (!projectId) return;
     try {
@@ -93,16 +96,22 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
       }
 
       setMetrics(ms);
-      if (ms.length > 0 && !selectedScript) {
+      if (ms.length > 0 && !selectedScriptRef.current) {
         const first = extractScript(ms[0].contract_id).name;
+        selectedScriptRef.current = first;
         setSelectedScript(first);
       }
       setConflicts(await governanceApi.metricConflicts(projectId));
       setStats(await governanceApi.metricStats(projectId));
     } catch (e) { console.error('Metric list failed:', e); }
-  }, [projectId, selectedScript]);
+  }, [projectId, t]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    selectedScriptRef.current = null;
+    setSelectedScript(null);
+    setExpandedMetric(null);
+    refresh();
+  }, [projectId]); // Only re-run when project changes
 
   const handleAutoDetect = async () => {
     if (!projectId) return;

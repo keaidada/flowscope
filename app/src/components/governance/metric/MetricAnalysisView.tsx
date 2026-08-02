@@ -8,7 +8,7 @@
  * on large projects (e.g., 293 duplicate groups). Uses "show more" buttons.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle, ChevronDown, ChevronRight, Copy, Layers, Lightbulb, TrendingDown,
@@ -19,7 +19,7 @@ import { governanceApi, type MetricAnalysis } from '@/lib/governance-api';
 const MAX_DUPS = 15;
 const MAX_LOADS = 15;
 
-export function MetricAnalysisView({ projectId }: { projectId: string | null }) {
+export const MetricAnalysisView = memo(function MetricAnalysisView({ projectId }: { projectId: string | null }) {
   const { t } = useTranslation();
   const [analysis, setAnalysis] = useState<MetricAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
@@ -262,11 +262,7 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
       )}
     </div>
   );
-}
-
-// ============================================================
-// Sub-components
-// ============================================================
+});
 
 function ScoreBar({ label, pct, color }: { label: string; pct: number; color: string }) {
   const colorClass = {
