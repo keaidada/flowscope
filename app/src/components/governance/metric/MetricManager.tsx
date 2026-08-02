@@ -73,7 +73,25 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
   const refresh = useCallback(async () => {
     if (!projectId) return;
     try {
-      const ms = await governanceApi.listMetrics(new URLSearchParams({ project_id: projectId }).toString());
+      let ms = await governanceApi.listMetrics(new URLSearchParams({ project_id: projectId }).toString());
+
+      // Auto-extract from lineage if project has no metrics yet
+      if (ms.length === 0) {
+        setImportMsg(t('governance.autoExtracting', '正在从血缘提取指标...'));
+        try {
+          const r = await governanceApi.extractLineageMetrics(projectId);
+          if (r.extracted > 0) {
+            setImportMsg(`${t('governance.extractLineageDone', '从血缘提取')} ${r.extracted} ${t('governance.metrics', '个指标')}`);
+            ms = await governanceApi.listMetrics(new URLSearchParams({ project_id: projectId }).toString());
+          } else {
+            setImportMsg(null);
+          }
+        } catch (e) {
+          console.error('Auto-extract failed:', e);
+          setImportMsg(null);
+        }
+      }
+
       setMetrics(ms);
       if (ms.length > 0 && !selectedScript) {
         const first = extractScript(ms[0].contract_id).name;

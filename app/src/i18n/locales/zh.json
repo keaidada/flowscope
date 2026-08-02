@@ -876,6 +876,7 @@
     "selectTable": "选择左侧表查看指标",
     "field": "字段",
     "autoDetectDone": "自动检测",
+    "autoExtracting": "正在从血缘提取指标...",
     "selectMetric": "选择左侧指标查看详情",
     "metricConflicts": "口径冲突",
     "definition": "定义",

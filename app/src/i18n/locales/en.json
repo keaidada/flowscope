@@ -876,6 +876,7 @@
     "selectTable": "Select a table to view its metrics",
     "field": "Field",
     "autoDetectDone": "Auto-detected",
+    "autoExtracting": "Extracting metrics from lineage...",
     "selectMetric": "Select a metric to view details",
     "metricConflicts": "Metric Conflicts",
     "definition": "Definition",

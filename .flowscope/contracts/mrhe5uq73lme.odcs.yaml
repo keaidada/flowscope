@@ -67,8 +67,8 @@ custom:
     - id: naming_must_match_layer
       description: 表名前缀必须与层级匹配
       patterns:
-        ADS: ^(ads_|app_)
         DWD: ^dwd_
+        ADS: ^(ads_|app_)
         ODS: ^ods_
         DIM: ^dim_
         DWS: ^dws_
