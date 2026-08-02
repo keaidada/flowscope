@@ -1,13 +1,23 @@
 /**
- * MetricManager — metric list + search + filters + conflicts + detail.
+ * MetricManager — table-centric metric view + analysis toggle.
+ *
+ * Left panel: table list (grouped by bound_model, sorted by metric count).
+ * Right panel: selected table's metric profile with inline-expandable rows.
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, BarChart3, Database, GitBranch, LayoutGrid, List, Search, Sparkles } from 'lucide-react';
+import {
+  ChevronDown, ChevronRight, Database, GitBranch, LayoutGrid, Package, Search, Sparkles,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { governanceApi, type MetricEntry, type MetricConflict, type MetricStats } from '@/lib/governance-api';
+import {
+  governanceApi,
+  type MetricEntry,
+  type MetricConflict,
+  type MetricStats,
+} from '@/lib/governance-api';
 import { MetricAnalysisView } from './MetricAnalysisView';
 
 const AGG_COLORS: Record<string, string> = {
@@ -21,64 +31,69 @@ const AGG_COLORS: Record<string, string> = {
   median: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300',
 };
 
-function aggBadgeClass(agg: string): string {
+function aggBadge(agg: string): string {
   return AGG_COLORS[agg.toLowerCase()] ?? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
+}
+
+interface TableGroup {
+  table: string;
+  metrics: MetricEntry[];
+  aggs: string[];
+  layer: string;
+  sources: string[];
+  owner: string;
 }
 
 export function MetricManager({ projectId }: { projectId: string | null }) {
   const { t } = useTranslation();
+  const [view, setView] = useState<'table' | 'analysis'>('table');
   const [metrics, setMetrics] = useState<MetricEntry[]>([]);
   const [conflicts, setConflicts] = useState<MetricConflict[]>([]);
   const [stats, setStats] = useState<MetricStats | null>(null);
-  const [selected, setSelected] = useState<MetricEntry | null>(null);
-
-  // View mode: list or analysis
-  const [view, setView] = useState<'list' | 'analysis'>('list');
-
-  // Filters
-  const [searchText, setSearchText] = useState('');
-  const [aggFilter, setAggFilter] = useState<string>('');
-  const [layerFilter, setLayerFilter] = useState<string>('');
+  const [selectedTable, setSelectedTable] = useState<string | null>(null);
+  const [expandedMetric, setExpandedMetric] = useState<number | null>(null);
+  const [tableSearch, setTableSearch] = useState('');
+  const [importMsg, setImportMsg] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
     try {
       const ms = await governanceApi.listMetrics(new URLSearchParams({ project_id: projectId }).toString());
       setMetrics(ms);
+      // Auto-select first table if none selected
+      if (ms.length > 0 && !selectedTable) {
+        const firstTable = ms.find((m) => m.bound_model)?.bound_model ?? null;
+        setSelectedTable(firstTable);
+      }
       const cs = await governanceApi.metricConflicts(projectId);
       setConflicts(cs);
       const s = await governanceApi.metricStats(projectId);
       setStats(s);
     } catch (e) { console.error('Metric list failed:', e); }
-  }, [projectId]);
+  }, [projectId, selectedTable]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // --- Action handlers ---
   const handleAutoDetect = async () => {
     if (!projectId) return;
     try {
       const r = await governanceApi.autoDetectMetrics(projectId);
-      console.log(`Auto-detected ${r.detected} metrics`);
+      setImportMsg(`${t('governance.autoDetectDone', '自动检测')} ${r.detected} ${t('governance.metrics', '个指标')}`);
       await refresh();
-    } catch (e) { console.error('Auto-detect failed:', e); }
+    } catch (e) { console.error(e); setImportMsg(String(e)); }
   };
-
-  const [importMsg, setImportMsg] = useState<string | null>(null);
 
   const handleImportDbt = async () => {
     if (!projectId) return;
     try {
       setImportMsg(null);
       const r = await governanceApi.importDbtMetrics(projectId);
-      const msg = r.imported > 0
-        ? `${t('governance.importDbtDone', '已导入')} ${r.imported} ${t('governance.metrics', '个指标')}${r.skipped.length > 0 ? `（跳过 ${r.skipped.length}）` : ''}`
-        : t('governance.importDbtEmpty', '未发现 dbt MetricFlow 定义（semantic_models.yml / metrics.yml）');
-      setImportMsg(msg);
+      setImportMsg(r.imported > 0
+        ? `${t('governance.importDbtDone', '已导入')} ${r.imported} ${t('governance.metrics', '个指标')}`
+        : t('governance.importDbtEmpty', '未发现 dbt MetricFlow 定义'));
       await refresh();
-    } catch (e) {
-      console.error('dbt import failed:', e);
-      setImportMsg(String(e));
-    }
+    } catch (e) { console.error(e); setImportMsg(String(e)); }
   };
 
   const handleExtractLineage = async () => {
@@ -88,38 +103,41 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
       const r = await governanceApi.extractLineageMetrics(projectId);
       setImportMsg(`${t('governance.extractLineageDone', '从血缘提取')} ${r.extracted} ${t('governance.metrics', '个指标')}`);
       await refresh();
-    } catch (e) {
-      console.error('Lineage extraction failed:', e);
-      setImportMsg(String(e));
-    }
+    } catch (e) { console.error(e); setImportMsg(String(e)); }
   };
 
-  // Derived filter options from metrics data
-  const aggOptions = useMemo(() => {
-    const set = new Set<string>();
-    metrics.forEach((m) => { if (m.aggregation) set.add(m.aggregation); });
-    return Array.from(set).sort();
+  // --- Group metrics by bound_model ---
+  const tableGroups: TableGroup[] = useMemo(() => {
+    const map = new Map<string, MetricEntry[]>();
+    for (const m of metrics) {
+      const key = m.bound_model || '(unknown)';
+      const arr = map.get(key) ?? [];
+      arr.push(m);
+      map.set(key, arr);
+    }
+    return Array.from(map.entries())
+      .map(([table, ms]) => ({
+        table,
+        metrics: ms,
+        aggs: Array.from(new Set(ms.map((m) => m.aggregation).filter(Boolean))),
+        layer: ms[0]?.layer ?? '',
+        sources: Array.from(new Set(ms.flatMap((m) => m.source_tables.split(',').map((s) => s.trim()).filter(Boolean)))),
+        owner: ms[0]?.owner ?? '',
+      }))
+      .sort((a, b) => b.metrics.length - a.metrics.length);
   }, [metrics]);
 
-  const layerOptions = useMemo(() => {
-    const set = new Set<string>();
-    metrics.forEach((m) => { if (m.layer) set.add(m.layer); });
-    return Array.from(set).sort();
-  }, [metrics]);
+  const filteredTables = useMemo(() => {
+    const q = tableSearch.toLowerCase().trim();
+    if (!q) return tableGroups;
+    return tableGroups.filter((g) => g.table.toLowerCase().includes(q));
+  }, [tableGroups, tableSearch]);
 
-  // Filtered metrics
-  const filtered = useMemo(() => {
-    const lower = searchText.toLowerCase().trim();
-    return metrics.filter((m) => {
-      if (aggFilter && m.aggregation.toLowerCase() !== aggFilter.toLowerCase()) return false;
-      if (layerFilter && m.layer !== layerFilter) return false;
-      if (lower) {
-        const haystack = `${m.metric_name} ${m.expression} ${m.business_filter} ${m.definition} ${m.source_tables}`.toLowerCase();
-        if (!haystack.includes(lower)) return false;
-      }
-      return true;
-    });
-  }, [metrics, searchText, aggFilter, layerFilter]);
+  // Selected table's metrics
+  const selectedGroup = useMemo(
+    () => tableGroups.find((g) => g.table === selectedTable) ?? null,
+    [tableGroups, selectedTable],
+  );
 
   if (!projectId) {
     return <div className="flex items-center justify-center h-full text-muted-foreground text-sm">{t('governance.selectProject', '请先选择项目')}</div>;
@@ -127,233 +145,275 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Top toolbar: view toggle + action buttons */}
+      {/* === Top toolbar === */}
       <div className="flex items-center justify-between px-2 py-1.5 border-b shrink-0">
         <div className="flex items-center gap-0.5">
-          <Button variant={view === 'list' ? 'secondary' : 'ghost'} size="sm" onClick={() => setView('list')} className="h-6 px-2 text-xs">
-            <List className="h-3 w-3 mr-1" />{t('governance.listView', '列表')}
+          <Button variant={view === 'table' ? 'secondary' : 'ghost'} size="sm" onClick={() => setView('table')} className="h-6 px-2 text-xs">
+            <Package className="h-3 w-3 mr-1" />{t('governance.byTable', '按表')}
           </Button>
           <Button variant={view === 'analysis' ? 'secondary' : 'ghost'} size="sm" onClick={() => setView('analysis')} className="h-6 px-2 text-xs">
             <LayoutGrid className="h-3 w-3 mr-1" />{t('governance.analysisView', '分析')}
           </Button>
         </div>
-        {view === 'list' && (
+        {view === 'table' && (
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" onClick={handleAutoDetect} className="h-6 px-2 text-xs">
-              <Sparkles className="h-3 w-3 mr-1" />Auto-detect
+              <Sparkles className="h-3 w-3 mr-1" />Auto
             </Button>
-            <Button variant="ghost" size="sm" onClick={handleImportDbt} className="h-6 px-2 text-xs" title="从 dbt MetricFlow 导入">
+            <Button variant="ghost" size="sm" onClick={handleImportDbt} className="h-6 px-2 text-xs">
               <Database className="h-3 w-3 mr-1" />dbt
             </Button>
-            <Button variant="ghost" size="sm" onClick={handleExtractLineage} className="h-6 px-2 text-xs" title="从字段级血缘提取">
+            <Button variant="ghost" size="sm" onClick={handleExtractLineage} className="h-6 px-2 text-xs">
               <GitBranch className="h-3 w-3 mr-1" />Lineage
             </Button>
           </div>
         )}
       </div>
 
-      {importMsg && view === 'list' && (
-        <div className="px-3 py-1.5 border-b text-xs text-muted-foreground">{importMsg}</div>
+      {importMsg && view === 'table' && (
+        <div className="px-3 py-1 border-b text-xs text-muted-foreground shrink-0">{importMsg}</div>
       )}
 
-      {/* Content area */}
+      {/* === Content === */}
       {view === 'analysis' ? (
         <MetricAnalysisView projectId={projectId} />
       ) : (
         <div className="flex flex-1 min-h-0">
-        {/* Left: list + filters */}
-        <div className="w-80 border-r flex flex-col">
-
-        {/* Search + filters */}
-        <div className="px-2 py-1.5 border-b space-y-1.5">
-          <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder={t('governance.searchMetrics', '搜索指标名/表达式/业务限定...')}
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              className="w-full pl-7 pr-2 py-1 text-xs rounded border bg-transparent focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-          <div className="flex gap-1">
-            <select
-              value={aggFilter}
-              onChange={(e) => setAggFilter(e.target.value)}
-              className="flex-1 text-xs px-1 py-0.5 rounded border bg-transparent"
-            >
-              <option value="">{t('governance.allAggs', '全部聚合')}</option>
-              {aggOptions.map((a) => <option key={a} value={a}>{a}</option>)}
-            </select>
-            <select
-              value={layerFilter}
-              onChange={(e) => setLayerFilter(e.target.value)}
-              className="flex-1 text-xs px-1 py-0.5 rounded border bg-transparent"
-            >
-              <option value="">{t('governance.allLayers', '全部层级')}</option>
-              {layerOptions.map((l) => <option key={l} value={l}>{l}</option>)}
-            </select>
-          </div>
-        </div>
-
-        {/* Stats bar */}
-        {stats && (
-          <div className="flex gap-3 px-3 py-1.5 border-b bg-muted/20 text-xs text-muted-foreground">
-            <span>{t('governance.total', '总计')}: <b className="text-foreground">{filtered.length}</b>{filtered.length !== stats.total && `/${stats.total}`}</span>
-            {stats.conflict_count > 0 && (
-              <span className="text-yellow-600">⚠ {stats.conflict_count} {t('governance.conflicts', '冲突')}</span>
-            )}
-          </div>
-        )}
-
-        {/* Metric list */}
-        <div className="flex-1 overflow-auto">
-          {filtered.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => setSelected(m)}
-              className={cn(
-                'w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/50 border-b',
-                selected?.id === m.id && 'bg-accent'
-              )}
-            >
-              <BarChart3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium truncate">{m.metric_name}</div>
-                <div className="flex items-center gap-1 mt-0.5">
-                  {m.aggregation && (
-                    <span className={cn('px-1 rounded text-[10px] font-medium', aggBadgeClass(m.aggregation))}>
-                      {m.aggregation}
-                    </span>
-                  )}
-                  {m.business_filter && (
-                    <span className="text-[10px] text-amber-600 dark:text-amber-400 truncate">⚡ {m.business_filter.split(';')[0].trim()}</span>
-                  )}
-                </div>
-              </div>
-              {m.layer && m.layer !== 'unknown' && (
-                <span className="px-1 rounded text-[10px] bg-muted shrink-0">{m.layer}</span>
-              )}
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <div className="text-center py-8 text-sm text-muted-foreground">
-              {metrics.length === 0
-                ? t('governance.noMetrics', '暂无指标，点击上方按钮提取')
-                : t('governance.noMatch', '无匹配指标')}
+          {/* --- Left: table list --- */}
+          <div className="w-72 border-r flex flex-col shrink-0">
+            {/* Search */}
+            <div className="relative px-2 py-1.5 border-b">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder={t('governance.searchTables', '搜索表名...')}
+                value={tableSearch}
+                onChange={(e) => setTableSearch(e.target.value)}
+                className="w-full pl-6 pr-2 py-1 text-xs rounded border bg-transparent focus:outline-none focus:ring-1 focus:ring-ring"
+              />
             </div>
-          )}
-        </div>
-      </div>
 
-      {/* Right: detail */}
-      <div className="flex-1 overflow-auto p-4 space-y-4">
-        {/* Conflicts */}
-        {conflicts.length > 0 && (
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1">
-              <AlertTriangle className="h-4 w-4 text-yellow-500" />
-              {t('governance.metricConflicts', '口径冲突')} ({conflicts.length})
-            </h3>
-            {conflicts.map((c, i) => (
-              <div key={i} className="p-3 bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="px-1.5 py-0.5 bg-yellow-200 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-200 rounded text-xs font-medium">
-                    {c.conflict_type}
-                  </span>
-                  <span>{c.metric_names.join(' ≈ ')}</span>
-                </div>
-                {c.detail.expression ? (
-                  <div className="text-xs text-muted-foreground mt-1 font-mono">
-                    {typeof c.detail.expression === 'string' ? c.detail.expression : JSON.stringify(c.detail.expression)}
+            {/* Stats */}
+            {stats && (
+              <div className="px-3 py-1 border-b bg-muted/20 text-[10px] text-muted-foreground">
+                {tableGroups.length} {t('governance.tables', '张表')} · {stats.total} {t('governance.metrics', '个指标')}
+                {conflicts.length > 0 && <span className="text-yellow-600 ml-2">⚠ {conflicts.length}</span>}
+              </div>
+            )}
+
+            {/* Table list */}
+            <div className="flex-1 overflow-auto">
+              {filteredTables.map((g) => (
+                <button
+                  key={g.table}
+                  onClick={() => { setSelectedTable(g.table); setExpandedMetric(null); }}
+                  className={cn(
+                    'w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/50 border-b',
+                    selectedTable === g.table && 'bg-accent',
+                  )}
+                >
+                  <Package className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate">{g.table}</div>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      {g.aggs.slice(0, 3).map((a) => (
+                        <span key={a} className={cn('px-1 rounded text-[9px] font-medium', aggBadge(a))}>{a}</span>
+                      ))}
+                      {g.aggs.length > 3 && <span className="text-[9px] text-muted-foreground">+{g.aggs.length - 3}</span>}
+                    </div>
                   </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Detail */}
-        {selected ? (
-          <div className="space-y-4">
-            {/* Header with badges */}
-            <div className="flex items-start gap-3">
-              <h2 className="text-lg font-semibold flex-1 break-all">{selected.metric_name}</h2>
-              <div className="flex flex-wrap gap-1 shrink-0">
-                <span className={cn('px-2 py-0.5 rounded text-xs font-medium',
-                  selected.metric_type === 'atomic' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300')}>
-                  {selected.metric_type || 'atomic'}
-                </span>
-                {selected.aggregation && (
-                  <span className={cn('px-2 py-0.5 rounded text-xs font-medium', aggBadgeClass(selected.aggregation))}>
-                    {selected.aggregation}
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary/10 text-primary shrink-0">
+                    {g.metrics.length}
                   </span>
-                )}
-                {selected.layer && selected.layer !== 'unknown' && (
-                  <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">{selected.layer}</span>
-                )}
-              </div>
-            </div>
-
-            {/* Definition */}
-            {selected.definition && (
-              <div className="p-3 bg-muted/50 rounded-lg">
-                <label className="text-xs text-muted-foreground">{t('governance.definition', '定义')}</label>
-                <p className="text-sm mt-1">{selected.definition}</p>
-              </div>
-            )}
-
-            {/* Business filter highlighted */}
-            {selected.business_filter && (
-              <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
-                <label className="text-xs text-amber-700 dark:text-amber-400 font-medium">⚡ {t('governance.businessFilter', '业务限定')}</label>
-                <p className="text-sm mt-1 font-mono text-amber-900 dark:text-amber-100 whitespace-pre-wrap">{selected.business_filter}</p>
-              </div>
-            )}
-
-            {/* Expression */}
-            <div>
-              <label className="text-xs text-muted-foreground">{t('governance.expression', '表达式')}</label>
-              <pre className="text-xs font-mono mt-1 p-3 bg-muted rounded-lg overflow-auto max-h-48 whitespace-pre-wrap break-all">{selected.expression}</pre>
-            </div>
-
-            {/* Metadata grid */}
-            <div className="grid grid-cols-2 gap-3">
-              <Field label={t('governance.period', '周期')} value={selected.period} />
-              <Field label={t('governance.sourceTables', '来源表')} value={selected.source_tables} />
-              <Field label={t('governance.owner', '负责人/域')} value={selected.owner} />
-              <Field label={t('governance.boundModel', '绑定模型')} value={`${selected.bound_model}.${selected.bound_column}`} />
-              <Field label={t('governance.lifecycle', '生命周期')} value={selected.lifecycle} />
-              {selected.dimensions.length > 0 && (
-                <Field label={t('governance.dimensions', '维度')} value={selected.dimensions.join(', ')} />
+                </button>
+              ))}
+              {filteredTables.length === 0 && (
+                <div className="text-center py-8 text-sm text-muted-foreground">
+                  {metrics.length === 0 ? t('governance.noMetrics', '暂无指标') : t('governance.noMatch', '无匹配')}
+                </div>
               )}
             </div>
+          </div>
 
-            {/* SQL Signature */}
-            <div>
-              <label className="text-xs text-muted-foreground">SQL Signature</label>
-              <div className="text-xs font-mono mt-1 px-2 py-1 bg-muted rounded break-all text-muted-foreground">
-                {selected.sql_signature}
+          {/* --- Right: table metric profile --- */}
+          <div className="flex-1 overflow-auto">
+            {selectedGroup ? (
+              <TableMetricProfile
+                group={selectedGroup}
+                expandedMetric={expandedMetric}
+                onToggleExpand={(id) => setExpandedMetric(expandedMetric === id ? null : id)}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                {t('governance.selectTable', '选择左侧表查看指标')}
               </div>
-            </div>
+            )}
           </div>
-        ) : (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-            {t('governance.selectMetric', '选择左侧指标查看详情')}
-          </div>
-        )}
-      </div>
-    </div>
+        </div>
       )}
     </div>
   );
 }
 
-function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+// ============================================================
+// Table Metric Profile — right panel
+// ============================================================
+
+function TableMetricProfile({
+  group, expandedMetric, onToggleExpand,
+}: {
+  group: TableGroup;
+  expandedMetric: number | null;
+  onToggleExpand: (id: number) => void;
+}) {
+  const { t } = useTranslation();
+  const { table, metrics, aggs, layer, sources, owner } = group;
+
+  const filterCount = metrics.filter((m) => m.business_filter).length;
+  const periodCount = metrics.filter((m) => m.period).length;
+
   return (
-    <div>
-      <label className="text-xs text-muted-foreground">{label}</label>
-      <p className={cn('text-sm mt-1 font-medium', mono && 'font-mono text-xs')}>{value || '-'}</p>
+    <div className="p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <h2 className="text-lg font-semibold break-all">{table}</h2>
+          <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-muted-foreground">
+            <span>{metrics.length} {t('governance.metrics', '个指标')}</span>
+            <span>·</span>
+            <span>{sources.length} {t('governance.sourceTables', '源表')}: {sources.slice(0, 5).join(', ')}{sources.length > 5 ? '...' : ''}</span>
+            {owner && <><span>·</span><span>{owner}</span></>}
+          </div>
+        </div>
+        <div className="flex gap-1 shrink-0">
+          {layer && layer !== 'unknown' && (
+            <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">{layer}</span>
+          )}
+          {aggs.map((a) => (
+            <span key={a} className={cn('px-2 py-0.5 rounded text-xs font-medium', aggBadge(a))}>{a}</span>
+          ))}
+        </div>
+      </div>
+
+      {/* Quick stats */}
+      <div className="flex gap-4 text-xs">
+        <span className="text-muted-foreground">
+          {t('governance.hasFilter', '业务限定')}: <b className="text-foreground">{filterCount}/{metrics.length}</b>
+        </span>
+        <span className="text-muted-foreground">
+          {t('governance.hasPeriod', '周期')}: <b className="text-foreground">{periodCount}/{metrics.length}</b>
+        </span>
+      </div>
+
+      {/* Metric rows */}
+      <div className="border rounded-lg overflow-hidden">
+        {/* Column headers */}
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/50 border-b text-[10px] font-medium text-muted-foreground uppercase">
+          <span className="w-5 shrink-0" />
+          <span className="flex-1">{t('governance.field', '字段')}</span>
+          <span className="w-24 shrink-0">{t('governance.aggregation', '聚合')}</span>
+          <span className="w-40 shrink-0">{t('governance.businessFilter', '业务限定')}</span>
+          <span className="w-32 shrink-0 text-right">{t('governance.period', '周期')}</span>
+        </div>
+
+        {metrics.map((m) => (
+          <MetricRow
+            key={m.id}
+            metric={m}
+            expanded={expandedMetric === m.id}
+            onToggle={() => onToggleExpand(m.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MetricRow({
+  metric, expanded, onToggle,
+}: {
+  metric: MetricEntry;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useTranslation();
+  const filterPreview = metric.business_filter
+    ? metric.business_filter.split(';')[0].trim()
+    : '';
+
+  return (
+    <div className="border-b last:border-b-0">
+      {/* Summary row */}
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/50"
+      >
+        {expanded ? (
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <span className="flex-1 text-sm font-medium truncate">{metric.bound_column || metric.metric_name}</span>
+        <span className="w-24 shrink-0">
+          {metric.aggregation && (
+            <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium', aggBadge(metric.aggregation))}>
+              {metric.aggregation}
+            </span>
+          )}
+        </span>
+        <span className="w-40 shrink-0 text-xs truncate" title={metric.business_filter}>
+          {filterPreview ? (
+            <span className="text-amber-600 dark:text-amber-400">⚡ {filterPreview}</span>
+          ) : (
+            <span className="text-muted-foreground">-</span>
+          )}
+        </span>
+        <span className="w-32 shrink-0 text-right text-xs text-muted-foreground">{metric.period || '-'}</span>
+      </button>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div className="px-3 pb-3 pl-9 space-y-2">
+          {/* Definition */}
+          {metric.definition && (
+            <div>
+              <label className="text-[10px] text-muted-foreground uppercase">{t('governance.definition', '定义')}</label>
+              <p className="text-xs mt-0.5">{metric.definition}</p>
+            </div>
+          )}
+
+          {/* Full business filter */}
+          {metric.business_filter && (
+            <div>
+              <label className="text-[10px] text-amber-600 dark:text-amber-400 uppercase">{t('governance.businessFilter', '业务限定')}</label>
+              <p className="text-xs mt-0.5 font-mono text-amber-900 dark:text-amber-100 whitespace-pre-wrap break-all">
+                {metric.business_filter}
+              </p>
+            </div>
+          )}
+
+          {/* Full expression */}
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase">{t('governance.expression', '表达式')}</label>
+            <pre className="text-xs font-mono mt-0.5 p-2 bg-muted rounded overflow-auto max-h-40 whitespace-pre-wrap break-all">
+              {metric.expression}
+            </pre>
+          </div>
+
+          {/* Metadata */}
+          <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+            {metric.source_tables && (
+              <span>{t('governance.sourceTables', '来源表')}: <b className="text-foreground">{metric.source_tables}</b></span>
+            )}
+            {metric.metric_type && (
+              <span>{t('governance.metricType', '类型')}: <b className="text-foreground">{metric.metric_type}</b></span>
+            )}
+            {metric.sql_signature && (
+              <span className="font-mono text-[10px]">sig: {metric.sql_signature.slice(0, 16)}...</span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
