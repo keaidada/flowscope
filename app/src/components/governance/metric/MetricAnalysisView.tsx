@@ -18,7 +18,6 @@ import { governanceApi, type MetricAnalysis } from '@/lib/governance-api';
 
 const MAX_DUPS = 15;
 const MAX_LOADS = 15;
-const MAX_NAMES_IN_CARD = 20;
 
 export function MetricAnalysisView({ projectId }: { projectId: string | null }) {
   const { t } = useTranslation();
@@ -59,10 +58,10 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
   // Sort duplicates by group size (largest first) for priority display
   const crossModelDups = duplicates
     .filter((d) => d.dup_type === 'cross_model')
-    .sort((a, b) => b.metric_names.length - a.metric_names.length);
+    .sort((a, b) => b.metric_count - a.metric_count);
   const sameModelDups = duplicates
     .filter((d) => d.dup_type === 'same_model')
-    .sort((a, b) => b.metric_names.length - a.metric_names.length);
+    .sort((a, b) => b.metric_count - a.metric_count);
 
   const visibleCross = showAllDups ? crossModelDups : crossModelDups.slice(0, MAX_DUPS);
   const visibleSame = showAllDups ? sameModelDups : sameModelDups.slice(0, MAX_DUPS);
@@ -146,10 +145,11 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
             {visibleCross.map((dup, i) => (
               <ExpandableCard
                 key={i}
-                title={`${dup.aggregation.toUpperCase()} — ${dup.metric_names.length} ${t('governance.metrics', '个指标')}`}
+                title={`${dup.aggregation.toUpperCase()} — ${dup.metric_count} ${t('governance.metrics', '个指标')}`}
                 subtitle={`${t('governance.models', '模型')}: ${dup.bound_models.join(' vs ')}`}
                 suggestion={dup.suggestion}
                 metricNames={dup.metric_names}
+                totalCount={dup.metric_count}
                 normalizedExpr={dup.normalized_expr}
               />
             ))}
@@ -178,6 +178,7 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
                 title={`${fam.bound_model} — ${fam.count} ${t('governance.metrics', '个同模式指标')}`}
                 subtitle={fam.suggestion}
                 columnBadges={fam.columns}
+                totalCount={fam.column_count}
                 normalizedExpr={fam.pattern}
               />
             ))}
@@ -230,9 +231,10 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
             {visibleSame.map((dup, i) => (
               <ExpandableCard
                 key={i}
-                title={`${dup.aggregation.toUpperCase()} — ${dup.metric_names.length} ${t('governance.metrics', '个指标')}`}
+                title={`${dup.aggregation.toUpperCase()} — ${dup.metric_count} ${t('governance.metrics', '个指标')}`}
                 subtitle={dup.bound_models.join(', ')}
                 metricNames={dup.metric_names}
+                totalCount={dup.metric_count}
                 normalizedExpr={dup.normalized_expr}
               />
             ))}
@@ -296,26 +298,22 @@ function ShowMoreButton({ showAll, count, onClick }: { showAll: boolean; count: 
 }
 
 function ExpandableCard({
-  title, subtitle, suggestion, metricNames, columnBadges, normalizedExpr,
+  title, subtitle, suggestion, metricNames, columnBadges, totalCount, normalizedExpr,
 }: {
   title: string;
   subtitle?: string;
   suggestion?: string;
   metricNames?: string[];
   columnBadges?: string[];
+  totalCount?: number;
   normalizedExpr?: string;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
-  // Limit names shown inside the card
   const names = metricNames ?? [];
-  const visibleNames = names.slice(0, MAX_NAMES_IN_CARD);
-  const hiddenCount = names.length - visibleNames.length;
-
-  const badges = columnBadges ?? [];
-  const visibleBadges = badges.slice(0, MAX_NAMES_IN_CARD);
-  const hiddenBadgeCount = badges.length - visibleBadges.length;
+  const realTotal = totalCount ?? names.length;
+  const hiddenCount = realTotal - names.length;
 
   return (
     <div className="border rounded-lg overflow-hidden">
@@ -336,19 +334,18 @@ function ExpandableCard({
               {suggestion}
             </div>
           )}
-          {visibleBadges.length > 0 && (
+          {columnBadges && columnBadges.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {visibleBadges.map((col) => (
+              {columnBadges.map((col) => (
                 <span key={col} className="px-1.5 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300">
                   {col}
                 </span>
               ))}
-              {hiddenBadgeCount > 0 && <span className="text-[10px] text-muted-foreground">+{hiddenBadgeCount}</span>}
             </div>
           )}
-          {visibleNames.length > 0 && (
+          {names.length > 0 && (
             <div className="space-y-0.5">
-              {visibleNames.map((name) => (
+              {names.map((name) => (
                 <div key={name} className="text-xs font-mono flex items-center gap-1">
                   <ChevronRight className="h-3 w-3 text-muted-foreground" /> {name}
                 </div>

@@ -835,6 +835,7 @@ pub struct DuplicateGroup {
     pub aggregation: String,
     pub normalized_expr: String,
     pub metric_names: Vec<String>,
+    pub metric_count: usize,
     pub bound_models: Vec<String>,
     pub suggestion: String,
 }
@@ -845,6 +846,7 @@ pub struct MetricFamily {
     pub pattern: String,
     pub count: usize,
     pub columns: Vec<String>,
+    pub column_count: usize,
     pub suggestion: String,
 }
 
@@ -989,7 +991,8 @@ pub fn analyze_metrics(
             .collect();
 
         let metric_names: Vec<String> = group.iter().map(|m| m.metric_name.clone()).collect();
-        dup_metric_count += group.len();
+        let metric_total = metric_names.len();
+        dup_metric_count += metric_total;
 
         if models.len() > 1 {
             // Cross-model duplicate: same logic in different models
@@ -998,6 +1001,7 @@ pub fn analyze_metrics(
                 aggregation: agg.clone(),
                 normalized_expr: norm.clone(),
                 metric_names: metric_names.clone(),
+                metric_count: metric_total,
                 bound_models: models.clone(),
                 suggestion: format!(
                     "相同逻辑在 {} 个模型中重复计算，建议统一为单一指标",
@@ -1008,11 +1012,13 @@ pub fn analyze_metrics(
             // Metric family: ≥3 metrics with same pattern on same model
             let model = &models[0];
             let columns: Vec<String> = group.iter().map(|m| m.bound_column.clone()).collect();
+            let col_total = columns.len();
             families.push(MetricFamily {
                 bound_model: model.clone(),
                 pattern: norm.clone(),
                 count: group.len(),
                 columns: columns.clone(),
+                column_count: col_total,
                 suggestion: format!(
                     "{} 个指标使用相同模式，建议参数化为单一指标+维度",
                     group.len()
@@ -1025,6 +1031,7 @@ pub fn analyze_metrics(
                 aggregation: agg.clone(),
                 normalized_expr: norm.clone(),
                 metric_names,
+                metric_count: metric_total,
                 bound_models: models,
                 suggestion: "相同模型内有重复指标逻辑".into(),
             });
@@ -1139,6 +1146,30 @@ pub fn analyze_metrics(
             affected_metrics: vec![],
         });
     }
+
+    // Limit payload: sort by size, truncate arrays and names
+    duplicates.sort_by(|a, b| b.metric_count.cmp(&a.metric_count));
+    for d in &mut duplicates {
+        d.metric_names.truncate(10);
+        if d.normalized_expr.len() > 200 {
+            d.normalized_expr.truncate(200);
+            d.normalized_expr.push_str("...");
+        }
+    }
+    duplicates.truncate(30);
+
+    families.sort_by(|a, b| b.count.cmp(&a.count));
+    for f in &mut families {
+        f.columns.truncate(15);
+        if f.pattern.len() > 200 {
+            f.pattern.truncate(200);
+            f.pattern.push_str("...");
+        }
+    }
+    families.truncate(15);
+
+    model_loads.truncate(30);
+    tips.truncate(15);
 
     Ok(MetricAnalysis {
         quality: MetricQuality {

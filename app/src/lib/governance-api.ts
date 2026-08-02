@@ -135,6 +135,7 @@ export interface DuplicateGroup {
   aggregation: string;
   normalized_expr: string;
   metric_names: string[];
+  metric_count: number;
   bound_models: string[];
   suggestion: string;
 }
@@ -144,6 +145,7 @@ export interface MetricFamily {
   pattern: string;
   count: number;
   columns: string[];
+  column_count: number;
   suggestion: string;
 }
 
