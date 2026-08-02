@@ -374,8 +374,41 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
 }
 
 // ============================================================
-// Metric Row — inline expandable
+// Metric Row — inline expandable with rich detail
 // ============================================================
+
+/// Extract column references from a SQL expression.
+function extractSourceColumns(expr: string): string[] {
+  const keywords = new Set([
+    'case', 'when', 'then', 'else', 'end', 'and', 'or', 'not', 'null', 'is',
+    'in', 'like', 'between', 'distinct', 'all', 'as', 'cast', 'true', 'false',
+    'sum', 'count', 'avg', 'average', 'max', 'min', 'median', 'round', 'coalesce',
+    'nvl', 'if', 'iff', 'concat', 'substring', 'length', 'trim', 'lower', 'upper',
+    'replace', 'cast', 'convert', 'parse', 'extract', 'date', 'timestamp', 'string',
+    'integer', 'int', 'float', 'double', 'decimal', 'boolean', 'partition', 'over',
+    'row_number', 'rank', 'dense_rank', 'lag', 'lead', 'first_value', 'last_value',
+    'interval', 'day', 'month', 'year', 'week', 'hour', 'minute', 'second',
+    'current_date', 'now', 'today', 'format', 'from_unixtime', 'to_unixtime',
+  ]);
+  const tokens = expr.match(/[`a-zA-Z_][`a-zA-Z0-9_.]*/g) ?? [];
+  const cols = new Set<string>();
+  for (const raw of tokens) {
+    const token = raw.replace(/`/g, '');
+    // Strip table prefix: tab.col → col
+    const col = token.includes('.') ? token.split('.').pop() ?? token : token;
+    const lower = col.toLowerCase();
+    if (!keywords.has(lower) && col.length > 1 && !/^\d+$/.test(col)) {
+      cols.add(col);
+    }
+  }
+  return Array.from(cols);
+}
+
+/// Deduplicate dimension names.
+function dedupDimensions(dims: string[] | undefined): string[] {
+  if (!dims || dims.length === 0) return [];
+  return Array.from(new Set(dims.map(d => d.replace(/`/g, '').trim()).filter(Boolean)));
+}
 
 function MetricRow({
   metric, expanded, onToggle,
@@ -389,11 +422,17 @@ function MetricRow({
     ? metric.business_filter.split(';')[0].trim()
     : '';
 
+  // Derived detail data
+  const sourceCols = expanded ? extractSourceColumns(metric.expression) : [];
+  const dims = expanded ? dedupDimensions(metric.dimensions) : [];
+  const sourceTables = metric.source_tables ? metric.source_tables.split(',').map(s => s.trim()).filter(Boolean) : [];
+
   return (
     <div className="border-b last:border-b-0">
+      {/* Summary row */}
       <button onClick={onToggle} className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-accent/40">
         {expanded ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />}
-        <span className="flex-1 text-sm truncate">{metric.bound_column || metric.metric_name}</span>
+        <span className="flex-1 text-sm truncate font-medium">{metric.bound_column || metric.metric_name}</span>
         <span className="w-20 shrink-0">
           {metric.aggregation && (
             <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium', aggBadge(metric.aggregation))}>
@@ -411,30 +450,127 @@ function MetricRow({
         <span className="w-20 shrink-0 text-right text-xs text-muted-foreground">{metric.period || '-'}</span>
       </button>
 
+      {/* Expanded detail — structured sections */}
       {expanded && (
-        <div className="px-3 pb-3 pl-9 space-y-2">
-          {metric.definition && (
-            <div>
-              <label className="text-[10px] text-muted-foreground uppercase">{t('governance.definition', '定义')}</label>
-              <p className="text-xs mt-0.5">{metric.definition}</p>
+        <div className="px-3 pb-3 pl-9 space-y-2.5">
+
+          {/* Section 1: 计算逻辑 */}
+          <DetailSection label={t('governance.computation', '计算逻辑')} icon="🔧">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              {metric.aggregation && (
+                <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium', aggBadge(metric.aggregation))}>
+                  {metric.aggregation}
+                </span>
+              )}
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                {metric.metric_type || 'atomic'}
+              </span>
             </div>
-          )}
+            <pre className="text-xs font-mono p-2 bg-muted rounded overflow-auto max-h-32 whitespace-pre-wrap break-all">{metric.expression}</pre>
+          </DetailSection>
+
+          {/* Section 2: 业务限定 */}
           {metric.business_filter && (
-            <div>
-              <label className="text-[10px] text-amber-600 dark:text-amber-400 uppercase">{t('governance.businessFilter', '业务限定')}</label>
-              <p className="text-xs mt-0.5 font-mono text-amber-900 dark:text-amber-100 whitespace-pre-wrap break-all">{metric.business_filter}</p>
-            </div>
+            <DetailSection label={t('governance.businessFilter', '业务限定')} icon="⚡">
+              <div className="space-y-1">
+                {metric.business_filter.split(';').map((cond, i) => {
+                  const c = cond.trim();
+                  if (!c) return null;
+                  return (
+                    <div key={i} className="flex items-start gap-1.5 text-xs">
+                      <span className="text-amber-500 shrink-0">▸</span>
+                      <code className="text-amber-900 dark:text-amber-100 break-all">{c}</code>
+                    </div>
+                  );
+                })}
+              </div>
+            </DetailSection>
           )}
-          <div>
-            <label className="text-[10px] text-muted-foreground uppercase">{t('governance.expression', '表达式')}</label>
-            <pre className="text-xs font-mono mt-0.5 p-2 bg-muted rounded overflow-auto max-h-40 whitespace-pre-wrap break-all">{metric.expression}</pre>
-          </div>
-          <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-            {metric.source_tables && <span>{t('governance.sourceTables', '来源表')}: <b className="text-foreground">{metric.source_tables}</b></span>}
-            {metric.metric_type && <span>{t('governance.metricType', '类型')}: <b className="text-foreground">{metric.metric_type}</b></span>}
-          </div>
+
+          {/* Section 3: 数据来源 */}
+          <DetailSection label={t('governance.dataLineage', '数据来源')} icon="🔗">
+            <div className="space-y-1 text-xs">
+              {sourceCols.length > 0 && (
+                <div className="flex items-start gap-2">
+                  <span className="text-muted-foreground shrink-0 w-14">{t('governance.sourceFields', '源字段')}:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {sourceCols.map(col => (
+                      <span key={col} className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 text-[10px] font-mono">
+                        {col}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {sourceTables.length > 0 && (
+                <div className="flex items-start gap-2">
+                  <span className="text-muted-foreground shrink-0 w-14">{t('governance.sourceTables', '源表')}:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {sourceTables.slice(0, 8).map(tbl => (
+                      <span key={tbl} className="px-1.5 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300 text-[10px] font-mono">
+                        {tbl}
+                      </span>
+                    ))}
+                    {sourceTables.length > 8 && <span className="text-[10px] text-muted-foreground">+{sourceTables.length - 8}</span>}
+                  </div>
+                </div>
+              )}
+              <div className="flex items-start gap-2">
+                <span className="text-muted-foreground shrink-0 w-14">{t('governance.output', '产出')}:</span>
+                <code className="text-[10px] font-mono">{metric.bound_model}.{metric.bound_column}</code>
+              </div>
+            </div>
+          </DetailSection>
+
+          {/* Section 4: 统计维度 */}
+          {dims.length > 0 && (
+            <DetailSection label={t('governance.dimensions', '统计维度')} icon="📊">
+              <div className="flex flex-wrap gap-1">
+                {dims.map(dim => (
+                  <span key={dim} className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300 text-[10px] font-mono">
+                    {dim}
+                  </span>
+                ))}
+              </div>
+            </DetailSection>
+          )}
+
+          {/* Section 5: 元数据 */}
+          <DetailSection label={t('governance.metadata', '元数据')} icon="ℹ️">
+            <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-xs">
+              <MetaItem label={t('governance.layer', '层级')} value={metric.layer} />
+              <MetaItem label={t('governance.period', '周期')} value={metric.period} />
+              <MetaItem label={t('governance.owner', '负责人')} value={metric.owner} />
+              <MetaItem label={t('governance.lifecycle', '生命周期')} value={metric.lifecycle} />
+              <MetaItem label={t('governance.definition', '定义')} value={metric.definition} span={3} />
+              <div className="col-span-3">
+                <span className="text-muted-foreground">{t('governance.signature', '签名')}: </span>
+                <code className="text-[10px] font-mono text-muted-foreground break-all">{metric.sql_signature.slice(0, 32)}...</code>
+              </div>
+            </div>
+          </DetailSection>
+
         </div>
       )}
+    </div>
+  );
+}
+
+function DetailSection({ label, icon, children }: { label: string; icon: string; children: React.ReactNode }) {
+  return (
+    <div className="border-l-2 border-muted pl-3">
+      <div className="text-[10px] font-medium text-muted-foreground uppercase mb-1">{icon} {label}</div>
+      {children}
+    </div>
+  );
+}
+
+function MetaItem({ label, value, span }: { label: string; value: string; span?: number }) {
+  if (!value) return null;
+  return (
+    <div className={span === 3 ? 'col-span-3' : ''}>
+      <span className="text-muted-foreground">{label}: </span>
+      <span className="font-medium">{value}</span>
     </div>
   );
 }
