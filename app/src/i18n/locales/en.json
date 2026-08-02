@@ -882,6 +882,7 @@
     "showMore": "Show more",
     "showLess": "Show less",
     "more": "more",
+    "affects": "affects",
     "selectMetric": "Select a metric to view details",
     "metricConflicts": "Metric Conflicts",
     "definition": "Definition",

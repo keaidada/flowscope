@@ -162,7 +162,7 @@ export interface OptimizationTip {
   severity: string;
   title: string;
   description: string;
-  affected_metrics: string[];
+  affected_count: number;
 }
 
 export interface MetricAnalysis {

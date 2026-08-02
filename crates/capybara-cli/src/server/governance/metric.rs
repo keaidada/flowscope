@@ -865,7 +865,7 @@ pub struct OptimizationTip {
     pub severity: String,
     pub title: String,
     pub description: String,
-    pub affected_metrics: Vec<String>,
+    pub affected_count: usize,
 }
 
 /// Normalize an SQL expression for duplicate comparison.
@@ -1083,71 +1083,7 @@ pub fn analyze_metrics(
 
     model_loads.sort_by(|a, b| b.metric_count.cmp(&a.metric_count));
 
-    // --- Optimization tips ---
-    let mut tips = Vec::new();
-
-    // Cross-model dedup tips
-    let cross_count = duplicates.iter().filter(|d| d.dup_type == "cross_model").count();
-    if cross_count > 0 {
-        let affected: Vec<String> = duplicates
-            .iter()
-            .filter(|d| d.dup_type == "cross_model")
-            .flat_map(|d| d.metric_names.iter().cloned())
-            .collect();
-        tips.push(OptimizationTip {
-            tip_type: "dedup".into(),
-            severity: "high".into(),
-            title: "跨模型重复计算".into(),
-            description: format!(
-                "发现 {} 组跨模型重复指标，相同逻辑在多个模型中重复计算，浪费计算资源",
-                cross_count
-            ),
-            affected_metrics: affected,
-        });
-    }
-
-    // Metric family merge tips
-    for f in &families {
-        if f.count >= 5 {
-            tips.push(OptimizationTip {
-                tip_type: "merge".into(),
-                severity: "medium".into(),
-                title: format!("指标族可参数化: {}", f.bound_model),
-                description: f.suggestion.clone(),
-                affected_metrics: f.columns.iter().map(|c| format!("{}.{}", f.bound_model, c)).collect(),
-            });
-        }
-    }
-
-    // Model split tips
-    for ml in &model_loads {
-        if ml.load_level == "heavy" && ml.source_count > 15 {
-            tips.push(OptimizationTip {
-                tip_type: "split".into(),
-                severity: if ml.source_count > 20 { "high" } else { "medium" }.into(),
-                title: format!("模型过载: {} ({} 张源表)", ml.table_name, ml.source_count),
-                description: format!(
-                    "该模型依赖 {} 张源表，产出 {} 个指标，建议拆分为多个子模型",
-                    ml.source_count, ml.metric_count
-                ),
-                affected_metrics: vec![],
-            });
-        }
-    }
-
-    // Owner assignment tip
-    if quality.owner_pct < 100.0 {
-        let missing = total - has_owner;
-        tips.push(OptimizationTip {
-            tip_type: "assign_owner".into(),
-            severity: "low".into(),
-            title: "缺少负责人".into(),
-            description: format!("{} 个指标未分配负责人/域", missing),
-            affected_metrics: vec![],
-        });
-    }
-
-    // Limit payload: sort by size, truncate arrays and names
+    // --- Truncate BEFORE generating tips (so tips reference limited data) ---
     duplicates.sort_by(|a, b| b.metric_count.cmp(&a.metric_count));
     for d in &mut duplicates {
         d.metric_names.truncate(10);
@@ -1169,6 +1105,67 @@ pub fn analyze_metrics(
     families.truncate(15);
 
     model_loads.truncate(30);
+
+    // --- Optimization tips (built from already-truncated data) ---
+    let mut tips = Vec::new();
+
+    // Cross-model dedup tips
+    let cross_dups: Vec<&DuplicateGroup> = duplicates.iter().filter(|d| d.dup_type == "cross_model").collect();
+    if !cross_dups.is_empty() {
+        let affected_count: usize = cross_dups.iter().map(|d| d.metric_count).sum();
+        tips.push(OptimizationTip {
+            tip_type: "dedup".into(),
+            severity: "high".into(),
+            title: "跨模型重复计算".into(),
+            description: format!(
+                "发现 {} 组跨模型重复指标，相同逻辑在多个模型中重复计算，浪费计算资源",
+                cross_dups.len()
+            ),
+            affected_count,
+        });
+    }
+
+    // Metric family merge tips
+    for f in &families {
+        if f.count >= 5 {
+            tips.push(OptimizationTip {
+                tip_type: "merge".into(),
+                severity: "medium".into(),
+                title: format!("指标族可参数化: {}", f.bound_model),
+                description: f.suggestion.clone(),
+                affected_count: f.column_count,
+            });
+        }
+    }
+
+    // Model split tips
+    for ml in &model_loads {
+        if ml.load_level == "heavy" && ml.source_count > 15 {
+            tips.push(OptimizationTip {
+                tip_type: "split".into(),
+                severity: if ml.source_count > 20 { "high" } else { "medium" }.into(),
+                title: format!("模型过载: {} ({} 张源表)", ml.table_name, ml.source_count),
+                description: format!(
+                    "该模型依赖 {} 张源表，产出 {} 个指标，建议拆分为多个子模型",
+                    ml.source_count, ml.metric_count
+                ),
+                affected_count: ml.metric_count,
+            });
+        }
+    }
+
+    // Owner assignment tip
+    if quality.owner_pct < 100.0 {
+        let missing = total - has_owner;
+        tips.push(OptimizationTip {
+            tip_type: "assign_owner".into(),
+            severity: "low".into(),
+            title: "缺少负责人".into(),
+            description: format!("{} 个指标未分配负责人/域", missing),
+            affected_count: missing,
+        });
+    }
+
     tips.truncate(15);
 
     Ok(MetricAnalysis {

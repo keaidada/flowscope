@@ -126,6 +126,11 @@ export function MetricAnalysisView({ projectId }: { projectId: string | null }) 
                     {tip.tip_type}
                   </span>
                   <span className="font-medium">{tip.title}</span>
+                  {tip.affected_count > 0 && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground shrink-0">
+                      {t('governance.affects', '影响')} {tip.affected_count}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">{tip.description}</p>
               </div>
