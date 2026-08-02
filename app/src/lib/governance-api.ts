@@ -121,6 +121,56 @@ export interface MetricStats {
   conflict_count: number;
 }
 
+export interface MetricQuality {
+  total: number;
+  filter_pct: number;
+  owner_pct: number;
+  period_pct: number;
+  duplicate_metric_count: number;
+  conflict_count: number;
+}
+
+export interface DuplicateGroup {
+  dup_type: string;
+  aggregation: string;
+  normalized_expr: string;
+  metric_names: string[];
+  bound_models: string[];
+  suggestion: string;
+}
+
+export interface MetricFamily {
+  bound_model: string;
+  pattern: string;
+  count: number;
+  columns: string[];
+  suggestion: string;
+}
+
+export interface ModelLoad {
+  table_name: string;
+  metric_count: number;
+  source_count: number;
+  agg_types: string[];
+  load_level: string;
+}
+
+export interface OptimizationTip {
+  tip_type: string;
+  severity: string;
+  title: string;
+  description: string;
+  affected_metrics: string[];
+}
+
+export interface MetricAnalysis {
+  quality: MetricQuality;
+  duplicates: DuplicateGroup[];
+  families: MetricFamily[];
+  model_loads: ModelLoad[];
+  tips: OptimizationTip[];
+}
+
 export type GovernanceTab = 'dashboard' | 'models' | 'metrics' | 'contracts' | 'designer' | 'settings';
 
 function apiBase(): string {
@@ -261,6 +311,10 @@ export const governanceApi = {
       method: 'POST',
       body: JSON.stringify({ project_id: projectId }),
     });
+  },
+
+  async metricAnalysis(projectId: string): Promise<MetricAnalysis> {
+    return govFetch(`/metrics/analysis?project_id=${encodeURIComponent(projectId)}`);
   },
 
   // === Designer ===

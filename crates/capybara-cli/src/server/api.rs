@@ -98,6 +98,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/governance/metrics/auto", post(gov_auto_detect_metrics))
         .route("/governance/metrics/import-dbt", post(gov_import_dbt_metrics))
         .route("/governance/metrics/extract-lineage", post(gov_extract_lineage_metrics))
+        .route("/governance/metrics/analysis", get(gov_metric_analysis))
         // Designer
         .route("/governance/gen-ddl", post(gov_gen_ddl))
         .route("/governance/reverse-engineer", post(gov_reverse_engineer))
@@ -3458,6 +3459,21 @@ async fn gov_extract_lineage_metrics(
     match super::governance::metric::extract_metrics_from_lineage(&main_conn, &gov_conn, &req.project_id) {
         Ok(count) => Json(serde_json::json!({"extracted": count})).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Lineage extraction failed: {e}")).into_response(),
+    }
+}
+
+/// GET /api/governance/metrics/analysis — metric intelligence analysis
+async fn gov_metric_analysis(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::analyze_metrics(&conn, &q.project_id) {
+        Ok(analysis) => Json(analysis).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Analysis failed: {e}")).into_response(),
     }
 }
 

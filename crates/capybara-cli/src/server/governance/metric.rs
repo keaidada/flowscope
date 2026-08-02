@@ -806,6 +806,360 @@ pub fn extract_metrics_from_lineage(
     }
 }
 
+// ============================================================
+// Metric Intelligence: global analysis + problem discovery
+// ============================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MetricAnalysis {
+    pub quality: MetricQuality,
+    pub duplicates: Vec<DuplicateGroup>,
+    pub families: Vec<MetricFamily>,
+    pub model_loads: Vec<ModelLoad>,
+    pub tips: Vec<OptimizationTip>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MetricQuality {
+    pub total: usize,
+    pub filter_pct: f64,
+    pub owner_pct: f64,
+    pub period_pct: f64,
+    pub duplicate_metric_count: usize,
+    pub conflict_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DuplicateGroup {
+    pub dup_type: String,
+    pub aggregation: String,
+    pub normalized_expr: String,
+    pub metric_names: Vec<String>,
+    pub bound_models: Vec<String>,
+    pub suggestion: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MetricFamily {
+    pub bound_model: String,
+    pub pattern: String,
+    pub count: usize,
+    pub columns: Vec<String>,
+    pub suggestion: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelLoad {
+    pub table_name: String,
+    pub metric_count: usize,
+    pub source_count: usize,
+    pub agg_types: Vec<String>,
+    pub load_level: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct OptimizationTip {
+    pub tip_type: String,
+    pub severity: String,
+    pub title: String,
+    pub description: String,
+    pub affected_metrics: Vec<String>,
+}
+
+/// Normalize an SQL expression for duplicate comparison.
+///
+/// Strips string/number literals (→ `?`), table aliases (`a.col` → `col`),
+/// backticks/quotes, and collapses whitespace. This makes expressions that
+/// differ only in literal values or table aliases compare as equal.
+///
+/// `max(CASE WHEN fee_code = 'F0001' THEN price ELSE 0 END)`
+///   → `max(case when fee_code = ? then price else ? end)`
+fn normalize_expression(expr: &str) -> String {
+    let lower = expr.to_lowercase();
+
+    // Phase 1: Replace string literals with ?
+    let mut phase1 = String::with_capacity(lower.len());
+    let mut in_str = false;
+    for c in lower.chars() {
+        if c == '\'' {
+            if in_str {
+                phase1.push('?');
+                in_str = false;
+            } else {
+                in_str = true;
+            }
+        } else if !in_str {
+            phase1.push(c);
+        }
+    }
+
+    // Phase 2: strip backticks/quotes, collapse table aliases, replace numbers
+    let mut phase2 = String::with_capacity(phase1.len());
+    let mut token = String::new();
+    for c in phase1.chars() {
+        if c.is_alphanumeric() || c == '_' || c == '.' {
+            token.push(c);
+        } else {
+            flush_token(&mut phase2, &mut token);
+            if c != '`' && c != '"' {
+                phase2.push(c);
+            }
+        }
+    }
+    flush_token(&mut phase2, &mut token);
+
+    // Phase 3: collapse whitespace + remove spaces around punctuation
+    let collapsed = phase2.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed
+        .replace("( ", "(")
+        .replace(" )", ")")
+        .replace(" ,", ",")
+        .replace(" ;", ";")
+}
+
+/// Write a token to the output buffer, applying alias-stripping and
+/// numeric-literal replacement.
+fn flush_token(out: &mut String, token: &mut String) {
+    if token.is_empty() {
+        return;
+    }
+    // Strip table alias: keep only the part after the last dot.
+    let cleaned = match token.rfind('.') {
+        Some(pos) => &token[pos + 1..],
+        None => token.as_str(),
+    };
+    // Replace pure-numeric tokens with ?
+    if !cleaned.is_empty() && cleaned.chars().all(|c| c.is_ascii_digit()) {
+        out.push('?');
+    } else {
+        out.push_str(cleaned);
+    }
+    token.clear();
+}
+
+/// Run full metric intelligence analysis for a project.
+pub fn analyze_metrics(
+    gov_conn: &Connection,
+    project_id: &str,
+) -> Result<MetricAnalysis, rusqlite::Error> {
+    let metrics = list_metrics(gov_conn, project_id, None, None, None)?;
+    let conflicts = detect_conflicts(gov_conn, project_id)?;
+
+    // --- Quality scorecard ---
+    let total = metrics.len();
+    let has_filter = metrics.iter().filter(|m| !m.business_filter.is_empty()).count();
+    let has_owner = metrics.iter().filter(|m| !m.owner.is_empty()).count();
+    let has_period = metrics.iter().filter(|m| !m.period.is_empty()).count();
+
+    let quality = MetricQuality {
+        total,
+        filter_pct: pct(has_filter, total),
+        owner_pct: pct(has_owner, total),
+        period_pct: pct(has_period, total),
+        duplicate_metric_count: 0, // filled below
+        conflict_count: conflicts.len(),
+    };
+
+    // --- Duplicate detection ---
+    // Group by (aggregation, normalized_expression)
+    let mut groups: HashMap<(String, String), Vec<&MetricEntry>> = HashMap::new();
+    for m in &metrics {
+        if m.expression.is_empty() {
+            continue;
+        }
+        let norm = normalize_expression(&m.expression);
+        let agg = m.aggregation.to_lowercase();
+        groups.entry((agg, norm)).or_default().push(m);
+    }
+
+    let mut duplicates = Vec::new();
+    let mut families = Vec::new();
+    let mut dup_metric_count = 0usize;
+
+    for ((agg, norm), group) in &groups {
+        if group.len() < 2 {
+            continue;
+        }
+
+        let models: Vec<String> = group
+            .iter()
+            .map(|m| m.bound_model.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        let metric_names: Vec<String> = group.iter().map(|m| m.metric_name.clone()).collect();
+        dup_metric_count += group.len();
+
+        if models.len() > 1 {
+            // Cross-model duplicate: same logic in different models
+            duplicates.push(DuplicateGroup {
+                dup_type: "cross_model".into(),
+                aggregation: agg.clone(),
+                normalized_expr: norm.clone(),
+                metric_names: metric_names.clone(),
+                bound_models: models.clone(),
+                suggestion: format!(
+                    "相同逻辑在 {} 个模型中重复计算，建议统一为单一指标",
+                    models.len()
+                ),
+            });
+        } else if group.len() >= 3 {
+            // Metric family: ≥3 metrics with same pattern on same model
+            let model = &models[0];
+            let columns: Vec<String> = group.iter().map(|m| m.bound_column.clone()).collect();
+            families.push(MetricFamily {
+                bound_model: model.clone(),
+                pattern: norm.clone(),
+                count: group.len(),
+                columns: columns.clone(),
+                suggestion: format!(
+                    "{} 个指标使用相同模式，建议参数化为单一指标+维度",
+                    group.len()
+                ),
+            });
+        } else {
+            // Same-model duplicate (2 metrics)
+            duplicates.push(DuplicateGroup {
+                dup_type: "same_model".into(),
+                aggregation: agg.clone(),
+                normalized_expr: norm.clone(),
+                metric_names,
+                bound_models: models,
+                suggestion: "相同模型内有重复指标逻辑".into(),
+            });
+        }
+    }
+
+    // --- Model load analysis ---
+    let mut model_map: HashMap<&str, Vec<&MetricEntry>> = HashMap::new();
+    for m in &metrics {
+        if !m.bound_model.is_empty() {
+            model_map.entry(m.bound_model.as_str()).or_default().push(m);
+        }
+    }
+
+    let mut model_loads: Vec<ModelLoad> = model_map
+        .iter()
+        .map(|(table, ms)| {
+            let source_count = ms
+                .iter()
+                .flat_map(|m| m.source_tables.split(','))
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect::<HashSet<_>>()
+                .len();
+            let agg_types: Vec<String> = ms
+                .iter()
+                .map(|m| m.aggregation.clone())
+                .filter(|a| !a.is_empty())
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect();
+            let load_level = if ms.len() > 10 || source_count > 10 {
+                "heavy"
+            } else if ms.len() > 5 || source_count > 5 {
+                "moderate"
+            } else {
+                "light"
+            };
+            ModelLoad {
+                table_name: table.to_string(),
+                metric_count: ms.len(),
+                source_count,
+                agg_types,
+                load_level: load_level.into(),
+            }
+        })
+        .filter(|ml| ml.load_level != "light")
+        .collect();
+
+    model_loads.sort_by(|a, b| b.metric_count.cmp(&a.metric_count));
+
+    // --- Optimization tips ---
+    let mut tips = Vec::new();
+
+    // Cross-model dedup tips
+    let cross_count = duplicates.iter().filter(|d| d.dup_type == "cross_model").count();
+    if cross_count > 0 {
+        let affected: Vec<String> = duplicates
+            .iter()
+            .filter(|d| d.dup_type == "cross_model")
+            .flat_map(|d| d.metric_names.iter().cloned())
+            .collect();
+        tips.push(OptimizationTip {
+            tip_type: "dedup".into(),
+            severity: "high".into(),
+            title: "跨模型重复计算".into(),
+            description: format!(
+                "发现 {} 组跨模型重复指标，相同逻辑在多个模型中重复计算，浪费计算资源",
+                cross_count
+            ),
+            affected_metrics: affected,
+        });
+    }
+
+    // Metric family merge tips
+    for f in &families {
+        if f.count >= 5 {
+            tips.push(OptimizationTip {
+                tip_type: "merge".into(),
+                severity: "medium".into(),
+                title: format!("指标族可参数化: {}", f.bound_model),
+                description: f.suggestion.clone(),
+                affected_metrics: f.columns.iter().map(|c| format!("{}.{}", f.bound_model, c)).collect(),
+            });
+        }
+    }
+
+    // Model split tips
+    for ml in &model_loads {
+        if ml.load_level == "heavy" && ml.source_count > 15 {
+            tips.push(OptimizationTip {
+                tip_type: "split".into(),
+                severity: if ml.source_count > 20 { "high" } else { "medium" }.into(),
+                title: format!("模型过载: {} ({} 张源表)", ml.table_name, ml.source_count),
+                description: format!(
+                    "该模型依赖 {} 张源表，产出 {} 个指标，建议拆分为多个子模型",
+                    ml.source_count, ml.metric_count
+                ),
+                affected_metrics: vec![],
+            });
+        }
+    }
+
+    // Owner assignment tip
+    if quality.owner_pct < 100.0 {
+        let missing = total - has_owner;
+        tips.push(OptimizationTip {
+            tip_type: "assign_owner".into(),
+            severity: "low".into(),
+            title: "缺少负责人".into(),
+            description: format!("{} 个指标未分配负责人/域", missing),
+            affected_metrics: vec![],
+        });
+    }
+
+    Ok(MetricAnalysis {
+        quality: MetricQuality {
+            duplicate_metric_count: dup_metric_count,
+            ..quality
+        },
+        duplicates,
+        families,
+        model_loads,
+        tips,
+    })
+}
+
+fn pct(n: usize, total: usize) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        (n as f64 / total as f64 * 100.0 * 10.0).round() / 10.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -964,5 +1318,54 @@ mod tests {
             "DQC_数据质量检查区",
         );
         assert_eq!(infer_owner_from_path("single_file.sql"), "single_file.sql");
+    }
+
+    #[test]
+    fn test_normalize_expression() {
+        // String literal → ?
+        assert_eq!(
+            normalize_expression("max(CASE WHEN fee_code = 'F0001' THEN price ELSE 0 END)"),
+            "max(case when fee_code = ? then price else ? end)",
+        );
+        // Different literal → same normalized form
+        assert_eq!(
+            normalize_expression("max(CASE WHEN fee_code = 'F0002' THEN price ELSE 0 END)"),
+            "max(case when fee_code = ? then price else ? end)",
+        );
+        // Table alias stripped
+        assert_eq!(
+            normalize_expression("sum(tab1.amount)"),
+            "sum(amount)",
+        );
+        // Backticks removed
+        assert_eq!(
+            normalize_expression("max(`fee_code` = 'X')"),
+            "max(fee_code = ?)",
+        );
+        // Whitespace collapsed
+        assert_eq!(
+            normalize_expression("sum(  a  +  b  )"),
+            "sum(a + b)",
+        );
+    }
+
+    #[test]
+    fn test_normalize_family_detection() {
+        // Three fee metrics should normalize to the same expression
+        let exprs = [
+            "max(CASE WHEN `fee_code` = 'F0001' THEN `price` ELSE 0 END)",
+            "max(CASE WHEN `fee_code` = 'F0002' THEN `price` ELSE 0 END)",
+            "max(CASE WHEN `fee_code` = 'F0003' THEN `price` ELSE 0 END)",
+        ];
+        let norms: Vec<String> = exprs.iter().map(|e| normalize_expression(e)).collect();
+        assert_eq!(norms[0], norms[1], "F0001 and F0002 should match");
+        assert_eq!(norms[1], norms[2], "F0002 and F0003 should match");
+    }
+
+    #[test]
+    fn test_pct() {
+        assert_eq!(pct(3, 4), 75.0);
+        assert_eq!(pct(0, 0), 0.0);
+        assert_eq!(pct(1, 3), 33.3);
     }
 }

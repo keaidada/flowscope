@@ -4,10 +4,11 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, BarChart3, Database, GitBranch, Search, Sparkles } from 'lucide-react';
+import { AlertTriangle, BarChart3, Database, GitBranch, LayoutGrid, List, Search, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { governanceApi, type MetricEntry, type MetricConflict, type MetricStats } from '@/lib/governance-api';
+import { MetricAnalysisView } from './MetricAnalysisView';
 
 const AGG_COLORS: Record<string, string> = {
   sum: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
@@ -30,6 +31,9 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
   const [conflicts, setConflicts] = useState<MetricConflict[]>([]);
   const [stats, setStats] = useState<MetricStats | null>(null);
   const [selected, setSelected] = useState<MetricEntry | null>(null);
+
+  // View mode: list or analysis
+  const [view, setView] = useState<'list' | 'analysis'>('list');
 
   // Filters
   const [searchText, setSearchText] = useState('');
@@ -122,25 +126,43 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
   }
 
   return (
-    <div className="flex h-full">
-      {/* Left: list + filters */}
-      <div className="w-80 border-r flex flex-col">
-        {/* Action buttons */}
-        <div className="flex items-center gap-1 px-2 py-1.5 border-b">
-          <Button variant="ghost" size="sm" onClick={handleAutoDetect} className="h-6 px-2 text-xs">
-            <Sparkles className="h-3 w-3 mr-1" />Auto-detect
+    <div className="flex flex-col h-full">
+      {/* Top toolbar: view toggle + action buttons */}
+      <div className="flex items-center justify-between px-2 py-1.5 border-b shrink-0">
+        <div className="flex items-center gap-0.5">
+          <Button variant={view === 'list' ? 'secondary' : 'ghost'} size="sm" onClick={() => setView('list')} className="h-6 px-2 text-xs">
+            <List className="h-3 w-3 mr-1" />{t('governance.listView', '列表')}
           </Button>
-          <Button variant="ghost" size="sm" onClick={handleImportDbt} className="h-6 px-2 text-xs" title="从 dbt MetricFlow (semantic_models.yml / metrics.yml) 导入指标">
-            <Database className="h-3 w-3 mr-1" />Import dbt
-          </Button>
-          <Button variant="ghost" size="sm" onClick={handleExtractLineage} className="h-6 px-2 text-xs" title="从字段级血缘提取指标（覆盖全部文件）">
-            <GitBranch className="h-3 w-3 mr-1" />From Lineage
+          <Button variant={view === 'analysis' ? 'secondary' : 'ghost'} size="sm" onClick={() => setView('analysis')} className="h-6 px-2 text-xs">
+            <LayoutGrid className="h-3 w-3 mr-1" />{t('governance.analysisView', '分析')}
           </Button>
         </div>
-
-        {importMsg && (
-          <div className="px-3 py-1.5 border-b text-xs text-muted-foreground">{importMsg}</div>
+        {view === 'list' && (
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" onClick={handleAutoDetect} className="h-6 px-2 text-xs">
+              <Sparkles className="h-3 w-3 mr-1" />Auto-detect
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleImportDbt} className="h-6 px-2 text-xs" title="从 dbt MetricFlow 导入">
+              <Database className="h-3 w-3 mr-1" />dbt
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleExtractLineage} className="h-6 px-2 text-xs" title="从字段级血缘提取">
+              <GitBranch className="h-3 w-3 mr-1" />Lineage
+            </Button>
+          </div>
         )}
+      </div>
+
+      {importMsg && view === 'list' && (
+        <div className="px-3 py-1.5 border-b text-xs text-muted-foreground">{importMsg}</div>
+      )}
+
+      {/* Content area */}
+      {view === 'analysis' ? (
+        <MetricAnalysisView projectId={projectId} />
+      ) : (
+        <div className="flex flex-1 min-h-0">
+        {/* Left: list + filters */}
+        <div className="w-80 border-r flex flex-col">
 
         {/* Search + filters */}
         <div className="px-2 py-1.5 border-b space-y-1.5">
@@ -321,6 +343,8 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
           </div>
         )}
       </div>
+    </div>
+      )}
     </div>
   );
 }
