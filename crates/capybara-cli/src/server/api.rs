@@ -99,6 +99,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/governance/metrics/import-dbt", post(gov_import_dbt_metrics))
         .route("/governance/metrics/extract-lineage", post(gov_extract_lineage_metrics))
         .route("/governance/metrics/analysis", get(gov_metric_analysis))
+        .route("/governance/metrics/scripts", get(gov_metric_scripts))
         // Designer
         .route("/governance/gen-ddl", post(gov_gen_ddl))
         .route("/governance/reverse-engineer", post(gov_reverse_engineer))
@@ -3293,6 +3294,8 @@ struct GovMetricQuery {
     owner: Option<String>,
     #[serde(default)]
     q: Option<String>,
+    #[serde(default)]
+    contract_id: Option<String>,
 }
 
 /// GET /api/governance/metrics
@@ -3305,7 +3308,7 @@ async fn gov_list_metrics(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
     };
     match super::governance::metric::list_metrics(
-        &conn, &q.project_id, q.layer.as_deref(), q.owner.as_deref(), q.q.as_deref(),
+        &conn, &q.project_id, q.layer.as_deref(), q.owner.as_deref(), q.q.as_deref(), q.contract_id.as_deref(),
     ) {
         Ok(metrics) => Json(metrics).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Query failed: {e}")).into_response(),
@@ -3474,6 +3477,21 @@ async fn gov_metric_analysis(
     match super::governance::metric::analyze_metrics(&conn, &q.project_id) {
         Ok(analysis) => Json(analysis).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Analysis failed: {e}")).into_response(),
+    }
+}
+
+/// GET /api/governance/metrics/scripts — lightweight script list for lazy loading
+async fn gov_metric_scripts(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::list_script_summaries(&conn, &q.project_id) {
+        Ok(scripts) => Json(scripts).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Script list failed: {e}")).into_response(),
     }
 }
 

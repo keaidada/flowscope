@@ -247,6 +247,7 @@ pub fn list_metrics(
     layer: Option<&str>,
     owner: Option<&str>,
     query: Option<&str>,
+    contract_id: Option<&str>,
 ) -> Result<Vec<MetricEntry>, rusqlite::Error> {
     let mut sql = String::from(
         "SELECT id, project_id, metric_name, metric_type, definition, sql_signature, expression, aggregation,
@@ -269,6 +270,11 @@ pub fn list_metrics(
     if let Some(q) = query {
         sql.push_str(&format!(" AND (metric_name LIKE ?{idx} OR definition LIKE ?{idx})"));
         params_vec.push(Box::new(format!("%{q}%")));
+        idx += 1;
+    }
+    if let Some(cid) = contract_id {
+        sql.push_str(&format!(" AND contract_id = ?{idx}"));
+        params_vec.push(Box::new(cid.to_string()));
     }
     sql.push_str(" ORDER BY metric_name");
 
@@ -304,7 +310,7 @@ pub fn list_metrics(
 
 /// Detect metric conflicts (same name different signature, or different name same signature).
 pub fn detect_conflicts(conn: &Connection, project_id: &str) -> Result<Vec<MetricConflict>, rusqlite::Error> {
-    let metrics = list_metrics(conn, project_id, None, None, None)?;
+    let metrics = list_metrics(conn, project_id, None, None, None, None)?;
     let mut conflicts = Vec::new();
 
     // Group by signature
@@ -339,7 +345,7 @@ pub fn detect_conflicts(conn: &Connection, project_id: &str) -> Result<Vec<Metri
 
 /// Get metric statistics.
 pub fn get_metric_stats(conn: &Connection, project_id: &str) -> Result<MetricStats, rusqlite::Error> {
-    let metrics = list_metrics(conn, project_id, None, None, None)?;
+    let metrics = list_metrics(conn, project_id, None, None, None, None)?;
     let conflicts = detect_conflicts(conn, project_id)?;
 
     let mut stats = MetricStats {
@@ -360,7 +366,58 @@ pub fn get_metric_stats(conn: &Connection, project_id: &str) -> Result<MetricSta
 }
 
 // ============================================================
-// Lineage-based metric extraction
+// Script-level summaries (lightweight, for lazy loading)
+// ============================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ScriptSummary {
+    pub contract_id: String,
+    pub script_name: String,
+    pub metric_count: usize,
+    pub table_count: usize,
+}
+
+/// List all scripts with counts — lightweight, no table/metric details.
+pub fn list_script_summaries(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<ScriptSummary>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(contract_id, '') as cid,
+                COUNT(*) as cnt,
+                COUNT(DISTINCT bound_model) as tbl_cnt
+         FROM metrics_registry
+         WHERE project_id = ?1 AND status = 1
+         GROUP BY cid
+         ORDER BY cnt DESC",
+    )?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)? as usize,
+            row.get::<_, i64>(2)? as usize,
+        ))
+    })?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        let (cid, cnt, tbl_cnt) = row?;
+        let script_name = if cid.is_empty() {
+            "(auto)".to_string()
+        } else if let Some(path) = cid.strip_prefix("lineage:") {
+            path.rsplit('/').next().unwrap_or(path).to_string()
+        } else {
+            cid.clone()
+        };
+        result.push(ScriptSummary {
+            contract_id: cid,
+            script_name,
+            metric_count: cnt,
+            table_count: tbl_cnt,
+        });
+    }
+    Ok(result)
+}
 // ============================================================
 
 /// Row extracted from lineage_edges.
@@ -944,7 +1001,7 @@ pub fn analyze_metrics(
     gov_conn: &Connection,
     project_id: &str,
 ) -> Result<MetricAnalysis, rusqlite::Error> {
-    let metrics = list_metrics(gov_conn, project_id, None, None, None)?;
+    let metrics = list_metrics(gov_conn, project_id, None, None, None, None)?;
     let conflicts = detect_conflicts(gov_conn, project_id)?;
 
     // --- Quality scorecard ---

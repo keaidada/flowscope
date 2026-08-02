@@ -121,6 +121,13 @@ export interface MetricStats {
   conflict_count: number;
 }
 
+export interface ScriptSummary {
+  contract_id: string;
+  script_name: string;
+  metric_count: number;
+  table_count: number;
+}
+
 export interface MetricQuality {
   total: number;
   filter_pct: number;
@@ -280,6 +287,10 @@ export const governanceApi = {
   // === Metric management ===
   async listMetrics(queryString: string): Promise<MetricEntry[]> {
     return govFetch(`/metrics?${queryString}`);
+  },
+
+  async listScriptSummaries(projectId: string): Promise<ScriptSummary[]> {
+    return govFetch(`/metrics/scripts?project_id=${encodeURIComponent(projectId)}`);
   },
 
   async metricConflicts(projectId: string): Promise<MetricConflict[]> {
