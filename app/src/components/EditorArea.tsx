@@ -481,7 +481,6 @@ export function EditorArea({
         onConvertDbt={() => setDbtDialogOpen(true)}
         showDbt={showDbt}
         onToggleDbt={() => setShowDbt((v) => !v)}
-        hasDbtContent={hasDbtContent}
         openFiles={
           (currentProject?.openFileIds || [])
             .map((id) => currentProject?.files.find((f) => f.id === id))
