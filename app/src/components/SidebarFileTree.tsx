@@ -20,6 +20,7 @@ import { convertToDbt, saveDbtContent } from '@/lib/file-storage';
 import { convertProceduresOnServer } from '@/lib/server-db';
 import { ConvertFolderDialog } from './ConvertFolderDialog';
 import { DbtConvertDialog } from './DbtConvertDialog';
+import { DbtConvertFolderDialog } from './DbtConvertFolderDialog';
 import type { Dialect } from '@/lib/dialect-constants';
 
 interface SidebarFileTreeProps {
@@ -84,6 +85,8 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const [dbtConvertPath, setDbtConvertPath] = useState<string | null>(null);
   const [dbtConvertOpen, setDbtConvertOpen] = useState(false);
   const [dbtFolderPath, setDbtFolderPath] = useState<string | null>(null);
+  const [dbtFolderOpen, setDbtFolderOpen] = useState(false);
+  const [dbtFolderFiles, setDbtFolderFiles] = useState<string[]>([]);
   const [isConvertingDbtFolder, setIsConvertingDbtFolder] = useState(false);
   const [dbtFolderProgress, setDbtFolderProgress] = useState<{
     done: number;
@@ -310,52 +313,67 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     setDbtConvertOpen(true);
   }, []);
 
+  // Open the folder convert dialog with a file list (no conversion yet)
   const handleConvertDbtFolder = useCallback(
-    async (folderPath: string) => {
+    (folderPath: string) => {
       if (!currentProject) return;
-      setDbtFolderPath(folderPath);
-      setIsConvertingDbtFolder(true);
-      setDbtFolderProgress({ done: 0, total: 0, success: [], errors: [] });
-
       const prefix = folderPath.endsWith('/') ? folderPath : folderPath + '/';
-      // Match all SQL-type files (.sql, .hql, .hive, .ddl) under the folder
       const sqlFiles = currentProject.files.filter(
         (f) =>
           f.path.startsWith(prefix) &&
           (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path))
       );
-      const total = sqlFiles.length;
-      const success: string[] = [];
-      const errors: string[] = [];
-
-      if (total === 0) {
-        setDbtFolderProgress({ done: 0, total: 0, success, errors });
-        setIsConvertingDbtFolder(false);
-        return;
-      }
-
-      let done = 0;
-      for (const file of sqlFiles) {
-        try {
-          const result = await convertToDbt(currentProject.id, file.path);
-          if (result.dbt_content) {
-            await saveDbtContent(currentProject.id, file.path, result.dbt_content);
-            updateFiles([{ fileId: file.id, dbtContent: result.dbt_content }]);
-            success.push(file.path);
-          }
-        } catch (e) {
-          console.error(`[convert-dbt] ${file.path} failed:`, e);
-          errors.push(file.path);
-        }
-        done += 1;
-        setDbtFolderProgress({ done, total, success, errors });
-      }
-
-      setIsConvertingDbtFolder(false);
-      setDbtFolderProgress({ done: total, total, success, errors });
+      setDbtFolderPath(folderPath);
+      setDbtFolderFiles(sqlFiles.map((f) => f.path));
+      setDbtFolderProgress(null);
+      setDbtFolderOpen(true);
     },
-    [currentProject, updateFiles]
+    [currentProject]
   );
+
+  // Execute conversion after user confirms in the dialog
+  const handleConfirmDbtFolder = useCallback(async () => {
+    if (!currentProject || !dbtFolderPath) return;
+    setDbtFolderOpen(false);
+    setIsConvertingDbtFolder(true);
+    setDbtFolderProgress({ done: 0, total: 0, success: [], errors: [] });
+
+    const prefix = dbtFolderPath.endsWith('/') ? dbtFolderPath : dbtFolderPath + '/';
+    const sqlFiles = currentProject.files.filter(
+      (f) =>
+        f.path.startsWith(prefix) &&
+        (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path))
+    );
+    const total = sqlFiles.length;
+    const success: string[] = [];
+    const errors: string[] = [];
+
+    if (total === 0) {
+      setDbtFolderProgress({ done: 0, total: 0, success, errors });
+      setIsConvertingDbtFolder(false);
+      return;
+    }
+
+    let done = 0;
+    for (const file of sqlFiles) {
+      try {
+        const result = await convertToDbt(currentProject.id, file.path);
+        if (result.dbt_content) {
+          await saveDbtContent(currentProject.id, file.path, result.dbt_content);
+          updateFiles([{ fileId: file.id, dbtContent: result.dbt_content }]);
+          success.push(file.path);
+        }
+      } catch (e) {
+        console.error(`[convert-dbt] ${file.path} failed:`, e);
+        errors.push(file.path);
+      }
+      done += 1;
+      setDbtFolderProgress({ done, total, success, errors });
+    }
+
+    setIsConvertingDbtFolder(false);
+    setDbtFolderProgress({ done: total, total, success, errors });
+  }, [currentProject, dbtFolderPath, updateFiles]);
 
   const handleConvertFolder = useCallback(
     async (dialect: Dialect) => {
@@ -446,6 +464,13 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     const prefix = convertTargetPath.endsWith('/') ? convertTargetPath : convertTargetPath + '/';
     return currentProject.files.filter((f) => f.path.startsWith(prefix)).length;
   }, [convertDialogOpen, currentProject, convertTargetPath]);
+
+  // Total files under the dbt convert folder (for dialog display)
+  const dbtFolderTotalCount = useMemo(() => {
+    if (!dbtFolderOpen || !currentProject || !dbtFolderPath) return 0;
+    const prefix = dbtFolderPath.endsWith('/') ? dbtFolderPath : dbtFolderPath + '/';
+    return currentProject.files.filter((f) => f.path.startsWith(prefix)).length;
+  }, [dbtFolderOpen, currentProject, dbtFolderPath]);
 
   const handleSelectFile = (fileId: string) => {
     openFile(fileId);
@@ -984,58 +1009,27 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         />
       )}
 
-      {/* Folder dbt conversion progress */}
-      {dbtFolderProgress && dbtFolderPath && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { if (!isConvertingDbtFolder) { setDbtFolderProgress(null); setDbtFolderPath(null); } }}>
-          <div
-            className="bg-background border rounded-lg shadow-xl w-[32rem] p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-sm font-semibold mb-3">
-              📦 {t('editor.convertDbtFolder', '批量转换 dbt')}
-            </h3>
-            {dbtFolderProgress.total === 0 ? (
-              <div className="text-sm text-muted-foreground mb-3">
-                {t('editor.noSqlInFolder', '该文件夹下未找到 SQL 文件')}
-              </div>
-            ) : (
-              <>
-                <div className="text-xs text-muted-foreground mb-2">
-                  {dbtFolderPath} — {dbtFolderProgress.done}/{dbtFolderProgress.total} {t('editor.filesConverted', '个文件已处理')}
-                </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden mb-3">
-                  <div
-                    className="h-full bg-blue-500 transition-all"
-                    style={{ width: `${(dbtFolderProgress.done / dbtFolderProgress.total) * 100}%` }}
-                  />
-                </div>
-              </>
-            )}
-            {dbtFolderProgress.success.length > 0 && (
-              <div className="text-xs text-green-600 mb-1">
-                ✅ {dbtFolderProgress.success.length} {t('editor.convertSuccess', '个转换成功')}
-              </div>
-            )}
-            {dbtFolderProgress.errors.length > 0 && (
-              <div className="text-xs text-red-500 mb-1">
-                ❌ {dbtFolderProgress.errors.length} {t('editor.convertErrors', '个失败')}:
-                <div className="mt-1 max-h-24 overflow-auto">
-                  {dbtFolderProgress.errors.map((p) => (
-                    <div key={p} className="truncate">{p}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {!isConvertingDbtFolder && (
-              <div className="flex justify-end mt-3">
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setDbtFolderProgress(null); setDbtFolderPath(null); }}>
-                  {t('editor.close', '关闭')}
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Folder dbt conversion dialog */}
+      <DbtConvertFolderDialog
+        open={dbtFolderOpen || Boolean(dbtFolderProgress)}
+        onOpenChange={(open) => {
+          if (!isConvertingDbtFolder) {
+            setDbtFolderOpen(open);
+            if (!open) {
+              setDbtFolderPath(null);
+              setDbtFolderFiles([]);
+              setDbtFolderProgress(null);
+            }
+          }
+        }}
+        folderPath={dbtFolderPath ?? ''}
+        sqlFiles={dbtFolderFiles}
+        totalFileCount={dbtFolderTotalCount}
+        isConverting={isConvertingDbtFolder}
+        convertProgress={dbtFolderProgress ? { done: dbtFolderProgress.done, total: dbtFolderProgress.total } : null}
+        convertResult={dbtFolderProgress ? { success: dbtFolderProgress.success, errors: dbtFolderProgress.errors } : null}
+        onConfirm={handleConfirmDbtFolder}
+      />
     </div>
   );
 }

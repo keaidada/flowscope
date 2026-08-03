@@ -138,7 +138,12 @@
     "filesConverted": "个文件已处理",
     "convertSuccess": "个转换成功",
     "convertErrors": "个失败",
-    "noSqlInFolder": "该文件夹下未找到 SQL 文件"
+    "noSqlInFolder": "该文件夹下未找到 SQL 文件",
+    "convertDbtFolderDesc": "将文件夹下的 SQL 脚本转换为 dbt 模型格式",
+    "totalFilesInFolder": "文件夹内文件",
+    "sqlFilesToConvert": "待转换 SQL 文件",
+    "filesToConvert": "将转换以下文件",
+    "convertDbtN": "转换 {{count}} 个文件"
   },
   "project": {
     "projects": "项目",

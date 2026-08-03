@@ -138,7 +138,12 @@
     "filesConverted": "files processed",
     "convertSuccess": "converted successfully",
     "convertErrors": "failed",
-    "noSqlInFolder": "No SQL files found in this folder"
+    "noSqlInFolder": "No SQL files found in this folder",
+    "convertDbtFolderDesc": "Convert SQL scripts in the folder to dbt model format",
+    "totalFilesInFolder": "Files in folder",
+    "sqlFilesToConvert": "SQL files to convert",
+    "filesToConvert": "Files to convert",
+    "convertDbtN": "Convert {{count}} files"
   },
   "project": {
     "projects": "Projects",
