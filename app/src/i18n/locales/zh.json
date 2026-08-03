@@ -97,30 +97,7 @@
     "saveShortcutMac": "保存 (⌘S)",
     "saveShortcutWin": "保存 (Ctrl+S)",
     "shared": "已分享",
-    "noFile": "无"
-  },
-  "convert": {
-    "title": "批量转换存储过程",
-    "desc": "将目录下所有存储过程提取为纯 DML 语句。",
-    "totalFiles": "总文件数",
-    "procedures": "存储过程",
-    "converting": "转换中...",
-    "complete": "完成",
-    "convertN": "转换 {{count}} 个存储过程",
-    "engineType": "引擎类型",
-    "done": "完成",
-    "noDml": "无 DML",
-    "errors": "异常",
-    "success": "成功"
-  },
-  "procedure": {
-    "title": "存储过程 DML 提取",
-    "desc": "左：原始存储过程（只读）  右：提取的 DML（可编辑）  点击应用后保存为转换结果",
-    "original": "原始脚本（只读）",
-    "transformed": "转换结果（可编辑）",
-    "reExtract": "重新提取",
-    "apply": "应用",
-    "noDml": "未提取到 DML 语句",
+    "noFile": "无",
     "convertDbt": "转换为 dbt 模型",
     "viewDbt": "查看 dbt",
     "extractDml": "DML 语句提取",
@@ -144,6 +121,29 @@
     "sqlFilesToConvert": "待转换 SQL 文件",
     "filesToConvert": "将转换以下文件",
     "convertDbtN": "转换 {{count}} 个文件"
+  },
+  "convert": {
+    "title": "批量转换存储过程",
+    "desc": "将目录下所有存储过程提取为纯 DML 语句。",
+    "totalFiles": "总文件数",
+    "procedures": "存储过程",
+    "converting": "转换中...",
+    "complete": "完成",
+    "convertN": "转换 {{count}} 个存储过程",
+    "engineType": "引擎类型",
+    "done": "完成",
+    "noDml": "无 DML",
+    "errors": "异常",
+    "success": "成功"
+  },
+  "procedure": {
+    "title": "存储过程 DML 提取",
+    "desc": "左：原始存储过程（只读）  右：提取的 DML（可编辑）  点击应用后保存为转换结果",
+    "original": "原始脚本（只读）",
+    "transformed": "转换结果（可编辑）",
+    "reExtract": "重新提取",
+    "apply": "应用",
+    "noDml": "未提取到 DML 语句"
   },
   "project": {
     "projects": "项目",

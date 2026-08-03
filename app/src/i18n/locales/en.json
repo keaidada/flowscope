@@ -97,30 +97,7 @@
     "saveShortcutMac": "Save (⌘S)",
     "saveShortcutWin": "Save (Ctrl+S)",
     "shared": "Shared",
-    "noFile": "None"
-  },
-  "convert": {
-    "title": "Batch Convert Procedures",
-    "desc": "Extract DML statements from all stored procedures in the folder.",
-    "totalFiles": "Total Files",
-    "procedures": "Procedures",
-    "converting": "Converting...",
-    "complete": "Complete",
-    "convertN": "Convert {{count}} procedures",
-    "engineType": "Engine Type",
-    "done": "Done",
-    "noDml": "No DML",
-    "errors": "Errors",
-    "success": "Success"
-  },
-  "procedure": {
-    "title": "Procedure DML Extraction",
-    "desc": "Left: Original (read-only)  Right: Extracted DML (editable)  Click Apply to save.",
-    "original": "Original (read-only)",
-    "transformed": "Transformed (editable)",
-    "reExtract": "Re-extract",
-    "apply": "Apply",
-    "noDml": "No DML extracted",
+    "noFile": "None",
     "convertDbt": "Convert to dbt model",
     "viewDbt": "View dbt",
     "extractDml": "Extract DML statements",
@@ -144,6 +121,29 @@
     "sqlFilesToConvert": "SQL files to convert",
     "filesToConvert": "Files to convert",
     "convertDbtN": "Convert {{count}} files"
+  },
+  "convert": {
+    "title": "Batch Convert Procedures",
+    "desc": "Extract DML statements from all stored procedures in the folder.",
+    "totalFiles": "Total Files",
+    "procedures": "Procedures",
+    "converting": "Converting...",
+    "complete": "Complete",
+    "convertN": "Convert {{count}} procedures",
+    "engineType": "Engine Type",
+    "done": "Done",
+    "noDml": "No DML",
+    "errors": "Errors",
+    "success": "Success"
+  },
+  "procedure": {
+    "title": "Procedure DML Extraction",
+    "desc": "Left: Original (read-only)  Right: Extracted DML (editable)  Click Apply to save.",
+    "original": "Original (read-only)",
+    "transformed": "Transformed (editable)",
+    "reExtract": "Re-extract",
+    "apply": "Apply",
+    "noDml": "No DML extracted"
   },
   "project": {
     "projects": "Projects",
