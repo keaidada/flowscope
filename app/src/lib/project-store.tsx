@@ -146,7 +146,7 @@ interface ProjectContextType {
   /** Close all tabs except the given file */
   closeOtherTabs: (fileId: string) => void;
   /** Load content for a single file on demand (lazy content loading) */
-  loadFileContent: (fileId: string) => Promise<void>;
+  loadFileContent: (fileId: string, opts?: { force?: boolean }) => Promise<void>;
   /** Check if a file's content has been loaded */
   isContentLoaded: (fileId: string) => boolean;
   /** Ensure multiple files have content loaded (batch) */
@@ -926,8 +926,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   // Lazy content loading: load a single file's content from DB
   const loadFileContent = useCallback(
-    async (fileId: string) => {
-      if (loadedContentIds.current.has(fileId)) return;
+    async (fileId: string, opts?: { force?: boolean }) => {
+      if (loadedContentIds.current.has(fileId) && !opts?.force) return;
       const project = projects.find((p) => p.id === activeProjectId);
       const file = project?.files.find((f) => f.id === fileId);
       if (!file || !activeProjectId) return;

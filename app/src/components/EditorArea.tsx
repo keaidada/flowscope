@@ -480,7 +480,17 @@ export function EditorArea({
         folded={folded}
         onConvertDbt={() => setDbtDialogOpen(true)}
         showDbt={showDbt}
-        onToggleDbt={() => setShowDbt((v) => !v)}
+        onToggleDbt={() => {
+          setShowDbt((v) => {
+            const next = !v;
+            // When switching INTO dbt view, lazily re-fetch the file in case
+            // dbt_content was persisted after the last content load.
+            if (next && !hasDbtContent && activeFile) {
+              loadFileContent(activeFile.id, { force: true });
+            }
+            return next;
+          });
+        }}
         openFiles={
           (currentProject?.openFileIds || [])
             .map((id) => currentProject?.files.find((f) => f.id === id))

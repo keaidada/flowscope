@@ -968,6 +968,8 @@ pub(crate) struct FileContentResponse {
     is_procedure: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     transformed_content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dbt_content: Option<String>,
 }
 
 /// GET /api/db/file-content - Get file content
@@ -998,6 +1000,7 @@ pub(crate) async fn get_file_content(
         content: full.as_ref().and_then(|f| f.content.clone()),
         is_procedure: full.as_ref().map(|f| f.is_procedure),
         transformed_content: full.as_ref().and_then(|f| f.transformed_content.clone()),
+        dbt_content: full.as_ref().and_then(|f| f.dbt_content.clone()),
     }))
 }
 
@@ -1015,6 +1018,8 @@ struct FileContentEntry {
     content: Option<String>,
     is_procedure: Option<i64>,
     transformed_content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dbt_content: Option<String>,
 }
 
 pub(crate) async fn get_file_contents_batch(
@@ -1034,6 +1039,7 @@ pub(crate) async fn get_file_contents_batch(
             content: full.as_ref().and_then(|f| f.content.clone()),
             is_procedure: full.as_ref().map(|f| f.is_procedure),
             transformed_content: full.as_ref().and_then(|f| f.transformed_content.clone()),
+            dbt_content: full.as_ref().and_then(|f| f.dbt_content.clone()),
         });
     }
     Ok(Json(results))
