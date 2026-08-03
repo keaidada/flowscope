@@ -61,6 +61,12 @@ pub fn convert_sql_to_dbt_with_tables(
     // CTE / subquery aliases that must NOT be rewritten to ref()/source().
     let cte_names = extract_cte_names(sql);
 
+    // Byte offset in `output` right after the last CTE definition (`),`).
+    // When we hit INSERT INTO, we truncate output back to this point,
+    // discarding the WITH main query body (dbt only needs CTE definitions +
+    // the INSERT's own SELECT).
+    let mut last_cte_end: Option<usize> = None;
+
     for line in sql.lines() {
         let trimmed = line.trim();
 
@@ -114,10 +120,16 @@ pub fn convert_sql_to_dbt_with_tables(
             continue;
         }
 
+        let upper = trimmed.to_uppercase();
+
         // Handle INSERT INTO ... — skip the whole header (table, partition,
         // column list) until the query body begins. dbt materializes via config.
-        let upper = trimmed.to_uppercase();
         if upper.starts_with("INSERT") || upper.starts_with("INTO") {
+            // Discard the WITH main query body — keep only CTE definitions.
+            if let Some(off) = last_cte_end {
+                output.truncate(off);
+                last_cte_end = None;
+            }
             // If SELECT/VALUES/WITH is on the same line as INSERT, strip the
             // INSERT prefix and keep only the query body.
             if let Some(body) = strip_insert_prefix(trimmed) {
@@ -146,6 +158,12 @@ pub fn convert_sql_to_dbt_with_tables(
 
         // Replace table references in FROM/JOIN clauses
         let converted_line = replace_table_refs(&trimmed, &model_tables, &cte_names, &mut source_count, &mut warnings);
+        // Track CTE definition end: a line ending with `),` closes a CTE def
+        // (e.g. `from a4 group by Ctgy_Desc),`). The latest offset is the end
+        // of the WITH definitions block; the main query body follows it.
+        if trimmed.ends_with("),") && !upper.contains("LEFT JOIN") && !upper.contains("RIGHT JOIN") && !upper.contains("INNER JOIN") {
+            last_cte_end = Some(output.len() + converted_line.len() + 1);
+        }
         output.push_str(&converted_line);
         output.push('\n');
     }
@@ -666,5 +684,43 @@ WHERE data_dt = '${data_dt}'";
         assert!(!result.dbt_content.contains("PARTITION"), "PARTITION leaked: {}", result.dbt_content);
         assert!(result.dbt_content.contains("SELECT a"), "SELECT body missing: {}", result.dbt_content);
         assert!(result.dbt_content.contains("src"), "src missing: {}", result.dbt_content);
+    }
+
+    #[test]
+    fn test_convert_with_query_body_then_insert() {
+        // WITH defs (each ends `),`), a leftover main query body, then INSERT.
+        // The main query body (a6's SELECT with Exp_UV) is discarded; only
+        // CTE defs (a1..a5) + INSERT's own SELECT remain.
+        let sql = "with a1 as (select 1 x),
+a2 as (select 2 x),
+a3 as (select 3 x),
+a4 as (select 4 x),
+a5 as (select 5 x),
+a6 as (select a3.Exp_UV, a1.x
+from a1 left join a2 on a1.x = a2.x
+left join a3 on a1.x = a3.x
+)
+insert into table mat_db.t
+partition (data_dt='${data_dt}')
+(
+statt_tm,
+acct_num_desc
+)
+select current_date statt_tm, a1.x acct_num_desc
+from a1;";
+        let empty_models: HashSet<String> = HashSet::new();
+        let result = convert_sql_to_dbt_with_tables(&empty_models, sql);
+        let content = &result.dbt_content;
+        // The leftover main query body (a6's SELECT with Exp_UV) must be gone
+        assert!(!content.contains("Exp_UV"), "WITH main query body leaked: {content}");
+        assert!(!content.contains("insert into"), "INSERT leaked: {content}");
+        assert!(!content.contains("partition (data_dt"), "PARTITION leaked: {content}");
+        // CTE definitions a1..a5 preserved (a6 was the leftover body)
+        for name in ["a1", "a2", "a3", "a4", "a5"] {
+            assert!(content.contains(&format!("{name} as (")), "CTE {name} missing: {content}");
+        }
+        // INSERT's actual SELECT body preserved (references CTEs)
+        assert!(content.contains("select current_date"), "INSERT SELECT missing: {content}");
+        assert!(content.contains("from a1"), "INSERT FROM missing: {content}");
     }
 }
