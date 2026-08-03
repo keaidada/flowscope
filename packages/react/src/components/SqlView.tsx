@@ -165,11 +165,13 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
       editor.revealLineInCenter(startPos.lineNumber);
     }
 
-    // Jinja {{ }} highlighting — find all occurrences and decorate them
+    // Jinja highlighting — {{ expressions }} and {% statements %}, both
+    // can span multiple lines. Expressions get blue, statements get purple.
     const text = model.getValue();
-    const jinjaRegex = /\{\{[^}]*\}\}/g;
+    const jinjaRegex = /\{\{[\s\S]*?\}\}|\{%[\s\S]*?%\}/g;
     let match;
     while ((match = jinjaRegex.exec(text)) !== null) {
+      const isStatement = match[0].startsWith('{%');
       const startPos = model.getPositionAt(match.index);
       const endPos = model.getPositionAt(match.index + match[0].length);
       newDecorations.push({
@@ -179,7 +181,11 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
           endLineNumber: endPos.lineNumber,
           endColumn: endPos.column,
         },
-        options: { inlineClassName: 'capybara-jinja-highlight' },
+        options: {
+          inlineClassName: isStatement
+            ? 'capybara-jinja-statement-highlight'
+            : 'capybara-jinja-highlight',
+        },
       });
     }
 
@@ -201,6 +207,12 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
           border-radius: 2px;
           font-weight: 600;
           color: #3b82f6;
+        }
+        .capybara-jinja-statement-highlight {
+          background-color: rgba(168,85,247,0.15);
+          border-radius: 2px;
+          font-weight: 600;
+          color: #a855f7;
         }
       `}</style>
       <Editor
