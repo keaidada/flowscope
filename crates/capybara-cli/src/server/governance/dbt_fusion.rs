@@ -209,11 +209,21 @@ fn replace_table_refs(
 ) -> String {
     let mut result = line.to_string();
 
-    // Find table references after FROM and JOIN keywords. INSERT INTO target
-    // tables are left untouched — the INSERT statement is preserved verbatim.
+    // Find table references after FROM / JOIN / INTO keywords. INSERT INTO /
+    // INSERT OVERWRITE target tables are rewritten to ref()/source() (dbt
+    // format). The OVERWRITE keyword is only matched on INSERT lines to avoid
+    // rewriting column/comment text elsewhere.
     let upper = line.to_uppercase();
+    let is_insert_line = upper.trim_start().starts_with("INSERT")
+        || upper.trim_start().starts_with("INTO");
 
-    for keyword in &["FROM ", "JOIN "] {
+    let keywords: &[&str] = if is_insert_line {
+        &["FROM ", "JOIN ", "INTO ", "OVERWRITE "]
+    } else {
+        &["FROM ", "JOIN ", "INTO "]
+    };
+
+    for keyword in keywords {
         let mut search_start = 0;
         while let Some(pos) = upper[search_start..].find(keyword) {
             let abs_pos = search_start + pos + keyword.len();
@@ -233,33 +243,58 @@ fn replace_table_refs(
                 continue;
             }
 
-            let normalized = normalize_table_name(table_ref);
+            // `INSERT INTO TABLE db.tbl` / `INSERT OVERWRITE TABLE db.tbl` —
+            // skip the TABLE keyword and use the actual table name.
+            let mut actual_ref = table_ref;
+            let mut actual_end = end;
+            let mut actual_start = 0usize; // offset of the table name in `rest`
+            if (*keyword == "INTO " || *keyword == "OVERWRITE ")
+                && (table_ref.eq_ignore_ascii_case("table")
+                    || table_ref.eq_ignore_ascii_case("overwrite"))
+            {
+                let mut pos = table_ref.len();
+                let mut after = rest[pos..].trim_start();
+                pos = rest.len() - after.len();
+                if after.eq_ignore_ascii_case("table") {
+                    after = after[5..].trim_start();
+                    pos = rest.len() - after.len();
+                }
+                let end2 = after
+                    .find(|c: char| c == ' ' || c == ',' || c == '(' || c == '\n' || c == ';')
+                    .unwrap_or(after.len());
+                actual_ref = after[..end2].trim().trim_matches(|c: char| c == '`' || c == '"');
+                actual_start = pos;
+                actual_end = pos + end2;
+            }
+
+            let normalized = normalize_table_name(actual_ref);
 
             // Skip CTE / subquery aliases — they are not physical tables.
-            if cte_names.contains(&normalized) || cte_names.contains(table_ref) {
-                search_start = abs_pos + end;
+            if cte_names.contains(&normalized) || cte_names.contains(actual_ref) {
+                search_start = abs_pos + actual_end;
                 continue;
             }
 
             // Decide ref() vs source()
-            let replacement = if model_tables.contains(&normalized) || model_tables.contains(table_ref) {
+            let replacement = if model_tables.contains(&normalized) || model_tables.contains(actual_ref) {
                 format!("{{{{ ref('{}') }}}}", normalized)
             } else {
                 // Extract schema from the table ref
-                let (schema, table) = if let Some(pos) = table_ref.rfind('.') {
-                    (&table_ref[..pos], &table_ref[pos + 1..])
+                let (schema, table) = if let Some(pos) = actual_ref.rfind('.') {
+                    (&actual_ref[..pos], &actual_ref[pos + 1..])
                 } else {
-                    ("raw", table_ref)
+                    ("raw", actual_ref)
                 };
                 *source_count += 1;
                 format!("{{{{ source('{}', '{}') }}}}", schema, table)
             };
 
-            // Replace in the result string
-            let full_ref = &line[abs_pos..abs_pos + end];
+            // Replace in the result string — only the table name is replaced,
+            // so `INSERT INTO TABLE` keeps its `TABLE` keyword.
+            let full_ref = &line[abs_pos + actual_start..abs_pos + actual_end];
             result = result.replacen(full_ref, &replacement, 1);
 
-            search_start = abs_pos + end;
+            search_start = abs_pos + actual_end;
         }
     }
 
@@ -590,9 +625,8 @@ WHERE data_dt = '${data_dt}'";
         let empty_models: HashSet<String> = HashSet::new();
         let result = convert_sql_to_dbt_with_tables(&empty_models, sql);
         let content = &result.dbt_content;
-        // INSERT INTO / partition / column list preserved verbatim (target
-        // table name NOT rewritten).
-        assert!(content.contains("INSERT INTO TABLE mat_db.a01_cctv_acct_contt_send_msg_form"), "INSERT INTO not preserved: {content}");
+        // INSERT INTO target table rewritten to source() — `TABLE` kept.
+        assert!(content.contains("INSERT INTO TABLE {{ source('mat_db', 'a01_cctv_acct_contt_send_msg_form') }}"), "INSERT INTO not rewritten: {content}");
         assert!(content.contains("partition (data_dt"), "PARTITION missing: {content}");
         assert!(content.contains("(col1, col2, col3)"), "column list missing: {content}");
         // Query body preserved
@@ -609,7 +643,7 @@ WHERE data_dt = '${data_dt}'";
         let empty_models: HashSet<String> = HashSet::new();
         let result = convert_sql_to_dbt_with_tables(&empty_models, sql);
         let content = &result.dbt_content;
-        assert!(content.contains("INSERT INTO TABLE mat_db.t"), "INSERT/target missing: {content}");
+        assert!(content.contains("INSERT INTO TABLE {{ source('mat_db', 't') }}"), "INSERT/target missing: {content}");
         assert!(content.contains("PARTITION (dt='1')"), "PARTITION missing: {content}");
         assert!(content.contains("SELECT a FROM {{ source('raw', 'src') }}"), "SELECT body missing: {content}");
     }
@@ -640,8 +674,8 @@ from a1;";
         for name in ["a1", "a2", "a3", "a4", "a5", "a6"] {
             assert!(content.contains(&format!("{name} as (")), "CTE {name} missing: {content}");
         }
-        // INSERT INTO / partition / column list preserved verbatim
-        assert!(content.contains("insert into table mat_db.t"), "INSERT INTO missing: {content}");
+        // INSERT INTO / partition preserved, target rewritten to source()
+        assert!(content.contains("insert into table {{ source('mat_db', 't') }}"), "INSERT INTO missing: {content}");
         assert!(content.contains("partition (data_dt"), "PARTITION missing: {content}");
         assert!(content.contains("statt_tm"), "column list missing: {content}");
         // INSERT's actual SELECT body preserved (references CTEs)
