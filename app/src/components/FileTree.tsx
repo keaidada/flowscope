@@ -6,6 +6,7 @@ import {
   FolderOpen,
   FolderPlus,
   FileCode,
+  FileCode2,
   Pencil,
   Trash2,
   Plus,
@@ -75,6 +76,10 @@ interface FileTreeProps {
   onDeleteFolder?: (folderPath: string) => void;
   /** Called when user clicks the convert procedure button on a folder */
   onConvertProcedureInFolder?: (folderPath: string) => void;
+  /** Called when user clicks the convert-to-dbt button on a single file */
+  onConvertDbtFile?: (filePath: string) => void;
+  /** Called when user clicks the convert-to-dbt button on a folder */
+  onConvertDbtInFolder?: (folderPath: string) => void;
   /** Current search query — when non-empty, auto-expand folders containing matched files */
   searchQuery?: string;
   /** Reports the rendered tree content width so the sidebar can auto-resize */
@@ -434,6 +439,18 @@ const FolderNode = memo(function FolderNode({
                 <Scissors className="size-3" />
               </button>
             )}
+            {props.onConvertDbtInFolder && (
+              <button
+                className="p-0.5 rounded hover:bg-blue-500/20 text-muted-foreground hover:text-blue-500"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onConvertDbtInFolder!(node.path);
+                }}
+                title="Convert to dbt in folder"
+              >
+                <FileCode2 className="size-3" />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -570,6 +587,7 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
     canDeleteFiles,
     renameInputRef,
     isReadOnly,
+    onConvertDbtFile,
   } = props;
 
   const isActive = activeFileId === file.id;
@@ -705,6 +723,30 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
             </div>
           ) : (
             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
+              {onConvertDbtFile && (
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 hover:bg-background/50 hover:text-blue-500"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onConvertDbtFile(file.path);
+                        }}
+                        data-testid={`convert-dbt-${file.id}`}
+                      >
+                        <FileCode2 className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <p>Convert to dbt</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
               <TooltipProvider delayDuration={300}>
                 <Tooltip>
                   <TooltipTrigger asChild>

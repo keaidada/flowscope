@@ -18,6 +18,7 @@ import { genId } from '@/lib/utils';
 import { saveProjectFiles } from '@/lib/file-storage';
 import { convertProceduresOnServer } from '@/lib/server-db';
 import { ConvertFolderDialog } from './ConvertFolderDialog';
+import { DbtConvertDialog } from './DbtConvertDialog';
 import type { Dialect } from '@/lib/dialect-constants';
 
 interface SidebarFileTreeProps {
@@ -78,6 +79,9 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     empty: string[];
     errors: string[];
   } | null>(null);
+  // dbt conversion state
+  const [dbtConvertPath, setDbtConvertPath] = useState<string | null>(null);
+  const [dbtConvertOpen, setDbtConvertOpen] = useState(false);
 
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
@@ -290,6 +294,11 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     setConvertTargetPath(folderPath);
     setConvertResult(null);
     setConvertDialogOpen(true);
+  }, []);
+
+  const handleConvertDbtFile = useCallback((filePath: string) => {
+    setDbtConvertPath(filePath);
+    setDbtConvertOpen(true);
   }, []);
 
   const handleConvertFolder = useCallback(
@@ -821,6 +830,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
               }
             }}
             onConvertProcedureInFolder={!isReadOnly ? handleOpenConvertFolder : undefined}
+            onConvertDbtFile={!isReadOnly ? handleConvertDbtFile : undefined}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4 text-center">
@@ -900,6 +910,22 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         convertResult={convertResult}
         onConfirm={handleConvertFolder}
       />
+
+      {currentProject && dbtConvertPath && (
+        <DbtConvertDialog
+          open={dbtConvertOpen}
+          onClose={() => setDbtConvertOpen(false)}
+          projectId={currentProject.id}
+          filePath={dbtConvertPath}
+          originalSql={currentProject.files.find((f) => f.path === dbtConvertPath)?.content || ''}
+          onSaved={(dbtContent) => {
+            const file = currentProject.files.find((f) => f.path === dbtConvertPath);
+            if (file) {
+              updateFiles([{ fileId: file.id, dbtContent }]);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
