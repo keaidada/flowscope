@@ -83,3 +83,8 @@ flowscope.db
 debug-export-crash.md
 app/flowscope.db.bak
 docs/pic/ck-lineage-2026-07-27T11-33-44-162Z.svg
+app/governance.db
+app/governance.db-wal
+app/governance.db-shm
+app/flowscope.db-wal
+app/flowscope.db-shm
