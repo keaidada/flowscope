@@ -17,7 +17,6 @@ import {
   XCircle,
   FileCode2,
   Boxes,
-  FileText,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -83,7 +82,6 @@ interface EditorToolbarProps {
   showDbt?: boolean;
   onToggleDbt?: () => void;
   hasDbtContent?: boolean;
-  onExtractDml?: () => void;
   // Open file tabs
   openFiles?: ProjectFile[];
   activeFileId?: string | null;
@@ -128,7 +126,6 @@ export function EditorToolbar({
   showDbt,
   onToggleDbt,
   hasDbtContent,
-  onExtractDml,
   openFiles,
   activeFileId,
   onOpenFile,
@@ -515,8 +512,8 @@ export function EditorToolbar({
             </Tooltip>
           </TooltipProvider>
         )}
-        {/* Toggle dbt / original */}
-        {hasDbtContent && onToggleDbt && (
+        {/* Toggle dbt / original — always available when onToggleDbt provided */}
+        {onToggleDbt && (
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -525,27 +522,13 @@ export function EditorToolbar({
                   size="icon"
                   className={cn('h-7 w-7', showDbt && 'bg-blue-500/10 text-blue-600')}
                   onClick={onToggleDbt}
+                  disabled={!hasDbtContent}
                 >
                   {showDbt ? <EyeOff className="h-3.5 w-3.5" /> : <Boxes className="h-3.5 w-3.5" />}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
                 <p>{showDbt ? t('editor.viewOriginal', '查看原始') : t('editor.viewDbt', '查看 dbt')}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
-        {/* Extract DML */}
-        {onExtractDml && (
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onExtractDml}>
-                  <FileText className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{t('editor.extractDml', 'DML 语句提取')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

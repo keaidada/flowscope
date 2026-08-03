@@ -121,7 +121,9 @@
     "totalFilesInFolder": "文件夹内文件",
     "sqlFilesToConvert": "待转换 SQL 文件",
     "filesToConvert": "将转换以下文件",
-    "convertDbtN": "转换 {{count}} 个文件"
+    "convertDbtN": "转换 {{count}} 个文件",
+    "reConvert": "重新转换",
+    "copied": "已复制"
   },
   "convert": {
     "title": "批量转换存储过程",

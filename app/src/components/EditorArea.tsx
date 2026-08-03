@@ -14,7 +14,6 @@ import type { SqlViewMode } from './EditorToolbar';
 import { EtlDialog } from './EtlDialog';
 import { ProcedureRepairDialog } from './ProcedureRepairDialog';
 import { DbtConvertDialog } from './DbtConvertDialog';
-import { DmlExtractDialog } from './DmlExtractDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_FILE_NAMES } from '@/lib/constants';
 import type { RunMode } from '@/lib/project-store';
@@ -228,7 +227,6 @@ export function EditorArea({
   const [folded, setFolded] = useState(false);
   const [showDbt, setShowDbt] = useState(false);
   const [dbtDialogOpen, setDbtDialogOpen] = useState(false);
-  const [dmlDialogOpen, setDmlDialogOpen] = useState(false);
   const showTransformedRef = useRef(showTransformed);
   showTransformedRef.current = showTransformed;
 
@@ -484,7 +482,6 @@ export function EditorArea({
         showDbt={showDbt}
         onToggleDbt={() => setShowDbt((v) => !v)}
         hasDbtContent={hasDbtContent}
-        onExtractDml={() => setDmlDialogOpen(true)}
         openFiles={
           (currentProject?.openFileIds || [])
             .map((id) => currentProject?.files.find((f) => f.id === id))
@@ -566,15 +563,6 @@ export function EditorArea({
           onSaved={(dbtContent) => {
             updateFiles([{ fileId: activeFile.id, dbtContent }]);
           }}
-        />
-      )}
-
-      {currentProject && activeFile && (
-        <DmlExtractDialog
-          open={dmlDialogOpen}
-          onClose={() => setDmlDialogOpen(false)}
-          projectId={currentProject.id}
-          filePath={activeFile.path}
         />
       )}
     </div>

@@ -121,7 +121,9 @@
     "totalFilesInFolder": "Files in folder",
     "sqlFilesToConvert": "SQL files to convert",
     "filesToConvert": "Files to convert",
-    "convertDbtN": "Convert {{count}} files"
+    "convertDbtN": "Convert {{count}} files",
+    "reConvert": "Re-convert",
+    "copied": "Copied"
   },
   "convert": {
     "title": "Batch Convert Procedures",
