@@ -51,6 +51,7 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
   const [collapsedTables, setCollapsedTables] = useState<Set<string>>(new Set());
 
   const projectIdRef = useRef(projectId);
+  const selectedCidRef = useRef<string | null>(null);
 
   // --- Load script list (lightweight) ---
   const loadScripts = useCallback(async () => {
@@ -59,11 +60,11 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
       let list = await governanceApi.listScriptSummaries(projectId);
       // Auto-extract if empty
       if (list.length === 0) {
-        setImportMsg(t('governance.autoExtracting', '正在从血缘提取指标...'));
+        setImportMsg('正在从血缘提取指标...');
         try {
           const r = await governanceApi.extractLineageMetrics(projectId);
           if (r.extracted > 0) {
-            setImportMsg(`${t('governance.extractLineageDone', '从血缘提取')} ${r.extracted} ${t('governance.metrics', '个指标')}`);
+            setImportMsg(`从血缘提取 ${r.extracted} 个指标`);
             list = await governanceApi.listScriptSummaries(projectId);
           } else {
             setImportMsg(null);
@@ -75,16 +76,18 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
       }
       setScripts(list);
       // Auto-select first script
-      if (list.length > 0 && !selectedCid) {
+      if (list.length > 0 && !selectedCidRef.current) {
+        selectedCidRef.current = list[0].contract_id;
         setSelectedCid(list[0].contract_id);
       }
     } catch (e) { console.error('Script list failed:', e); }
-  }, [projectId, t, selectedCid]);
+  }, [projectId]);
 
   useEffect(() => {
     // Reset state on project change
     if (projectIdRef.current !== projectId) {
       projectIdRef.current = projectId;
+      selectedCidRef.current = null;
       setSelectedCid(null);
       setScriptMetrics([]);
       setScripts([]);
@@ -186,7 +189,7 @@ export function MetricManager({ projectId }: { projectId: string | null }) {
             </div>
             <div className="flex-1 overflow-auto">
               {filteredScripts.map(s => (
-                <button key={s.contract_id} onClick={() => setSelectedCid(s.contract_id)}
+                <button key={s.contract_id} onClick={() => { selectedCidRef.current = s.contract_id; setSelectedCid(s.contract_id); }}
                   className={cn('w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/50 border-b', selectedCid === s.contract_id && 'bg-accent')}
                   title={s.script_name}>
                   <FileCode className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
