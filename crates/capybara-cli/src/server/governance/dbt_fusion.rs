@@ -58,6 +58,9 @@ pub fn convert_sql_to_dbt_with_tables(
     // We skip everything from `INSERT` up to the query body (SELECT/VALUES or `(`).
     let mut in_insert_header = false;
 
+    // CTE / subquery aliases that must NOT be rewritten to ref()/source().
+    let cte_names = extract_cte_names(sql);
+
     for line in sql.lines() {
         let trimmed = line.trim();
 
@@ -118,7 +121,7 @@ pub fn convert_sql_to_dbt_with_tables(
             // If SELECT/VALUES/WITH is on the same line as INSERT, strip the
             // INSERT prefix and keep only the query body.
             if let Some(body) = strip_insert_prefix(trimmed) {
-                let converted_line = replace_table_refs(&body, &model_tables, &mut source_count, &mut warnings);
+                let converted_line = replace_table_refs(&body, &model_tables, &cte_names, &mut source_count, &mut warnings);
                 output.push_str(&converted_line);
                 output.push('\n');
                 continue;
@@ -142,7 +145,7 @@ pub fn convert_sql_to_dbt_with_tables(
         }
 
         // Replace table references in FROM/JOIN clauses
-        let converted_line = replace_table_refs(&trimmed, &model_tables, &mut source_count, &mut warnings);
+        let converted_line = replace_table_refs(&trimmed, &model_tables, &cte_names, &mut source_count, &mut warnings);
         output.push_str(&converted_line);
         output.push('\n');
     }
@@ -243,9 +246,13 @@ fn extract_engine(line: &str) -> Option<String> {
 }
 
 /// Replace table references in a line with {{ ref() }} or {{ source() }}.
+///
+/// `cte_names` contains CTE aliases / subquery aliases that must NOT be
+/// treated as physical tables (they are defined within the same SQL).
 fn replace_table_refs(
     line: &str,
     model_tables: &HashSet<String>,
+    cte_names: &HashSet<String>,
     source_count: &mut usize,
     warnings: &mut Vec<String>,
 ) -> String {
@@ -277,6 +284,12 @@ fn replace_table_refs(
 
             let normalized = normalize_table_name(table_ref);
 
+            // Skip CTE / subquery aliases — they are not physical tables.
+            if cte_names.contains(&normalized) || cte_names.contains(table_ref) {
+                search_start = abs_pos + end;
+                continue;
+            }
+
             // Decide ref() vs source()
             let replacement = if model_tables.contains(&normalized) || model_tables.contains(table_ref) {
                 format!("{{{{ ref('{}') }}}}", normalized)
@@ -300,6 +313,105 @@ fn replace_table_refs(
     }
 
     result
+}
+
+/// Extract CTE aliases and subquery aliases from a SQL script.
+///
+/// Returns a set of identifiers that appear as:
+/// - `WITH <name> AS (...)`
+/// - `) <alias>` (subquery aliases, e.g. `) k1`, `) tt2 on ...`)
+///
+/// These should not be treated as physical tables during ref()/source()
+/// replacement.
+fn extract_cte_names(sql: &str) -> HashSet<String> {
+    let mut names = HashSet::new();
+    let upper = sql.to_uppercase();
+
+    // 1. CTE names: `<name> AS (`, `<name> AS(`, matching both spacing variants.
+    let mut search_from = 0usize;
+    while let Some(rel) = upper[search_from..].find(" AS") {
+        let as_pos = search_from + rel;
+        if as_pos < 2 {
+            search_from = as_pos + 3;
+            continue;
+        }
+        // Ensure next non-space char is '('
+        let after = &upper[as_pos + 3..];
+        let after_trimmed = after.trim_start();
+        if !after_trimmed.starts_with('(') {
+            search_from = as_pos + 3;
+            continue;
+        }
+        // Walk backwards from ' AS' to find the identifier before it.
+        let before = &sql[..as_pos];
+        let mut end = before.len();
+        // Skip whitespace and delimiters
+        while end > 0 {
+            let ch = before[..end].chars().last().unwrap();
+            if ch == '(' || ch == ')' || ch == ',' || ch == ' ' {
+                end -= 1;
+            } else {
+                break;
+            }
+        }
+        // Read identifier chars backwards
+        let id_end = end;
+        while end > 0 && (before[..end].chars().last().unwrap().is_ascii_alphanumeric() || before[..end].chars().last().unwrap() == '_') {
+            end -= 1;
+        }
+        let id_start = end;
+        if id_start < id_end {
+            let name = &sql[id_start..id_end];
+            names.insert(name.to_string());
+        }
+        search_from = as_pos + 3;
+    }
+
+    // 2. Subquery aliases: `) <alias>` followed by join/on/etc.
+    let mut search = 0usize;
+    while let Some(pos) = sql[search..].find(')') {
+        let after_paren = search + pos + 1;
+        if after_paren >= sql.len() {
+            break;
+        }
+        let after = &sql[after_paren..];
+        let after_upper = after.to_uppercase();
+        let trimmed = after.trim_start();
+        if trimmed.is_empty() {
+            search = after_paren + 1;
+            continue;
+        }
+        let id_len = trimmed
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .count();
+        if id_len > 0 {
+            let alias = &trimmed[..id_len];
+            let rest_after_alias = trimmed[id_len..].trim_start();
+            let is_alias = rest_after_alias.is_empty()
+                || rest_after_alias.starts_with("left")
+                || rest_after_alias.starts_with("right")
+                || rest_after_alias.starts_with("inner")
+                || rest_after_alias.starts_with("full")
+                || rest_after_alias.starts_with("cross")
+                || rest_after_alias.starts_with("on")
+                || rest_after_alias.starts_with("where")
+                || rest_after_alias.starts_with("group")
+                || rest_after_alias.starts_with("order")
+                || rest_after_alias.starts_with("having")
+                || rest_after_alias.starts_with("limit")
+                || rest_after_alias.starts_with(",")
+                || rest_after_alias.starts_with(")")
+                || rest_after_alias.starts_with("union")
+                || rest_after_alias.starts_with("select");
+            if is_alias && !rest_after_alias.starts_with('(') {
+                names.insert(alias.to_string());
+            }
+        }
+        search = after_paren + 1;
+    }
+
+    names
 }
 
 /// Extract DML statements (INSERT/UPDATE/DELETE/MERGE) from a SQL script.
@@ -443,6 +555,7 @@ mod tests {
     fn test_replace_table_refs() {
         let mut models = HashSet::new();
         models.insert("dwd_orders".to_string());
+        let empty_cte = HashSet::new();
 
         let mut source_count = 0;
         let mut warnings = Vec::new();
@@ -450,6 +563,7 @@ mod tests {
         let result = replace_table_refs(
             "FROM dwd_orders o",
             &models,
+            &empty_cte,
             &mut source_count,
             &mut warnings,
         );
@@ -458,10 +572,49 @@ mod tests {
         let result2 = replace_table_refs(
             "LEFT JOIN db_mp_order.order_info ON",
             &models,
+            &empty_cte,
             &mut source_count,
             &mut warnings,
         );
         assert!(result2.contains("{{ source('db_mp_order', 'order_info') }}"));
+    }
+
+    #[test]
+    fn test_replace_table_refs_skips_cte() {
+        let mut models = HashSet::new();
+        let mut cte = HashSet::new();
+        cte.insert("a2".to_string());
+        cte.insert("i5".to_string());
+
+        let mut source_count = 0;
+        let mut warnings = Vec::new();
+
+        let result = replace_table_refs(
+            "left join a2 on x = y",
+            &models,
+            &cte,
+            &mut source_count,
+            &mut warnings,
+        );
+        // CTE alias must NOT be replaced
+        assert!(result.contains("join a2"), "CTE was replaced: {result}");
+        assert!(!result.contains("source"), "CTE became source: {result}");
+    }
+
+    #[test]
+    fn test_extract_cte_names() {
+        let sql = "with a1 as (select 1), b2 as (select 2)\nselect * from a1 left join b2";
+        let ctes = extract_cte_names(sql);
+        assert!(ctes.contains("a1"), "missing a1: {ctes:?}");
+        assert!(ctes.contains("b2"), "missing b2: {ctes:?}");
+    }
+
+    #[test]
+    fn test_extract_subquery_alias() {
+        let sql = "(select vid from t1 where dt=1) k1\nleft join (select x from t2) tt2 on a=b";
+        let ctes = extract_cte_names(sql);
+        assert!(ctes.contains("k1"), "missing k1: {ctes:?}");
+        assert!(ctes.contains("tt2"), "missing tt2: {ctes:?}");
     }
 
     #[test]
