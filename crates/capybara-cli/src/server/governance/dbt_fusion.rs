@@ -311,90 +311,105 @@ fn replace_table_refs(
 /// replacement.
 fn extract_cte_names(sql: &str) -> HashSet<String> {
     let mut names = HashSet::new();
-    let upper = sql.to_uppercase();
 
-    // 1. CTE names: `<name> AS (`, `<name> AS(`, matching both spacing variants.
-    let mut search_from = 0usize;
-    while let Some(rel) = upper[search_from..].find(" AS") {
-        let as_pos = search_from + rel;
-        if as_pos < 2 {
-            search_from = as_pos + 3;
-            continue;
-        }
-        // Ensure next non-space char is '('
-        let after = &upper[as_pos + 3..];
-        let after_trimmed = after.trim_start();
-        if !after_trimmed.starts_with('(') {
-            search_from = as_pos + 3;
-            continue;
-        }
-        // Walk backwards from ' AS' to find the identifier before it.
-        let before = &sql[..as_pos];
-        let mut end = before.len();
-        // Skip whitespace and delimiters
-        while end > 0 {
-            let ch = before[..end].chars().last().unwrap();
-            if ch == '(' || ch == ')' || ch == ',' || ch == ' ' {
-                end -= 1;
-            } else {
-                break;
+    // 1. CTE names: `<name> AS (` or `<name> AS(` (case-insensitive).
+    //    Scan over char_indices so every byte index is a UTF-8 char boundary.
+    let mut i = 0usize;
+    let chars: Vec<(usize, char)> = sql.char_indices().collect();
+    while i + 1 < chars.len() {
+        if chars[i].1.eq_ignore_ascii_case(&'A') && chars[i + 1].1.eq_ignore_ascii_case(&'S') {
+            // "AS" must be followed (after whitespace) by '('
+            let mut k = i + 2;
+            while k < chars.len() && chars[k].1.is_whitespace() {
+                k += 1;
+            }
+            if k < chars.len() && chars[k].1 == '(' {
+                // Walk backwards from before "AS" to find the identifier
+                // (ASCII letters/digits/_). Skip whitespace right before "AS".
+                let mut id_end_idx = i; // char index of the char right after the identifier
+                while id_end_idx > 0 {
+                    let ch = chars[id_end_idx - 1].1;
+                    if ch.is_whitespace() || ch == '(' || ch == ')' || ch == ',' {
+                        id_end_idx -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                // Now walk back over identifier chars to find the start.
+                let mut id_start = id_end_idx;
+                while id_start > 0 {
+                    let ch = chars[id_start - 1].1;
+                    if ch.is_ascii_alphanumeric() || ch == '_' {
+                        id_start -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                if id_start < id_end_idx {
+                    let start_byte = chars[id_start].0;
+                    let end_byte = chars[id_end_idx].0;
+                    if end_byte <= sql.len() {
+                        let name = &sql[start_byte..end_byte];
+                        names.insert(name.to_string());
+                    }
+                }
+                i = k;
+                continue;
             }
         }
-        // Read identifier chars backwards
-        let id_end = end;
-        while end > 0 && (before[..end].chars().last().unwrap().is_ascii_alphanumeric() || before[..end].chars().last().unwrap() == '_') {
-            end -= 1;
-        }
-        let id_start = end;
-        if id_start < id_end {
-            let name = &sql[id_start..id_end];
-            names.insert(name.to_string());
-        }
-        search_from = as_pos + 3;
+        i += 1;
     }
 
     // 2. Subquery aliases: `) <alias>` followed by join/on/etc.
-    let mut search = 0usize;
-    while let Some(pos) = sql[search..].find(')') {
-        let after_paren = search + pos + 1;
+    //    char-safe scanning: find each ')' byte offset, then inspect what
+    //    follows it.
+    let mut scan = 0usize;
+    while let Some(pos) = sql[scan..].find(')') {
+        let after_paren = scan + pos + 1; // byte offset of the char after ')'
         if after_paren >= sql.len() {
             break;
         }
+        // after_paren is a char boundary because ')' is ASCII and +1 lands on
+        // the next char's first byte.
         let after = &sql[after_paren..];
-        let after_upper = after.to_uppercase();
         let trimmed = after.trim_start();
-        if trimmed.is_empty() {
-            search = after_paren + 1;
-            continue;
-        }
-        let id_len = trimmed
-            .chars()
-            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-            .count();
-        if id_len > 0 {
-            let alias = &trimmed[..id_len];
-            let rest_after_alias = trimmed[id_len..].trim_start();
-            let is_alias = rest_after_alias.is_empty()
-                || rest_after_alias.starts_with("left")
-                || rest_after_alias.starts_with("right")
-                || rest_after_alias.starts_with("inner")
-                || rest_after_alias.starts_with("full")
-                || rest_after_alias.starts_with("cross")
-                || rest_after_alias.starts_with("on")
-                || rest_after_alias.starts_with("where")
-                || rest_after_alias.starts_with("group")
-                || rest_after_alias.starts_with("order")
-                || rest_after_alias.starts_with("having")
-                || rest_after_alias.starts_with("limit")
-                || rest_after_alias.starts_with(",")
-                || rest_after_alias.starts_with(")")
-                || rest_after_alias.starts_with("union")
-                || rest_after_alias.starts_with("select");
-            if is_alias && !rest_after_alias.starts_with('(') {
-                names.insert(alias.to_string());
+        let trimmed_byte_off = after.len() - trimmed.len();
+        let mut consumed = trimmed.len();
+        if !trimmed.is_empty() {
+            let id_len = trimmed
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .count();
+            if id_len > 0 {
+                let alias = &trimmed[..id_len];
+                let rest_after_alias = trimmed[id_len..].trim_start();
+                let is_alias = rest_after_alias.is_empty()
+                    || rest_after_alias.starts_with("left")
+                    || rest_after_alias.starts_with("right")
+                    || rest_after_alias.starts_with("inner")
+                    || rest_after_alias.starts_with("full")
+                    || rest_after_alias.starts_with("cross")
+                    || rest_after_alias.starts_with("on")
+                    || rest_after_alias.starts_with("where")
+                    || rest_after_alias.starts_with("group")
+                    || rest_after_alias.starts_with("order")
+                    || rest_after_alias.starts_with("having")
+                    || rest_after_alias.starts_with("limit")
+                    || rest_after_alias.starts_with(",")
+                    || rest_after_alias.starts_with(")")
+                    || rest_after_alias.starts_with("union")
+                    || rest_after_alias.starts_with("select");
+                if is_alias && !rest_after_alias.starts_with('(') {
+                    names.insert(alias.to_string());
+                }
+                // Only advance past the alias token so later ')' chars are
+                // still scanned (e.g. nested subqueries).
+                consumed = alias.len();
             }
         }
-        search = after_paren + 1;
+        // Resume scanning after the alias token (or after the whole region if
+        // no alias matched).
+        scan = after_paren + trimmed_byte_off + consumed;
     }
 
     names
@@ -481,18 +496,21 @@ fn extract_execute_immediate(sql: &str, out: &mut Vec<String>) {
         // Find the string literal
         let rest_trimmed = rest.trim_start();
         if rest_trimmed.starts_with('\'') {
-            // Find the closing quote (handle escaped quotes '')
-            let mut end = 1;
-            let chars: Vec<char> = rest_trimmed.chars().collect();
-            while end < chars.len() {
-                if chars[end] == '\'' {
-                    if end + 1 < chars.len() && chars[end + 1] == '\'' {
-                        end += 2; // escaped quote
-                    } else {
-                        break;
+            // Find the closing quote (handle escaped quotes '') using byte
+            // offsets via char_indices so slicing is always char-boundary safe.
+            let mut end = 1usize; // byte offset after the opening quote
+            let mut iter = rest_trimmed.char_indices().skip(1).peekable();
+            while let Some((off, ch)) = iter.next() {
+                if ch == '\'' {
+                    if let Some(&(_, next_ch)) = iter.peek() {
+                        if next_ch == '\'' {
+                            // escaped quote '' — skip both
+                            iter.next();
+                            continue;
+                        }
                     }
-                } else {
-                    end += 1;
+                    end = off;
+                    break;
                 }
             }
             let inner = &rest_trimmed[1..end];
