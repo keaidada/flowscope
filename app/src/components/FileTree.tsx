@@ -72,8 +72,6 @@ interface FileTreeProps {
   onCreateFolderInFolder?: (folderPath: string) => void;
   /** Called when user confirms renaming a folder */
   onRenameFolder?: (oldFolderPath: string, newFolderName: string) => void;
-  /** Called when user clicks the delete button on a folder */
-  onDeleteFolder?: (folderPath: string) => void;
   /** Called when user clicks the convert procedure button on a folder */
   onConvertProcedureInFolder?: (folderPath: string) => void;
   /** Called when user clicks the convert-to-dbt button on a single file */
@@ -413,18 +411,6 @@ const FolderNode = memo(function FolderNode({
                 title="Rename"
               >
                 <Pencil className="size-3" />
-              </button>
-            )}
-            {props.onDeleteFolder && (
-              <button
-                className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  props.onDeleteFolder!(node.path);
-                }}
-                title="Delete folder"
-              >
-                <Trash2 className="size-3" />
               </button>
             )}
             {props.onConvertProcedureInFolder && (

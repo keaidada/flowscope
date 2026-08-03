@@ -45,7 +45,6 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     setFileSelection,
     renameFile,
     renameFolder,
-    deleteFolder,
     isReadOnly,
     selectFile,
     revealCnt,
@@ -898,18 +897,6 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
               );
             }}
             onRenameFolder={(oldPath, newName) => renameFolder(oldPath, newName)}
-            onDeleteFolder={(folderPath) => {
-              // 需要二次确认防止误删
-              if (
-                window.confirm(`确定要删除文件夹 "${folderPath}" 及其所有文件吗？此操作不可撤销。`)
-              ) {
-                try {
-                  deleteFolder(folderPath);
-                } catch (e) {
-                  console.error('[deleteFolder] sync error:', e);
-                }
-              }
-            }}
             onConvertProcedureInFolder={!isReadOnly ? handleOpenConvertFolder : undefined}
             onConvertDbtFile={!isReadOnly ? handleConvertDbtFile : undefined}
             onConvertDbtInFolder={!isReadOnly ? handleConvertDbtFolder : undefined}
