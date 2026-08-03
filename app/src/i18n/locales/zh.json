@@ -133,7 +133,11 @@
     "modelRefs": "个模型引用",
     "sourceRefs": "个 source 引用",
     "confirmSave": "确认保存",
-    "saved": "已保存"
+    "saved": "已保存",
+    "convertDbtFolder": "批量转换 dbt",
+    "filesConverted": "个文件已处理",
+    "convertSuccess": "个转换成功",
+    "convertErrors": "个失败"
   },
   "project": {
     "projects": "项目",

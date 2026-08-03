@@ -133,7 +133,11 @@
     "modelRefs": "model refs",
     "sourceRefs": "source refs",
     "confirmSave": "Save",
-    "saved": "Saved"
+    "saved": "Saved",
+    "convertDbtFolder": "Batch convert to dbt",
+    "filesConverted": "files processed",
+    "convertSuccess": "converted successfully",
+    "convertErrors": "failed"
   },
   "project": {
     "projects": "Projects",
