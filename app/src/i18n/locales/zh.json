@@ -137,7 +137,8 @@
     "convertDbtFolder": "批量转换 dbt",
     "filesConverted": "个文件已处理",
     "convertSuccess": "个转换成功",
-    "convertErrors": "个失败"
+    "convertErrors": "个失败",
+    "noSqlInFolder": "该文件夹下未找到 SQL 文件"
   },
   "project": {
     "projects": "项目",

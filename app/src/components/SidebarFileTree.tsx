@@ -318,8 +318,11 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       setDbtFolderProgress({ done: 0, total: 0, success: [], errors: [] });
 
       const prefix = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+      // Match all SQL-type files (.sql, .hql, .hive, .ddl) under the folder
       const sqlFiles = currentProject.files.filter(
-        (f) => f.path.startsWith(prefix) && f.path.toLowerCase().endsWith('.sql')
+        (f) =>
+          f.path.startsWith(prefix) &&
+          (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path))
       );
       const total = sqlFiles.length;
       const success: string[] = [];
@@ -991,16 +994,22 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
             <h3 className="text-sm font-semibold mb-3">
               📦 {t('editor.convertDbtFolder', '批量转换 dbt')}
             </h3>
-            <div className="text-xs text-muted-foreground mb-2">
-              {dbtFolderPath} — {dbtFolderProgress.done}/{dbtFolderProgress.total || 0} {t('editor.filesConverted', '个文件已处理')}
-            </div>
-            {dbtFolderProgress.total > 0 && (
-              <div className="h-2 bg-muted rounded-full overflow-hidden mb-3">
-                <div
-                  className="h-full bg-blue-500 transition-all"
-                  style={{ width: `${(dbtFolderProgress.done / dbtFolderProgress.total) * 100}%` }}
-                />
+            {dbtFolderProgress.total === 0 ? (
+              <div className="text-sm text-muted-foreground mb-3">
+                {t('editor.noSqlInFolder', '该文件夹下未找到 SQL 文件')}
               </div>
+            ) : (
+              <>
+                <div className="text-xs text-muted-foreground mb-2">
+                  {dbtFolderPath} — {dbtFolderProgress.done}/{dbtFolderProgress.total} {t('editor.filesConverted', '个文件已处理')}
+                </div>
+                <div className="h-2 bg-muted rounded-full overflow-hidden mb-3">
+                  <div
+                    className="h-full bg-blue-500 transition-all"
+                    style={{ width: `${(dbtFolderProgress.done / dbtFolderProgress.total) * 100}%` }}
+                  />
+                </div>
+              </>
             )}
             {dbtFolderProgress.success.length > 0 && (
               <div className="text-xs text-green-600 mb-1">

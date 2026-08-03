@@ -137,7 +137,8 @@
     "convertDbtFolder": "Batch convert to dbt",
     "filesConverted": "files processed",
     "convertSuccess": "converted successfully",
-    "convertErrors": "failed"
+    "convertErrors": "failed",
+    "noSqlInFolder": "No SQL files found in this folder"
   },
   "project": {
     "projects": "Projects",
