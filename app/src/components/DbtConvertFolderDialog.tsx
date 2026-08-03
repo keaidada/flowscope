@@ -33,6 +33,7 @@ interface DbtConvertFolderDialogProps {
   convertResult: {
     success: string[];
     errors: string[];
+    skipped: number;
   } | null;
   onConfirm: () => void;
 }
@@ -156,10 +157,11 @@ export function DbtConvertFolderDialog({
 
   const successCount = convertResult?.success.length ?? 0;
   const errorCount = convertResult?.errors.length ?? 0;
+  const skippedCount = convertResult?.skipped ?? 0;
 
   const resultCard = (label: string, count: number, color: string, onClick?: () => void) => (
     <div
-      className={`rounded-lg border p-2 text-center ${
+      className={`rounded-lg border p-2 text-center transition-colors ${
         onClick ? 'cursor-pointer hover:bg-muted/50' : ''
       }`}
       onClick={onClick}
@@ -186,7 +188,7 @@ export function DbtConvertFolderDialog({
             <DialogDescription>{t('editor.convertDbtFolderDesc', '将文件夹下的 SQL 脚本转换为 dbt 模型格式')}</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-2 min-w-0">
+          <div className="space-y-4 py-2 min-w-0 animate-in fade-in-0 slide-in-from-top-2 duration-200">
             <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
               <FolderTree className="h-4 w-4 shrink-0" />
               <span className="font-mono text-xs truncate">{folderPath}</span>
@@ -207,7 +209,7 @@ export function DbtConvertFolderDialog({
 
             {/* File list preview (before confirm) */}
             {!isConverting && !completed && sqlFiles.length > 0 && (
-              <div className="rounded-lg border overflow-hidden min-w-0">
+              <div className="rounded-lg border overflow-hidden min-w-0 animate-in fade-in-0 duration-200">
                 <div className="px-3 py-1.5 bg-muted/30 border-b text-xs font-medium text-muted-foreground">
                   {t('editor.filesToConvert', '将转换以下文件')}
                 </div>
@@ -231,7 +233,7 @@ export function DbtConvertFolderDialog({
                 </div>
                 <div className="h-2 rounded-full bg-muted overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all duration-300 ${
+                    className={`h-full rounded-full transition-all duration-300 ease-out ${
                       completed ? 'bg-green-500' : 'bg-blue-500'
                     }`}
                     style={{
@@ -243,12 +245,15 @@ export function DbtConvertFolderDialog({
             )}
 
             {completed && convertResult && (
-              <div className="grid grid-cols-2 gap-2">
+              <div key="result" className="grid grid-cols-3 gap-2 animate-in fade-in-0 zoom-in-95 duration-300">
                 {successCount > 0
                   ? resultCard(t('editor.convertSuccess', '转换成功'), successCount, 'text-green-600', () =>
                       setListType('success')
                     )
                   : resultCard(t('editor.convertSuccess', '转换成功'), successCount, 'text-green-600')}
+                {skippedCount > 0
+                  ? resultCard(t('editor.convertSkipped', '跳过(空文件)'), skippedCount, 'text-amber-600')
+                  : resultCard(t('editor.convertSkipped', '跳过(空文件)'), skippedCount, 'text-amber-600')}
                 {errorCount > 0
                   ? resultCard(t('editor.convertErrors', '转换失败'), errorCount, 'text-red-600', () =>
                       setListType('errors')

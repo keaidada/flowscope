@@ -166,6 +166,7 @@ export async function convertToDbtBatch(
 ): Promise<{
   success: number;
   errors: number;
+  skipped: number;
   total: number;
   successPaths: string[];
   errorPaths: string[];

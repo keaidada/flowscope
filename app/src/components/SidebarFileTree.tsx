@@ -92,6 +92,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     total: number;
     success: string[];
     errors: string[];
+    skipped: number;
   } | null>(null);
 
   const currentProjectRef = useRef(currentProject);
@@ -317,12 +318,12 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     (folderPath: string) => {
       if (!currentProject) return;
       const prefix = folderPath.endsWith('/') ? folderPath : folderPath + '/';
-      // Only include SQL files that actually have content — skip empty ones
+      // List ALL SQL files under the folder — content may be lazy-loaded,
+      // so don't filter on content here (backend skips empty files).
       const sqlFiles = currentProject.files.filter(
         (f) =>
           f.path.startsWith(prefix) &&
-          (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path)) &&
-          (f.content || '').trim().length > 0
+          (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path))
       );
       setDbtFolderPath(folderPath);
       setDbtFolderFiles(sqlFiles.map((f) => f.path));
@@ -337,22 +338,22 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     if (!currentProject || !dbtFolderPath) return;
     setDbtFolderOpen(false);
     setIsConvertingDbtFolder(true);
-    setDbtFolderProgress({ done: 0, total: 0, success: [], errors: [] });
+    setDbtFolderProgress({ done: 0, total: 0, success: [], errors: [], skipped: 0 });
 
     const prefix = dbtFolderPath.endsWith('/') ? dbtFolderPath : dbtFolderPath + '/';
-    // Only convert files with actual content (empty ones were skipped at dialog open)
+    // Convert ALL SQL files under the folder; backend skips empty-content files.
     const sqlFiles = currentProject.files.filter(
       (f) =>
         f.path.startsWith(prefix) &&
-        (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path)) &&
-        (f.content || '').trim().length > 0
+        (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path))
     );
     const total = sqlFiles.length;
     const success: string[] = [];
     const errors: string[] = [];
+    let skipped = 0;
 
     if (total === 0) {
-      setDbtFolderProgress({ done: 0, total: 0, success, errors });
+      setDbtFolderProgress({ done: 0, total: 0, success, errors, skipped });
       setIsConvertingDbtFolder(false);
       return;
     }
@@ -370,15 +371,16 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         );
         success.push(...result.successPaths);
         errors.push(...result.errorPaths);
+        skipped += result.skipped;
       } catch (e) {
         console.error('[convert-dbt-batch] chunk failed:', e);
         errors.push(...chunk.map((f) => f.path));
       }
       done += chunk.length;
-      setDbtFolderProgress({ done, total, success, errors });
+      setDbtFolderProgress({ done, total, success, errors, skipped });
     }
 
-    setDbtFolderProgress({ done: total, total, success, errors });
+    setDbtFolderProgress({ done: total, total, success, errors, skipped });
     setIsConvertingDbtFolder(false);
   }, [currentProject, dbtFolderPath]);
 
@@ -1022,7 +1024,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         totalFileCount={dbtFolderTotalCount}
         isConverting={isConvertingDbtFolder}
         convertProgress={dbtFolderProgress ? { done: dbtFolderProgress.done, total: dbtFolderProgress.total } : null}
-        convertResult={dbtFolderProgress ? { success: dbtFolderProgress.success, errors: dbtFolderProgress.errors } : null}
+        convertResult={dbtFolderProgress ? { success: dbtFolderProgress.success, errors: dbtFolderProgress.errors, skipped: dbtFolderProgress.skipped } : null}
         onConfirm={handleConfirmDbtFolder}
       />
     </div>

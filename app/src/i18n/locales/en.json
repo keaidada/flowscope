@@ -115,6 +115,7 @@
     "filesConverted": "files processed",
     "convertSuccess": "Succeeded",
     "convertErrors": "Failed",
+    "convertSkipped": "Skipped (empty)",
     "noSqlInFolder": "No SQL files found in this folder",
     "convertDbtFolderDesc": "Convert SQL scripts in the folder to dbt model format",
     "totalFilesInFolder": "Files in folder",

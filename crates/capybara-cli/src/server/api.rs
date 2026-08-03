@@ -3848,10 +3848,11 @@ async fn gov_convert_dbt_batch(
     };
 
     // 2. Filter to SQL files under the folder prefix, resolving content.
-    //    Empty-content files are skipped (not counted, not errors).
+    //    Empty-content files are skipped (counted in `skipped`, not errors).
     let prefix = req.folder_path.as_deref().map(|p| {
         if p.ends_with('/') { p.to_string() } else { format!("{p}/") }
     });
+    let mut skipped = 0usize;
     let mut sql_files: Vec<(&store::ProjectFileRow, String)> = all_files
         .iter()
         .filter_map(|f| {
@@ -3870,8 +3871,9 @@ async fn gov_convert_dbt_batch(
                 read_project_file(&state, &req.project_id, &f.path)
             };
 
-            // Skip empty-content files silently
+            // Skip empty-content files silently (counted as skipped)
             if sql.trim().is_empty() {
+                skipped += 1;
                 return None;
             }
             Some((f, sql))
@@ -3919,6 +3921,7 @@ async fn gov_convert_dbt_batch(
     Json(serde_json::json!({
         "success": success_paths.len(),
         "errors": error_paths.len(),
+        "skipped": skipped,
         "total": total,
         "successPaths": success_paths,
         "errorPaths": error_paths,
