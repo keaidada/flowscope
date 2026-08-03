@@ -523,17 +523,6 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
               ({currentProject.files.length})
             </span>
           )}
-          {currentProject.files.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-5 px-1"
-              onClick={() => setQuickOpen((v) => !v)}
-              title="快速打开文件"
-            >
-              <Search className="h-3 w-3" />
-            </Button>
-          )}
           {selectedCount > 0 && (
             <span className="text-xs text-muted-foreground whitespace-nowrap">
               · {t('sidebar.selectedCount', { count: selectedCount })}
