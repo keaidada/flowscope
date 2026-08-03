@@ -136,8 +136,8 @@
     "saved": "已保存",
     "convertDbtFolder": "批量转换 dbt",
     "filesConverted": "个文件已处理",
-    "convertSuccess": "个转换成功",
-    "convertErrors": "个失败",
+    "convertSuccess": "转换成功",
+    "convertErrors": "转换失败",
     "noSqlInFolder": "该文件夹下未找到 SQL 文件",
     "convertDbtFolderDesc": "将文件夹下的 SQL 脚本转换为 dbt 模型格式",
     "totalFilesInFolder": "文件夹内文件",
@@ -178,7 +178,16 @@
     "expandFolder": "展开文件夹 {{name}}",
     "fileList": "文件列表",
     "fileTreeLabel": "文件树",
-    "deleteConfirm": "确认删除？"
+    "deleteConfirm": "确认删除？",
+    "newFile": "新建文件",
+    "uploadToFolder": "上传到此文件夹",
+    "newFolder": "新建子文件夹",
+    "rename": "重命名",
+    "delete": "删除",
+    "confirmDelete": "删除？",
+    "convertProcFolder": "转换文件夹内的存储过程",
+    "convertDbtFolder": "在文件夹内转换为 dbt",
+    "convertDbt": "转换为 dbt"
   },
   "export": {
     "exportLineage": "导出血缘数据",

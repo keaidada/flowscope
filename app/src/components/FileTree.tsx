@@ -13,6 +13,7 @@ import {
   Scissors,
   Upload,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -208,6 +209,7 @@ const FolderNode = memo(function FolderNode({
 }: FolderNodeProps) {
   const isExpanded = expandedFolders.has(node.path);
   const sortedChildren = useMemo(() => sortTreeNodes(Array.from(node.children.values())), [node]);
+  const { t } = useTranslation();
 
   const fileCount = useMemo(() => countDirectFiles(node), [node]);
 
@@ -371,7 +373,7 @@ const FolderNode = memo(function FolderNode({
                   e.stopPropagation();
                   props.onCreateFileInFolder!(node.path);
                 }}
-                title="New file"
+                title={t('fileTree.newFile', 'New file')}
               >
                 <Plus className="size-3" />
               </button>
@@ -383,7 +385,7 @@ const FolderNode = memo(function FolderNode({
                   e.stopPropagation();
                   props.onUploadToFolder!(node.path);
                 }}
-                title="Upload to this folder"
+                title={t('fileTree.uploadToFolder', 'Upload to this folder')}
               >
                 <Upload className="size-3" />
               </button>
@@ -395,7 +397,7 @@ const FolderNode = memo(function FolderNode({
                   e.stopPropagation();
                   props.onCreateFolderInFolder!(node.path);
                 }}
-                title="New folder"
+                title={t('fileTree.newFolder', 'New folder')}
               >
                 <FolderPlus className="size-3" />
               </button>
@@ -408,7 +410,7 @@ const FolderNode = memo(function FolderNode({
                   setRenameValue(node.name);
                   setIsRenaming(true);
                 }}
-                title="Rename"
+                title={t('fileTree.rename', 'Rename')}
               >
                 <Pencil className="size-3" />
               </button>
@@ -420,7 +422,7 @@ const FolderNode = memo(function FolderNode({
                   e.stopPropagation();
                   props.onConvertProcedureInFolder!(node.path);
                 }}
-                title="Convert stored procedures in folder"
+                title={t('fileTree.convertProcFolder', 'Convert stored procedures in folder')}
               >
                 <Scissors className="size-3" />
               </button>
@@ -432,7 +434,7 @@ const FolderNode = memo(function FolderNode({
                   e.stopPropagation();
                   props.onConvertDbtInFolder!(node.path);
                 }}
-                title="Convert to dbt in folder"
+                title={t('fileTree.convertDbtFolder', 'Convert to dbt in folder')}
               >
                 <FileCode2 className="size-3" />
               </button>
@@ -551,6 +553,7 @@ interface FileNodeProps {
 const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
   const file = node.file;
   if (!file) return null;
+  const { t } = useTranslation();
   const {
     activeFileId,
     selectedFileIds,
@@ -696,7 +699,7 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
         <>
           {isDeleting ? (
             <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-              <span className="text-xs text-destructive">Delete?</span>
+              <span className="text-xs text-destructive">{t('fileTree.confirmDelete', 'Delete?')}</span>
               <Button
                 variant="ghost"
                 size="icon"
@@ -728,7 +731,7 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
-                      <p>Convert to dbt</p>
+                      <p>{t('fileTree.convertDbt', 'Convert to dbt')}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -752,7 +755,7 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
                     <p>
-                      Rename <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">R</kbd>
+                      {t('fileTree.rename', 'Rename')} <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">R</kbd>
                     </p>
                   </TooltipContent>
                 </Tooltip>
@@ -773,7 +776,7 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
                       <p>
-                        Delete <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">D</kbd>
+                        {t('fileTree.delete', 'Delete')} <kbd className="ml-1 rounded bg-muted px-1 font-mono text-xs">D</kbd>
                       </p>
                     </TooltipContent>
                   </Tooltip>

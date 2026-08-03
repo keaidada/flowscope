@@ -245,15 +245,15 @@ export function DbtConvertFolderDialog({
             {completed && convertResult && (
               <div className="grid grid-cols-2 gap-2">
                 {successCount > 0
-                  ? resultCard(t('editor.convertSuccess', '个转换成功'), successCount, 'text-green-600', () =>
+                  ? resultCard(t('editor.convertSuccess', '转换成功'), successCount, 'text-green-600', () =>
                       setListType('success')
                     )
-                  : resultCard(t('editor.convertSuccess', '个转换成功'), successCount, 'text-green-600')}
+                  : resultCard(t('editor.convertSuccess', '转换成功'), successCount, 'text-green-600')}
                 {errorCount > 0
-                  ? resultCard(t('editor.convertErrors', '个失败'), errorCount, 'text-red-600', () =>
+                  ? resultCard(t('editor.convertErrors', '转换失败'), errorCount, 'text-red-600', () =>
                       setListType('errors')
                     )
-                  : resultCard(t('editor.convertErrors', '个失败'), errorCount, 'text-red-600')}
+                  : resultCard(t('editor.convertErrors', '转换失败'), errorCount, 'text-red-600')}
               </div>
             )}
           </div>

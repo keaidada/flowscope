@@ -136,8 +136,8 @@
     "saved": "Saved",
     "convertDbtFolder": "Batch convert to dbt",
     "filesConverted": "files processed",
-    "convertSuccess": "converted successfully",
-    "convertErrors": "failed",
+    "convertSuccess": "Succeeded",
+    "convertErrors": "Failed",
     "noSqlInFolder": "No SQL files found in this folder",
     "convertDbtFolderDesc": "Convert SQL scripts in the folder to dbt model format",
     "totalFilesInFolder": "Files in folder",
@@ -178,7 +178,16 @@
     "expandFolder": "Expand folder {{name}}",
     "fileList": "File list",
     "fileTreeLabel": "File tree",
-    "deleteConfirm": "Delete?"
+    "deleteConfirm": "Delete?",
+    "newFile": "New file",
+    "uploadToFolder": "Upload to this folder",
+    "newFolder": "New subfolder",
+    "rename": "Rename",
+    "delete": "Delete",
+    "confirmDelete": "Delete?",
+    "convertProcFolder": "Convert stored procedures in folder",
+    "convertDbtFolder": "Convert to dbt in folder",
+    "convertDbt": "Convert to dbt"
   },
   "export": {
     "exportLineage": "Export lineage data",
