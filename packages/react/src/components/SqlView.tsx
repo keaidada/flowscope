@@ -106,7 +106,7 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
     [actions, onChange, isControlled]
   );
 
-  // Apply decorations (issue highlights + active span highlight)
+  // Apply decorations (issue highlights + active span highlight + jinja {{ }})
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -165,8 +165,26 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
       editor.revealLineInCenter(startPos.lineNumber);
     }
 
+    // Jinja {{ }} highlighting — find all occurrences and decorate them
+    const text = model.getValue();
+    const jinjaRegex = /\{\{[^}]*\}\}/g;
+    let match;
+    while ((match = jinjaRegex.exec(text)) !== null) {
+      const startPos = model.getPositionAt(match.index);
+      const endPos = model.getPositionAt(match.index + match[0].length);
+      newDecorations.push({
+        range: {
+          startLineNumber: startPos.lineNumber,
+          startColumn: startPos.column,
+          endLineNumber: endPos.lineNumber,
+          endColumn: endPos.column,
+        },
+        options: { inlineClassName: 'capybara-jinja-highlight' },
+      });
+    }
+
     decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
-  }, [highlightedSpan, issueHighlights]);
+  }, [highlightedSpan, issueHighlights, sqlText]);
 
   return (
     <div className={`capybara-sql-view monaco-editor-wrapper ${className || ''}`}>
@@ -178,6 +196,12 @@ export const SqlView = forwardRef<SqlViewHandle, SqlViewProps>(function SqlView(
         .capybara-sql-highlight-error { background-color: rgba(239,72,111,0.25); }
         .capybara-sql-highlight-warning { background-color: rgba(244,164,98,0.25); }
         .capybara-sql-highlight-info { background-color: rgba(76,97,255,0.15); }
+        .capybara-jinja-highlight {
+          background-color: rgba(59,130,246,0.15);
+          border-radius: 2px;
+          font-weight: 600;
+          color: #3b82f6;
+        }
       `}</style>
       <Editor
         height="100%"
