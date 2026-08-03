@@ -54,6 +54,10 @@ pub fn convert_sql_to_dbt_with_tables(
     let mut config_parts: Vec<String> = Vec::new();
     let mut has_config = false;
 
+    // State for INSERT INTO ... header (table / partition / column list).
+    // We skip everything from `INSERT` up to the query body (SELECT/VALUES or `(`).
+    let mut in_insert_header = false;
+
     for line in sql.lines() {
         let trimmed = line.trim();
 
@@ -107,9 +111,34 @@ pub fn convert_sql_to_dbt_with_tables(
             continue;
         }
 
-        // Handle INSERT INTO ... — strip the INSERT wrapper, keep SELECT
-        if trimmed.to_uppercase().starts_with("INSERT INTO") {
-            continue; // Skip — dbt materializes automatically
+        // Handle INSERT INTO ... — skip the whole header (table, partition,
+        // column list) until the query body begins. dbt materializes via config.
+        let upper = trimmed.to_uppercase();
+        if upper.starts_with("INSERT") || upper.starts_with("INTO") {
+            // If SELECT/VALUES/WITH is on the same line as INSERT, strip the
+            // INSERT prefix and keep only the query body.
+            if let Some(body) = strip_insert_prefix(trimmed) {
+                let converted_line = replace_table_refs(&body, &model_tables, &mut source_count, &mut warnings);
+                output.push_str(&converted_line);
+                output.push('\n');
+                continue;
+            }
+            in_insert_header = true;
+            continue;
+        }
+        if in_insert_header {
+            // Skip partition (...) lines, column lists, trailing commas, etc.
+            // Stop when we reach the actual query body: SELECT/VALUES/WITH.
+            if upper.starts_with("SELECT")
+                || upper.starts_with("VALUES")
+                || upper.starts_with("WITH")
+                || upper.starts_with("(SELECT")
+            {
+                in_insert_header = false;
+                // fall through to process this line
+            } else {
+                continue;
+            }
         }
 
         // Replace table references in FROM/JOIN clauses
@@ -139,8 +168,7 @@ pub fn load_model_tables_pub(conn: &Connection, project_id: &str) -> HashSet<Str
 }
 
 /// Load all tables that are produced by scripts (appear as `to_table` in table_level_edges).
-fn load_model_tables(conn: &Connection, project_id: &str) -> HashSet<String> {
-    let mut tables = HashSet::new();
+fn load_model_tables(conn: &Connection, project_id: &str) -> HashSet<String> {    let mut tables = HashSet::new();
     if let Ok(mut stmt) = conn.prepare(
         "SELECT DISTINCT to_table FROM table_level_edges WHERE project_id = ?1 AND status = 1",
     ) {
@@ -165,6 +193,26 @@ fn normalize_table_name(name: &str) -> String {
     } else {
         name.to_string()
     }
+}
+
+/// If a line starts with `INSERT ...` and contains the query body on the same
+/// line (`SELECT`/`VALUES`/`WITH`), return the query body with the INSERT
+/// prefix stripped. Otherwise return `None` (means the INSERT header spans
+/// multiple lines and should be handled by the state machine).
+fn strip_insert_prefix(line: &str) -> Option<String> {
+    let upper = line.to_uppercase();
+    if !(upper.starts_with("INSERT") || upper.starts_with("INTO")) {
+        return None;
+    }
+    // Find the earliest body marker: SELECT, VALUES, WITH
+    let select_pos = upper.find("SELECT");
+    let values_pos = upper.find(" VALUES ");
+    let with_pos = upper.find(" WITH ");
+    let body_pos = [select_pos, values_pos, with_pos]
+        .into_iter()
+        .flatten()
+        .min()?;
+    Some(line[body_pos..].to_string())
 }
 
 /// Extract the table name from a CREATE TABLE DDL statement.
@@ -423,5 +471,47 @@ mod tests {
         extract_execute_immediate(sql, &mut out);
         assert_eq!(out.len(), 1);
         assert!(out[0].to_uppercase().contains("INSERT"));
+    }
+
+    #[test]
+    fn test_strip_insert_prefix_single_line() {
+        // INSERT + SELECT on same line → keep only SELECT
+        let body = strip_insert_prefix("INSERT INTO t SELECT * FROM s");
+        assert!(body.is_some());
+        let body = body.unwrap();
+        assert!(body.to_uppercase().starts_with("SELECT"));
+        assert!(!body.to_uppercase().contains("INSERT INTO t"));
+    }
+
+    #[test]
+    fn test_convert_skips_insert_header_multiline() {
+        // Multi-line INSERT: table, partition, column list, then SELECT.
+        let sql = "INSERT INTO TABLE mat_db.a01_cctv_acct_contt_send_msg_form
+partition (data_dt='${data_dt}')
+(col1, col2, col3)
+SELECT col1, col2, col3
+FROM src_table
+WHERE data_dt = '${data_dt}'";
+        let empty_models: HashSet<String> = HashSet::new();
+        let result = convert_sql_to_dbt_with_tables(&empty_models, sql);
+        // partition line must NOT appear; SELECT body must appear.
+        assert!(!result.dbt_content.contains("partition"), "partition leaked: {}", result.dbt_content);
+        assert!(!result.dbt_content.contains("INSERT"), "INSERT leaked: {}", result.dbt_content);
+        assert!(!result.dbt_content.contains("(col1, col2, col3)"), "column list leaked: {}", result.dbt_content);
+        assert!(result.dbt_content.contains("SELECT col1, col2, col3"), "SELECT body missing: {}", result.dbt_content);
+        assert!(result.dbt_content.contains("src_table"), "FROM missing: {}", result.dbt_content);
+        assert!(result.dbt_content.contains("WHERE data_dt"), "WHERE missing: {}", result.dbt_content);
+    }
+
+    #[test]
+    fn test_convert_insert_select_single_line() {
+        // INSERT + SELECT on one line → SELECT body kept, INSERT prefix dropped.
+        let sql = "INSERT INTO TABLE mat_db.t PARTITION (dt='1') SELECT a FROM src";
+        let empty_models: HashSet<String> = HashSet::new();
+        let result = convert_sql_to_dbt_with_tables(&empty_models, sql);
+        assert!(!result.dbt_content.contains("INSERT"), "INSERT leaked: {}", result.dbt_content);
+        assert!(!result.dbt_content.contains("PARTITION"), "PARTITION leaked: {}", result.dbt_content);
+        assert!(result.dbt_content.contains("SELECT a"), "SELECT body missing: {}", result.dbt_content);
+        assert!(result.dbt_content.contains("src"), "src missing: {}", result.dbt_content);
     }
 }
