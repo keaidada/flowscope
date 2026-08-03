@@ -156,6 +156,29 @@ export async function convertToDbt(
   return res.json();
 }
 
+/** Batch convert a folder's SQL files to dbt in one request.
+ *  Passes file contents as fallback (used when DB content is empty).
+ */
+export async function convertToDbtBatch(
+  projectId: string,
+  folderPath: string,
+  files: { path: string; content: string }[]
+): Promise<{
+  success: number;
+  errors: number;
+  total: number;
+  successPaths: string[];
+  errorPaths: string[];
+}> {
+  const res = await fetch(`${apiBase()}/api/convert-dbt-batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, folder_path: folderPath, files }),
+  });
+  if (!res.ok) throw new Error(`Batch convert failed: ${res.status}`);
+  return res.json();
+}
+
 /** Extract DML statements from a SQL file */
 export async function extractDml(
   projectId: string,

@@ -110,6 +110,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/governance/contracts/templates", get(gov_contract_templates))
         // dbt fusion: SQL→dbt conversion + DML extraction
         .route("/convert-dbt", post(gov_convert_dbt))
+        .route("/convert-dbt-batch", post(gov_convert_dbt_batch))
         .route("/extract-dml", post(gov_extract_dml))
         .route("/files/dbt-content", put(gov_save_dbt_content))
 }
@@ -3794,17 +3795,8 @@ async fn gov_convert_dbt(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ConvertDbtRequest>,
 ) -> impl IntoResponse {
-    // Read file content from main DB
-    let sql = {
-        let conn = match state.db.lock() {
-            Ok(c) => c,
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
-        };
-        match store::load_file_content(&conn, &req.project_id, &req.file_path) {
-            Ok(Some(content)) => content,
-            _ => return (StatusCode::NOT_FOUND, "File not found".to_string()).into_response(),
-        }
-    };
+    // Read file content: try disk (watch dirs) first, fallback to DB
+    let sql = read_project_file(&state, &req.project_id, &req.file_path);
 
     // Convert
     let conn = match state.db.lock() {
@@ -3815,24 +3807,151 @@ async fn gov_convert_dbt(
     Json(result).into_response()
 }
 
+#[derive(Deserialize)]
+struct ConvertDbtBatchRequest {
+    project_id: String,
+    #[serde(default)]
+    folder_path: Option<String>,
+    /// Optional per-file SQL content from the frontend (fallback when DB content is empty)
+    #[serde(default)]
+    files: Vec<BatchFileContent>,
+}
+
+#[derive(Deserialize)]
+struct BatchFileContent {
+    path: String,
+    content: String,
+}
+
+/// POST /api/convert-dbt-batch — convert a folder's SQL files to dbt in one request.
+///
+/// Mirrors the stored-procedure batch convert pattern: enumerate SQL files,
+/// read content (DB first, frontend-provided content as fallback), convert,
+/// save dbt_content, and report per-file success/error.
+async fn gov_convert_dbt_batch(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ConvertDbtBatchRequest>,
+) -> impl IntoResponse {
+    // 1. Load file list from DB, plus frontend-provided content as fallback
+    let (all_files, frontend_content): (Vec<store::ProjectFileRow>, std::collections::HashMap<String, String>) = {
+        let conn = match state.db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+        };
+        let files = store::load_project_files(&conn, &req.project_id);
+        let content_map: std::collections::HashMap<String, String> = req
+            .files
+            .into_iter()
+            .map(|f| (f.path, f.content))
+            .collect();
+        (files.unwrap_or_default(), content_map)
+    };
+
+    // 2. Filter to SQL files under the folder prefix
+    let prefix = req.folder_path.as_deref().map(|p| {
+        if p.ends_with('/') { p.to_string() } else { format!("{p}/") }
+    });
+    let sql_files: Vec<&store::ProjectFileRow> = all_files
+        .iter()
+        .filter(|f| {
+            if let Some(ref pfx) = prefix {
+                if !f.path.starts_with(pfx.as_str()) { return false; }
+            }
+            let lower = f.name.to_lowercase();
+            lower.ends_with(".sql") || lower.ends_with(".hql")
+        })
+        .collect();
+
+    let total = sql_files.len();
+    let mut success_paths = Vec::new();
+    let mut error_paths = Vec::new();
+    let mut updates: Vec<(String, String)> = Vec::new();
+
+    // 3. Convert each file
+    for f in sql_files {
+        // Prefer DB content; fall back to frontend-provided content
+        let sql = if !f.content.trim().is_empty() {
+            f.content.clone()
+        } else if let Some(c) = frontend_content.get(&f.path) {
+            c.clone()
+        } else {
+            // Try disk (watch dirs)
+            read_project_file(&state, &req.project_id, &f.path)
+        };
+
+        if sql.trim().is_empty() {
+            error_paths.push(f.path.clone());
+            continue;
+        }
+
+        let conn = match state.db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+        };
+        let result = super::governance::dbt_fusion::convert_sql_to_dbt(&conn, &req.project_id, &sql);
+        if !result.dbt_content.trim().is_empty() {
+            success_paths.push(f.path.clone());
+            updates.push((f.path.clone(), result.dbt_content));
+        } else {
+            error_paths.push(f.path.clone());
+        }
+    }
+
+    // 4. Persist dbt_content in chunks
+    if !updates.is_empty() {
+        let conn = match state.db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+        };
+        const CHUNK: usize = 500;
+        for chunk in updates.chunks(CHUNK) {
+            if let Err(e) = store::batch_update_dbt_content(&conn, &req.project_id, chunk) {
+                eprintln!("[api] convert-dbt-batch persist error: {e}");
+            }
+        }
+    }
+
+    Json(serde_json::json!({
+        "success": success_paths.len(),
+        "errors": error_paths.len(),
+        "total": total,
+        "successPaths": success_paths,
+        "errorPaths": error_paths,
+    }))
+    .into_response()
+}
+
 /// POST /api/extract-dml — extract DML statements from SQL
 async fn gov_extract_dml(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ConvertDbtRequest>,
 ) -> impl IntoResponse {
-    let sql = {
-        let conn = match state.db.lock() {
-            Ok(c) => c,
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
-        };
-        match store::load_file_content(&conn, &req.project_id, &req.file_path) {
-            Ok(Some(content)) => content,
-            _ => return (StatusCode::NOT_FOUND, "File not found".to_string()).into_response(),
-        }
-    };
-
+    let sql = read_project_file(&state, &req.project_id, &req.file_path);
     let result = super::governance::dbt_fusion::extract_dml(&sql);
     Json(result).into_response()
+}
+
+/// Read a project file's content: try the watch directories on disk first,
+/// then fall back to the DB (content may be lazily loaded / not persisted).
+fn read_project_file(state: &Arc<AppState>, project_id: &str, file_path: &str) -> String {
+    // 1. Try disk: file_path is relative to a watch directory
+    for dir in &state.config.watch_dirs {
+        let candidate = dir.join(file_path);
+        if candidate.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&candidate) {
+                return content;
+            }
+        }
+    }
+
+    // 2. Fallback: read from DB
+    if let Ok(conn) = state.db.lock() {
+        if let Ok(Some(content)) = store::load_file_content(&conn, project_id, file_path) {
+            return content;
+        }
+    }
+
+    String::new()
 }
 
 #[derive(Deserialize)]

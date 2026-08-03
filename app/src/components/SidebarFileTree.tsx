@@ -16,7 +16,7 @@ import {
 } from '@/lib/constants';
 import { genId } from '@/lib/utils';
 import { saveProjectFiles } from '@/lib/file-storage';
-import { convertToDbt, saveDbtContent } from '@/lib/file-storage';
+import { convertToDbtBatch } from '@/lib/file-storage';
 import { convertProceduresOnServer } from '@/lib/server-db';
 import { ConvertFolderDialog } from './ConvertFolderDialog';
 import { DbtConvertDialog } from './DbtConvertDialog';
@@ -353,26 +353,24 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       return;
     }
 
-    let done = 0;
-    for (const file of sqlFiles) {
-      try {
-        const result = await convertToDbt(currentProject.id, file.path);
-        if (result.dbt_content) {
-          await saveDbtContent(currentProject.id, file.path, result.dbt_content);
-          updateFiles([{ fileId: file.id, dbtContent: result.dbt_content }]);
-          success.push(file.path);
-        }
-      } catch (e) {
-        console.error(`[convert-dbt] ${file.path} failed:`, e);
-        errors.push(file.path);
-      }
-      done += 1;
-      setDbtFolderProgress({ done, total, success, errors });
+    try {
+      // Single batch request — fast, and passes file contents as fallback
+      // (DB content may be empty for lazily-imported projects)
+      const result = await convertToDbtBatch(
+        currentProject.id,
+        dbtFolderPath,
+        sqlFiles.map((f) => ({ path: f.path, content: f.content || '' }))
+      );
+      success.push(...result.successPaths);
+      errors.push(...result.errorPaths);
+    } catch (e) {
+      console.error('[convert-dbt-batch] failed:', e);
+      errors.push(...sqlFiles.map((f) => f.path));
     }
 
-    setIsConvertingDbtFolder(false);
     setDbtFolderProgress({ done: total, total, success, errors });
-  }, [currentProject, dbtFolderPath, updateFiles]);
+    setIsConvertingDbtFolder(false);
+  }, [currentProject, dbtFolderPath]);
 
   const handleConvertFolder = useCallback(
     async (dialect: Dialect) => {

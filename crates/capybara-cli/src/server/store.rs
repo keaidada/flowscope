@@ -1507,6 +1507,28 @@ pub fn update_dbt_content(
     Ok(())
 }
 
+/// Batch-update dbt_content for multiple files.
+pub fn batch_update_dbt_content(
+    conn: &Connection,
+    project_id: &str,
+    updates: &[(String, String)],
+) -> Result<(), rusqlite::Error> {
+    let tx = conn.unchecked_transaction()?;
+    {
+        let now = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap())
+            .format("%Y-%m-%dT%H:%M:%S%.3f+08:00")
+            .to_string();
+        let mut stmt = tx.prepare(
+            "UPDATE project_files SET dbt_content = ?1, updated_at = ?4 WHERE project_id = ?2 AND path = ?3 AND status = 1",
+        )?;
+        for (path, dbt) in updates {
+            stmt.execute(params![dbt, project_id, path, now])?;
+        }
+    }
+    tx.commit()
+}
+
 // ── delete by paths ───────────────────────────────────────────────────
 
 pub fn delete_project_files_by_paths(
