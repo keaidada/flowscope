@@ -552,7 +552,6 @@ interface FileNodeProps {
 
 const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
   const file = node.file;
-  if (!file) return null;
   const { t } = useTranslation();
   const {
     activeFileId,
@@ -579,13 +578,34 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
     onConvertDbtFile,
   } = props;
 
+  // All hooks must be called before any early return (React Hooks rules)
+  const itemRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to active file when revealCnt increments (locate button)
+  const prevReveal = useRef(revealCnt);
+  useEffect(() => {
+    if (revealCnt && revealCnt > (prevReveal.current ?? 0) && activeFileId === file?.id && itemRef.current) {
+      itemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    prevReveal.current = revealCnt;
+  }, [revealCnt, activeFileId, file?.id]);
+
+  // Scroll into view when focused
+  const isFocused = focusedFileId === file?.id;
+  useEffect(() => {
+    if (isFocused && itemRef.current) {
+      itemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [isFocused]);
+
+  if (!file) return null;
+
   const isActive = activeFileId === file.id;
   const isIncluded = isFileIncludedInAnalysis(file.id);
   const hasLineage = hasLineageFile(file.path);
   const isSelected = selectedFileIds.includes(file.id);
   const isRenaming = renamingFileId === file.id;
   const isDeleting = deletingFileId === file.id;
-  const isFocused = focusedFileId === file.id;
 
   if (isRenaming) {
     return (
@@ -618,23 +638,6 @@ const FileNode = memo(function FileNode({ node, depth, props }: FileNodeProps) {
       </div>
     );
   }
-
-  const itemRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (isFocused && itemRef.current) {
-      itemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }
-  }, [isFocused]);
-
-  // Scroll to active file when revealCnt increments (locate button)
-  const prevReveal = useRef(revealCnt);
-  useEffect(() => {
-    if (revealCnt && revealCnt > (prevReveal.current ?? 0) && isActive && itemRef.current) {
-      itemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }
-    prevReveal.current = revealCnt;
-  }, [revealCnt, isActive]);
 
   return (
     <div

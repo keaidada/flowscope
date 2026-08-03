@@ -125,7 +125,6 @@ export function EditorToolbar({
   onConvertDbt,
   showDbt,
   onToggleDbt,
-  hasDbtContent,
   openFiles,
   activeFileId,
   onOpenFile,
@@ -512,7 +511,7 @@ export function EditorToolbar({
             </Tooltip>
           </TooltipProvider>
         )}
-        {/* Toggle dbt / original — always available when onToggleDbt provided */}
+        {/* Toggle dbt / original */}
         {onToggleDbt && (
           <TooltipProvider delayDuration={300}>
             <Tooltip>
@@ -522,7 +521,6 @@ export function EditorToolbar({
                   size="icon"
                   className={cn('h-7 w-7', showDbt && 'bg-blue-500/10 text-blue-600')}
                   onClick={onToggleDbt}
-                  disabled={!hasDbtContent}
                 >
                   {showDbt ? <EyeOff className="h-3.5 w-3.5" /> : <Boxes className="h-3.5 w-3.5" />}
                 </Button>
