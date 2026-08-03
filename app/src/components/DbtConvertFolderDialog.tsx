@@ -177,7 +177,7 @@ export function DbtConvertFolderDialog({
           if (!isConverting) onOpenChange(open);
         }}
       >
-        <DialogContent size="lg">
+        <DialogContent className="overflow-hidden w-[30rem] max-w-[90vw]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Boxes className="h-4 w-4 text-blue-500" />
@@ -186,9 +186,9 @@ export function DbtConvertFolderDialog({
             <DialogDescription>{t('editor.convertDbtFolderDesc', '将文件夹下的 SQL 脚本转换为 dbt 模型格式')}</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <FolderTree className="h-4 w-4" />
+          <div className="space-y-4 py-2 min-w-0">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+              <FolderTree className="h-4 w-4 shrink-0" />
               <span className="font-mono text-xs truncate">{folderPath}</span>
             </div>
 
@@ -207,11 +207,11 @@ export function DbtConvertFolderDialog({
 
             {/* File list preview (before confirm) */}
             {!isConverting && !completed && sqlFiles.length > 0 && (
-              <div className="rounded-lg border overflow-hidden">
+              <div className="rounded-lg border overflow-hidden min-w-0">
                 <div className="px-3 py-1.5 bg-muted/30 border-b text-xs font-medium text-muted-foreground">
                   {t('editor.filesToConvert', '将转换以下文件')}
                 </div>
-                <div className="max-h-40 overflow-y-auto text-xs">
+                <div className="max-h-40 overflow-y-auto text-xs min-w-0">
                   {sqlFiles.map((p) => (
                     <div key={p} className="px-3 py-1 font-mono text-muted-foreground truncate hover:bg-muted/50" title={p}>
                       {p}
