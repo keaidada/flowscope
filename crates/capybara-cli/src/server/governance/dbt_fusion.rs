@@ -54,11 +54,6 @@ pub fn convert_sql_to_dbt_with_tables(
     let mut config_parts: Vec<String> = Vec::new();
     let mut has_config = false;
 
-    // State for INSERT INTO ... header (table / partition / column list).
-    // We turn the INSERT header into a dbt config and skip the column list,
-    // keeping the query body (SELECT/VALUES) as the model's SQL.
-    let mut in_insert_header = false;
-
     // CTE / subquery aliases that must NOT be rewritten to ref()/source().
     let cte_names = extract_cte_names(sql);
 
@@ -117,54 +112,9 @@ pub fn convert_sql_to_dbt_with_tables(
 
         let upper = trimmed.to_uppercase();
 
-        // Handle INSERT INTO ... — turn header into dbt config, skip column list.
-        if upper.starts_with("INSERT") || upper.starts_with("INTO") {
-            // Set materialized config for the INSERT target.
-            has_config = true;
-            if !config_parts.iter().any(|c| c.starts_with("materialized")) {
-                config_parts.push("materialized='table'".to_string());
-            }
-            // Extract target table name for model count.
-            if upper.starts_with("INSERT") {
-                if let Some(tbl) = extract_insert_target(trimmed) {
-                    model_count += 1;
-                }
-            }
-            // If SELECT/VALUES/WITH is on the same line as INSERT, strip the
-            // INSERT prefix and keep only the query body.
-            if let Some(body) = strip_insert_prefix(trimmed) {
-                let converted_line = replace_table_refs(&body, &model_tables, &cte_names, &mut source_count, &mut warnings);
-                output.push_str(&converted_line);
-                output.push('\n');
-                continue;
-            }
-            in_insert_header = true;
-            continue;
-        }
-        if in_insert_header {
-            // `partition (...)` → dbt partition_by config.
-            if upper.starts_with("PARTITION") || upper.starts_with("partition") {
-                if let Some(p) = extract_partition_field(trimmed) {
-                    if !config_parts.iter().any(|c| c.starts_with("partition_by")) {
-                        config_parts.push(format!("partition_by=\"{}\"", p));
-                    }
-                }
-                continue;
-            }
-            // Skip column list lines and trailing commas.
-            if upper.starts_with("SELECT")
-                || upper.starts_with("VALUES")
-                || upper.starts_with("WITH")
-                || upper.starts_with("(SELECT")
-            {
-                in_insert_header = false;
-                // fall through to process this line
-            } else {
-                continue;
-            }
-        }
-
-        // Replace table references in FROM/JOIN clauses
+        // Replace table references in FROM/JOIN/INTO clauses. INSERT INTO,
+        // partition, and column-list lines are kept as-is (only table names
+        // are rewritten to ref()/source()).
         let converted_line = replace_table_refs(&trimmed, &model_tables, &cte_names, &mut source_count, &mut warnings);
         output.push_str(&converted_line);
         output.push('\n');
@@ -218,73 +168,6 @@ fn normalize_table_name(name: &str) -> String {
     }
 }
 
-/// If a line starts with `INSERT ...` and contains the query body on the same
-/// line (`SELECT`/`VALUES`/`WITH`), return the query body with the INSERT
-/// prefix stripped. Otherwise return `None` (means the INSERT header spans
-/// multiple lines and should be handled by the state machine).
-fn strip_insert_prefix(line: &str) -> Option<String> {
-    let upper = line.to_uppercase();
-    if !(upper.starts_with("INSERT") || upper.starts_with("INTO")) {
-        return None;
-    }
-    // Find the earliest body marker: SELECT, VALUES, WITH
-    let select_pos = upper.find("SELECT");
-    let values_pos = upper.find(" VALUES ");
-    let with_pos = upper.find(" WITH ");
-    let body_pos = [select_pos, values_pos, with_pos]
-        .into_iter()
-        .flatten()
-        .min()?;
-    Some(line[body_pos..].to_string())
-}
-
-/// Extract the target table name from an `INSERT INTO [TABLE] db.tbl` line.
-/// Returns the table (last path segment) or `None`.
-fn extract_insert_target(line: &str) -> Option<String> {
-    let lower = line.to_lowercase();
-    // Locate "insert into" then "table" (optional) then the table name.
-    let start = lower.find("insert into")? + "insert into".len();
-    let after = &line[start..];
-    let after_lower = after.to_lowercase();
-    let start2 = if let Some(t) = after_lower.find("table") {
-        // Only treat "table" as keyword if followed by whitespace/paren.
-        let after_t = &after[t + 5..];
-        if after_t.starts_with(char::is_whitespace) || after_t.starts_with('(') {
-            t + 5
-        } else {
-            0
-        }
-    } else {
-        0
-    };
-    let rest = &after[start2..];
-    let end = rest
-        .find(|c: char| c == ' ' || c == '(' || c == ';' || c == '\n')
-        .unwrap_or(rest.len());
-    let raw = rest[..end].trim();
-    if raw.is_empty() {
-        None
-    } else {
-        Some(normalize_table_name(raw))
-    }
-}
-
-/// Extract the first field name from a `partition (data_dt='...')` line.
-fn extract_partition_field(line: &str) -> Option<String> {
-    let open = line.find('(')?;
-    let inner = &line[open + 1..];
-    let trimmed = inner.trim();
-    // Read identifier (field name) until '=' or ',' or ')' or space
-    let end = trimmed
-        .find(|c: char| c == '=' || c == ',' || c == ')' || c == ' ' || c == '\n')
-        .unwrap_or(trimmed.len());
-    let field = trimmed[..end].trim().trim_matches('`').trim_matches('"');
-    if field.is_empty() {
-        None
-    } else {
-        Some(field.to_string())
-    }
-}
 
 /// Extract the table name from a CREATE TABLE DDL statement.
 fn extract_table_name_from_ddl(line: &str) -> Option<String> {
@@ -326,11 +209,11 @@ fn replace_table_refs(
 ) -> String {
     let mut result = line.to_string();
 
-    // Find table references after FROM and JOIN keywords
-    // Pattern: FROM table_name or JOIN table_name
+    // Find table references after FROM and JOIN keywords. INSERT INTO target
+    // tables are left untouched — the INSERT statement is preserved verbatim.
     let upper = line.to_uppercase();
 
-    for keyword in &["FROM ", "JOIN ", "INTO "] {
+    for keyword in &["FROM ", "JOIN "] {
         let mut search_start = 0;
         while let Some(pos) = upper[search_start..].find(keyword) {
             let abs_pos = search_start + pos + keyword.len();
@@ -695,18 +578,9 @@ mod tests {
     }
 
     #[test]
-    fn test_strip_insert_prefix_single_line() {
-        // INSERT + SELECT on same line → keep only SELECT
-        let body = strip_insert_prefix("INSERT INTO t SELECT * FROM s");
-        assert!(body.is_some());
-        let body = body.unwrap();
-        assert!(body.to_uppercase().starts_with("SELECT"));
-        assert!(!body.to_uppercase().contains("INSERT INTO t"));
-    }
-
-    #[test]
     fn test_convert_skips_insert_header_multiline() {
-        // Multi-line INSERT: table, partition, column list, then SELECT.
+        // INSERT INTO ... partition (...) column-list SELECT — the INSERT
+        // statement is preserved; only the table name is rewritten.
         let sql = "INSERT INTO TABLE mat_db.a01_cctv_acct_contt_send_msg_form
 partition (data_dt='${data_dt}')
 (col1, col2, col3)
@@ -716,13 +590,11 @@ WHERE data_dt = '${data_dt}'";
         let empty_models: HashSet<String> = HashSet::new();
         let result = convert_sql_to_dbt_with_tables(&empty_models, sql);
         let content = &result.dbt_content;
-        // INSERT header → dbt config (materialized + partition_by)
-        assert!(content.contains("config("), "config missing: {content}");
-        assert!(content.contains("materialized='table'"), "materialized missing: {content}");
-        assert!(content.contains("partition_by"), "partition_by missing: {content}");
-        assert!(!content.contains("INSERT INTO"), "INSERT leaked: {content}");
-        // Column list must be skipped (dbt infers columns from SELECT)
-        assert!(!content.contains("(col1, col2, col3)"), "column list leaked: {content}");
+        // INSERT INTO / partition / column list preserved verbatim (target
+        // table name NOT rewritten).
+        assert!(content.contains("INSERT INTO TABLE mat_db.a01_cctv_acct_contt_send_msg_form"), "INSERT INTO not preserved: {content}");
+        assert!(content.contains("partition (data_dt"), "PARTITION missing: {content}");
+        assert!(content.contains("(col1, col2, col3)"), "column list missing: {content}");
         // Query body preserved
         assert!(content.contains("SELECT col1, col2, col3"), "SELECT body missing: {content}");
         assert!(content.contains("src_table"), "FROM missing: {content}");
@@ -731,21 +603,22 @@ WHERE data_dt = '${data_dt}'";
 
     #[test]
     fn test_convert_insert_select_single_line() {
-        // INSERT + SELECT on one line → SELECT body kept, INSERT prefix dropped.
+        // INSERT + SELECT on one line → INSERT target preserved verbatim,
+        // only FROM table names rewritten.
         let sql = "INSERT INTO TABLE mat_db.t PARTITION (dt='1') SELECT a FROM src";
         let empty_models: HashSet<String> = HashSet::new();
         let result = convert_sql_to_dbt_with_tables(&empty_models, sql);
-        assert!(!result.dbt_content.contains("INSERT"), "INSERT leaked: {}", result.dbt_content);
-        assert!(!result.dbt_content.contains("PARTITION"), "PARTITION leaked: {}", result.dbt_content);
-        assert!(result.dbt_content.contains("SELECT a"), "SELECT body missing: {}", result.dbt_content);
-        assert!(result.dbt_content.contains("src"), "src missing: {}", result.dbt_content);
+        let content = &result.dbt_content;
+        assert!(content.contains("INSERT INTO TABLE mat_db.t"), "INSERT/target missing: {content}");
+        assert!(content.contains("PARTITION (dt='1')"), "PARTITION missing: {content}");
+        assert!(content.contains("SELECT a FROM {{ source('raw', 'src') }}"), "SELECT body missing: {content}");
     }
 
     #[test]
     fn test_convert_with_query_body_then_insert() {
         // WITH defs + INSERT INTO referencing CTEs. All CTEs (incl. last a6)
-        // must be preserved; INSERT header becomes dbt config; only the
-        // INSERT's own SELECT stays as the query body.
+        // must be preserved; INSERT INTO header + column list preserved; only
+        // table names are rewritten.
         let sql = "with a1 as (select 1 x),
 a2 as (select 2 x),
 a3 as (select 3 x),
@@ -767,12 +640,10 @@ from a1;";
         for name in ["a1", "a2", "a3", "a4", "a5", "a6"] {
             assert!(content.contains(&format!("{name} as (")), "CTE {name} missing: {content}");
         }
-        // INSERT header → dbt config
-        assert!(content.contains("config("), "config missing: {content}");
-        assert!(content.contains("materialized='table'"), "materialized missing: {content}");
-        assert!(content.contains("partition_by"), "partition_by missing: {content}");
-        assert!(!content.contains("insert into"), "INSERT leaked: {content}");
-        assert!(!content.contains("partition (data_dt"), "PARTITION header leaked: {content}");
+        // INSERT INTO / partition / column list preserved verbatim
+        assert!(content.contains("insert into table mat_db.t"), "INSERT INTO missing: {content}");
+        assert!(content.contains("partition (data_dt"), "PARTITION missing: {content}");
+        assert!(content.contains("statt_tm"), "column list missing: {content}");
         // INSERT's actual SELECT body preserved (references CTEs)
         assert!(content.contains("select current_date"), "INSERT SELECT missing: {content}");
         assert!(content.contains("from a1"), "INSERT FROM missing: {content}");
