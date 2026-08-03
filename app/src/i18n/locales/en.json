@@ -120,7 +120,20 @@
     "transformed": "Transformed (editable)",
     "reExtract": "Re-extract",
     "apply": "Apply",
-    "noDml": "No DML extracted"
+    "noDml": "No DML extracted",
+    "convertDbt": "Convert to dbt model",
+    "viewDbt": "View dbt",
+    "extractDml": "Extract DML statements",
+    "copyAll": "Copy all",
+    "foundDml": "Found",
+    "dmlStatements": "DML statements",
+    "statement": "Statement",
+    "originalSql": "Original SQL",
+    "dbtModel": "dbt model SQL",
+    "modelRefs": "model refs",
+    "sourceRefs": "source refs",
+    "confirmSave": "Save",
+    "saved": "Saved"
   },
   "project": {
     "projects": "Projects",

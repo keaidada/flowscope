@@ -13,6 +13,8 @@ import { EditorToolbar } from './EditorToolbar';
 import type { SqlViewMode } from './EditorToolbar';
 import { EtlDialog } from './EtlDialog';
 import { ProcedureRepairDialog } from './ProcedureRepairDialog';
+import { DbtConvertDialog } from './DbtConvertDialog';
+import { DmlExtractDialog } from './DmlExtractDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_FILE_NAMES } from '@/lib/constants';
 import type { RunMode } from '@/lib/project-store';
@@ -224,12 +226,19 @@ export function EditorArea({
   // Content to display in the editor based on view mode
   const [showTransformed, setShowTransformed] = useState(false);
   const [folded, setFolded] = useState(false);
+  const [showDbt, setShowDbt] = useState(false);
+  const [dbtDialogOpen, setDbtDialogOpen] = useState(false);
+  const [dmlDialogOpen, setDmlDialogOpen] = useState(false);
   const showTransformedRef = useRef(showTransformed);
   showTransformedRef.current = showTransformed;
 
   const hasTransformedContent = !!activeFile?.transformedContent;
+  const hasDbtContent = !!activeFile?.dbtContent;
 
   const displayContent = useMemo(() => {
+    if (showDbt && hasDbtContent) {
+      return activeFile?.dbtContent ?? '';
+    }
     if (sqlViewMode === 'resolved' && resolvedSql) {
       return resolvedSql;
     }
@@ -242,8 +251,11 @@ export function EditorArea({
     resolvedSql,
     activeFile?.content,
     activeFile?.transformedContent,
+    activeFile?.dbtContent,
     showTransformed,
+    showDbt,
     hasTransformedContent,
+    hasDbtContent,
   ]);
 
   const handleContentChange = useCallback(
@@ -468,6 +480,11 @@ export function EditorArea({
           setFolded((v) => !v);
         }}
         folded={folded}
+        onConvertDbt={() => setDbtDialogOpen(true)}
+        showDbt={showDbt}
+        onToggleDbt={() => setShowDbt((v) => !v)}
+        hasDbtContent={hasDbtContent}
+        onExtractDml={() => setDmlDialogOpen(true)}
         openFiles={
           (currentProject?.openFileIds || [])
             .map((id) => currentProject?.files.find((f) => f.id === id))
@@ -512,7 +529,7 @@ export function EditorArea({
             value={displayContent}
             onChange={handleContentChange}
             className="h-full text-sm"
-            editable={!showTransformed && sqlViewMode === 'template' && !isReadOnly}
+            editable={!showTransformed && !showDbt && sqlViewMode === 'template' && !isReadOnly}
             isDark={isDark}
             highlightedSpan={sqlViewMode === 'template' ? highlightedSpan : null}
             lineWrapping={lineWrapping}
@@ -538,6 +555,28 @@ export function EditorArea({
         originalContent={activeFile?.content || ''}
         onApply={handleApplyTransformed}
       />
+
+      {currentProject && activeFile && (
+        <DbtConvertDialog
+          open={dbtDialogOpen}
+          onClose={() => setDbtDialogOpen(false)}
+          projectId={currentProject.id}
+          filePath={activeFile.path}
+          originalSql={activeFile.content}
+          onSaved={(dbtContent) => {
+            updateFiles([{ fileId: activeFile.id, dbtContent }]);
+          }}
+        />
+      )}
+
+      {currentProject && activeFile && (
+        <DmlExtractDialog
+          open={dmlDialogOpen}
+          onClose={() => setDmlDialogOpen(false)}
+          projectId={currentProject.id}
+          filePath={activeFile.path}
+        />
+      )}
     </div>
   );
 }

@@ -20,6 +20,7 @@ export async function saveProjectFiles(projectId: string, files: ProjectFile[]):
       dialect: f.dialect || '',
       is_procedure: f.isProcedure ? 1 : 0,
       transformed_content: f.transformedContent || '',
+      dbt_content: f.dbtContent || '',
       created_at: '',
       updated_at: '',
     }))
@@ -39,6 +40,7 @@ export async function loadProjectFiles(projectId: string): Promise<ProjectFile[]
     dialect: (f as any).dialect || '',
     isProcedure: (f as any).is_procedure ? true : false,
     transformedContent: (f as any).transformed_content || null,
+    dbtContent: (f as any).dbt_content || null,
   }));
 }
 
@@ -66,6 +68,7 @@ export async function loadFileContent(
   content: string | null;
   isProcedure?: boolean;
   transformedContent?: string | null;
+  dbtContent?: string | null;
 } | null> {
   const resp = await serverDb.loadFileContent(projectId, filePath);
   if (resp.content === null && resp.is_procedure === null) return null;
@@ -73,6 +76,7 @@ export async function loadFileContent(
     content: resp.content,
     isProcedure: (resp.is_procedure ?? 0) !== 0,
     transformedContent: resp.transformed_content || null,
+    dbtContent: (resp as any).dbt_content || null,
   };
 }
 
@@ -105,6 +109,7 @@ export async function upsertProjectFiles(projectId: string, files: ProjectFile[]
       dialect: f.dialect || '',
       is_procedure: f.isProcedure ? 1 : 0,
       transformed_content: f.transformedContent || '',
+      dbt_content: f.dbtContent || '',
       created_at: '',
       updated_at: '',
     })) as never
@@ -125,6 +130,58 @@ export async function renameProjectFile(
   isFolder: boolean
 ): Promise<void> {
   await serverDb.renameProjectFile(projectId, oldPath, newPath, newName, isFolder);
+}
+
+// ── dbt fusion API helpers ─────────────────────────────────────────────
+
+function apiBase(): string {
+  if (typeof window !== 'undefined') {
+    const port = (window as unknown as { __FSCOPE_PORT__?: number }).__FSCOPE_PORT__;
+    if (port) return `http://localhost:${port}`;
+  }
+  return '';
+}
+
+/** Convert a SQL file to dbt format */
+export async function convertToDbt(
+  projectId: string,
+  filePath: string
+): Promise<{ dbt_content: string; model_count: number; source_count: number; warnings: string[] }> {
+  const res = await fetch(`${apiBase()}/api/convert-dbt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, file_path: filePath }),
+  });
+  if (!res.ok) throw new Error(`Convert failed: ${res.status}`);
+  return res.json();
+}
+
+/** Extract DML statements from a SQL file */
+export async function extractDml(
+  projectId: string,
+  filePath: string
+): Promise<{ statements: string[]; count: number }> {
+  const res = await fetch(`${apiBase()}/api/extract-dml`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, file_path: filePath }),
+  });
+  if (!res.ok) throw new Error(`Extract DML failed: ${res.status}`);
+  return res.json();
+}
+
+/** Save dbt_content for a file */
+export async function saveDbtContent(
+  projectId: string,
+  filePath: string,
+  dbtContent: string
+): Promise<void> {
+  const res = await fetch(`${apiBase()}/api/files/dbt-content`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, file_path: filePath, dbt_content: dbtContent }),
+  });
+  if (!res.ok) throw new Error(`Save dbt failed: ${res.status}`);
 }
 
 /** Delete stored files for a project */

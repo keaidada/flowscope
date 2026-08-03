@@ -15,7 +15,7 @@ use utoipa::ToSchema;
 /// v0: original — time fields (`created_at`, `updated_at`, `last_accessed_at`)
 ///     stored as `INTEGER` Unix millisecond timestamps.
 /// v1: time fields stored as `TEXT` RFC3339 / ISO 8601 strings (human-readable).
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 6;
 
 /// Open (or create) the database file at the given path.
 pub fn open_db(path: &Path) -> Result<Mutex<Connection>, rusqlite::Error> {
@@ -57,6 +57,10 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     if current < 5 {
         migrate_v4_to_v5(conn)?;
+    }
+
+    if current < 6 {
+        migrate_v5_to_v6(conn)?;
     }
 
     if current != SCHEMA_VERSION {
@@ -647,6 +651,33 @@ fn migrate_v4_to_v5(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// v5→v6: add dbt_content column to project_files
+fn migrate_v5_to_v6(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='project_files'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if !table_exists {
+        return Ok(());
+    }
+
+    let pf_cols: Vec<String> = conn
+        .prepare("PRAGMA table_info(project_files)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .collect();
+
+    if !pf_cols.iter().any(|c| c == "dbt_content") {
+        conn.execute_batch(
+            "ALTER TABLE project_files ADD COLUMN dbt_content TEXT NOT NULL DEFAULT '';",
+        )?;
+    }
+    Ok(())
+}
+
 /// Returns the `CREATE TABLE` statement for the given table with the current
 /// (v1) schema — time columns as `TEXT`.
 fn create_table_sql_for(table: &str) -> &'static str {
@@ -664,6 +695,7 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 dialect             TEXT    NOT NULL DEFAULT '',
                 is_procedure        INTEGER NOT NULL DEFAULT 0,
                 transformed_content TEXT    NOT NULL DEFAULT '',
+                dbt_content         TEXT    NOT NULL DEFAULT '',
                 created_at          TEXT    NOT NULL DEFAULT '',
                 updated_at          TEXT    NOT NULL DEFAULT '',
                 status              INTEGER NOT NULL DEFAULT 1,
@@ -940,6 +972,7 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             dialect             TEXT    NOT NULL DEFAULT '',
             is_procedure        INTEGER NOT NULL DEFAULT 0,
             transformed_content TEXT    NOT NULL DEFAULT '',
+            dbt_content         TEXT    NOT NULL DEFAULT '',
             created_at          TEXT    NOT NULL DEFAULT '',
             updated_at          TEXT    NOT NULL DEFAULT '',
             status              INTEGER NOT NULL DEFAULT 1,
@@ -1167,6 +1200,8 @@ pub struct ProjectFileRow {
     #[serde(default)]
     pub transformed_content: String,
     #[serde(default)]
+    pub dbt_content: String,
+    #[serde(default)]
     pub created_at: String,
     #[serde(default)]
     pub updated_at: String,
@@ -1196,7 +1231,7 @@ pub fn save_project_files_batch(
     let now = chrono::Local::now().to_rfc3339();
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?12), COALESCE(NULLIF(?11, ''), ?12), 1) ON CONFLICT(project_id, path) DO UPDATE SET name=excluded.name, content=excluded.content, language=excluded.language, size=excluded.size, dialect=excluded.dialect, is_procedure=excluded.is_procedure, transformed_content=excluded.transformed_content, updated_at=COALESCE(NULLIF(excluded.updated_at, ''), ?12), status=1"
+            "INSERT INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, dbt_content, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?13), COALESCE(NULLIF(?11, ''), ?13), COALESCE(NULLIF(?12, ''), ?13), 1) ON CONFLICT(project_id, path) DO UPDATE SET name=excluded.name, content=excluded.content, language=excluded.language, size=excluded.size, dialect=excluded.dialect, is_procedure=excluded.is_procedure, transformed_content=excluded.transformed_content, dbt_content=excluded.dbt_content, updated_at=COALESCE(NULLIF(excluded.updated_at, ''), ?13), status=1"
         )?;
         for f in files {
             stmt.execute(params![
@@ -1209,6 +1244,7 @@ pub fn save_project_files_batch(
                 f.dialect,
                 f.is_procedure,
                 f.transformed_content,
+                f.dbt_content,
                 f.created_at,
                 f.updated_at,
                 now
@@ -1224,7 +1260,7 @@ pub fn load_project_files(
     project_id: &str,
 ) -> Result<Vec<ProjectFileRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT name, path, content, language, size, COALESCE(dialect,'') as dialect, COALESCE(is_procedure,0) as is_procedure, COALESCE(transformed_content,'') as transformed_content, created_at, updated_at FROM project_files WHERE project_id = ?1 AND status = 1 ORDER BY path"
+        "SELECT name, path, content, language, size, COALESCE(dialect,'') as dialect, COALESCE(is_procedure,0) as is_procedure, COALESCE(transformed_content,'') as transformed_content, COALESCE(dbt_content,'') as dbt_content, created_at, updated_at FROM project_files WHERE project_id = ?1 AND status = 1 ORDER BY path"
     )?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(ProjectFileRow {
@@ -1236,8 +1272,9 @@ pub fn load_project_files(
             dialect: row.get(5)?,
             is_procedure: row.get(6)?,
             transformed_content: row.get(7)?,
-            created_at: row.get(8)?,
-            updated_at: row.get(9)?,
+            dbt_content: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
         })
     })?;
     rows.collect()
@@ -1306,6 +1343,8 @@ pub struct FileFullRow {
     pub content: Option<String>,
     pub is_procedure: i64,
     pub transformed_content: Option<String>,
+    #[serde(default)]
+    pub dbt_content: Option<String>,
 }
 
 pub fn load_file_full(
@@ -1314,7 +1353,7 @@ pub fn load_file_full(
     file_path: &str,
 ) -> Result<Option<FileFullRow>, rusqlite::Error> {
     let result = conn.query_row(
-        "SELECT content, COALESCE(is_procedure, 0), COALESCE(transformed_content, '')
+        "SELECT content, COALESCE(is_procedure, 0), COALESCE(transformed_content, ''), COALESCE(dbt_content, '')
          FROM project_files WHERE project_id = ?1 AND path = ?2 AND status = 1",
         params![project_id, file_path],
         |row| {
@@ -1323,11 +1362,11 @@ pub fn load_file_full(
                 is_procedure: row.get(1)?,
                 transformed_content: {
                     let tc: String = row.get(2)?;
-                    if tc.is_empty() {
-                        None
-                    } else {
-                        Some(tc)
-                    }
+                    if tc.is_empty() { None } else { Some(tc) }
+                },
+                dbt_content: {
+                    let dc: String = row.get(3)?;
+                    if dc.is_empty() { None } else { Some(dc) }
                 },
             })
         },
@@ -1386,8 +1425,8 @@ pub fn upsert_project_files(
     let tx = conn.unchecked_transaction()?;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, created_at, updated_at, status, dir_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(NULLIF(?10, ''), ?13), COALESCE(NULLIF(?11, ''), ?13), 1, ?12)
+            "INSERT INTO project_files (project_id, name, path, content, language, size, dialect, is_procedure, transformed_content, dbt_content, created_at, updated_at, status, dir_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, COALESCE(NULLIF(?11, ''), ?14), COALESCE(NULLIF(?12, ''), ?14), 1, ?13)
              ON CONFLICT(project_id, path) DO UPDATE SET
              name = excluded.name,
              content = excluded.content,
@@ -1396,7 +1435,8 @@ pub fn upsert_project_files(
              dialect = excluded.dialect,
              is_procedure = excluded.is_procedure,
              transformed_content = excluded.transformed_content,
-             updated_at = COALESCE(NULLIF(excluded.updated_at, ''), ?13),
+             dbt_content = excluded.dbt_content,
+             updated_at = COALESCE(NULLIF(excluded.updated_at, ''), ?14),
              status = excluded.status,
              dir_id = excluded.dir_id"
         )?;
@@ -1412,6 +1452,7 @@ pub fn upsert_project_files(
                 f.dialect,
                 f.is_procedure,
                 f.transformed_content,
+                f.dbt_content,
                 f.created_at,
                 f.updated_at,
                 dir,
@@ -1446,6 +1487,24 @@ pub fn batch_update_transformed(
         }
     }
     tx.commit()
+}
+
+/// Update dbt_content for a single file.
+pub fn update_dbt_content(
+    conn: &Connection,
+    project_id: &str,
+    file_path: &str,
+    dbt_content: &str,
+) -> Result<(), rusqlite::Error> {
+    let now = chrono::Utc::now()
+        .with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap())
+        .format("%Y-%m-%dT%H:%M:%S%.3f+08:00")
+        .to_string();
+    conn.execute(
+        "UPDATE project_files SET dbt_content = ?1, updated_at = ?4 WHERE project_id = ?2 AND path = ?3 AND status = 1",
+        params![dbt_content, project_id, file_path, now],
+    )?;
+    Ok(())
 }
 
 // ── delete by paths ───────────────────────────────────────────────────

@@ -15,6 +15,9 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   XCircle,
+  FileCode2,
+  Boxes,
+  FileText,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -75,6 +78,12 @@ interface EditorToolbarProps {
   hasTransformedContent?: boolean;
   onFoldAll?: () => void;
   folded?: boolean;
+  // dbt fusion
+  onConvertDbt?: () => void;
+  showDbt?: boolean;
+  onToggleDbt?: () => void;
+  hasDbtContent?: boolean;
+  onExtractDml?: () => void;
   // Open file tabs
   openFiles?: ProjectFile[];
   activeFileId?: string | null;
@@ -115,6 +124,11 @@ export function EditorToolbar({
   hasTransformedContent,
   onFoldAll,
   folded,
+  onConvertDbt,
+  showDbt,
+  onToggleDbt,
+  hasDbtContent,
+  onExtractDml,
   openFiles,
   activeFileId,
   onOpenFile,
@@ -482,6 +496,56 @@ export function EditorToolbar({
               </TooltipTrigger>
               <TooltipContent>
                 <p>{showTransformed ? t('editor.viewOriginal') : t('editor.viewTransformed')}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {/* Convert to dbt */}
+        {onConvertDbt && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onConvertDbt}>
+                  <FileCode2 className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{t('editor.convertDbt', '转换为 dbt 模型')}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {/* Toggle dbt / original */}
+        {hasDbtContent && onToggleDbt && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn('h-7 w-7', showDbt && 'bg-blue-500/10 text-blue-600')}
+                  onClick={onToggleDbt}
+                >
+                  {showDbt ? <EyeOff className="h-3.5 w-3.5" /> : <Boxes className="h-3.5 w-3.5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{showDbt ? t('editor.viewOriginal', '查看原始') : t('editor.viewDbt', '查看 dbt')}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {/* Extract DML */}
+        {onExtractDml && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onExtractDml}>
+                  <FileText className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{t('editor.extractDml', 'DML 语句提取')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

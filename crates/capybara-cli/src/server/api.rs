@@ -10,7 +10,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use capybara_core::{self, AnalyzeRequest as CoreAnalyzeRequest, Dialect};
@@ -108,6 +108,10 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/governance/settings", get(gov_get_settings).put(gov_update_settings))
         // Contract templates
         .route("/governance/contracts/templates", get(gov_contract_templates))
+        // dbt fusion: SQL→dbt conversion + DML extraction
+        .route("/convert-dbt", post(gov_convert_dbt))
+        .route("/extract-dml", post(gov_extract_dml))
+        .route("/files/dbt-content", put(gov_save_dbt_content))
 }
 
 // === Request/Response types ===
@@ -3774,3 +3778,81 @@ status: draft
 custom:
   flowscope: {}
 "#;
+
+// ============================================================
+// dbt fusion: SQL→dbt conversion + DML extraction
+// ============================================================
+
+#[derive(Deserialize)]
+struct ConvertDbtRequest {
+    project_id: String,
+    file_path: String,
+}
+
+/// POST /api/convert-dbt — convert SQL to dbt format
+async fn gov_convert_dbt(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ConvertDbtRequest>,
+) -> impl IntoResponse {
+    // Read file content from main DB
+    let sql = {
+        let conn = match state.db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+        };
+        match store::load_file_content(&conn, &req.project_id, &req.file_path) {
+            Ok(Some(content)) => content,
+            _ => return (StatusCode::NOT_FOUND, "File not found".to_string()).into_response(),
+        }
+    };
+
+    // Convert
+    let conn = match state.db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    let result = super::governance::dbt_fusion::convert_sql_to_dbt(&conn, &req.project_id, &sql);
+    Json(result).into_response()
+}
+
+/// POST /api/extract-dml — extract DML statements from SQL
+async fn gov_extract_dml(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ConvertDbtRequest>,
+) -> impl IntoResponse {
+    let sql = {
+        let conn = match state.db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+        };
+        match store::load_file_content(&conn, &req.project_id, &req.file_path) {
+            Ok(Some(content)) => content,
+            _ => return (StatusCode::NOT_FOUND, "File not found".to_string()).into_response(),
+        }
+    };
+
+    let result = super::governance::dbt_fusion::extract_dml(&sql);
+    Json(result).into_response()
+}
+
+#[derive(Deserialize)]
+struct SaveDbtContentRequest {
+    project_id: String,
+    file_path: String,
+    dbt_content: String,
+}
+
+/// PUT /api/files/dbt-content — save dbt_content for a file
+async fn gov_save_dbt_content(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SaveDbtContentRequest>,
+) -> impl IntoResponse {
+    let conn = match state.db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match store::update_dbt_content(&conn, &req.project_id, &req.file_path, &req.dbt_content) {
+        Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response(),
+    }
+}

@@ -120,7 +120,20 @@
     "transformed": "转换结果（可编辑）",
     "reExtract": "重新提取",
     "apply": "应用",
-    "noDml": "未提取到 DML 语句"
+    "noDml": "未提取到 DML 语句",
+    "convertDbt": "转换为 dbt 模型",
+    "viewDbt": "查看 dbt",
+    "extractDml": "DML 语句提取",
+    "copyAll": "复制全部",
+    "foundDml": "提取到",
+    "dmlStatements": "条 DML 语句",
+    "statement": "语句",
+    "originalSql": "原始 SQL",
+    "dbtModel": "dbt 模型 SQL",
+    "modelRefs": "个模型引用",
+    "sourceRefs": "个 source 引用",
+    "confirmSave": "确认保存",
+    "saved": "已保存"
   },
   "project": {
     "projects": "项目",
