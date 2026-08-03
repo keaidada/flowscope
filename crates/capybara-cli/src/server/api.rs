@@ -3847,18 +3847,34 @@ async fn gov_convert_dbt_batch(
         (files.unwrap_or_default(), content_map)
     };
 
-    // 2. Filter to SQL files under the folder prefix
+    // 2. Filter to SQL files under the folder prefix, resolving content.
+    //    Empty-content files are skipped (not counted, not errors).
     let prefix = req.folder_path.as_deref().map(|p| {
         if p.ends_with('/') { p.to_string() } else { format!("{p}/") }
     });
-    let sql_files: Vec<&store::ProjectFileRow> = all_files
+    let mut sql_files: Vec<(&store::ProjectFileRow, String)> = all_files
         .iter()
-        .filter(|f| {
+        .filter_map(|f| {
             if let Some(ref pfx) = prefix {
-                if !f.path.starts_with(pfx.as_str()) { return false; }
+                if !f.path.starts_with(pfx.as_str()) { return None; }
             }
             let lower = f.name.to_lowercase();
-            lower.ends_with(".sql") || lower.ends_with(".hql")
+            if !(lower.ends_with(".sql") || lower.ends_with(".hql")) { return None; }
+
+            // Resolve content: DB → frontend fallback → disk
+            let sql = if !f.content.trim().is_empty() {
+                f.content.clone()
+            } else if let Some(c) = frontend_content.get(&f.path) {
+                c.clone()
+            } else {
+                read_project_file(&state, &req.project_id, &f.path)
+            };
+
+            // Skip empty-content files silently
+            if sql.trim().is_empty() {
+                return None;
+            }
+            Some((f, sql))
         })
         .collect();
 
@@ -3867,28 +3883,17 @@ async fn gov_convert_dbt_batch(
     let mut error_paths = Vec::new();
     let mut updates: Vec<(String, String)> = Vec::new();
 
-    // 3. Convert each file
-    for f in sql_files {
-        // Prefer DB content; fall back to frontend-provided content
-        let sql = if !f.content.trim().is_empty() {
-            f.content.clone()
-        } else if let Some(c) = frontend_content.get(&f.path) {
-            c.clone()
-        } else {
-            // Try disk (watch dirs)
-            read_project_file(&state, &req.project_id, &f.path)
-        };
-
-        if sql.trim().is_empty() {
-            error_paths.push(f.path.clone());
-            continue;
-        }
-
+    // 3. Preload model tables once (avoids per-file DB queries), then convert
+    let model_tables = {
         let conn = match state.db.lock() {
             Ok(c) => c,
             Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
         };
-        let result = super::governance::dbt_fusion::convert_sql_to_dbt(&conn, &req.project_id, &sql);
+        super::governance::dbt_fusion::load_model_tables_pub(&conn, &req.project_id)
+    };
+    for (f, sql) in &sql_files {
+        let result =
+            super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, sql);
         if !result.dbt_content.trim().is_empty() {
             success_paths.push(f.path.clone());
             updates.push((f.path.clone(), result.dbt_content));

@@ -317,10 +317,12 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     (folderPath: string) => {
       if (!currentProject) return;
       const prefix = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+      // Only include SQL files that actually have content — skip empty ones
       const sqlFiles = currentProject.files.filter(
         (f) =>
           f.path.startsWith(prefix) &&
-          (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path))
+          (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path)) &&
+          (f.content || '').trim().length > 0
       );
       setDbtFolderPath(folderPath);
       setDbtFolderFiles(sqlFiles.map((f) => f.path));
@@ -338,10 +340,12 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     setDbtFolderProgress({ done: 0, total: 0, success: [], errors: [] });
 
     const prefix = dbtFolderPath.endsWith('/') ? dbtFolderPath : dbtFolderPath + '/';
+    // Only convert files with actual content (empty ones were skipped at dialog open)
     const sqlFiles = currentProject.files.filter(
       (f) =>
         f.path.startsWith(prefix) &&
-        (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path))
+        (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path)) &&
+        (f.content || '').trim().length > 0
     );
     const total = sqlFiles.length;
     const success: string[] = [];
@@ -353,19 +357,25 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       return;
     }
 
-    try {
-      // Single batch request — fast, and passes file contents as fallback
-      // (DB content may be empty for lazily-imported projects)
-      const result = await convertToDbtBatch(
-        currentProject.id,
-        dbtFolderPath,
-        sqlFiles.map((f) => ({ path: f.path, content: f.content || '' }))
-      );
-      success.push(...result.successPaths);
-      errors.push(...result.errorPaths);
-    } catch (e) {
-      console.error('[convert-dbt-batch] failed:', e);
-      errors.push(...sqlFiles.map((f) => f.path));
+    // Process in chunks so the progress bar animates and the UI stays responsive
+    const CHUNK = 100;
+    let done = 0;
+    for (let i = 0; i < sqlFiles.length; i += CHUNK) {
+      const chunk = sqlFiles.slice(i, i + CHUNK);
+      try {
+        const result = await convertToDbtBatch(
+          currentProject.id,
+          dbtFolderPath,
+          chunk.map((f) => ({ path: f.path, content: f.content || '' }))
+        );
+        success.push(...result.successPaths);
+        errors.push(...result.errorPaths);
+      } catch (e) {
+        console.error('[convert-dbt-batch] chunk failed:', e);
+        errors.push(...chunk.map((f) => f.path));
+      }
+      done += chunk.length;
+      setDbtFolderProgress({ done, total, success, errors });
     }
 
     setDbtFolderProgress({ done: total, total, success, errors });

@@ -34,12 +34,19 @@ pub fn convert_sql_to_dbt(
     project_id: &str,
     sql: &str,
 ) -> ConvertResult {
+    let model_tables = load_model_tables(main_conn, project_id);
+    convert_sql_to_dbt_with_tables(&model_tables, sql)
+}
+
+/// Same as [`convert_sql_to_dbt`] but accepts a preloaded model-table set.
+/// Use in batch loops to avoid re-querying the DB per file.
+pub fn convert_sql_to_dbt_with_tables(
+    model_tables: &std::collections::HashSet<String>,
+    sql: &str,
+) -> ConvertResult {
     let mut warnings = Vec::new();
     let mut model_count = 0usize;
     let mut source_count = 0usize;
-
-    // 1. Build the set of "model" tables (tables that appear as to_table in table_level_edges)
-    let model_tables = load_model_tables(main_conn, project_id);
 
     // 2. Process the SQL line by line
     let mut output = String::with_capacity(sql.len());
@@ -124,6 +131,11 @@ pub fn convert_sql_to_dbt(
         source_count,
         warnings,
     }
+}
+
+/// Load all tables that are produced by scripts (appear as `to_table` in table_level_edges).
+pub fn load_model_tables_pub(conn: &Connection, project_id: &str) -> HashSet<String> {
+    load_model_tables(conn, project_id)
 }
 
 /// Load all tables that are produced by scripts (appear as `to_table` in table_level_edges).
