@@ -949,7 +949,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
                     content: result.content ?? '',
                     isProcedure: result.isProcedure ?? f.isProcedure,
                     transformedContent: result.transformedContent ?? f.transformedContent,
-                    dbtContent: result.dbtContent ?? f.dbtContent,
+                    dbtContent: result.dbtContent ?? null,
                   }
                 : f
             ),

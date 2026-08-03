@@ -229,6 +229,21 @@ export function EditorArea({
   const [dbtDialogOpen, setDbtDialogOpen] = useState(false);
   const showTransformedRef = useRef(showTransformed);
   showTransformedRef.current = showTransformed;
+  const showDbtRef = useRef(showDbt);
+  showDbtRef.current = showDbt;
+
+  // When toggling into dbt view, re-fetch the file from the DB so the view
+  // always reflects the latest persisted dbt_content.
+  const firstShowDbt = useRef(true);
+  useEffect(() => {
+    if (firstShowDbt.current) {
+      firstShowDbt.current = false;
+      return;
+    }
+    if (showDbt && activeFile) {
+      loadFileContent(activeFile.id, { force: true });
+    }
+  }, [showDbt]);
 
   const hasTransformedContent = !!activeFile?.transformedContent;
   const hasDbtContent = !!activeFile?.dbtContent;
@@ -258,7 +273,11 @@ export function EditorArea({
 
   const handleContentChange = useCallback(
     (val: string) => {
-      if (!activeFile || showTransformedRef.current) return;
+      // Do not write back to the file when viewing a derived view (transformed
+      // or dbt). Monaco fires onChange when its value is set programmatically
+      // (e.g. via the toggle), which would otherwise overwrite the original
+      // content with the dbt/transformed version.
+      if (!activeFile || showTransformedRef.current || showDbtRef.current) return;
       updateFile(activeFile.id, val);
     },
     [activeFile, updateFile]
@@ -480,17 +499,7 @@ export function EditorArea({
         folded={folded}
         onConvertDbt={() => setDbtDialogOpen(true)}
         showDbt={showDbt}
-        onToggleDbt={() => {
-          setShowDbt((v) => {
-            const next = !v;
-            // When switching INTO dbt view, lazily re-fetch the file in case
-            // dbt_content was persisted after the last content load.
-            if (next && !hasDbtContent && activeFile) {
-              loadFileContent(activeFile.id, { force: true });
-            }
-            return next;
-          });
-        }}
+        onToggleDbt={() => setShowDbt(!showDbtRef.current)}
         openFiles={
           (currentProject?.openFileIds || [])
             .map((id) => currentProject?.files.find((f) => f.id === id))
