@@ -55,17 +55,12 @@ pub fn convert_sql_to_dbt_with_tables(
     let mut has_config = false;
 
     // State for INSERT INTO ... header (table / partition / column list).
-    // We skip everything from `INSERT` up to the query body (SELECT/VALUES or `(`).
+    // We turn the INSERT header into a dbt config and skip the column list,
+    // keeping the query body (SELECT/VALUES) as the model's SQL.
     let mut in_insert_header = false;
 
     // CTE / subquery aliases that must NOT be rewritten to ref()/source().
     let cte_names = extract_cte_names(sql);
-
-    // Byte offset in `output` right after the last CTE definition (`),`).
-    // When we hit INSERT INTO, we truncate output back to this point,
-    // discarding the WITH main query body (dbt only needs CTE definitions +
-    // the INSERT's own SELECT).
-    let mut last_cte_end: Option<usize> = None;
 
     for line in sql.lines() {
         let trimmed = line.trim();
@@ -122,13 +117,18 @@ pub fn convert_sql_to_dbt_with_tables(
 
         let upper = trimmed.to_uppercase();
 
-        // Handle INSERT INTO ... — skip the whole header (table, partition,
-        // column list) until the query body begins. dbt materializes via config.
+        // Handle INSERT INTO ... — turn header into dbt config, skip column list.
         if upper.starts_with("INSERT") || upper.starts_with("INTO") {
-            // Discard the WITH main query body — keep only CTE definitions.
-            if let Some(off) = last_cte_end {
-                output.truncate(off);
-                last_cte_end = None;
+            // Set materialized config for the INSERT target.
+            has_config = true;
+            if !config_parts.iter().any(|c| c.starts_with("materialized")) {
+                config_parts.push("materialized='table'".to_string());
+            }
+            // Extract target table name for model count.
+            if upper.starts_with("INSERT") {
+                if let Some(tbl) = extract_insert_target(trimmed) {
+                    model_count += 1;
+                }
             }
             // If SELECT/VALUES/WITH is on the same line as INSERT, strip the
             // INSERT prefix and keep only the query body.
@@ -142,8 +142,16 @@ pub fn convert_sql_to_dbt_with_tables(
             continue;
         }
         if in_insert_header {
-            // Skip partition (...) lines, column lists, trailing commas, etc.
-            // Stop when we reach the actual query body: SELECT/VALUES/WITH.
+            // `partition (...)` → dbt partition_by config.
+            if upper.starts_with("PARTITION") || upper.starts_with("partition") {
+                if let Some(p) = extract_partition_field(trimmed) {
+                    if !config_parts.iter().any(|c| c.starts_with("partition_by")) {
+                        config_parts.push(format!("partition_by=\"{}\"", p));
+                    }
+                }
+                continue;
+            }
+            // Skip column list lines and trailing commas.
             if upper.starts_with("SELECT")
                 || upper.starts_with("VALUES")
                 || upper.starts_with("WITH")
@@ -158,12 +166,6 @@ pub fn convert_sql_to_dbt_with_tables(
 
         // Replace table references in FROM/JOIN clauses
         let converted_line = replace_table_refs(&trimmed, &model_tables, &cte_names, &mut source_count, &mut warnings);
-        // Track CTE definition end: a line ending with `),` closes a CTE def
-        // (e.g. `from a4 group by Ctgy_Desc),`). The latest offset is the end
-        // of the WITH definitions block; the main query body follows it.
-        if trimmed.ends_with("),") && !upper.contains("LEFT JOIN") && !upper.contains("RIGHT JOIN") && !upper.contains("INNER JOIN") {
-            last_cte_end = Some(output.len() + converted_line.len() + 1);
-        }
         output.push_str(&converted_line);
         output.push('\n');
     }
@@ -234,6 +236,54 @@ fn strip_insert_prefix(line: &str) -> Option<String> {
         .flatten()
         .min()?;
     Some(line[body_pos..].to_string())
+}
+
+/// Extract the target table name from an `INSERT INTO [TABLE] db.tbl` line.
+/// Returns the table (last path segment) or `None`.
+fn extract_insert_target(line: &str) -> Option<String> {
+    let lower = line.to_lowercase();
+    // Locate "insert into" then "table" (optional) then the table name.
+    let start = lower.find("insert into")? + "insert into".len();
+    let after = &line[start..];
+    let after_lower = after.to_lowercase();
+    let start2 = if let Some(t) = after_lower.find("table") {
+        // Only treat "table" as keyword if followed by whitespace/paren.
+        let after_t = &after[t + 5..];
+        if after_t.starts_with(char::is_whitespace) || after_t.starts_with('(') {
+            t + 5
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+    let rest = &after[start2..];
+    let end = rest
+        .find(|c: char| c == ' ' || c == '(' || c == ';' || c == '\n')
+        .unwrap_or(rest.len());
+    let raw = rest[..end].trim();
+    if raw.is_empty() {
+        None
+    } else {
+        Some(normalize_table_name(raw))
+    }
+}
+
+/// Extract the first field name from a `partition (data_dt='...')` line.
+fn extract_partition_field(line: &str) -> Option<String> {
+    let open = line.find('(')?;
+    let inner = &line[open + 1..];
+    let trimmed = inner.trim();
+    // Read identifier (field name) until '=' or ',' or ')' or space
+    let end = trimmed
+        .find(|c: char| c == '=' || c == ',' || c == ')' || c == ' ' || c == '\n')
+        .unwrap_or(trimmed.len());
+    let field = trimmed[..end].trim().trim_matches('`').trim_matches('"');
+    if field.is_empty() {
+        None
+    } else {
+        Some(field.to_string())
+    }
 }
 
 /// Extract the table name from a CREATE TABLE DDL statement.
@@ -665,13 +715,18 @@ FROM src_table
 WHERE data_dt = '${data_dt}'";
         let empty_models: HashSet<String> = HashSet::new();
         let result = convert_sql_to_dbt_with_tables(&empty_models, sql);
-        // partition line must NOT appear; SELECT body must appear.
-        assert!(!result.dbt_content.contains("partition"), "partition leaked: {}", result.dbt_content);
-        assert!(!result.dbt_content.contains("INSERT"), "INSERT leaked: {}", result.dbt_content);
-        assert!(!result.dbt_content.contains("(col1, col2, col3)"), "column list leaked: {}", result.dbt_content);
-        assert!(result.dbt_content.contains("SELECT col1, col2, col3"), "SELECT body missing: {}", result.dbt_content);
-        assert!(result.dbt_content.contains("src_table"), "FROM missing: {}", result.dbt_content);
-        assert!(result.dbt_content.contains("WHERE data_dt"), "WHERE missing: {}", result.dbt_content);
+        let content = &result.dbt_content;
+        // INSERT header → dbt config (materialized + partition_by)
+        assert!(content.contains("config("), "config missing: {content}");
+        assert!(content.contains("materialized='table'"), "materialized missing: {content}");
+        assert!(content.contains("partition_by"), "partition_by missing: {content}");
+        assert!(!content.contains("INSERT INTO"), "INSERT leaked: {content}");
+        // Column list must be skipped (dbt infers columns from SELECT)
+        assert!(!content.contains("(col1, col2, col3)"), "column list leaked: {content}");
+        // Query body preserved
+        assert!(content.contains("SELECT col1, col2, col3"), "SELECT body missing: {content}");
+        assert!(content.contains("src_table"), "FROM missing: {content}");
+        assert!(content.contains("WHERE data_dt"), "WHERE missing: {content}");
     }
 
     #[test]
@@ -688,18 +743,15 @@ WHERE data_dt = '${data_dt}'";
 
     #[test]
     fn test_convert_with_query_body_then_insert() {
-        // WITH defs (each ends `),`), a leftover main query body, then INSERT.
-        // The main query body (a6's SELECT with Exp_UV) is discarded; only
-        // CTE defs (a1..a5) + INSERT's own SELECT remain.
+        // WITH defs + INSERT INTO referencing CTEs. All CTEs (incl. last a6)
+        // must be preserved; INSERT header becomes dbt config; only the
+        // INSERT's own SELECT stays as the query body.
         let sql = "with a1 as (select 1 x),
 a2 as (select 2 x),
 a3 as (select 3 x),
 a4 as (select 4 x),
 a5 as (select 5 x),
-a6 as (select a3.Exp_UV, a1.x
-from a1 left join a2 on a1.x = a2.x
-left join a3 on a1.x = a3.x
-)
+a6 as (select a1.x, a2.y from a1 left join a2 on a1.x = a2.x)
 insert into table mat_db.t
 partition (data_dt='${data_dt}')
 (
@@ -711,14 +763,16 @@ from a1;";
         let empty_models: HashSet<String> = HashSet::new();
         let result = convert_sql_to_dbt_with_tables(&empty_models, sql);
         let content = &result.dbt_content;
-        // The leftover main query body (a6's SELECT with Exp_UV) must be gone
-        assert!(!content.contains("Exp_UV"), "WITH main query body leaked: {content}");
-        assert!(!content.contains("insert into"), "INSERT leaked: {content}");
-        assert!(!content.contains("partition (data_dt"), "PARTITION leaked: {content}");
-        // CTE definitions a1..a5 preserved (a6 was the leftover body)
-        for name in ["a1", "a2", "a3", "a4", "a5"] {
+        // CTE definitions preserved (a1..a6)
+        for name in ["a1", "a2", "a3", "a4", "a5", "a6"] {
             assert!(content.contains(&format!("{name} as (")), "CTE {name} missing: {content}");
         }
+        // INSERT header → dbt config
+        assert!(content.contains("config("), "config missing: {content}");
+        assert!(content.contains("materialized='table'"), "materialized missing: {content}");
+        assert!(content.contains("partition_by"), "partition_by missing: {content}");
+        assert!(!content.contains("insert into"), "INSERT leaked: {content}");
+        assert!(!content.contains("partition (data_dt"), "PARTITION header leaked: {content}");
         // INSERT's actual SELECT body preserved (references CTEs)
         assert!(content.contains("select current_date"), "INSERT SELECT missing: {content}");
         assert!(content.contains("from a1"), "INSERT FROM missing: {content}");
