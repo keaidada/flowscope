@@ -3832,53 +3832,53 @@ async fn gov_convert_dbt_batch(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ConvertDbtBatchRequest>,
 ) -> impl IntoResponse {
-    // 1. Load file list from DB, plus frontend-provided content as fallback
-    let (all_files, frontend_content): (Vec<store::ProjectFileRow>, std::collections::HashMap<String, String>) = {
+    // 1. Load the DB file list (to get DB-stored content / names for the
+    //    paths the frontend sent). We only process `req.files` — NOT the
+    //    whole folder — so chunked frontend calls don't double-count.
+    let db_files: Vec<store::ProjectFileRow> = {
         let conn = match state.db.lock() {
             Ok(c) => c,
             Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
         };
-        let files = store::load_project_files(&conn, &req.project_id);
-        let content_map: std::collections::HashMap<String, String> = req
-            .files
-            .into_iter()
-            .map(|f| (f.path, f.content))
-            .collect();
-        (files.unwrap_or_default(), content_map)
+        store::load_project_files(&conn, &req.project_id).unwrap_or_default()
     };
 
-    // 2. Filter to SQL files under the folder prefix, resolving content.
-    //    Empty-content files are skipped (counted in `skipped`, not errors).
-    let prefix = req.folder_path.as_deref().map(|p| {
-        if p.ends_with('/') { p.to_string() } else { format!("{p}/") }
-    });
+    // Map path → DB row for content fallback.
+    let db_by_path: std::collections::HashMap<&str, &store::ProjectFileRow> =
+        db_files.iter().map(|f| (f.path.as_str(), f)).collect();
+
     let mut skipped = 0usize;
-    let mut sql_files: Vec<(&store::ProjectFileRow, String)> = all_files
-        .iter()
-        .filter_map(|f| {
-            if let Some(ref pfx) = prefix {
-                if !f.path.starts_with(pfx.as_str()) { return None; }
-            }
-            let lower = f.name.to_lowercase();
-            if !(lower.ends_with(".sql") || lower.ends_with(".hql")) { return None; }
+    let mut sql_files: Vec<(String, String)> = Vec::new(); // (path, sql)
 
-            // Resolve content: DB → frontend fallback → disk
-            let sql = if !f.content.trim().is_empty() {
-                f.content.clone()
-            } else if let Some(c) = frontend_content.get(&f.path) {
-                c.clone()
-            } else {
-                read_project_file(&state, &req.project_id, &f.path)
-            };
+    for bf in &req.files {
+        let path = &bf.path;
+        // Only accept SQL-type paths.
+        let lower = path.to_lowercase();
+        if !(lower.ends_with(".sql") || lower.ends_with(".hql")) {
+            continue;
+        }
 
-            // Skip empty-content files silently (counted as skipped)
-            if sql.trim().is_empty() {
-                skipped += 1;
-                return None;
-            }
-            Some((f, sql))
-        })
-        .collect();
+        // Resolve content: DB → frontend-provided → disk.
+        let db_content = db_by_path
+            .get(path.as_str())
+            .map(|f| f.content.trim())
+            .filter(|c| !c.is_empty())
+            .unwrap_or("");
+        let sql = if !db_content.is_empty() {
+            db_content.to_string()
+        } else if !bf.content.trim().is_empty() {
+            bf.content.clone()
+        } else {
+            read_project_file(&state, &req.project_id, path)
+        };
+
+        // Skip empty-content files silently (counted as skipped).
+        if sql.trim().is_empty() {
+            skipped += 1;
+            continue;
+        }
+        sql_files.push((path.clone(), sql));
+    }
 
     let total = sql_files.len();
     let mut success_paths = Vec::new();
@@ -3893,14 +3893,14 @@ async fn gov_convert_dbt_batch(
         };
         super::governance::dbt_fusion::load_model_tables_pub(&conn, &req.project_id)
     };
-    for (f, sql) in &sql_files {
+    for (path, sql) in &sql_files {
         let result =
             super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, sql);
         if !result.dbt_content.trim().is_empty() {
-            success_paths.push(f.path.clone());
-            updates.push((f.path.clone(), result.dbt_content));
+            success_paths.push(path.clone());
+            updates.push((path.clone(), result.dbt_content));
         } else {
-            error_paths.push(f.path.clone());
+            error_paths.push(path.clone());
         }
     }
 
