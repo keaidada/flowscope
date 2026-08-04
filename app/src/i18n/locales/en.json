@@ -116,6 +116,7 @@
     "convertSuccess": "Succeeded",
     "convertErrors": "Failed",
     "convertSkipped": "Skipped (empty)",
+    "yamlSkipped": "Skipped (no lineage)",
     "noSqlInFolder": "No SQL files found in this folder",
     "convertDbtFolderDesc": "Convert SQL scripts in the folder to dbt model format",
     "generateYamlFolder": "Generate YAML in folder",

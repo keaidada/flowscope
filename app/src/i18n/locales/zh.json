@@ -116,6 +116,7 @@
     "convertSuccess": "转换成功",
     "convertErrors": "转换失败",
     "convertSkipped": "跳过(空文件)",
+    "yamlSkipped": "跳过(无血缘数据)",
     "noSqlInFolder": "该文件夹下未找到 SQL 文件",
     "convertDbtFolderDesc": "将文件夹下的 SQL 脚本转换为 dbt 模型格式",
     "generateYamlFolder": "批量生成 YAML",

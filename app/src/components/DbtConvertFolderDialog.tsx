@@ -282,10 +282,21 @@ export function DbtConvertFolderDialog({
                     )
                   : resultCard(t('editor.convertSuccess', '转换成功'), successCount, 'text-green-600')}
                 {skippedCount > 0
-                  ? resultCard(t('editor.convertSkipped', '跳过(空文件)'), skippedCount, 'text-amber-600', () =>
-                      setListType('skipped')
+                  ? resultCard(
+                      isYaml
+                        ? t('editor.yamlSkipped', '跳过(无血缘数据)')
+                        : t('editor.convertSkipped', '跳过(空文件)'),
+                      skippedCount,
+                      'text-amber-600',
+                      () => setListType('skipped')
                     )
-                  : resultCard(t('editor.convertSkipped', '跳过(空文件)'), skippedCount, 'text-amber-600')}
+                  : resultCard(
+                      isYaml
+                        ? t('editor.yamlSkipped', '跳过(无血缘数据)')
+                        : t('editor.convertSkipped', '跳过(空文件)'),
+                      skippedCount,
+                      'text-amber-600'
+                    )}
                 {errorCount > 0
                   ? resultCard(t('editor.convertErrors', '转换失败'), errorCount, 'text-red-600', () =>
                       setListType('errors')
