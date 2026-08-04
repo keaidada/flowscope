@@ -123,7 +123,9 @@
     "filesToConvert": "Files to convert",
     "convertDbtN": "Convert {{count}} files",
     "reConvert": "Re-convert",
-    "copied": "Copied"
+    "copied": "Copied",
+    "loadingFiles": "Loading file list, please wait...",
+    "loading": "Loading..."
   },
   "convert": {
     "title": "Batch Convert Procedures",

@@ -46,6 +46,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     renameFile,
     renameFolder,
     isReadOnly,
+    filesLoaded,
     selectFile,
     revealCnt,
   } = useProject();
@@ -86,6 +87,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const [dbtFolderPath, setDbtFolderPath] = useState<string | null>(null);
   const [dbtFolderOpen, setDbtFolderOpen] = useState(false);
   const [dbtFolderFiles, setDbtFolderFiles] = useState<string[]>([]);
+  const [dbtFolderLoadingFiles, setDbtFolderLoadingFiles] = useState(false);
   const [isConvertingDbtFolder, setIsConvertingDbtFolder] = useState(false);
   const [dbtFolderProgress, setDbtFolderProgress] = useState<{
     done: number;
@@ -98,6 +100,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const [yamlFolderPath, setYamlFolderPath] = useState<string | null>(null);
   const [yamlFolderOpen, setYamlFolderOpen] = useState(false);
   const [yamlFolderFiles, setYamlFolderFiles] = useState<string[]>([]);
+  const [yamlFolderLoadingFiles, setYamlFolderLoadingFiles] = useState(false);
   const [isGeneratingYaml, setIsGeneratingYaml] = useState(false);
   const [yamlFolderProgress, setYamlFolderProgress] = useState<{
     done: number;
@@ -128,6 +131,33 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       setTimeout(() => folderNameInputRef.current?.focus(), 0);
     }
   }, [isCreatingFolder]);
+
+  // When project file metadata finishes loading, refresh the dbt folder file
+  // list (it may have been empty because lazy loading hadn't completed).
+  useEffect(() => {
+    if (!filesLoaded || !dbtFolderLoadingFiles || !currentProject || !dbtFolderPath) return;
+    const prefix = dbtFolderPath.endsWith('/') ? dbtFolderPath : dbtFolderPath + '/';
+    const sqlFiles = currentProject.files.filter(
+      (f) =>
+        f.path.startsWith(prefix) &&
+        (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path))
+    );
+    setDbtFolderFiles(sqlFiles.map((f) => f.path));
+    setDbtFolderLoadingFiles(false);
+  }, [filesLoaded, dbtFolderLoadingFiles, currentProject, dbtFolderPath]);
+
+  // Same for the YAML folder dialog.
+  useEffect(() => {
+    if (!filesLoaded || !yamlFolderLoadingFiles || !currentProject || !yamlFolderPath) return;
+    const prefix = yamlFolderPath.endsWith('/') ? yamlFolderPath : yamlFolderPath + '/';
+    const sqlFiles = currentProject.files.filter(
+      (f) =>
+        f.path.startsWith(prefix) &&
+        (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path))
+    );
+    setYamlFolderFiles(sqlFiles.map((f) => f.path));
+    setYamlFolderLoadingFiles(false);
+  }, [filesLoaded, yamlFolderLoadingFiles, currentProject, yamlFolderPath]);
 
   const quickMatches = useMemo(() => {
     if (!quickQuery.trim() || !currentProject) return [] as ProjectFile[];
@@ -340,14 +370,27 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       setDbtFolderPath(folderPath);
       setDbtFolderFiles(sqlFiles.map((f) => f.path));
       setDbtFolderProgress(null);
+      // If the project's file metadata hasn't finished loading yet, the file
+      // list may be empty and conversion would show "0 / 0". Keep the dialog
+      // open in a "loading" state instead of letting the user confirm an empty
+      // batch. The dialog re-renders once filesLoaded flips to true.
+      if (!filesLoaded) {
+        setDbtFolderLoadingFiles(true);
+      }
       setDbtFolderOpen(true);
     },
-    [currentProject]
+    [currentProject, filesLoaded]
   );
 
   // Execute conversion after user confirms in the dialog
   const handleConfirmDbtFolder = useCallback(async () => {
     if (!currentProject || !dbtFolderPath) return;
+    // Guard: file metadata may still be lazy-loading. Refuse to run an empty
+    // batch — show a message instead of the misleading "0 / 0 completed".
+    if (!filesLoaded) {
+      setDbtFolderLoadingFiles(true);
+      return;
+    }
     setDbtFolderOpen(false);
     setIsConvertingDbtFolder(true);
     setDbtFolderProgress({ done: 0, total: 0, success: [], errors: [], skipped: 0 });
@@ -375,12 +418,14 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     let done = 0;
     for (let i = 0; i < sqlFiles.length; i += CHUNK) {
       const chunk = sqlFiles.slice(i, i + CHUNK);
+      console.log(`[convert-dbt-folder] chunk ${i / CHUNK + 1}/${Math.ceil(sqlFiles.length / CHUNK)} (${chunk.length} files)`);
       try {
         const result = await convertToDbtBatch(
           currentProject.id,
           dbtFolderPath,
           chunk.map((f) => ({ path: f.path, content: f.content || '' }))
         );
+        console.log(`[convert-dbt-folder] chunk ${i / CHUNK + 1} done: success=${result.success} errors=${result.errors} skipped=${result.skipped}`);
         success.push(...result.successPaths);
         errors.push(...result.errorPaths);
         skipped += result.skipped;
@@ -394,7 +439,8 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
     setDbtFolderProgress({ done: total, total, success, errors, skipped });
     setIsConvertingDbtFolder(false);
-  }, [currentProject, dbtFolderPath]);
+    console.log(`[convert-dbt-folder] FINISHED: ${success.length} success, ${errors.length} errors, ${skipped} skipped`);
+  }, [currentProject, dbtFolderPath, filesLoaded]);
 
   // Open the YAML folder dialog with a file list (no generation yet)
   const handleGenerateYamlFolder = useCallback(
@@ -409,14 +455,21 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       setYamlFolderPath(folderPath);
       setYamlFolderFiles(sqlFiles.map((f) => f.path));
       setYamlFolderProgress(null);
+      if (!filesLoaded) {
+        setYamlFolderLoadingFiles(true);
+      }
       setYamlFolderOpen(true);
     },
-    [currentProject]
+    [currentProject, filesLoaded]
   );
 
   // Execute YAML generation after user confirms in the dialog
   const handleConfirmYamlFolder = useCallback(async () => {
     if (!currentProject || !yamlFolderPath) return;
+    if (!filesLoaded) {
+      setYamlFolderLoadingFiles(true);
+      return;
+    }
     setYamlFolderOpen(false);
     setIsGeneratingYaml(true);
     setYamlFolderProgress({ done: 0, total: 0, success: [], errors: [], skipped: 0 });
@@ -442,12 +495,14 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     let done = 0;
     for (let i = 0; i < sqlFiles.length; i += CHUNK) {
       const chunk = sqlFiles.slice(i, i + CHUNK);
+      console.log(`[generate-yaml-folder] chunk ${i / CHUNK + 1}/${Math.ceil(sqlFiles.length / CHUNK)} (${chunk.length} files)`);
       try {
         const result = await generateSemanticYamlBatch(
           currentProject.id,
           yamlFolderPath,
           chunk.map((f) => ({ path: f.path, content: f.content || '' }))
         );
+        console.log(`[generate-yaml-folder] chunk ${i / CHUNK + 1} done: success=${result.success} errors=${result.errors} skipped=${result.skipped}`);
         success.push(...result.successPaths);
         errors.push(...result.errorPaths);
         skipped += result.skipped;
@@ -461,7 +516,8 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
     setYamlFolderProgress({ done: total, total, success, errors, skipped });
     setIsGeneratingYaml(false);
-  }, [currentProject, yamlFolderPath]);
+    console.log(`[generate-yaml-folder] FINISHED: ${success.length} success, ${errors.length} errors, ${skipped} skipped`);
+  }, [currentProject, yamlFolderPath, filesLoaded]);
 
   const handleConvertFolder = useCallback(
     async (dialect: Dialect) => {
@@ -1096,12 +1152,14 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
               setDbtFolderPath(null);
               setDbtFolderFiles([]);
               setDbtFolderProgress(null);
+              setDbtFolderLoadingFiles(false);
             }
           }
         }}
         folderPath={dbtFolderPath ?? ''}
         sqlFiles={dbtFolderFiles}
         totalFileCount={dbtFolderTotalCount}
+        loadingFiles={dbtFolderLoadingFiles}
         isConverting={isConvertingDbtFolder}
         convertProgress={dbtFolderProgress ? { done: dbtFolderProgress.done, total: dbtFolderProgress.total } : null}
         convertResult={dbtFolderProgress ? { success: dbtFolderProgress.success, errors: dbtFolderProgress.errors, skipped: dbtFolderProgress.skipped } : null}
@@ -1118,12 +1176,14 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
               setYamlFolderPath(null);
               setYamlFolderFiles([]);
               setYamlFolderProgress(null);
+              setYamlFolderLoadingFiles(false);
             }
           }
         }}
         folderPath={yamlFolderPath ?? ''}
         sqlFiles={yamlFolderFiles}
         totalFileCount={yamlFolderFiles.length}
+        loadingFiles={yamlFolderLoadingFiles}
         isConverting={isGeneratingYaml}
         convertProgress={yamlFolderProgress ? { done: yamlFolderProgress.done, total: yamlFolderProgress.total } : null}
         convertResult={yamlFolderProgress ? { success: yamlFolderProgress.success, errors: yamlFolderProgress.errors, skipped: yamlFolderProgress.skipped } : null}

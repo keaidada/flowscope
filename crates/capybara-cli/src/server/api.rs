@@ -3807,8 +3807,15 @@ async fn gov_convert_dbt(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ConvertDbtRequest>,
 ) -> impl IntoResponse {
+    let _dbg_t0 = std::time::Instant::now();
+    eprintln!("[convert-dbt] START: {}", req.file_path);
     // Read file content: try disk (watch dirs) first, fallback to DB
     let sql = read_project_file(&state, &req.project_id, &req.file_path);
+    eprintln!(
+        "[convert-dbt] read {} bytes: {:?}",
+        sql.len(),
+        _dbg_t0.elapsed()
+    );
 
     // Convert
     let conn = match state.db.lock() {
@@ -3833,6 +3840,14 @@ async fn gov_convert_dbt(
     } else {
         super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, &sql)
     };
+    eprintln!(
+        "[convert-dbt] DONE: {} bytes ({} sources, {} models, {} warnings) elapsed={:?}",
+        result.dbt_content.len(),
+        result.source_count,
+        result.model_count,
+        result.warnings.len(),
+        _dbg_t0.elapsed()
+    );
 
     Json(result).into_response()
 }
@@ -3862,6 +3877,12 @@ async fn gov_convert_dbt_batch(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ConvertDbtBatchRequest>,
 ) -> impl IntoResponse {
+    let _dbg_t0 = std::time::Instant::now();
+    eprintln!(
+        "[convert-dbt-batch] START: {} files, folder={:?}",
+        req.files.len(),
+        req.folder_path
+    );
     // 1. Load ONLY the requested file paths from the DB (not the whole
     //    project). Loading everything per 100-file chunk is O(project size)
     //    and gets slower as dbt_content grows — the "slows down after 1400"
@@ -3878,6 +3899,11 @@ async fn gov_convert_dbt_batch(
         };
         store::load_project_files_by_paths(&conn, &req.project_id, &req_paths).unwrap_or_default()
     };
+    eprintln!(
+        "[convert-dbt-batch] load {} project rows: {:?}",
+        db_files.len(),
+        _dbg_t0.elapsed()
+    );
 
     // Map path → DB row for content fallback.
     let db_by_path: std::collections::HashMap<&str, &store::ProjectFileRow> =
@@ -3948,6 +3974,12 @@ async fn gov_convert_dbt_batch(
         }
         (mt, edges_map)
     };
+    eprintln!(
+        "[convert-dbt-batch] preload model_tables({}) + edges({}): {:?}",
+        model_tables.len(),
+        all_edges.len(),
+        _dbg_t0.elapsed()
+    );
     for (path, sql) in &sql_files {
         // Derive script_name from path (e.g. "etl/ALL/Foo.sql" → "Foo.sql").
         let script_name = std::path::Path::new(path)
@@ -3975,7 +4007,14 @@ async fn gov_convert_dbt_batch(
             error_paths.push(path.clone());
         }
     }
-
+    eprintln!(
+        "[convert-dbt-batch] converted {} files ({} success, {} errors, {} skipped): {:?}",
+        sql_files.len(),
+        success_paths.len(),
+        error_paths.len(),
+        skipped,
+        _dbg_t0.elapsed()
+    );
     // 4. Persist dbt_content in chunks
     if !updates.is_empty() {
         let conn = match state.db.lock() {
@@ -3989,6 +4028,19 @@ async fn gov_convert_dbt_batch(
             }
         }
     }
+    eprintln!(
+        "[convert-dbt-batch] persist {} updates: {:?}",
+        updates.len(),
+        _dbg_t0.elapsed()
+    );
+    eprintln!(
+        "[convert-dbt-batch] DONE total={} success={} errors={} skipped={} elapsed={:?}",
+        total,
+        success_paths.len(),
+        error_paths.len(),
+        skipped,
+        _dbg_t0.elapsed()
+    );
 
     Json(serde_json::json!({
         "success": success_paths.len(),

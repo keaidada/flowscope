@@ -28,6 +28,8 @@ interface DbtConvertFolderDialogProps {
   sqlFiles: string[];
   /** Total files in the folder (for display) */
   totalFileCount: number;
+  /** File metadata is still lazy-loading — list may be incomplete */
+  loadingFiles?: boolean;
   isConverting: boolean;
   convertProgress: { done: number; total: number } | null;
   convertResult: {
@@ -146,6 +148,7 @@ export function DbtConvertFolderDialog({
   folderPath,
   sqlFiles,
   totalFileCount,
+  loadingFiles,
   isConverting,
   convertProgress,
   convertResult,
@@ -193,6 +196,13 @@ export function DbtConvertFolderDialog({
               <FolderTree className="h-4 w-4 shrink-0" />
               <span className="font-mono text-xs truncate">{folderPath}</span>
             </div>
+
+            {loadingFiles && !completed && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-500/30 bg-blue-500/5 text-xs text-blue-600 dark:text-blue-400">
+                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                {t('editor.loadingFiles', '文件列表加载中，请稍候...')}
+              </div>
+            )}
 
             {!completed && (
               <div className="grid grid-cols-2 gap-3">
@@ -275,11 +285,16 @@ export function DbtConvertFolderDialog({
                 >
                   {t('common.cancel')}
                 </Button>
-                <Button onClick={onConfirm} disabled={sqlFiles.length === 0 || isConverting}>
+                <Button onClick={onConfirm} disabled={sqlFiles.length === 0 || isConverting || loadingFiles}>
                   {isConverting ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       {t('convert.converting')}
+                    </>
+                  ) : loadingFiles ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      {t('editor.loading', '加载中...')}
                     </>
                   ) : (
                     t('editor.convertDbtN', { count: sqlFiles.length })
