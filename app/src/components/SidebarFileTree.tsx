@@ -492,18 +492,18 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       return;
     }
 
-    // 逐个文件按顺序解析（1 → total），每个请求只处理一个文件，
-    // 后端只查询当前脚本相关的 lineage 信息（数据以数据库为准）。
-    // 注意：不要用 file.content 判断空文件——content 是懒加载的，列表里的
-    // content 可能为空但 DB 里有值。后端会从 DB 读内容并正确归类 skipped。
+    // 2 并发处理：同时发 2 个请求，速度翻倍但不会压垮服务器
+    // （后端 state.db 是 Mutex，并发请求会排队等锁，2 个刚好）
+    const CONCURRENCY = 2;
+    const projectId = currentProject.id;
     let done = 0;
-    for (let i = 0; i < sqlFiles.length; i++) {
-      const file = sqlFiles[i];
+    let idx = 0;
+
+    async function processOne(file: typeof sqlFiles[number]) {
       try {
-        console.log(`[generate-yaml-folder] ${i + 1}/${sqlFiles.length} ${file.path}`);
-        const result = await generateSemanticYaml(currentProject.id, file.path);
+        console.log(`[generate-yaml-folder] ${file.path}`);
+        const result = await generateSemanticYaml(projectId, file.path);
         if (result.skipped || !result.yaml || !result.yaml.trim()) {
-          // 后端无可用血缘数据（无输出表/无列）→ 跳过而非失败
           skipped.push(file.path);
         } else {
           success.push(file.path);
@@ -515,6 +515,13 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       }
       done += 1;
       setYamlFolderProgress({ done, total, success, errors, skipped });
+    }
+
+    while (idx < sqlFiles.length) {
+      // 取 CONCURRENCY 个文件并行处理
+      const batch = sqlFiles.slice(idx, idx + CONCURRENCY);
+      idx += batch.length;
+      await Promise.all(batch.map((f) => processOne(f)));
     }
 
     // 逐个文件按顺序保存生成的 YAML 到 DB
