@@ -974,34 +974,41 @@ fn format_yaml(
         yaml.push('\n');
     }
 
-    // Measures — ALL properties
+    // Measures — ALL properties per dbt Semantic Layer spec
     if !measures.is_empty() {
         yaml.push_str("    measures:\n");
         for m in measures {
+            let label = capitalize_words(&m.name);
             yaml.push_str(&format!("      - name: {}\n", m.name));
-            yaml.push_str(&format!("        description: '{}'\n", m.name.replace('_', " ")));
+            yaml.push_str(&format!("        description: '{}'\n", label));
             yaml.push_str(&format!("        agg: {}\n", m.agg));
             yaml.push_str(&format!("        expr: {}\n", m.expr));
             if let Some(td) = &m.agg_time_dimension {
                 yaml.push_str(&format!("        agg_time_dimension: {td}\n"));
+                yaml.push_str("        agg_time_granularity: day\n");
             }
             yaml.push_str("        create_metric: true\n");
+            yaml.push_str(&format!("        create_metric_display_name: '{}'\n", label));
+            yaml.push_str("        non_additive_dimension: null\n");
         }
         yaml.push('\n');
     }
 
-    // Metrics — ALL properties
+    // Metrics — ALL properties per dbt Semantic Layer spec
     if !measures.is_empty() {
         yaml.push_str("metrics:\n");
         for m in measures {
+            let label = capitalize_words(&m.name);
             yaml.push_str(&format!("  - name: {}\n", m.name));
-            yaml.push_str(&format!("    description: '{}'\n", m.name.replace('_', " ")));
-            yaml.push_str(&format!("    label: '{}'\n", capitalize_words(&m.name)));
+            yaml.push_str(&format!("    description: '{}'\n", label));
+            yaml.push_str(&format!("    label: '{}'\n", label));
             yaml.push_str("    type: simple\n");
+            yaml.push_str("    filter: ''\n");
             yaml.push_str("    type_params:\n");
             yaml.push_str("      measure:\n");
             yaml.push_str(&format!("        name: {}\n", m.name));
             yaml.push_str("        filter: ''\n");
+            yaml.push_str(&format!("        alias: {}\n", m.name));
             if let Some(td) = &m.agg_time_dimension {
                 yaml.push_str(&format!("      agg_time_dimension: {td}\n"));
             }
