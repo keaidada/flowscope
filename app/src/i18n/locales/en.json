@@ -118,6 +118,8 @@
     "convertSkipped": "Skipped (empty)",
     "noSqlInFolder": "No SQL files found in this folder",
     "convertDbtFolderDesc": "Convert SQL scripts in the folder to dbt model format",
+    "generateYamlFolder": "Generate YAML in folder",
+    "generateYamlFolderDesc": "Generate Semantic Layer YAML for SQL scripts in the folder",
     "totalFilesInFolder": "Files in folder",
     "sqlFilesToConvert": "SQL files to convert",
     "filesToConvert": "Files to convert",

@@ -18,6 +18,7 @@ import {
   Copy,
   Check,
   Boxes,
+  FileJson,
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 
@@ -25,6 +26,8 @@ interface DbtConvertFolderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   folderPath: string;
+  /** dbt = convert to dbt model; yaml = generate semantic layer YAML */
+  mode?: 'dbt' | 'yaml';
   /** SQL files to convert */
   sqlFiles: string[];
   /** Total files in the folder (for display) */
@@ -149,6 +152,7 @@ export function DbtConvertFolderDialog({
   open,
   onOpenChange,
   folderPath,
+  mode = 'dbt',
   sqlFiles,
   totalFileCount,
   loadingFiles,
@@ -158,6 +162,7 @@ export function DbtConvertFolderDialog({
   onConfirm,
 }: DbtConvertFolderDialogProps) {
   const { t } = useTranslation();
+  const isYaml = mode === 'yaml';
   const [listType, setListType] = useState<'success' | 'errors' | 'skipped' | null>(null);
   const completed = convertProgress && convertProgress.done >= convertProgress.total;
 
@@ -190,10 +195,20 @@ export function DbtConvertFolderDialog({
         <DialogContent className="overflow-hidden w-[30rem] max-w-[90vw]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Boxes className="h-4 w-4 text-blue-500" />
-              {t('editor.convertDbtFolder', '批量转换 dbt')}
+              {isYaml ? (
+                <FileJson className="h-4 w-4 text-purple-500" />
+              ) : (
+                <Boxes className="h-4 w-4 text-blue-500" />
+              )}
+              {isYaml
+                ? t('editor.generateYamlFolder', '批量生成 YAML')
+                : t('editor.convertDbtFolder', '批量转换 dbt')}
             </DialogTitle>
-            <DialogDescription>{t('editor.convertDbtFolderDesc', '将文件夹下的 SQL 脚本转换为 dbt 模型格式')}</DialogDescription>
+            <DialogDescription>
+              {isYaml
+                ? t('editor.generateYamlFolderDesc', '批量生成文件夹下 SQL 脚本的 Semantic YAML')
+                : t('editor.convertDbtFolderDesc', '将文件夹下的 SQL 脚本转换为 dbt 模型格式')}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2 min-w-0 animate-in fade-in-0 slide-in-from-top-2 duration-200">

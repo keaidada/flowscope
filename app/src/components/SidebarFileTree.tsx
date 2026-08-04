@@ -494,16 +494,11 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
     // 逐个文件按顺序解析（1 → total），每个请求只处理一个文件，
     // 后端只查询当前脚本相关的 lineage 信息（数据以数据库为准）。
+    // 注意：不要用 file.content 判断空文件——content 是懒加载的，列表里的
+    // content 可能为空但 DB 里有值。后端会从 DB 读内容并正确归类 skipped。
     let done = 0;
     for (let i = 0; i < sqlFiles.length; i++) {
       const file = sqlFiles[i];
-      // 空文件直接跳过（不计入失败）
-      if (!file.content || !file.content.trim()) {
-        skipped.push(file.path);
-        done += 1;
-        setYamlFolderProgress({ done, total, success, errors, skipped });
-        continue;
-      }
       try {
         console.log(`[generate-yaml-folder] ${i + 1}/${sqlFiles.length} ${file.path}`);
         const result = await generateSemanticYaml(currentProject.id, file.path);
@@ -1185,6 +1180,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
 
       {/* Folder YAML generation dialog */}
       <DbtConvertFolderDialog
+        mode="yaml"
         open={yamlFolderOpen || Boolean(yamlFolderProgress)}
         onOpenChange={(open) => {
           if (!isGeneratingYaml) {
