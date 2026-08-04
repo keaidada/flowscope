@@ -65,8 +65,15 @@ pub fn convert_sql_to_dbt_with_tables(
             continue;
         }
 
-        // Handle CREATE TABLE ... (DDL definition)
-        if trimmed.to_uppercase().starts_with("CREATE") && trimmed.to_uppercase().contains("TABLE") {
+        // Handle CREATE TABLE ... (DDL definition).
+        // CREATE TEMPORARY/TEMP TABLE is NOT treated as DDL — it's a CTE-like
+        // construct whose body should be processed normally (table refs inside
+        // still need to be rewritten).
+        let tu = trimmed.to_uppercase();
+        let is_create_table = tu.starts_with("CREATE") && tu.contains("TABLE");
+        let is_temp = tu.starts_with("CREATE")
+            && (tu.contains("TEMPORARY") || tu.contains(" TEMP "));
+        if is_create_table && !is_temp {
             in_create_table = true;
             has_config = true;
             // Avoid duplicate materialized entries when a script has multiple
