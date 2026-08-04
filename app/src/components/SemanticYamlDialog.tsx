@@ -52,23 +52,38 @@ interface ParsedEntity {
   expr: string;
 }
 
+interface ParsedMetric {
+  name: string;
+  label: string;
+  type: string;
+  filter: string;
+  measure: string;
+  measure_filter: string;
+  alias: string;
+  agg_time_dimension: string;
+}
+
 interface ParsedSemantic {
   measures: ParsedMeasure[];
   dimensions: ParsedDim[];
   entities: ParsedEntity[];
+  metrics: ParsedMetric[];
 }
 
 /** Minimal YAML block parser for our generated semantic_models structure. */
 function parseSemanticYaml(yaml: string): ParsedSemantic {
-  const result: ParsedSemantic = { measures: [], dimensions: [], entities: [] };
+  const result: ParsedSemantic = { measures: [], dimensions: [], entities: [], metrics: [] };
   if (!yaml) return result;
 
   const lines = yaml.split('\n');
-  // Current section we're inside: '', 'measures', 'dimensions', 'entities'.
+  // Current section we're inside: '', 'measures', 'dimensions', 'entities', 'metrics'.
   let section = '';
   let currentMeasure: Partial<ParsedMeasure> | null = null;
   let currentDim: Partial<ParsedDim> | null = null;
   let currentEntity: Partial<ParsedEntity> | null = null;
+  let currentMetric: Partial<ParsedMetric> | null = null;
+  // Track nesting inside a metric's type_params.measure block.
+  let inMetricMeasure = false;
 
   const flushMeasure = () => {
     if (currentMeasure?.name) {
@@ -104,25 +119,49 @@ function parseSemanticYaml(yaml: string): ParsedSemantic {
     }
     currentEntity = null;
   };
+  const flushMetric = () => {
+    if (currentMetric?.name) {
+      result.metrics.push({
+        name: currentMetric.name,
+        label: currentMetric.label ?? '',
+        type: currentMetric.type ?? '',
+        filter: currentMetric.filter ?? '',
+        measure: currentMetric.measure ?? '',
+        measure_filter: currentMetric.measure_filter ?? '',
+        alias: currentMetric.alias ?? '',
+        agg_time_dimension: currentMetric.agg_time_dimension ?? '',
+      });
+    }
+    currentMetric = null;
+  };
+  const flushAll = () => { flushMeasure(); flushDim(); flushEntity(); flushMetric(); inMetricMeasure = false; };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
     const indent = line.length - line.trimStart().length;
 
+    // Skip blank lines — they are purely cosmetic between blocks.
+    if (!trimmed) continue;
+
     // Section headers at 4-space indent: "    measures:", "    dimensions:"
     if (/^ {4}[a-z_]+:$/.test(line)) {
       const sec = trimmed.replace(':', '');
       if (sec === 'measures' || sec === 'dimensions' || sec === 'entities') {
         section = sec;
-        flushMeasure(); flushDim(); flushEntity();
+        flushAll();
         continue;
       }
     }
-    // Top-level (no indent) → leave section.
+    // Top-level (no indent): "metrics:" or a new top-level block.
     if (indent === 0) {
-      section = '';
-      flushMeasure(); flushDim(); flushEntity();
+      if (trimmed === 'metrics:') {
+        section = 'metrics';
+        flushAll();
+      } else {
+        section = '';
+        flushAll();
+      }
       continue;
     }
 
@@ -139,6 +178,12 @@ function parseSemanticYaml(yaml: string): ParsedSemantic {
     if (section === 'entities' && indent === 6 && trimmed.startsWith('- name:')) {
       flushEntity();
       currentEntity = { name: trimmed.replace('- name:', '').trim() };
+      continue;
+    }
+    if (section === 'metrics' && indent === 2 && trimmed.startsWith('- name:')) {
+      flushMetric();
+      inMetricMeasure = false;
+      currentMetric = { name: trimmed.replace('- name:', '').trim() };
       continue;
     }
 
@@ -177,8 +222,29 @@ function parseSemanticYaml(yaml: string): ParsedSemantic {
       if (trimmed.startsWith('type:')) currentEntity.type = trimmed.replace('type:', '').trim();
       else if (trimmed.startsWith('expr:')) currentEntity.expr = trimmed.replace('expr:', '').trim();
     }
+    if (currentMetric) {
+      // Metric keys at indent 4: name/description/label/type/filter
+      if (indent === 4 && trimmed.startsWith('label:')) currentMetric.label = trimmed.replace('label:', '').trim().replace(/'/g, '');
+      else if (indent === 4 && trimmed.startsWith('type:')) currentMetric.type = trimmed.replace('type:', '').trim();
+      else if (indent === 4 && trimmed.startsWith('filter:')) currentMetric.filter = trimmed.replace('filter:', '').trim().replace(/'/g, '');
+      // type_params block starts at indent 4, measure at indent 6
+      else if (trimmed === 'measure:' && indent === 6) {
+        inMetricMeasure = true;
+      }
+      // measure keys at indent 8
+      else if (inMetricMeasure && indent === 8) {
+        if (trimmed.startsWith('name:')) currentMetric.measure = trimmed.replace('name:', '').trim();
+        else if (trimmed.startsWith('filter:')) currentMetric.measure_filter = trimmed.replace('filter:', '').trim().replace(/'/g, '');
+        else if (trimmed.startsWith('alias:')) currentMetric.alias = trimmed.replace('alias:', '').trim();
+      }
+      // agg_time_dimension at indent 6 (sibling of measure under type_params)
+      else if (indent === 6 && trimmed.startsWith('agg_time_dimension:')) {
+        currentMetric.agg_time_dimension = trimmed.replace('agg_time_dimension:', '').trim();
+        inMetricMeasure = false;
+      }
+    }
   }
-  flushMeasure(); flushDim(); flushEntity();
+  flushMeasure(); flushDim(); flushEntity(); flushMetric();
   return result;
 }
 
@@ -254,7 +320,7 @@ export function SemanticYamlDialog({
             </div>
             <DialogTitle>{t('editor.generateYaml', '生成 Semantic YAML')}</DialogTitle>
             <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
-              {view === 'yaml' ? `${lineCount} 行` : `${parsed.measures.length} measures · ${parsed.dimensions.length} dims`}
+              {view === 'yaml' ? `${lineCount} 行` : `${parsed.measures.length} measures · ${parsed.dimensions.length} dims · ${parsed.metrics.length} metrics`}
               {stats.measure_count > 0 && view === 'yaml' && ` · ${stats.measure_count} measures · ${stats.dimension_count} dims · ${stats.source_count} sources`}
             </span>
           </div>
@@ -456,6 +522,79 @@ function TableView({ parsed, t }: { parsed: ParsedSemantic; t: ReturnType<typeof
           </div>
         </section>
       )}
+
+      {/* Metrics */}
+      {parsed.metrics.length > 0 && (
+        <MetricsTable parsed={parsed} t={t} />
+      )}
     </div>
   );
 }
+
+/** Metrics table: name / label / type / filter / measure / full SQL. */
+function MetricsTable({ parsed, t }: { parsed: ParsedSemantic; t: ReturnType<typeof useTranslation>['t'] }) {
+  const sqlByMeasure = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of parsed.measures) {
+      if (m.full_sql) map.set(m.name, m.full_sql);
+    }
+    return map;
+  }, [parsed.measures]);
+
+  return (
+    <section>
+      <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-1.5">
+        {t('editor.metrics', '指标定义')} ({parsed.metrics.length})
+      </h4>
+      <div className="overflow-x-auto border rounded-lg bg-card">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/40">
+            <tr>
+              <th className="text-left px-2.5 py-1.5 font-medium text-muted-foreground">{t('editor.colName', '名称')}</th>
+              <th className="text-left px-2.5 py-1.5 font-medium text-muted-foreground">{t('editor.colType', '类型')}</th>
+              <th className="text-left px-2.5 py-1.5 font-medium text-muted-foreground">{t('editor.colSource', '来源表')}</th>
+              <th className="text-left px-2.5 py-1.5 font-medium text-muted-foreground">{t('editor.colTime', '时间维度')}</th>
+              <th className="text-left px-2.5 py-1.5 font-medium text-muted-foreground">{t('editor.colFullSql', '完整 SQL')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {parsed.metrics.map(m => {
+              const fullSql = sqlByMeasure.get(m.measure) ?? '';
+              return (
+                <tr key={m.name} className="border-t align-top">
+                  <td className="px-2.5 py-1.5 font-medium whitespace-nowrap">
+                    {m.name}
+                    {m.label && m.label !== m.name && (
+                      <span className="ml-1 text-[10px] text-muted-foreground">({m.label})</span>
+                    )}
+                    {m.filter && (
+                      <div className="text-[10px] text-amber-600 dark:text-amber-400 font-normal">filter: {m.filter}</div>
+                    )}
+                  </td>
+                  <td className="px-2.5 py-1.5 whitespace-nowrap">
+                    <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 text-[10px] font-medium">{m.type}</span>
+                  </td>
+                  <td className="px-2.5 py-1.5 whitespace-nowrap">
+                    <span className="font-mono">{m.measure}</span>
+                    {m.alias && m.alias !== m.measure && (
+                      <div className="text-[10px] text-muted-foreground">alias: {m.alias}</div>
+                    )}
+                  </td>
+                  <td className="px-2.5 py-1.5 font-mono whitespace-nowrap">{m.agg_time_dimension}</td>
+                  <td className="px-2.5 py-1.5">
+                    {fullSql ? (
+                      <pre className="text-[10px] font-mono bg-muted rounded p-1.5 whitespace-pre-wrap break-all max-h-28 overflow-auto">{fullSql}</pre>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
