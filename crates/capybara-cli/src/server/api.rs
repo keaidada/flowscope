@@ -4191,13 +4191,23 @@ async fn gov_generate_semantic_yaml_batch(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
     };
 
+    // Preload the lineage edge graph ONCE, shared across all files. Each file
+    // would otherwise reload all 70k+ edges from the DB (~0.12s each → minutes
+    // for a 100-file chunk).
+    let edge_map = super::governance::semantic_yaml::load_edges_map(&conn, &req.project_id);
+
     for bf in &req.files {
         let path = &bf.path;
         let lower = path.to_lowercase();
         if !(lower.ends_with(".sql") || lower.ends_with(".hql")) {
             continue;
         }
-        match super::governance::semantic_yaml::generate_semantic_yaml(&conn, &req.project_id, path) {
+        match super::governance::semantic_yaml::generate_semantic_yaml_with_edges(
+            &conn,
+            &req.project_id,
+            path,
+            &edge_map,
+        ) {
             Ok(result) => {
                 success_paths.push(path.clone());
                 updates.push((path.clone(), result.yaml));

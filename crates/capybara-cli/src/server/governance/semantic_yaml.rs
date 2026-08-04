@@ -25,6 +25,27 @@ pub fn generate_semantic_yaml(
     project_id: &str,
     file_path: &str,
 ) -> Result<SemanticYamlResult, String> {
+    generate_semantic_yaml_inner(conn, project_id, file_path, None)
+}
+
+/// Same as [`generate_semantic_yaml`] but accepts a preloaded in-memory edge
+/// graph. Batch flows preload the graph ONCE and share it across files —
+/// otherwise each file reloads all 70k+ lineage edges from the DB.
+pub fn generate_semantic_yaml_with_edges(
+    conn: &Connection,
+    project_id: &str,
+    file_path: &str,
+    edge_map: &EdgeGraph,
+) -> Result<SemanticYamlResult, String> {
+    generate_semantic_yaml_inner(conn, project_id, file_path, Some(edge_map))
+}
+
+fn generate_semantic_yaml_inner(
+    conn: &Connection,
+    project_id: &str,
+    file_path: &str,
+    preloaded_edges: Option<&EdgeGraph>,
+) -> Result<SemanticYamlResult, String> {
     let script_name = std::path::Path::new(file_path)
         .file_name()
         .and_then(|n| n.to_str())
@@ -50,12 +71,21 @@ pub fn generate_semantic_yaml(
     }
 
     // 4. Classify each column as measure or dimension via BFS lineage tracing.
+    //    Use a preloaded edge graph if available (batch), else load once.
+    let owned_edges: Option<EdgeGraph>;
+    let edge_map: &EdgeGraph = match preloaded_edges {
+        Some(g) => g,
+        None => {
+            owned_edges = Some(load_edges_map(conn, project_id));
+            owned_edges.as_ref().unwrap()
+        }
+    };
     let mut dimensions: Vec<DimInfo> = Vec::new();
     let mut measures: Vec<MeasureInfo> = Vec::new();
     let time_dim_name = find_time_dimension(&columns);
 
     for col in &columns {
-        if let Some((agg, expr)) = trace_aggregation(conn, project_id, &col.column_id) {
+        if let Some((agg, expr)) = trace_aggregation_mem(edge_map, &col.column_id) {
             measures.push(MeasureInfo {
                 name: to_snake_case(&col.label),
                 agg,
@@ -224,16 +254,41 @@ fn query_output_columns(
     Ok(columns)
 }
 
-/// BFS backward through data_flow/cross_statement edges to find if a column
-/// traces back to an aggregation derivation.
+/// In-memory lineage edge graph: to_id → list of (edge_type, expr, from_id).
+type EdgeGraph = std::collections::HashMap<String, Vec<(String, String, String)>>;
+
+/// Load ALL relevant lineage edges for a project into an in-memory graph.
+/// `to_id` is the key; each entry is (edge_type, expression, from_id).
+pub fn load_edges_map(conn: &Connection, project_id: &str) -> EdgeGraph {
+    let mut graph: EdgeGraph = std::collections::HashMap::new();
+    let sql = "SELECT to_id, edge_type, expression, from_id FROM lineage_edges \
+               WHERE project_id = ?1 AND edge_type IN ('derivation', 'data_flow', 'cross_statement')";
+    if let Ok(mut stmt) = conn.prepare(sql) {
+        let rows = stmt.query_map(params![project_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?, // to_id
+                row.get::<_, String>(1)?, // edge_type
+                row.get::<_, String>(2).unwrap_or_default(), // expression
+                row.get::<_, String>(3).unwrap_or_default(), // from_id
+            ))
+        });
+        if let Ok(rows) = rows {
+            for (to_id, etype, expr, from_id) in rows.flatten() {
+                graph
+                    .entry(to_id)
+                    .or_insert_with(Vec::new)
+                    .push((etype, expr, from_id));
+            }
+        }
+    }
+    graph
+}
+
+/// BFS backward over the in-memory edge graph to find if a column traces
+/// back to an aggregation derivation.
 /// Returns (agg_function, inner_expression).
-///
-/// NOTE: The BFS does NOT filter by file_path — column_id values are globally
-/// unique (hash-based), and the lineage chain may span multiple copies of the
-/// same script (e.g. `etl/ALL/` and `etl/A01_应用集市库-BI/`).
-fn trace_aggregation(
-    conn: &Connection,
-    project_id: &str,
+fn trace_aggregation_mem(
+    graph: &EdgeGraph,
     column_id: &str,
 ) -> Option<(String, String)> {
     let mut visited = HashSet::new();
@@ -243,31 +298,14 @@ fn trace_aggregation(
         if !visited.insert(col_id.clone()) {
             continue;
         }
-
-        // Single query: get all edges pointing TO this column (no file_path filter).
-        let sql = "SELECT edge_type, expression, from_id FROM lineage_edges \
-                   WHERE project_id = ?1 AND to_id = ?2 \
-                   AND edge_type IN ('derivation', 'data_flow', 'cross_statement')";
-        if let Ok(mut stmt) = conn.prepare(sql) {
-            let rows = stmt.query_map(params![project_id, &col_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1).unwrap_or_default(),
-                    row.get::<_, String>(2).unwrap_or_default(),
-                ))
-            });
-            if let Ok(rows) = rows {
-                for (etype, expr, from_id) in rows.flatten() {
-                    if etype == "derivation" {
-                        if let Some(parsed) = parse_aggregation(&expr) {
-                            return Some(parsed);
-                        }
-                    } else {
-                        // data_flow or cross_statement: follow upstream.
-                        if !from_id.is_empty() {
-                            queue.push(from_id);
-                        }
+        if let Some(edges) = graph.get(&col_id) {
+            for (etype, expr, from_id) in edges {
+                if etype == "derivation" {
+                    if let Some(parsed) = parse_aggregation(expr) {
+                        return Some(parsed);
                     }
+                } else if !from_id.is_empty() {
+                    queue.push(from_id.clone());
                 }
             }
         }
