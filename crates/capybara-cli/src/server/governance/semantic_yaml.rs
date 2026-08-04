@@ -922,46 +922,64 @@ fn format_yaml(
     yaml.push_str("semantic_models:\n");
     yaml.push_str(&format!("  - name: {model_name}\n"));
     yaml.push_str(&format!("    model: ref('{to_table}')\n"));
+    let desc_text = if !from_tables.is_empty() {
+        format!("Sources: {}", from_tables.join(", "))
+    } else {
+        String::new()
+    };
+    yaml.push_str(&format!("    description: '{}'\n", desc_text.replace('\'', "''")));
 
-    if !from_tables.is_empty() {
-        yaml.push_str(&format!(
-            "    description: 'Sources: {}'\n",
-            from_tables.join(", ")
-        ));
+    // defaults
+    if let Some(td) = time_dim {
+        yaml.push_str(&format!("    defaults:\n"));
+        yaml.push_str(&format!("      agg_time_dimension: {td}\n"));
     }
 
     yaml.push('\n');
 
-    // Default entity (best-effort: use table short name + _id).
-    // Skipped for now — user can add manually.
+    // entities — best-effort primary key detection
+    let entity_name = detect_primary_entity(dimensions);
+    yaml.push_str("    entities:\n");
+    yaml.push_str(&format!("      - name: {}\n", entity_name));
+    yaml.push_str("        type: primary\n");
+    yaml.push_str(&format!("        expr: {}\n", entity_name));
+    yaml.push_str(&format!("        description: 'Primary key (auto-detected)'\n"));
 
-    // Dimensions
+    // Dimensions — ALL properties
     if !dimensions.is_empty() {
         yaml.push_str("    dimensions:\n");
+        let mut first_time = true;
         for d in dimensions {
             yaml.push_str(&format!("      - name: {}\n", d.name));
-            if let Some(ref desc) = d.description {
-                yaml.push_str(&format!("        description: '{}'\n", desc.replace('\'', "''")));
-            }
+            let desc = d.description.as_deref().unwrap_or("");
+            yaml.push_str(&format!("        description: '{}'\n", desc.replace('\'', "''")));
+            let expr_val = d.description.as_deref().filter(|s| !s.is_empty()).unwrap_or(&d.name);
             match &d.dim_type {
                 DimensionType::Time { granularity } => {
                     yaml.push_str("        type: time\n");
+                    yaml.push_str(&format!("        expr: {}\n", expr_val));
                     yaml.push_str("        type_params:\n");
                     yaml.push_str(&format!("          time_granularity: {granularity}\n"));
+                    if first_time {
+                        yaml.push_str("          is_primary: true\n");
+                        first_time = false;
+                    }
                 }
                 DimensionType::Categorical => {
                     yaml.push_str("        type: categorical\n");
+                    yaml.push_str(&format!("        expr: {}\n", expr_val));
                 }
             }
         }
         yaml.push('\n');
     }
 
-    // Measures
+    // Measures — ALL properties
     if !measures.is_empty() {
         yaml.push_str("    measures:\n");
         for m in measures {
             yaml.push_str(&format!("      - name: {}\n", m.name));
+            yaml.push_str(&format!("        description: '{}'\n", m.name.replace('_', " ")));
             yaml.push_str(&format!("        agg: {}\n", m.agg));
             yaml.push_str(&format!("        expr: {}\n", m.expr));
             if let Some(td) = &m.agg_time_dimension {
@@ -972,22 +990,43 @@ fn format_yaml(
         yaml.push('\n');
     }
 
-    // Also generate simple metrics list (one per measure with create_metric).
+    // Metrics — ALL properties
     if !measures.is_empty() {
         yaml.push_str("metrics:\n");
         for m in measures {
             yaml.push_str(&format!("  - name: {}\n", m.name));
-            yaml.push_str(&format!("    label: {}\n", capitalize_words(&m.name)));
+            yaml.push_str(&format!("    description: '{}'\n", m.name.replace('_', " ")));
+            yaml.push_str(&format!("    label: '{}'\n", capitalize_words(&m.name)));
             yaml.push_str("    type: simple\n");
             yaml.push_str("    type_params:\n");
-            yaml.push_str(&format!("      measure:\n"));
+            yaml.push_str("      measure:\n");
             yaml.push_str(&format!("        name: {}\n", m.name));
+            yaml.push_str("        filter: ''\n");
+            if let Some(td) = &m.agg_time_dimension {
+                yaml.push_str(&format!("      agg_time_dimension: {td}\n"));
+            }
             yaml.push('\n');
         }
     }
 
-    let _ = time_dim; // already used in measures
+    let _ = time_dim;
     yaml
+}
+
+/// Best-effort primary entity name detection from dimension names.
+fn detect_primary_entity(dimensions: &[DimInfo]) -> String {
+    // Look for a column ending with _id or named 'id'
+    for d in dimensions {
+        let lower = d.name.to_lowercase();
+        if lower == "id" || lower.ends_with("_id") {
+            return d.name.clone();
+        }
+    }
+    // Fallback: use first dimension name + _id
+    if let Some(first) = dimensions.first() {
+        return format!("{}_id", first.name);
+    }
+    "row_id".to_string()
 }
 
 /// Capitalize each word in a snake_case name for human-readable labels.
