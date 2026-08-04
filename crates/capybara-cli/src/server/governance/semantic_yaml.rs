@@ -43,7 +43,7 @@ pub fn generate_semantic_yaml(
     let output_node_id = find_output_node(conn, project_id, file_path, &to_table)?;
 
     // 3. Get all columns of the output table.
-    let columns = query_output_columns(conn, project_id, file_path, &output_node_id)?;
+    let columns = query_output_columns(conn, project_id, &output_node_id)?;
 
     if columns.is_empty() {
         return Err(format!("No columns found for output table {to_table}"));
@@ -145,6 +145,11 @@ fn query_table_edges(
 }
 
 /// Find the lineage_nodes node_id for the output table of this script.
+///
+/// A physical table may be written by MANY scripts (each a copy / different
+/// report over the same table), so its node is NOT guaranteed to live under
+/// the current file_path. Match by qualified_name / label across the whole
+/// project instead — the DB is the source of truth.
 fn find_output_node(
     conn: &Connection,
     project_id: &str,
@@ -154,38 +159,78 @@ fn find_output_node(
     let to_table_lower = to_table.to_lowercase();
     let short_name = normalize_name(&to_table_lower);
 
-    // Collect all output/table/view nodes for this file.
-    let sql = "SELECT node_id, label FROM lineage_nodes \
-               WHERE project_id = ?1 AND file_path = ?2 AND node_type IN ('output', 'table', 'view')";
-    let candidates: Vec<(String, String)> = if let Ok(mut stmt) = conn.prepare(sql) {
-        let rows = stmt.query_map(params![project_id, file_path], |row| {
+    // Strategy 1: qualified_name exact match (whole project).
+    let sql_qn = "SELECT node_id, qualified_name FROM lineage_nodes \
+                  WHERE project_id = ?1 AND lower(qualified_name) = ?2 \
+                  AND node_type IN ('output', 'table', 'view') LIMIT 1";
+    if let Ok(mut stmt) = conn.prepare(sql_qn) {
+        if let Ok(mut rows) = stmt.query_map(params![project_id, &to_table_lower], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            if let Some(Ok((nid, _))) = rows.next() {
+                return Ok(nid);
+            }
+        }
+    }
+
+    // Strategy 2: qualified_name ends_with the short name (case-insensitive),
+    // scoped to the current file first, then whole project.
+    let like = format!("%.{short_name}");
+    let sql_end = "SELECT node_id, qualified_name FROM lineage_nodes \
+                   WHERE project_id = ?1 AND node_type IN ('output', 'table', 'view') \
+                   AND lower(qualified_name) LIKE ?2 LIMIT 1";
+    let sql_scoped = "SELECT node_id, qualified_name FROM lineage_nodes \
+                      WHERE project_id = ?1 AND file_path = ?2 \
+                      AND node_type IN ('output', 'table', 'view') \
+                      AND lower(qualified_name) LIKE ?3 LIMIT 1";
+    if let Ok(mut stmt) = conn.prepare(sql_scoped) {
+        if let Ok(mut rows) = stmt.query_map(
+            params![project_id, file_path, &like],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        ) {
+            if let Some(Ok((nid, _))) = rows.next() {
+                return Ok(nid);
+            }
+        }
+    }
+    if let Ok(mut stmt) = conn.prepare(sql_end) {
+        if let Ok(mut rows) = stmt.query_map(
+            params![project_id, &like],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        ) {
+            if let Some(Ok((nid, _))) = rows.next() {
+                return Ok(nid);
+            }
+        }
+    }
+
+    // Strategy 3: label exact match (whole project).
+    let sql_lbl = "SELECT node_id, label FROM lineage_nodes \
+                   WHERE project_id = ?1 AND lower(label) = ?2 \
+                   AND node_type IN ('output', 'table', 'view') LIMIT 1";
+    if let Ok(mut stmt) = conn.prepare(sql_lbl) {
+        if let Ok(mut rows) = stmt.query_map(params![project_id, &to_table_lower], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            if let Some(Ok((nid, _))) = rows.next() {
+                return Ok(nid);
+            }
+        }
+    }
+
+    // Strategy 4: normalized short label match (whole project).
+    let sql_short = "SELECT node_id, label FROM lineage_nodes \
+                     WHERE project_id = ?1 AND node_type IN ('output', 'table', 'view')";
+    if let Ok(mut stmt) = conn.prepare(sql_short) {
+        let rows = stmt.query_map(params![project_id], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         });
-        rows.ok()
-            .map(|r| r.flatten().collect())
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
-    // Strategy 1: exact label match (case-insensitive).
-    for (node_id, label) in &candidates {
-        if label.to_lowercase() == to_table_lower {
-            return Ok(node_id.clone());
-        }
-    }
-
-    // Strategy 2: normalized short name match.
-    for (node_id, label) in &candidates {
-        if normalize_name(&label.to_lowercase()) == short_name {
-            return Ok(node_id.clone());
-        }
-    }
-
-    // Strategy 3: partial contains match.
-    for (node_id, label) in &candidates {
-        if normalize_name(&label.to_lowercase()).contains(&short_name) {
-            return Ok(node_id.clone());
+        if let Ok(rows) = rows {
+            for row in rows.flatten() {
+                if normalize_name(&row.1.to_lowercase()) == short_name {
+                    return Ok(row.0);
+                }
+            }
         }
     }
 
@@ -198,16 +243,18 @@ fn find_output_node(
 fn query_output_columns(
     conn: &Connection,
     project_id: &str,
-    file_path: &str,
     node_id: &str,
 ) -> Result<Vec<ColInfo>, String> {
     let mut columns = Vec::new();
 
+    // Columns belong to the table NODE, which may live under a different
+    // file_path than the current script (a table can be written by many
+    // scripts). Query by parent_node_id across the project.
     let sql = "SELECT column_id, label FROM lineage_columns \
-               WHERE project_id = ?1 AND file_path = ?2 AND parent_node_id = ?3 \
+               WHERE project_id = ?1 AND parent_node_id = ?2 \
                ORDER BY label";
     if let Ok(mut stmt) = conn.prepare(sql) {
-        let rows = stmt.query_map(params![project_id, file_path, node_id], |row| {
+        let rows = stmt.query_map(params![project_id, node_id], |row| {
             Ok(ColInfo {
                 column_id: row.get(0)?,
                 label: row.get(1)?,
