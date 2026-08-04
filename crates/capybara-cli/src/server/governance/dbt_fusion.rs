@@ -69,7 +69,11 @@ pub fn convert_sql_to_dbt_with_tables(
         if trimmed.to_uppercase().starts_with("CREATE") && trimmed.to_uppercase().contains("TABLE") {
             in_create_table = true;
             has_config = true;
-            config_parts.push("materialized='table'".to_string());
+            // Avoid duplicate materialized entries when a script has multiple
+            // CREATE TABLE statements (only the first occurrence is kept).
+            if !config_parts.iter().any(|c| c.starts_with("materialized")) {
+                config_parts.push("materialized='table'".to_string());
+            }
 
             // Extract table name
             if let Some(table_name) = extract_table_name_from_ddl(trimmed) {
@@ -83,7 +87,10 @@ pub fn convert_sql_to_dbt_with_tables(
             let upper = trimmed.to_uppercase();
             if upper.starts_with("ENGINE") {
                 if let Some(engine) = extract_engine(trimmed) {
-                    config_parts.push(format!("engine='{engine}'"));
+                    let entry = format!("engine='{engine}'");
+                    if !config_parts.iter().any(|c| c.starts_with("engine=")) {
+                        config_parts.push(entry);
+                    }
                 }
                 continue;
             }
@@ -91,14 +98,20 @@ pub fn convert_sql_to_dbt_with_tables(
                 let expr = trimmed.trim_start_matches(|c: char| c.is_ascii_alphabetic() || c == ' ' || c == '\t');
                 let expr = expr.trim().trim_matches(|c: char| c == '(' || c == ')' || c == ' ' || c == '\'');
                 if !expr.is_empty() {
-                    config_parts.push(format!("partition_by=\"{}\"", expr));
+                    let entry = format!("partition_by=\"{}\"", expr);
+                    if !config_parts.iter().any(|c| c.starts_with("partition_by=")) {
+                        config_parts.push(entry);
+                    }
                 }
                 continue;
             }
             if upper.starts_with("ORDER BY") && !upper.contains("JOIN") {
                 let expr = trimmed[8..].trim().trim_matches(|c: char| c == '(' || c == ')' || c == ' ');
                 if !expr.is_empty() {
-                    config_parts.push(format!("order_by=\"{}\"", expr));
+                    let entry = format!("order_by=\"{}\"", expr);
+                    if !config_parts.iter().any(|c| c.starts_with("order_by=")) {
+                        config_parts.push(entry);
+                    }
                 }
                 continue;
             }
