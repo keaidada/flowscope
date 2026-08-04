@@ -35,7 +35,17 @@ pub fn generate_semantic_yaml(
         .unwrap_or(file_path);
 
     // 1. Get to_table and from_tables from table_level_edges.
-    let (to_table, from_tables) = query_table_edges(conn, project_id, script_name)?;
+    let (mut to_table, mut from_tables) = query_table_edges(conn, project_id, script_name)?;
+
+    // Fallback: if table_level_edges has no row for this script (e.g. the
+    // repopulate step hasn't run), derive the output table + source tables
+    // from lineage_nodes + data_flow edges directly.
+    if to_table.is_empty() {
+        if let Some((out, srcs)) = find_output_from_nodes(conn, project_id, file_path) {
+            to_table = out;
+            from_tables = srcs;
+        }
+    }
 
     if to_table.is_empty() {
         // No lineage output table recorded for this script.
@@ -200,6 +210,73 @@ fn query_table_edges(
     }
 
     Ok((to_table, from_tables))
+}
+
+/// Find the output table and source tables of a script from lineage_nodes +
+/// data_flow edges, WITHOUT relying on table_level_edges.
+///
+/// A table node that has an incoming data_flow edge whose from is a CTE (or
+/// another table) is a candidate output; tables that only appear as FROM
+/// sources are inputs.
+fn find_output_from_nodes(
+    conn: &Connection,
+    project_id: &str,
+    file_path: &str,
+) -> Option<(String, Vec<String>)> {
+    // 1. table/view nodes in this file.
+    let mut node_qn: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let sql_nodes = "SELECT node_id, COALESCE(qualified_name, label) FROM lineage_nodes \
+                     WHERE project_id = ?1 AND file_path = ?2 AND node_type IN ('table', 'view')";
+    if let Ok(mut stmt) = conn.prepare(sql_nodes) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for r in rows.flatten() {
+                node_qn.insert(r.0, r.1.to_lowercase());
+            }
+        }
+    }
+    if node_qn.is_empty() {
+        return None;
+    }
+
+    // 2. Which table nodes are written to (have a data_flow edge as `to`)?
+    let mut written: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut read: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let sql_edges = "SELECT from_id, to_id FROM lineage_edges \
+                     WHERE project_id = ?1 AND file_path = ?2 \
+                     AND REPLACE(LOWER(edge_type),'_','') = 'dataflow'";
+    if let Ok(mut stmt) = conn.prepare(sql_edges) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for (f, t) in rows.flatten() {
+                if node_qn.contains_key(&t) {
+                    written.insert(node_qn[&t].clone());
+                }
+                if node_qn.contains_key(&f) {
+                    read.insert(node_qn[&f].clone());
+                }
+            }
+        }
+    }
+
+    // 3. Output = written table (prefer one that's NOT also read-only).
+    let outputs: Vec<&String> = written.iter().collect();
+    if outputs.is_empty() {
+        return None;
+    }
+    let output = outputs[0].clone();
+    // Sources = read tables except the output itself.
+    let mut sources: Vec<String> = read
+        .iter()
+        .filter(|q| *q != &output)
+        .cloned()
+        .collect();
+    sources.sort();
+    sources.dedup();
+
+    Some((output, sources))
 }
 
 /// Find the lineage_nodes node_id for the output table of this script.
