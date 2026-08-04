@@ -4171,6 +4171,7 @@ async fn gov_generate_semantic_yaml(
             "dimension_count": result.dimension_count,
             "measure_count": result.measure_count,
             "source_count": result.source_count,
+            "skipped": result.skipped,
         })).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Generation failed: {e}")).into_response(),
     }
@@ -4184,6 +4185,7 @@ async fn gov_generate_semantic_yaml_batch(
     // Reuse ConvertDbtBatchRequest (project_id, folder_path, files).
     let mut success_paths = Vec::new();
     let mut error_paths = Vec::new();
+    let mut skipped_paths = Vec::new();
     let mut updates: Vec<(String, String)> = Vec::new();
 
     let conn = match state.db.lock() {
@@ -4206,8 +4208,12 @@ async fn gov_generate_semantic_yaml_batch(
             path,
         ) {
             Ok(result) => {
-                success_paths.push(path.clone());
-                updates.push((path.clone(), result.yaml));
+                if result.skipped {
+                    skipped_paths.push(path.clone());
+                } else {
+                    success_paths.push(path.clone());
+                    updates.push((path.clone(), result.yaml));
+                }
             }
             Err(_) => {
                 error_paths.push(path.clone());
@@ -4228,10 +4234,11 @@ async fn gov_generate_semantic_yaml_batch(
     Json(serde_json::json!({
         "success": success_paths.len(),
         "errors": error_paths.len(),
-        "skipped": 0,
-        "total": success_paths.len() + error_paths.len(),
+        "skipped": skipped_paths.len(),
+        "total": success_paths.len() + error_paths.len() + skipped_paths.len(),
         "successPaths": success_paths,
         "errorPaths": error_paths,
+        "skippedPaths": skipped_paths,
     }))
     .into_response()
 }

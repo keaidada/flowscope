@@ -107,7 +107,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     total: number;
     success: string[];
     errors: string[];
-    skipped: number;
+    skipped: string[];
   } | null>(null);
 
   const currentProjectRef = useRef(currentProject);
@@ -472,7 +472,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     }
     setYamlFolderOpen(false);
     setIsGeneratingYaml(true);
-    setYamlFolderProgress({ done: 0, total: 0, success: [], errors: [], skipped: 0 });
+    setYamlFolderProgress({ done: 0, total: 0, success: [], errors: [], skipped: [] });
 
     const prefix = yamlFolderPath.endsWith('/') ? yamlFolderPath : yamlFolderPath + '/';
     const sqlFiles = currentProject.files.filter(
@@ -484,7 +484,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     const success: string[] = [];
     const errors: string[] = [];
     const updates: { path: string; yaml: string }[] = [];
-    let skipped = 0;
+    const skipped: string[] = [];
 
     if (total === 0) {
       setYamlFolderProgress({ done: 0, total: 0, success, errors, skipped });
@@ -497,14 +497,22 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     let done = 0;
     for (let i = 0; i < sqlFiles.length; i++) {
       const file = sqlFiles[i];
+      // 空文件直接跳过（不计入失败）
+      if (!file.content || !file.content.trim()) {
+        skipped.push(file.path);
+        done += 1;
+        setYamlFolderProgress({ done, total, success, errors, skipped });
+        continue;
+      }
       try {
         console.log(`[generate-yaml-folder] ${i + 1}/${sqlFiles.length} ${file.path}`);
         const result = await generateSemanticYaml(currentProject.id, file.path);
-        if (result.yaml && result.yaml.trim()) {
+        if (result.skipped || !result.yaml || !result.yaml.trim()) {
+          // 后端无可用血缘数据（无输出表/无列）→ 跳过而非失败
+          skipped.push(file.path);
+        } else {
           success.push(file.path);
           updates.push({ path: file.path, yaml: result.yaml });
-        } else {
-          errors.push(file.path);
         }
       } catch (e) {
         console.error(`[generate-yaml-folder] file failed: ${file.path}`, e);

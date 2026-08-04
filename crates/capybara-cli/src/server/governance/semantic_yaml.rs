@@ -14,6 +14,10 @@ pub struct SemanticYamlResult {
     pub dimension_count: usize,
     pub measure_count: usize,
     pub source_count: usize,
+    /// True when the script has no usable lineage data (no output table /
+    /// no columns) — not an error, just nothing to generate. Frontend counts
+    /// these as "skipped" rather than "failed".
+    pub skipped: bool,
 }
 
 /// Generate dbt Semantic Layer YAML for a single script.
@@ -34,7 +38,15 @@ pub fn generate_semantic_yaml(
     let (to_table, from_tables) = query_table_edges(conn, project_id, script_name)?;
 
     if to_table.is_empty() {
-        return Err(format!("No output table found for {script_name}"));
+        // No lineage output table recorded for this script — not an error.
+        return Ok(SemanticYamlResult {
+            yaml: String::new(),
+            model_name: script_name.to_string(),
+            dimension_count: 0,
+            measure_count: 0,
+            source_count: 0,
+            skipped: true,
+        });
     }
 
     let model_name = normalize_name(&to_table);
@@ -46,7 +58,15 @@ pub fn generate_semantic_yaml(
     let columns = query_output_columns(conn, project_id, &output_node_id)?;
 
     if columns.is_empty() {
-        return Err(format!("No columns found for output table {to_table}"));
+        // Table node exists but no columns recorded — treat as skipped.
+        return Ok(SemanticYamlResult {
+            yaml: String::new(),
+            model_name,
+            dimension_count: 0,
+            measure_count: 0,
+            source_count: 0,
+            skipped: true,
+        });
     }
 
     // 4. Classify each column as measure or dimension via BFS lineage tracing.
@@ -83,6 +103,7 @@ pub fn generate_semantic_yaml(
         dimension_count: dimensions.len(),
         measure_count: measures.len(),
         source_count,
+        skipped: false,
     })
 }
 

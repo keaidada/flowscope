@@ -14,6 +14,7 @@ import {
   FolderTree,
   XCircle,
   CheckCircle,
+  AlertTriangle,
   Copy,
   Check,
   Boxes,
@@ -35,7 +36,7 @@ interface DbtConvertFolderDialogProps {
   convertResult: {
     success: string[];
     errors: string[];
-    skipped: number;
+    skipped: string[] | number;
   } | null;
   onConfirm: () => void;
 }
@@ -51,7 +52,7 @@ function DbtFileListDialog({
   onOpenChange: (open: boolean) => void;
   title: string;
   files: string[];
-  icon: 'success' | 'error';
+  icon: 'success' | 'error' | 'skipped';
 }) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -82,6 +83,8 @@ function DbtFileListDialog({
           <DialogTitle className="flex items-center gap-2">
             {icon === 'success' ? (
               <CheckCircle className="h-4 w-4 text-green-500" />
+            ) : icon === 'skipped' ? (
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
             ) : (
               <XCircle className="h-4 w-4 text-red-500" />
             )}
@@ -155,12 +158,14 @@ export function DbtConvertFolderDialog({
   onConfirm,
 }: DbtConvertFolderDialogProps) {
   const { t } = useTranslation();
-  const [listType, setListType] = useState<'success' | 'errors' | null>(null);
+  const [listType, setListType] = useState<'success' | 'errors' | 'skipped' | null>(null);
   const completed = convertProgress && convertProgress.done >= convertProgress.total;
 
   const successCount = convertResult?.success.length ?? 0;
   const errorCount = convertResult?.errors.length ?? 0;
-  const skippedCount = convertResult?.skipped ?? 0;
+  const skippedCount = Array.isArray(convertResult?.skipped)
+    ? convertResult!.skipped.length
+    : (convertResult?.skipped ?? 0);
 
   const resultCard = (label: string, count: number, color: string, onClick?: () => void) => (
     <div
@@ -262,7 +267,9 @@ export function DbtConvertFolderDialog({
                     )
                   : resultCard(t('editor.convertSuccess', '转换成功'), successCount, 'text-green-600')}
                 {skippedCount > 0
-                  ? resultCard(t('editor.convertSkipped', '跳过(空文件)'), skippedCount, 'text-amber-600')
+                  ? resultCard(t('editor.convertSkipped', '跳过(空文件)'), skippedCount, 'text-amber-600', () =>
+                      setListType('skipped')
+                    )
                   : resultCard(t('editor.convertSkipped', '跳过(空文件)'), skippedCount, 'text-amber-600')}
                 {errorCount > 0
                   ? resultCard(t('editor.convertErrors', '转换失败'), errorCount, 'text-red-600', () =>
@@ -310,9 +317,21 @@ export function DbtConvertFolderDialog({
         <DbtFileListDialog
           open
           onOpenChange={() => setListType(null)}
-          title={listType === 'success' ? t('editor.convertSuccess', '个转换成功') : t('editor.convertErrors', '个失败')}
-          files={listType === 'success' ? convertResult.success : convertResult.errors}
-          icon={listType === 'success' ? 'success' : 'error'}
+          title={
+            listType === 'success'
+              ? t('editor.convertSuccess', '个转换成功')
+              : listType === 'skipped'
+                ? t('editor.convertSkipped', '个跳过')
+                : t('editor.convertErrors', '个失败')
+          }
+          files={
+            listType === 'success'
+              ? convertResult.success
+              : listType === 'skipped'
+                ? (Array.isArray(convertResult.skipped) ? convertResult.skipped : [])
+                : convertResult.errors
+          }
+          icon={listType === 'success' ? 'success' : listType === 'skipped' ? 'skipped' : 'error'}
         />
       )}
     </>

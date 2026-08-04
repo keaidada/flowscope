@@ -236,7 +236,7 @@ export async function deleteProjectFiles(projectId: string): Promise<void> {
 export async function generateSemanticYaml(
   projectId: string,
   filePath: string
-): Promise<{ yaml: string; model_name: string; dimension_count: number; measure_count: number; source_count: number }> {
+): Promise<{ yaml: string; model_name: string; dimension_count: number; measure_count: number; source_count: number; skipped: boolean }> {
   const res = await fetchWithTimeout(`${apiBase()}/api/generate-semantic-yaml`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
