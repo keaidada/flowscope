@@ -38,15 +38,26 @@ pub fn generate_semantic_yaml(
     let (to_table, from_tables) = query_table_edges(conn, project_id, script_name)?;
 
     if to_table.is_empty() {
-        // No lineage output table recorded for this script — not an error.
-        return Ok(SemanticYamlResult {
-            yaml: String::new(),
-            model_name: script_name.to_string(),
-            dimension_count: 0,
-            measure_count: 0,
-            source_count: 0,
-            skipped: true,
-        });
+        // No lineage output table recorded for this script.
+        // Distinguish: empty file → skipped; non-empty file → failed
+        // (script has content but lineage analysis didn't record its output).
+        let has_content = match store_load_content(conn, project_id, file_path) {
+            Some(c) => !c.trim().is_empty(),
+            None => false,
+        };
+        if !has_content {
+            return Ok(SemanticYamlResult {
+                yaml: String::new(),
+                model_name: script_name.to_string(),
+                dimension_count: 0,
+                measure_count: 0,
+                source_count: 0,
+                skipped: true,
+            });
+        }
+        return Err(format!(
+            "No output table found for {script_name} (content present but lineage has no to_table)"
+        ));
     }
 
     let model_name = normalize_name(&to_table);
@@ -58,15 +69,25 @@ pub fn generate_semantic_yaml(
     let columns = query_output_columns(conn, project_id, &output_node_id)?;
 
     if columns.is_empty() {
-        // Table node exists but no columns recorded — treat as skipped.
-        return Ok(SemanticYamlResult {
-            yaml: String::new(),
-            model_name,
-            dimension_count: 0,
-            measure_count: 0,
-            source_count: 0,
-            skipped: true,
-        });
+        // Table node exists but no columns recorded. If the script has
+        // content, treat as failed (lineage incomplete); else skipped.
+        let has_content = match store_load_content(conn, project_id, file_path) {
+            Some(c) => !c.trim().is_empty(),
+            None => false,
+        };
+        if !has_content {
+            return Ok(SemanticYamlResult {
+                yaml: String::new(),
+                model_name,
+                dimension_count: 0,
+                measure_count: 0,
+                source_count: 0,
+                skipped: true,
+            });
+        }
+        return Err(format!(
+            "No columns found for output table {to_table} (content present but lineage has no columns)"
+        ));
     }
 
     // 4. Classify each column as measure or dimension via BFS lineage tracing.
@@ -132,6 +153,22 @@ struct MeasureInfo {
 }
 
 // ── Query helpers ────────────────────────────────────────────────────────
+
+/// Load the file content from project_files for a given path.
+/// Returns None if the file doesn't exist or has no content.
+fn store_load_content(conn: &Connection, project_id: &str, file_path: &str) -> Option<String> {
+    let sql = "SELECT content FROM project_files WHERE project_id = ?1 AND path = ?2 AND status = 1";
+    if let Ok(mut stmt) = conn.prepare(sql) {
+        if let Ok(mut rows) = stmt.query_map(params![project_id, file_path], |row| {
+            row.get::<_, String>(0)
+        }) {
+            if let Some(Ok(content)) = rows.next() {
+                return Some(content);
+            }
+        }
+    }
+    None
+}
 
 /// Query to_table and from_tables from table_level_edges.
 fn query_table_edges(
