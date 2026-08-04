@@ -20,7 +20,7 @@ const SCHEMA_VERSION: i32 = 7;
 /// Open (or create) the database file at the given path.
 pub fn open_db(path: &Path) -> Result<Mutex<Connection>, rusqlite::Error> {
     let conn = Connection::open(path)?;
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cache_size = -200000; PRAGMA temp_store = MEMORY; PRAGMA wal_autocheckpoint = 1000;")?;
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cache_size = -200000; PRAGMA temp_store = MEMORY; PRAGMA wal_autocheckpoint = 1000; PRAGMA busy_timeout = 5000;")?;
     migrate(&conn)?;
     create_tables(&conn)?;
     Ok(Mutex::new(conn))
@@ -1552,7 +1552,7 @@ pub fn batch_update_transformed(
     updates: &[(String, String)],
 ) -> Result<(), rusqlite::Error> {
     let tx = conn.unchecked_transaction()?;
-    {
+    let result = (|| -> Result<(), rusqlite::Error> {
         let now = chrono::Utc::now()
             .with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap())
             .format("%Y-%m-%dT%H:%M:%S%.3f+08:00")
@@ -1563,8 +1563,15 @@ pub fn batch_update_transformed(
         for (path, transformed) in updates {
             stmt.execute(params![transformed, project_id, path, now])?;
         }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => tx.commit(),
+        Err(e) => {
+            let _ = tx.rollback();
+            Err(e)
+        }
     }
-    tx.commit()
 }
 
 /// Update dbt_content for a single file.
@@ -1592,7 +1599,7 @@ pub fn batch_update_dbt_content(
     updates: &[(String, String)],
 ) -> Result<(), rusqlite::Error> {
     let tx = conn.unchecked_transaction()?;
-    {
+    let result = (|| -> Result<(), rusqlite::Error> {
         let now = chrono::Utc::now()
             .with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap())
             .format("%Y-%m-%dT%H:%M:%S%.3f+08:00")
@@ -1603,8 +1610,18 @@ pub fn batch_update_dbt_content(
         for (path, dbt) in updates {
             stmt.execute(params![dbt, project_id, path, now])?;
         }
+        Ok(())
+    })();
+    // CRITICAL: ensure the transaction is always rolled back on error, otherwise
+    // the connection stays "IN TRANSACTION" and every subsequent query blocks
+    // forever (the 'stuck at 1400' symptom).
+    match result {
+        Ok(()) => tx.commit(),
+        Err(e) => {
+            let _ = tx.rollback();
+            Err(e)
+        }
     }
-    tx.commit()
 }
 
 /// Update dbt_yaml for a single file.
@@ -1632,7 +1649,7 @@ pub fn batch_update_dbt_yaml(
     updates: &[(String, String)],
 ) -> Result<(), rusqlite::Error> {
     let tx = conn.unchecked_transaction()?;
-    {
+    let result = (|| -> Result<(), rusqlite::Error> {
         let now = chrono::Utc::now()
             .with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap())
             .format("%Y-%m-%dT%H:%M:%S%.3f+08:00")
@@ -1643,8 +1660,15 @@ pub fn batch_update_dbt_yaml(
         for (path, yaml) in updates {
             stmt.execute(params![yaml, project_id, path, now])?;
         }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => tx.commit(),
+        Err(e) => {
+            let _ = tx.rollback();
+            Err(e)
+        }
     }
-    tx.commit()
 }
 
 // ── delete by paths ───────────────────────────────────────────────────

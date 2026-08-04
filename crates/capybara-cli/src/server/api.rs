@@ -3833,12 +3833,30 @@ async fn gov_convert_dbt(
     let (sources, targets) =
         super::governance::dbt_fusion::load_script_edges(&conn, &req.project_id, script_name);
 
-    let result = if !sources.is_empty() || !targets.is_empty() {
-        super::governance::dbt_fusion::convert_sql_to_dbt_with_edges(
-            &sources, &targets, &model_tables, &sql,
-        )
-    } else {
-        super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, &sql)
+    let result = std::panic::catch_unwind(|| {
+        if !sources.is_empty() || !targets.is_empty() {
+            super::governance::dbt_fusion::convert_sql_to_dbt_with_edges(
+                &sources, &targets, &model_tables, &sql,
+            )
+        } else {
+            super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, &sql)
+        }
+    });
+    let result = match result {
+        Ok(r) => r,
+        Err(panic_info) => {
+            let msg = panic_info
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| panic_info.downcast_ref::<String>().map(|s| s.as_str()))
+                .unwrap_or("unknown panic");
+            eprintln!("[convert-dbt] PANIC converting {}: {msg}", req.file_path);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Conversion panic: {msg}"),
+            )
+                .into_response();
+        }
     };
     eprintln!(
         "[convert-dbt] DONE: {} bytes ({} sources, {} models, {} warnings) elapsed={:?}",
@@ -3988,16 +4006,37 @@ async fn gov_convert_dbt_batch(
             .unwrap_or(path);
 
         // Use edge-based conversion if edges data exists, else fallback to regex.
-        let result = if let Some((sources, targets)) = all_edges.get(script_name) {
-            if !sources.is_empty() || !targets.is_empty() {
-                super::governance::dbt_fusion::convert_sql_to_dbt_with_edges(
-                    sources, targets, &model_tables, sql,
-                )
+        // catch_unwind so a panic in conversion (e.g. UTF-8 slice) is logged and
+        // skipped instead of aborting the handler mid-transaction — which would
+        // leave the DB connection stuck IN TRANSACTION (the 'stuck at 1400'
+        // root cause).
+        let result = std::panic::catch_unwind(|| {
+            if let Some((sources, targets)) = all_edges.get(script_name) {
+                if !sources.is_empty() || !targets.is_empty() {
+                    super::governance::dbt_fusion::convert_sql_to_dbt_with_edges(
+                        sources, targets, &model_tables, sql,
+                    )
+                } else {
+                    super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, sql)
+                }
             } else {
                 super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, sql)
             }
-        } else {
-            super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, sql)
+        });
+
+        let result = match result {
+            Ok(r) => r,
+            Err(panic_info) => {
+                let msg = panic_info
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic_info.downcast_ref::<String>().map(|s| s.as_str()))
+                    .unwrap_or("unknown panic");
+                eprintln!("[convert-dbt-batch] PANIC converting {path}: {msg}");
+                // Treat as an error file, do not persist.
+                error_paths.push(path.clone());
+                continue;
+            }
         };
 
         if !result.dbt_content.trim().is_empty() {
