@@ -151,9 +151,29 @@ pub fn generate_semantic_yaml(
             });
         } else {
             let dim_type = classify_dimension(&col.label);
+            // Generate description from expression
+            let description = col.expression.as_ref().and_then(|expr| {
+                let trimmed = expr.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            });
+            // For col_N auto-named columns, try to infer a better name
+            let name = if col.label.starts_with("col_") {
+                if let Some(ref expr) = col.expression {
+                    infer_name_from_expression(expr).unwrap_or_else(|| to_snake_case(&col.label))
+                } else {
+                    to_snake_case(&col.label)
+                }
+            } else {
+                to_snake_case(&col.label)
+            };
             dimensions.push(DimInfo {
-                name: to_snake_case(&col.label),
+                name,
                 dim_type,
+                description,
             });
         }
     }
@@ -176,11 +196,13 @@ pub fn generate_semantic_yaml(
 struct ColInfo {
     column_id: String,
     label: String,
+    expression: Option<String>,
 }
 
 struct DimInfo {
     name: String,
     dim_type: DimensionType,
+    description: Option<String>,
 }
 
 enum DimensionType {
@@ -477,7 +499,7 @@ fn query_output_columns(
     let mut columns = Vec::new();
 
     // Query ONLY this file's columns for the output node.
-    let sql = "SELECT column_id, label FROM lineage_columns \
+    let sql = "SELECT column_id, label, expression FROM lineage_columns \
                WHERE project_id = ?1 AND file_path = ?2 AND parent_node_id = ?3 \
                ORDER BY label";
     if let Ok(mut stmt) = conn.prepare(sql) {
@@ -485,6 +507,7 @@ fn query_output_columns(
             Ok(ColInfo {
                 column_id: row.get(0)?,
                 label: row.get(1)?,
+                expression: row.get::<_, Option<String>>(2).unwrap_or(None),
             })
         });
         if let Ok(rows) = rows {
@@ -676,6 +699,28 @@ fn find_time_dimension(columns: &[ColInfo]) -> Option<String> {
     None
 }
 
+/// Try to infer a meaningful dimension name from a column's SQL expression.
+/// Used when the lineage engine auto-named a column `col_N` (no alias).
+///
+/// Examples:
+///   `'tags'` / `'ctgy'` / `'lid'` → `attr_type` (type indicator column)
+///   `from_unixtime(...)` → keep `col_N` (too complex to name)
+fn infer_name_from_expression(expr: &str) -> Option<String> {
+    let trimmed = expr.trim();
+    // String constant like 'tags', 'ctgy', 'lid'
+    if trimmed.starts_with('\'') && trimmed.ends_with('\'') {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        // If it's a short identifier-like value, it's likely a type indicator
+        if !inner.is_empty()
+            && inner.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && inner.len() <= 20
+        {
+            return Some(format!("attr_type_{}", to_snake_case(inner)));
+        }
+    }
+    None
+}
+
 /// Classify a column as time or categorical based on its name.
 fn classify_dimension(label: &str) -> DimensionType {
     let lower = label.to_lowercase();
@@ -829,6 +874,7 @@ fn generate_minimal_yaml_from_sql(
                 dimensions.push(DimInfo {
                     name: to_snake_case(alias),
                     dim_type,
+                    description: None,
                 });
             }
         }
@@ -894,6 +940,9 @@ fn format_yaml(
         yaml.push_str("    dimensions:\n");
         for d in dimensions {
             yaml.push_str(&format!("      - name: {}\n", d.name));
+            if let Some(ref desc) = d.description {
+                yaml.push_str(&format!("        description: '{}'\n", desc.replace('\'', "''")));
+            }
             match &d.dim_type {
                 DimensionType::Time { granularity } => {
                     yaml.push_str("        type: time\n");
