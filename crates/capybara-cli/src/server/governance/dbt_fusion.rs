@@ -308,9 +308,10 @@ fn replace_table_refs(
             let leading_ws = rest_raw.len() - rest_raw.trim_start().len();
             let rest = &rest_raw[leading_ws..];
 
-            // Extract the table name (until space, comma, paren, or end)
+            // Extract the table name (until space, comma, paren, or end).
+            // ')' is included so that `from b1) temp` yields `b1` not `b1)`.
             let end = rest
-                .find(|c: char| c == ' ' || c == ',' || c == '(' || c == '\n' || c == ';')
+                .find(|c: char| c == ' ' || c == ',' || c == '(' || c == ')' || c == '\n' || c == ';')
                 .unwrap_or(rest.len());
             let table_ref = rest[..end].trim().trim_matches(|c: char| c == '`' || c == '"');
 
@@ -336,7 +337,7 @@ fn replace_table_refs(
                     pos = rest.len() - after.len();
                 }
                 let end2 = after
-                    .find(|c: char| c == ' ' || c == ',' || c == '(' || c == '\n' || c == ';')
+                    .find(|c: char| c == ' ' || c == ',' || c == '(' || c == ')' || c == '\n' || c == ';')
                     .unwrap_or(after.len());
                 actual_ref = after[..end2].trim().trim_matches(|c: char| c == '`' || c == '"');
                 actual_start = pos;
