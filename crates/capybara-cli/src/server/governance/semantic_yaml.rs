@@ -37,7 +37,7 @@ pub fn generate_semantic_yaml(
     // 1. Get to_table and from_tables from table_level_edges.
     let (mut to_table, mut from_tables) = query_table_edges(conn, project_id, script_name)?;
 
-    // Fallback: if table_level_edges has no row for this script (e.g. the
+    // Fallback 1: if table_level_edges has no row for this script (e.g. the
     // repopulate step hasn't run), derive the output table + source tables
     // from lineage_nodes + data_flow edges directly.
     if to_table.is_empty() {
@@ -47,10 +47,27 @@ pub fn generate_semantic_yaml(
         }
     }
 
+    // Fallback 2: if still no to_table AND lineage_nodes is empty for this
+    // file (analysis never ran on it), parse the SQL content for INSERT
+    // INTO/OVERWRITE TABLE to find the output table name.
     if to_table.is_empty() {
-        // No lineage output table recorded for this script.
-        // Distinguish: empty file → skipped; non-empty file → failed
-        // (script has content but lineage analysis didn't record its output).
+        let content = store_load_content(conn, project_id, file_path).unwrap_or_default();
+        if content.trim().is_empty() {
+            return Ok(SemanticYamlResult {
+                yaml: String::new(),
+                model_name: script_name.to_string(),
+                dimension_count: 0,
+                measure_count: 0,
+                source_count: 0,
+                skipped: true,
+            });
+        }
+        if let Some(table) = parse_insert_target_from_sql(&content) {
+            to_table = table;
+        }
+    }
+
+    if to_table.is_empty() {
         let has_content = match store_load_content(conn, project_id, file_path) {
             Some(c) => !c.trim().is_empty(),
             None => false,
@@ -73,10 +90,26 @@ pub fn generate_semantic_yaml(
     let model_name = normalize_name(&to_table);
 
     // 2. Find output table node in lineage_nodes (try multiple match strategies).
-    let output_node_id = find_output_node(conn, project_id, file_path, &to_table)?;
+    let output_node_id = match find_output_node(conn, project_id, file_path, &to_table) {
+        Ok(nid) => nid,
+        Err(_) => {
+            // No lineage node at all — analysis never ran on this file.
+            // Generate a minimal YAML from the SQL content (INSERT target +
+            // column list from the SELECT).
+            let content = store_load_content(conn, project_id, file_path).unwrap_or_default();
+            return Ok(generate_minimal_yaml_from_sql(&content, &to_table, &from_tables, script_name));
+        }
+    };
 
     // 3. Get all columns of the output table.
-    let columns = query_output_columns(conn, project_id, &output_node_id)?;
+    let columns = match query_output_columns(conn, project_id, &output_node_id) {
+        Ok(c) if !c.is_empty() => c,
+        _ => {
+            // No columns in lineage — try SQL content.
+            let content = store_load_content(conn, project_id, file_path).unwrap_or_default();
+            return Ok(generate_minimal_yaml_from_sql(&content, &to_table, &from_tables, script_name));
+        }
+    };
 
     if columns.is_empty() {
         // Table node exists but no columns recorded. If the script has
@@ -277,6 +310,63 @@ fn find_output_from_nodes(
     sources.dedup();
 
     Some((output, sources))
+}
+
+/// Parse the SQL content for an `INSERT INTO/OVERWRITE TABLE <name>` to
+/// determine the output table when lineage analysis hasn't run on the file.
+///
+/// Handles `USE db;` to prepend the schema when the table name has no prefix.
+fn parse_insert_target_from_sql(sql: &str) -> Option<String> {
+    // Track current database from USE statements.
+    let mut current_db = String::new();
+    for line in sql.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_lowercase();
+
+        // USE <db>;
+        if lower.starts_with("use ") {
+            let rest = trimmed[4..].trim().trim_end_matches(';').trim();
+            if !rest.is_empty() {
+                current_db = rest.to_string();
+            }
+            continue;
+        }
+
+        // INSERT INTO TABLE <name>  /  INSERT OVERWRITE TABLE <name>
+        // INSERT INTO <name>        /  INSERT OVERWRITE <name>
+        if lower.starts_with("insert ") {
+            let after_insert = &trimmed[7..]; // skip "insert "
+            let after_lower = after_insert.to_lowercase();
+            let rest = if after_lower.starts_with("overwrite ") {
+                &after_insert[10..] // skip "overwrite "
+            } else if after_lower.starts_with("into ") {
+                &after_insert[5..] // skip "into "
+            } else {
+                continue;
+            };
+            let rest_lower = rest.to_lowercase();
+            let after_table = if rest_lower.starts_with("table ") {
+                &rest[6..] // skip "table "
+            } else {
+                rest
+            };
+            // Read table name until space, paren, or partition.
+            let name: String = after_table
+                .chars()
+                .take_while(|c| !c.is_whitespace() && *c != '(' && *c != ';')
+                .collect();
+            let name = name.trim();
+            if name.is_empty() {
+                continue;
+            }
+            // Prepend current_db if the name has no schema prefix.
+            if !name.contains('.') && !current_db.is_empty() {
+                return Some(format!("{current_db}.{name}").to_lowercase());
+            }
+            return Some(name.to_lowercase());
+        }
+    }
+    None
 }
 
 /// Find the lineage_nodes node_id for the output table of this script.
@@ -677,6 +767,100 @@ fn to_snake_case(s: &str) -> String {
 }
 
 // ── YAML formatting ──────────────────────────────────────────────────────
+
+/// Generate a minimal semantic model YAML from SQL content when lineage
+/// analysis hasn't run (no nodes/edges). Extracts the INSERT target as the
+/// model name and the SELECT column list / aliases as dimensions.
+fn generate_minimal_yaml_from_sql(
+    sql: &str,
+    to_table: &str,
+    from_tables: &[String],
+    script_name: &str,
+) -> SemanticYamlResult {
+    let model_name = normalize_name(to_table);
+
+    // Parse column names from SELECT clauses: look for aliases after AS or
+    // after column expressions (last identifier on the line before comma/--)
+    let mut dimensions: Vec<DimInfo> = Vec::new();
+    let mut in_select = false;
+
+    for line in sql.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_lowercase();
+
+        if lower.starts_with("select") && !lower.contains("partition") {
+            in_select = true;
+            continue;
+        }
+        if in_select {
+            // End of SELECT on FROM, INSERT, or semicolon
+            if lower.starts_with("from")
+                || lower.starts_with("insert")
+                || lower.starts_with("where")
+                || lower.starts_with("group")
+                || lower.starts_with("union")
+                || lower.starts_with("limit")
+            {
+                in_select = false;
+                continue;
+            }
+            // Skip comments and empty
+            if trimmed.starts_with("--") || trimmed.is_empty() {
+                continue;
+            }
+            // Try to extract column alias:
+            // `expr as alias` or `expr alias,` or `expr alias --comment`
+            let cleaned = trimmed.split("--").next().unwrap_or(trimmed).trim();
+            let cleaned = cleaned.trim_end_matches(',');
+            // Check for `as alias`
+            let alias = if let Some(pos) = cleaned.to_lowercase().rfind(" as ") {
+                cleaned[pos + 4..].trim()
+            } else {
+                // Last word might be the alias
+                cleaned.split_whitespace().last().unwrap_or("")
+            };
+            // Only add if it looks like an identifier
+            if !alias.is_empty()
+                && alias.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && alias != "as"
+            {
+                let dim_type = classify_dimension(alias);
+                dimensions.push(DimInfo {
+                    name: to_snake_case(alias),
+                    dim_type,
+                });
+            }
+        }
+    }
+
+    // Deduplicate
+    let mut seen = HashSet::new();
+    dimensions.retain(|d| seen.insert(d.name.clone()));
+
+    let time_dim_name = dimensions
+        .iter()
+        .find(|d| matches!(d.dim_type, DimensionType::Time { .. }))
+        .map(|d| d.name.clone());
+    let measures: Vec<MeasureInfo> = Vec::new(); // no lineage → no measures
+
+    let yaml = format_yaml(
+        &model_name,
+        to_table,
+        from_tables,
+        &dimensions,
+        &measures,
+        &time_dim_name,
+    );
+
+    SemanticYamlResult {
+        yaml,
+        model_name,
+        dimension_count: dimensions.len(),
+        measure_count: 0,
+        source_count: from_tables.len(),
+        skipped: false,
+    }
+}
 
 fn format_yaml(
     model_name: &str,
