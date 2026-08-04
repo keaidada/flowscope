@@ -25,27 +25,6 @@ pub fn generate_semantic_yaml(
     project_id: &str,
     file_path: &str,
 ) -> Result<SemanticYamlResult, String> {
-    generate_semantic_yaml_inner(conn, project_id, file_path, None)
-}
-
-/// Same as [`generate_semantic_yaml`] but accepts a preloaded in-memory edge
-/// graph. Batch flows preload the graph ONCE and share it across files —
-/// otherwise each file reloads all 70k+ lineage edges from the DB.
-pub fn generate_semantic_yaml_with_edges(
-    conn: &Connection,
-    project_id: &str,
-    file_path: &str,
-    edge_map: &EdgeGraph,
-) -> Result<SemanticYamlResult, String> {
-    generate_semantic_yaml_inner(conn, project_id, file_path, Some(edge_map))
-}
-
-fn generate_semantic_yaml_inner(
-    conn: &Connection,
-    project_id: &str,
-    file_path: &str,
-    preloaded_edges: Option<&EdgeGraph>,
-) -> Result<SemanticYamlResult, String> {
     let script_name = std::path::Path::new(file_path)
         .file_name()
         .and_then(|n| n.to_str())
@@ -71,21 +50,15 @@ fn generate_semantic_yaml_inner(
     }
 
     // 4. Classify each column as measure or dimension via BFS lineage tracing.
-    //    Use a preloaded edge graph if available (batch), else load once.
-    let owned_edges: Option<EdgeGraph>;
-    let edge_map: &EdgeGraph = match preloaded_edges {
-        Some(g) => g,
-        None => {
-            owned_edges = Some(load_edges_map(conn, project_id));
-            owned_edges.as_ref().unwrap()
-        }
-    };
+    //    Load ONLY this script's lineage edges (by file_name) — the DB is the
+    //    source of truth, no full-project preload.
+    let edge_map = load_edges_map(conn, project_id, script_name);
     let mut dimensions: Vec<DimInfo> = Vec::new();
     let mut measures: Vec<MeasureInfo> = Vec::new();
     let time_dim_name = find_time_dimension(&columns);
 
     for col in &columns {
-        if let Some((agg, expr)) = trace_aggregation_mem(edge_map, &col.column_id) {
+        if let Some((agg, expr)) = trace_aggregation_mem(&edge_map, &col.column_id) {
             measures.push(MeasureInfo {
                 name: to_snake_case(&col.label),
                 agg,
@@ -257,14 +230,21 @@ fn query_output_columns(
 /// In-memory lineage edge graph: to_id → list of (edge_type, expr, from_id).
 type EdgeGraph = std::collections::HashMap<String, Vec<(String, String, String)>>;
 
-/// Load ALL relevant lineage edges for a project into an in-memory graph.
-/// `to_id` is the key; each entry is (edge_type, expression, from_id).
-pub fn load_edges_map(conn: &Connection, project_id: &str) -> EdgeGraph {
+/// Load lineage edges for a SINGLE script by its file_name. Scripts may be
+/// stored under multiple file_paths (copies), but share the same file_name —
+/// this fetches all of them in one scoped query. Only the current script's
+/// edges are loaded; no full-project scan.
+pub fn load_edges_map(
+    conn: &Connection,
+    project_id: &str,
+    file_name: &str,
+) -> EdgeGraph {
     let mut graph: EdgeGraph = std::collections::HashMap::new();
     let sql = "SELECT to_id, edge_type, expression, from_id FROM lineage_edges \
-               WHERE project_id = ?1 AND edge_type IN ('derivation', 'data_flow', 'cross_statement')";
+               WHERE project_id = ?1 AND file_name = ?2 \
+               AND edge_type IN ('derivation', 'data_flow', 'cross_statement')";
     if let Ok(mut stmt) = conn.prepare(sql) {
-        let rows = stmt.query_map(params![project_id], |row| {
+        let rows = stmt.query_map(params![project_id, file_name], |row| {
             Ok((
                 row.get::<_, String>(0)?, // to_id
                 row.get::<_, String>(1)?, // edge_type
