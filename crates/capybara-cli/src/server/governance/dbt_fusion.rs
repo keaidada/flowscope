@@ -227,6 +227,13 @@ fn replace_table_refs(
     source_count: &mut usize,
     warnings: &mut Vec<String>,
 ) -> String {
+    // Skip comment lines — table names inside comments (-- ...) should not
+    // be rewritten. This prevents '--from old_table' from becoming
+    // '--from {{ source(...) }}'.
+    if line.trim_start().starts_with("--") {
+        return line.to_string();
+    }
+
     let mut result = line.to_string();
 
     // Find table references after FROM / JOIN / INTO keywords. INSERT INTO /
