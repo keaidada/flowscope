@@ -148,12 +148,23 @@ function apiBase(): string {
   return '';
 }
 
+/** fetch with a timeout so a stuck request doesn't hang the UI forever. */
+async function fetchWithTimeout(url: string, opts: RequestInit, timeoutMs = 60_000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Convert a SQL file to dbt format */
 export async function convertToDbt(
   projectId: string,
   filePath: string
 ): Promise<{ dbt_content: string; model_count: number; source_count: number; warnings: string[] }> {
-  const res = await fetch(`${apiBase()}/api/convert-dbt`, {
+  const res = await fetchWithTimeout(`${apiBase()}/api/convert-dbt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_id: projectId, file_path: filePath }),
@@ -177,7 +188,7 @@ export async function convertToDbtBatch(
   successPaths: string[];
   errorPaths: string[];
 }> {
-  const res = await fetch(`${apiBase()}/api/convert-dbt-batch`, {
+  const res = await fetchWithTimeout(`${apiBase()}/api/convert-dbt-batch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_id: projectId, folder_path: folderPath, files }),
@@ -191,7 +202,7 @@ export async function extractDml(
   projectId: string,
   filePath: string
 ): Promise<{ statements: string[]; count: number }> {
-  const res = await fetch(`${apiBase()}/api/extract-dml`, {
+  const res = await fetchWithTimeout(`${apiBase()}/api/extract-dml`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_id: projectId, file_path: filePath }),
@@ -206,7 +217,7 @@ export async function saveDbtContent(
   filePath: string,
   dbtContent: string
 ): Promise<void> {
-  const res = await fetch(`${apiBase()}/api/files/dbt-content`, {
+  const res = await fetchWithTimeout(`${apiBase()}/api/files/dbt-content`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_id: projectId, file_path: filePath, dbt_content: dbtContent }),
@@ -226,7 +237,7 @@ export async function generateSemanticYaml(
   projectId: string,
   filePath: string
 ): Promise<{ yaml: string; model_name: string; dimension_count: number; measure_count: number; source_count: number }> {
-  const res = await fetch(`${apiBase()}/api/generate-semantic-yaml`, {
+  const res = await fetchWithTimeout(`${apiBase()}/api/generate-semantic-yaml`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_id: projectId, file_path: filePath }),
@@ -251,7 +262,7 @@ export async function generateSemanticYamlBatch(
   successPaths: string[];
   errorPaths: string[];
 }> {
-  const res = await fetch(`${apiBase()}/api/generate-semantic-yaml-batch`, {
+  const res = await fetchWithTimeout(`${apiBase()}/api/generate-semantic-yaml-batch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_id: projectId, folder_path: folderPath, files }),
@@ -266,7 +277,7 @@ export async function saveDbtYaml(
   filePath: string,
   dbtYaml: string
 ): Promise<void> {
-  const res = await fetch(`${apiBase()}/api/files/dbt-yaml`, {
+  const res = await fetchWithTimeout(`${apiBase()}/api/files/dbt-yaml`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_id: projectId, file_path: filePath, dbt_yaml: dbtYaml }),
