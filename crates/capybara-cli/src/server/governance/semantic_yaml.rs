@@ -144,17 +144,46 @@ pub fn generate_semantic_yaml(
 
     for col in &columns {
         if let Some((agg, expr)) = trace_aggregation_mem(&edge_map, &col.column_id) {
-            measures.push(MeasureInfo {
+            // Resolve full aggregation expression + source table by tracing
+            // data_flow to the CTE column and its source table.
+            let src = resolve_measure_source(conn, project_id, file_path, &col.column_id);
+            // Prefer the measure-trace source table (from data_flow), falling
+            // back to the Ownership-based resolve_column_sources result.
+            let source_table = src
+                .as_ref()
+                .and_then(|s| s.source_table.clone())
+                .or_else(|| {
+                    col_sources
+                        .get(&col.column_id)
+                        .cloned()
+                        .flatten()
+                        .map(|(t, _c)| t)
+                });
+            let full_expression = src
+                .as_ref()
+                .map(|s| s.full_expression.clone())
+                .unwrap_or_else(|| {
+                    if expr.trim().is_empty() {
+                        col.label.clone()
+                    } else {
+                        format!("{}({})", agg, expr)
+                    }
+                });
+            let mut mi = MeasureInfo {
                 name: to_snake_case(&col.label),
                 agg,
                 expr,
                 agg_time_dimension: time_dim_name.clone(),
-                source_table: col_sources
-                    .get(&col.column_id)
-                    .cloned()
-                    .flatten()
-                    .map(|(t, c)| if c.is_empty() { t } else { format!("{t}.{c}") }),
-            });
+                // Prefer the measure-trace source table (from data_flow) since
+                // the Ownership-based resolve_column_sources often misses
+                // aggregate columns.
+                source_table: source_table.clone(),
+                full_expression: full_expression.clone(),
+                full_sql: String::new(),
+                cte_label: src.as_ref().and_then(|s| s.cte_label.clone()),
+            };
+            mi.full_sql = build_measure_sql(&mi, time_dim_name.as_deref());
+            measures.push(mi);
         } else {
             let dim_type = classify_dimension(&col.label);
             // Generate description from expression
@@ -230,6 +259,12 @@ struct MeasureInfo {
     agg_time_dimension: Option<String>,
     /// Origin table (qualified name) this measure traces back to.
     source_table: Option<String>,
+    /// Full aggregation expression e.g. `SUM(CASE WHEN ... THEN dau ELSE 0 END)`.
+    full_expression: String,
+    /// Reconstructable, executable SQL for this measure's metric.
+    full_sql: String,
+    /// CTE label used as the FROM alias (e.g. `vvs`).
+    cte_label: Option<String>,
 }
 
 // ── Query helpers ────────────────────────────────────────────────────────
@@ -697,6 +732,278 @@ fn resolve_column_sources(
     result
 }
 
+/// Resolved source information for a single measure (aggregation) column.
+struct MeasureSource {
+    /// Full aggregation expression e.g. `SUM(CASE WHEN video_side = 'APP' THEN dau ELSE 0 END)`.
+    full_expression: String,
+    /// Source table the aggregation reads from (e.g. `s20_cctvapp_dau_stat`).
+    source_table: Option<String>,
+    /// CTE label that produced this column (e.g. `daus`) — used as FROM alias.
+    cte_label: Option<String>,
+}
+
+/// Trace a measure (aggregation) column back to its full aggregation
+/// expression and the source table it reads from.
+///
+/// Path: output column → data_flow → CTE column (carries the full
+/// `SUM(CASE WHEN ...)` expression) → CTE parent node → DataFlow incoming
+/// edge → source table.
+///
+/// Returns None if the column never reaches an aggregation expression.
+fn resolve_measure_source(
+    conn: &Connection,
+    project_id: &str,
+    file_path: &str,
+    column_id: &str,
+) -> Option<MeasureSource> {
+    // Load column info for this file: id → (label, parent_node_id, expression).
+    let mut col_label: HashMap<String, String> = HashMap::new();
+    let mut col_parent: HashMap<String, String> = HashMap::new();
+    let mut col_expr: HashMap<String, String> = HashMap::new();
+    let sql_cols = "SELECT column_id, label, COALESCE(parent_node_id,''), COALESCE(expression,'') \
+                    FROM lineage_columns WHERE project_id = ?1 AND file_path = ?2";
+    if let Ok(mut stmt) = conn.prepare(sql_cols) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        }) {
+            for (id, lbl, parent, expr) in rows.flatten() {
+                col_label.insert(id.clone(), lbl);
+                col_parent.insert(id.clone(), parent);
+                col_expr.insert(id, expr);
+            }
+        }
+    }
+
+    // Load node info: id → (label, node_type).
+    let mut node_label: HashMap<String, String> = HashMap::new();
+    let mut node_type: HashMap<String, String> = HashMap::new();
+    let sql_nodes = "SELECT node_id, label, node_type FROM lineage_nodes \
+                     WHERE project_id = ?1 AND file_path = ?2";
+    if let Ok(mut stmt) = conn.prepare(sql_nodes) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }) {
+            for (id, lbl, typ) in rows.flatten() {
+                node_label.insert(id.clone(), lbl);
+                node_type.insert(id, typ);
+            }
+        }
+    }
+
+    // Load data_flow adjacency: to_id → [from_id].
+    let mut flow: HashMap<String, Vec<String>> = HashMap::new();
+    let sql_flow = "SELECT to_id, from_id FROM lineage_edges \
+                    WHERE project_id = ?1 AND file_path = ?2 \
+                    AND REPLACE(LOWER(edge_type),'_','') = 'dataflow'";
+    if let Ok(mut stmt) = conn.prepare(sql_flow) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for (to_id, from_id) in rows.flatten() {
+                flow.entry(to_id).or_default().push(from_id);
+            }
+        }
+    }
+
+    // Load DataFlow incoming edges for CTE nodes: node_id → [source_table_id].
+    let mut node_flow_src: HashMap<String, Vec<String>> = HashMap::new();
+    let sql_nf = "SELECT to_id, from_id FROM lineage_edges \
+                  WHERE project_id = ?1 AND file_path = ?2 \
+                  AND REPLACE(LOWER(edge_type),'_','') = 'dataflow' \
+                  AND to_id LIKE 'derived_%'";
+    if let Ok(mut stmt) = conn.prepare(sql_nf) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for (to_id, from_id) in rows.flatten() {
+                node_flow_src.entry(to_id).or_default().push(from_id);
+            }
+        }
+    }
+
+    // BFS backward along data_flow from the output column.
+    let mut visited = HashSet::new();
+    let mut queue = vec![column_id.to_string()];
+
+    while let Some(cur) = queue.pop() {
+        if !visited.insert(cur.clone()) {
+            continue;
+        }
+
+        let expr = col_expr.get(&cur).cloned().unwrap_or_default();
+        if contains_aggregation(&expr) {
+            // Found the full aggregation expression. The parent node (CTE)
+            // tells us the FROM source.
+            let parent = col_parent.get(&cur).cloned().unwrap_or_default();
+            let cte_label = if parent.starts_with("derived_") {
+                node_label.get(&parent).cloned()
+            } else {
+                None
+            };
+            let mut source_table = None;
+            if !parent.is_empty() {
+                if let Some(srcs) = node_flow_src.get(&parent) {
+                    for s in srcs {
+                        if let Some(typ) = node_type.get(s) {
+                            if typ == "table" || typ == "view" {
+                                source_table = node_label.get(s).cloned();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            return Some(MeasureSource {
+                full_expression: expr,
+                source_table,
+                cte_label,
+            });
+        }
+
+        // Follow data_flow upstream.
+        if let Some(froms) = flow.get(&cur) {
+            for f in froms {
+                queue.push(f.clone());
+            }
+        }
+    }
+
+    None
+}
+
+/// Does an expression contain an aggregation function call?
+fn contains_aggregation(expr: &str) -> bool {
+    let lower = expr.to_lowercase();
+    ["sum(", "count(", "avg(", "average(", "max(", "min(", "median("]
+        .iter()
+        .any(|a| lower.contains(a))
+}
+
+/// Build an executable SQL statement for a measure.
+///
+/// ```sql
+/// SELECT
+///   SUM(CASE WHEN video_side = 'APP' THEN dau ELSE 0 END) AS app_day_actv_equip_cnt,
+///   statt_tm
+/// FROM s20_cctvapp_dau_stat
+/// WHERE video_side = 'APP'
+/// GROUP BY statt_tm
+/// ```
+fn build_measure_sql(m: &MeasureInfo, time_dim: Option<&str>) -> String {
+    let mut sql = String::new();
+    sql.push_str("SELECT\n  ");
+    // Prefer the full aggregation expression; fall back to agg(expr).
+    let full = if !m.full_expression.is_empty() {
+        m.full_expression.clone()
+    } else if !m.expr.is_empty() {
+        format!("{}({})", m.agg, m.expr)
+    } else {
+        m.name.clone()
+    };
+    sql.push_str(&full);
+    sql.push_str(&format!(" AS {}\n", m.name));
+    if let Some(td) = time_dim {
+        if !td.is_empty() {
+            sql.push_str(&format!("  , {td}\n"));
+        }
+    }
+    sql.push_str("FROM ");
+    let from = m.source_table.as_deref().unwrap_or("unknown_table");
+    if let Some(cte) = &m.cte_label {
+        sql.push_str(&format!("{from} {cte}\n"));
+    } else {
+        sql.push_str(&format!("{from}\n"));
+    }
+    // WHERE from CASE WHEN conditions (deduplicate the first condition).
+    let filter = extract_where_conditions(&full);
+    if !filter.is_empty() {
+        sql.push_str(&format!("WHERE {filter}\n"));
+    }
+    if let Some(td) = time_dim {
+        if !td.is_empty() {
+            sql.push_str(&format!("GROUP BY {td}"));
+        }
+    }
+    sql.trim_end().to_string()
+}
+
+/// Extract business filter conditions from CASE WHEN inside an aggregation
+/// expression. Deduplicates conditions and joins with AND.
+fn extract_where_conditions(full_expr: &str) -> String {
+    let lower = full_expr.to_lowercase();
+    if !lower.contains("case when") {
+        return String::new();
+    }
+
+    // Boilerplate conditions to skip.
+    const NOISE: &[&str] = &[
+        "is_deleted", "is_delete", "_sign", "is_valid", "is_active",
+        "row_rank", "rownum", " rk =", " rn =", "1=1", "1 = 1",
+    ];
+
+    let mut conditions: Vec<String> = Vec::new();
+    let mut search_from = 0usize;
+    while let Some(rel) = lower[search_from..].find("when") {
+        let abs = search_from + rel + 4;
+        if abs >= full_expr.len() {
+            break;
+        }
+        let after = &full_expr[abs..];
+        let after_lower = after.to_lowercase();
+        if let Some(then_rel) = after_lower.find("then") {
+            let cond = after[..then_rel].trim();
+            let cleaned = cond.replace(['`', '"'], "")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            // Keep only conditions that are not trivially-true; boilerplate
+            // filtering happens at the clause level below.
+            let trivially_true = cleaned.is_empty() || cleaned == "1" || cleaned == "true";
+            if !trivially_true {
+                conditions.push(cleaned);
+            }
+            search_from = abs + then_rel + 4;
+        } else {
+            break;
+        }
+    }
+
+    // Deduplicate preserving order.
+    let mut seen = HashSet::new();
+    conditions.retain(|c| seen.insert(c.clone()));
+
+    // Filter noise at the clause level: split AND/OR chains and drop any
+    // clause that mentions boilerplate (is_deleted, _sign, etc.).
+    let mut kept: Vec<String> = Vec::new();
+    for cond in &conditions {
+        for clause in cond.split(" AND ") {
+            let c = clause.trim();
+            if c.is_empty() {
+                continue;
+            }
+            let noise = NOISE
+                .iter()
+                .any(|p| c.to_lowercase().contains(p));
+            if !noise {
+                kept.push(c.to_string());
+            }
+        }
+    }
+    // Deduplicate again after clause filtering.
+    let mut seen2 = HashSet::new();
+    kept.retain(|c| seen2.insert(c.clone()));
+    kept.join(" AND ")
+}
+
 /// BFS backward over the in-memory edge graph to find if a column traces
 /// back to an aggregation derivation.
 /// Returns (agg_function, inner_expression).
@@ -1139,6 +1446,13 @@ fn format_yaml(
             yaml.push_str("        create_metric: true\n");
             yaml.push_str(&format!("        create_metric_display_name: '{}'\n", label));
             yaml.push_str("        non_additive_dimension: null\n");
+            // Reconstructable full SQL for this measure's metric.
+            if !m.full_sql.is_empty() {
+                yaml.push_str("        full_sql: |\n");
+                for line in m.full_sql.lines() {
+                    yaml.push_str(&format!("          {line}\n"));
+                }
+            }
         }
         yaml.push('\n');
     }
@@ -1260,5 +1574,68 @@ mod tests {
         assert_eq!(capitalize_words("exp_uv"), "Exp Uv");
         assert_eq!(capitalize_words("pv"), "Pv");
         assert_eq!(capitalize_words("per_capt_pdura"), "Per Capt Pdura");
+    }
+
+    #[test]
+    fn test_contains_aggregation() {
+        assert!(contains_aggregation("SUM(CASE WHEN video_side = 'APP' THEN dau ELSE 0 END)"));
+        assert!(contains_aggregation("count(distinct usr_id)"));
+        assert!(contains_aggregation("avg(pcnt)"));
+        assert!(!contains_aggregation("current_date"));
+        assert!(!contains_aggregation("acct_num_desc"));
+    }
+
+    #[test]
+    fn test_extract_where_conditions() {
+        let expr = "SUM(CASE WHEN video_side = 'APP' AND video_ctgy IN ('OLYL','VIDE') THEN dau ELSE 0 END)";
+        let cond = extract_where_conditions(expr);
+        assert!(cond.contains("video_side = 'APP'"));
+        assert!(cond.contains("video_ctgy IN ('OLYL','VIDE')"));
+        assert!(cond.contains(" AND "));
+    }
+
+    #[test]
+    fn test_extract_where_conditions_skips_noise() {
+        let expr = "SUM(CASE WHEN is_deleted = 0 AND video_side = 'APP' THEN dau ELSE 0 END)";
+        let cond = extract_where_conditions(expr);
+        assert!(!cond.contains("is_deleted"), "Boilerplate condition should be skipped");
+        assert!(cond.contains("video_side = 'APP'"));
+    }
+
+    #[test]
+    fn test_build_measure_sql_full() {
+        let m = MeasureInfo {
+            name: "app_day_actv_equip_cnt".into(),
+            agg: "sum".into(),
+            expr: "CASE WHEN video_side = 'APP' THEN dau ELSE 0 END".into(),
+            agg_time_dimension: Some("statt_tm".into()),
+            source_table: Some("s20_cctvapp_dau_stat".into()),
+            full_expression: "SUM(CASE WHEN video_side = 'APP' THEN dau ELSE 0 END)".into(),
+            full_sql: String::new(),
+            cte_label: Some("daus".into()),
+        };
+        let sql = build_measure_sql(&m, Some("statt_tm"));
+        assert!(sql.contains("SUM(CASE WHEN video_side = 'APP' THEN dau ELSE 0 END) AS app_day_actv_equip_cnt"));
+        assert!(sql.contains("FROM s20_cctvapp_dau_stat daus"));
+        assert!(sql.contains("WHERE video_side = 'APP'"));
+        assert!(sql.contains("GROUP BY statt_tm"));
+    }
+
+    #[test]
+    fn test_build_measure_sql_no_time() {
+        let m = MeasureInfo {
+            name: "accm_equip_cnt".into(),
+            agg: "sum".into(),
+            expr: "accm_equip_cnt".into(),
+            agg_time_dimension: None,
+            source_table: Some("s20_cctvapp_cnu_pv_stat".into()),
+            full_expression: "SUM(accm_equip_cnt)".into(),
+            full_sql: String::new(),
+            cte_label: None,
+        };
+        let sql = build_measure_sql(&m, None);
+        assert!(sql.contains("SELECT"));
+        assert!(sql.contains("FROM s20_cctvapp_cnu_pv_stat"));
+        assert!(!sql.contains("GROUP BY"));
     }
 }
