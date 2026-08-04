@@ -1,4 +1,4 @@
-/* @ts-self-types="./capybara_wasm.d.ts" */
+/* @ts-self-types="./flowscope_wasm.d.ts" */
 
 /**
  * Analyze SQL and export to DuckDB SQL statements in one step.
@@ -442,6 +442,25 @@ export function sanitize_procedure(sql) {
 }
 
 /**
+ * Sanitize a BigQuery stored procedure and return DML with a line map.
+ * Returns a JSON string: {"dml":"...","lineMap":[-1,-1,0,1,2,...]}
+ * where lineMap[i] is the extracted line index for original line i (or -1).
+ * @param {string} sql
+ * @returns {string | undefined}
+ */
+export function sanitize_procedure_with_map(sql) {
+    const ptr0 = passStringToWasm0(sql, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.sanitize_procedure_with_map(ptr0, len0);
+    let v2;
+    if (ret[0] !== 0) {
+        v2 = getStringFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v2;
+}
+
+/**
  * Install panic hook for better error messages in browser console
  */
 export function set_panic_hook() {
@@ -529,7 +548,7 @@ function __wbg_get_imports() {
     };
     return {
         __proto__: null,
-        "./capybara_wasm_bg.js": import0,
+        "./flowscope_wasm_bg.js": import0,
     };
 }
 
@@ -709,7 +728,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (module_or_path === undefined) {
-        module_or_path = new URL('capybara_wasm_bg.wasm', import.meta.url);
+        module_or_path = new URL('flowscope_wasm_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
 

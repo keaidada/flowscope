@@ -2,7 +2,7 @@
 (function () {
   var validThemes = ['light', 'dark', 'system'];
   try {
-    var stored = localStorage.getItem('capybara-theme');
+    var stored = localStorage.getItem('flowscope-theme');
     var parsed = stored ? JSON.parse(stored) : null;
     var theme =
       parsed && parsed.state && validThemes.indexOf(parsed.state.theme) !== -1
