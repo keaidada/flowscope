@@ -17,6 +17,7 @@ pub mod health;
 pub mod metric;
 pub mod model;
 pub mod report;
+pub mod semantic_yaml;
 
 use std::collections::BTreeMap;
 use std::path::Path;

@@ -113,6 +113,9 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/convert-dbt-batch", post(gov_convert_dbt_batch))
         .route("/extract-dml", post(gov_extract_dml))
         .route("/files/dbt-content", put(gov_save_dbt_content))
+        .route("/generate-semantic-yaml", post(gov_generate_semantic_yaml))
+        .route("/generate-semantic-yaml-batch", post(gov_generate_semantic_yaml_batch))
+        .route("/files/dbt-yaml", put(gov_save_dbt_yaml))
 }
 
 // === Request/Response types ===
@@ -970,6 +973,8 @@ pub(crate) struct FileContentResponse {
     transformed_content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     dbt_content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dbt_yaml: Option<String>,
 }
 
 /// GET /api/db/file-content - Get file content
@@ -1001,6 +1006,7 @@ pub(crate) async fn get_file_content(
         is_procedure: full.as_ref().map(|f| f.is_procedure),
         transformed_content: full.as_ref().and_then(|f| f.transformed_content.clone()),
         dbt_content: full.as_ref().and_then(|f| f.dbt_content.clone()),
+        dbt_yaml: full.as_ref().and_then(|f| f.dbt_yaml.clone()),
     }))
 }
 
@@ -4039,6 +4045,110 @@ async fn gov_save_dbt_content(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
     };
     match store::update_dbt_content(&conn, &req.project_id, &req.file_path, &req.dbt_content) {
+        Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response(),
+    }
+}
+
+// ── Semantic YAML endpoints ──────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct GenerateSemanticYamlRequest {
+    project_id: String,
+    file_path: String,
+}
+
+/// POST /api/generate-semantic-yaml — generate dbt Semantic Layer YAML for a file
+async fn gov_generate_semantic_yaml(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GenerateSemanticYamlRequest>,
+) -> impl IntoResponse {
+    let conn = match state.db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::semantic_yaml::generate_semantic_yaml(&conn, &req.project_id, &req.file_path) {
+        Ok(result) => Json(serde_json::json!({
+            "yaml": result.yaml,
+            "model_name": result.model_name,
+            "dimension_count": result.dimension_count,
+            "measure_count": result.measure_count,
+            "source_count": result.source_count,
+        })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Generation failed: {e}")).into_response(),
+    }
+}
+
+/// POST /api/generate-semantic-yaml-batch — batch generate YAML for a folder
+async fn gov_generate_semantic_yaml_batch(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ConvertDbtBatchRequest>,
+) -> impl IntoResponse {
+    // Reuse ConvertDbtBatchRequest (project_id, folder_path, files).
+    let mut success_paths = Vec::new();
+    let mut error_paths = Vec::new();
+    let mut updates: Vec<(String, String)> = Vec::new();
+
+    let conn = match state.db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+
+    for bf in &req.files {
+        let path = &bf.path;
+        let lower = path.to_lowercase();
+        if !(lower.ends_with(".sql") || lower.ends_with(".hql")) {
+            continue;
+        }
+        match super::governance::semantic_yaml::generate_semantic_yaml(&conn, &req.project_id, path) {
+            Ok(result) => {
+                success_paths.push(path.clone());
+                updates.push((path.clone(), result.yaml));
+            }
+            Err(_) => {
+                error_paths.push(path.clone());
+            }
+        }
+    }
+
+    // Persist in chunks
+    if !updates.is_empty() {
+        const CHUNK: usize = 500;
+        for chunk in updates.chunks(CHUNK) {
+            if let Err(e) = store::batch_update_dbt_yaml(&conn, &req.project_id, chunk) {
+                eprintln!("[api] generate-semantic-yaml-batch persist error: {e}");
+            }
+        }
+    }
+
+    Json(serde_json::json!({
+        "success": success_paths.len(),
+        "errors": error_paths.len(),
+        "skipped": 0,
+        "total": success_paths.len() + error_paths.len(),
+        "successPaths": success_paths,
+        "errorPaths": error_paths,
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct SaveDbtYamlRequest {
+    project_id: String,
+    file_path: String,
+    dbt_yaml: String,
+}
+
+/// PUT /api/files/dbt-yaml — save dbt_yaml for a file
+async fn gov_save_dbt_yaml(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SaveDbtYamlRequest>,
+) -> impl IntoResponse {
+    let conn = match state.db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match store::update_dbt_yaml(&conn, &req.project_id, &req.file_path, &req.dbt_yaml) {
         Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response(),
     }

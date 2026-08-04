@@ -15,7 +15,7 @@ use utoipa::ToSchema;
 /// v0: original — time fields (`created_at`, `updated_at`, `last_accessed_at`)
 ///     stored as `INTEGER` Unix millisecond timestamps.
 /// v1: time fields stored as `TEXT` RFC3339 / ISO 8601 strings (human-readable).
-const SCHEMA_VERSION: i32 = 6;
+const SCHEMA_VERSION: i32 = 7;
 
 /// Open (or create) the database file at the given path.
 pub fn open_db(path: &Path) -> Result<Mutex<Connection>, rusqlite::Error> {
@@ -61,6 +61,7 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     if current < 6 {
         migrate_v5_to_v6(conn)?;
+        migrate_v6_to_v7(conn)?;
     }
 
     if current != SCHEMA_VERSION {
@@ -673,6 +674,33 @@ fn migrate_v5_to_v6(conn: &Connection) -> Result<(), rusqlite::Error> {
     if !pf_cols.iter().any(|c| c == "dbt_content") {
         conn.execute_batch(
             "ALTER TABLE project_files ADD COLUMN dbt_content TEXT NOT NULL DEFAULT '';",
+        )?;
+    }
+    Ok(())
+}
+
+/// v6→v7: add dbt_yaml column to project_files
+fn migrate_v6_to_v7(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='project_files'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if !table_exists {
+        return Ok(());
+    }
+
+    let pf_cols: Vec<String> = conn
+        .prepare("PRAGMA table_info(project_files)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .collect();
+
+    if !pf_cols.iter().any(|c| c == "dbt_yaml") {
+        conn.execute_batch(
+            "ALTER TABLE project_files ADD COLUMN dbt_yaml TEXT NOT NULL DEFAULT '';",
         )?;
     }
     Ok(())
@@ -1345,6 +1373,8 @@ pub struct FileFullRow {
     pub transformed_content: Option<String>,
     #[serde(default)]
     pub dbt_content: Option<String>,
+    #[serde(default)]
+    pub dbt_yaml: Option<String>,
 }
 
 pub fn load_file_full(
@@ -1353,7 +1383,7 @@ pub fn load_file_full(
     file_path: &str,
 ) -> Result<Option<FileFullRow>, rusqlite::Error> {
     let result = conn.query_row(
-        "SELECT content, COALESCE(is_procedure, 0), COALESCE(transformed_content, ''), COALESCE(dbt_content, '')
+        "SELECT content, COALESCE(is_procedure, 0), COALESCE(transformed_content, ''), COALESCE(dbt_content, ''), COALESCE(dbt_yaml, '')
          FROM project_files WHERE project_id = ?1 AND path = ?2 AND status = 1",
         params![project_id, file_path],
         |row| {
@@ -1367,6 +1397,10 @@ pub fn load_file_full(
                 dbt_content: {
                     let dc: String = row.get(3)?;
                     if dc.is_empty() { None } else { Some(dc) }
+                },
+                dbt_yaml: {
+                    let dy: String = row.get(4)?;
+                    if dy.is_empty() { None } else { Some(dy) }
                 },
             })
         },
@@ -1524,6 +1558,46 @@ pub fn batch_update_dbt_content(
         )?;
         for (path, dbt) in updates {
             stmt.execute(params![dbt, project_id, path, now])?;
+        }
+    }
+    tx.commit()
+}
+
+/// Update dbt_yaml for a single file.
+pub fn update_dbt_yaml(
+    conn: &Connection,
+    project_id: &str,
+    file_path: &str,
+    dbt_yaml: &str,
+) -> Result<(), rusqlite::Error> {
+    let now = chrono::Utc::now()
+        .with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap())
+        .format("%Y-%m-%dT%H:%M:%S%.3f+08:00")
+        .to_string();
+    conn.execute(
+        "UPDATE project_files SET dbt_yaml = ?1, updated_at = ?4 WHERE project_id = ?2 AND path = ?3 AND status = 1",
+        params![dbt_yaml, project_id, file_path, now],
+    )?;
+    Ok(())
+}
+
+/// Batch-update dbt_yaml for multiple files.
+pub fn batch_update_dbt_yaml(
+    conn: &Connection,
+    project_id: &str,
+    updates: &[(String, String)],
+) -> Result<(), rusqlite::Error> {
+    let tx = conn.unchecked_transaction()?;
+    {
+        let now = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap())
+            .format("%Y-%m-%dT%H:%M:%S%.3f+08:00")
+            .to_string();
+        let mut stmt = tx.prepare(
+            "UPDATE project_files SET dbt_yaml = ?1, updated_at = ?4 WHERE project_id = ?2 AND path = ?3 AND status = 1",
+        )?;
+        for (path, yaml) in updates {
+            stmt.execute(params![yaml, project_id, path, now])?;
         }
     }
     tx.commit()

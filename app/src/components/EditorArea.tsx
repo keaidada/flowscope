@@ -14,6 +14,7 @@ import type { SqlViewMode } from './EditorToolbar';
 import { EtlDialog } from './EtlDialog';
 import { ProcedureRepairDialog } from './ProcedureRepairDialog';
 import { DbtConvertDialog } from './DbtConvertDialog';
+import { SemanticYamlDialog } from './SemanticYamlDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_FILE_NAMES } from '@/lib/constants';
 import type { RunMode } from '@/lib/project-store';
@@ -227,10 +228,14 @@ export function EditorArea({
   const [folded, setFolded] = useState(false);
   const [showDbt, setShowDbt] = useState(false);
   const [dbtDialogOpen, setDbtDialogOpen] = useState(false);
+  const [showYaml, setShowYaml] = useState(false);
+  const [yamlDialogOpen, setYamlDialogOpen] = useState(false);
   const showTransformedRef = useRef(showTransformed);
   showTransformedRef.current = showTransformed;
   const showDbtRef = useRef(showDbt);
   showDbtRef.current = showDbt;
+  const showYamlRef = useRef(showYaml);
+  showYamlRef.current = showYaml;
 
   // When toggling into dbt view, re-fetch the file from the DB so the view
   // always reflects the latest persisted dbt_content.
@@ -249,6 +254,9 @@ export function EditorArea({
   const hasDbtContent = !!activeFile?.dbtContent;
 
   const displayContent = useMemo(() => {
+    if (showYaml && activeFile?.dbtYaml) {
+      return activeFile.dbtYaml;
+    }
     if (showDbt && hasDbtContent) {
       return activeFile?.dbtContent ?? '';
     }
@@ -265,8 +273,10 @@ export function EditorArea({
     activeFile?.content,
     activeFile?.transformedContent,
     activeFile?.dbtContent,
+    activeFile?.dbtYaml,
     showTransformed,
     showDbt,
+    showYaml,
     hasTransformedContent,
     hasDbtContent,
   ]);
@@ -277,7 +287,7 @@ export function EditorArea({
       // or dbt). Monaco fires onChange when its value is set programmatically
       // (e.g. via the toggle), which would otherwise overwrite the original
       // content with the dbt/transformed version.
-      if (!activeFile || showTransformedRef.current || showDbtRef.current) return;
+      if (!activeFile || showTransformedRef.current || showDbtRef.current || showYamlRef.current) return;
       updateFile(activeFile.id, val);
     },
     [activeFile, updateFile]
@@ -500,6 +510,9 @@ export function EditorArea({
         onConvertDbt={() => setDbtDialogOpen(true)}
         showDbt={showDbt}
         onToggleDbt={() => setShowDbt(!showDbtRef.current)}
+        onGenerateYaml={() => setYamlDialogOpen(true)}
+        showYaml={showYaml}
+        onToggleYaml={() => setShowYaml(!showYamlRef.current)}
         openFiles={
           (currentProject?.openFileIds || [])
             .map((id) => currentProject?.files.find((f) => f.id === id))
@@ -544,7 +557,7 @@ export function EditorArea({
             value={displayContent}
             onChange={handleContentChange}
             className="h-full text-sm"
-            editable={!showTransformed && !showDbt && sqlViewMode === 'template' && !isReadOnly}
+            editable={!showTransformed && !showDbt && !showYaml && sqlViewMode === 'template' && !isReadOnly}
             isDark={isDark}
             highlightedSpan={sqlViewMode === 'template' ? highlightedSpan : null}
             lineWrapping={lineWrapping}
@@ -580,6 +593,18 @@ export function EditorArea({
           originalSql={activeFile.content}
           onSaved={(dbtContent) => {
             updateFiles([{ fileId: activeFile.id, dbtContent }]);
+          }}
+        />
+      )}
+
+      {currentProject && activeFile && (
+        <SemanticYamlDialog
+          open={yamlDialogOpen}
+          onClose={() => setYamlDialogOpen(false)}
+          projectId={currentProject.id}
+          filePath={activeFile.path}
+          onSaved={(yaml) => {
+            updateFiles([{ fileId: activeFile.id, dbtYaml: yaml }]);
           }}
         />
       )}

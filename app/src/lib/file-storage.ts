@@ -21,6 +21,7 @@ export async function saveProjectFiles(projectId: string, files: ProjectFile[]):
       is_procedure: f.isProcedure ? 1 : 0,
       transformed_content: f.transformedContent || '',
       dbt_content: f.dbtContent || '',
+      dbt_yaml: f.dbtYaml || '',
       created_at: '',
       updated_at: '',
     }))
@@ -41,6 +42,7 @@ export async function loadProjectFiles(projectId: string): Promise<ProjectFile[]
     isProcedure: (f as any).is_procedure ? true : false,
     transformedContent: (f as any).transformed_content || null,
     dbtContent: (f as any).dbt_content || null,
+    dbtYaml: (f as any).dbt_yaml || null,
   }));
 }
 
@@ -57,6 +59,7 @@ export async function loadProjectFilesMeta(projectId: string): Promise<ProjectFi
     dialect: (f as any).dialect || '',
     isProcedure: (f.is_procedure ?? 0) !== 0,
     transformedContent: (f.has_transformed_content ?? 0) !== 0 ? '' : null,
+    dbtYaml: null,
   }));
 }
 
@@ -69,6 +72,7 @@ export async function loadFileContent(
   isProcedure?: boolean;
   transformedContent?: string | null;
   dbtContent?: string | null;
+  dbtYaml?: string | null;
 } | null> {
   const resp = await serverDb.loadFileContent(projectId, filePath);
   if (resp.content === null && resp.is_procedure === null) return null;
@@ -77,6 +81,7 @@ export async function loadFileContent(
     isProcedure: (resp.is_procedure ?? 0) !== 0,
     transformedContent: resp.transformed_content || null,
     dbtContent: (resp as any).dbt_content || null,
+    dbtYaml: (resp as any).dbt_yaml || null,
   };
 }
 
@@ -110,6 +115,7 @@ export async function upsertProjectFiles(projectId: string, files: ProjectFile[]
       is_procedure: f.isProcedure ? 1 : 0,
       transformed_content: f.transformedContent || '',
       dbt_content: f.dbtContent || '',
+      dbt_yaml: f.dbtYaml || '',
       created_at: '',
       updated_at: '',
     })) as never
@@ -211,4 +217,59 @@ export async function saveDbtContent(
 /** Delete stored files for a project */
 export async function deleteProjectFiles(projectId: string): Promise<void> {
   await serverDb.saveProjectFiles(projectId, []);
+}
+
+// ── Semantic YAML API helpers ────────────────────────────────────────────
+
+/** Generate dbt Semantic Layer YAML for a single file */
+export async function generateSemanticYaml(
+  projectId: string,
+  filePath: string
+): Promise<{ yaml: string; model_name: string; dimension_count: number; measure_count: number; source_count: number }> {
+  const res = await fetch(`${apiBase()}/api/generate-semantic-yaml`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, file_path: filePath }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Generate YAML failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
+/** Batch generate YAML for a folder's SQL files */
+export async function generateSemanticYamlBatch(
+  projectId: string,
+  folderPath: string,
+  files: { path: string; content: string }[]
+): Promise<{
+  success: number;
+  errors: number;
+  skipped: number;
+  total: number;
+  successPaths: string[];
+  errorPaths: string[];
+}> {
+  const res = await fetch(`${apiBase()}/api/generate-semantic-yaml-batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, folder_path: folderPath, files }),
+  });
+  if (!res.ok) throw new Error(`Batch YAML failed: ${res.status}`);
+  return res.json();
+}
+
+/** Save dbt_yaml for a file */
+export async function saveDbtYaml(
+  projectId: string,
+  filePath: string,
+  dbtYaml: string
+): Promise<void> {
+  const res = await fetch(`${apiBase()}/api/files/dbt-yaml`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, file_path: filePath, dbt_yaml: dbtYaml }),
+  });
+  if (!res.ok) throw new Error(`Save YAML failed: ${res.status}`);
 }

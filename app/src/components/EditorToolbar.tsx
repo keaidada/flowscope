@@ -16,6 +16,7 @@ import {
   ChevronsUpDown,
   XCircle,
   FileCode2,
+  FileJson,
   Boxes,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -82,6 +83,10 @@ interface EditorToolbarProps {
   showDbt?: boolean;
   onToggleDbt?: () => void;
   hasDbtContent?: boolean;
+  // semantic yaml
+  onGenerateYaml?: () => void;
+  showYaml?: boolean;
+  onToggleYaml?: () => void;
   // Open file tabs
   openFiles?: ProjectFile[];
   activeFileId?: string | null;
@@ -125,6 +130,9 @@ export function EditorToolbar({
   onConvertDbt,
   showDbt,
   onToggleDbt,
+  onGenerateYaml,
+  showYaml,
+  onToggleYaml,
   openFiles,
   activeFileId,
   onOpenFile,
@@ -527,6 +535,41 @@ export function EditorToolbar({
               </TooltipTrigger>
               <TooltipContent>
                 <p>{showDbt ? t('editor.viewOriginal', '查看原始') : t('editor.viewDbt', '查看 dbt')}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {/* Generate Semantic YAML */}
+        {onGenerateYaml && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onGenerateYaml}>
+                  <FileJson className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{t('editor.generateYaml', '生成 Semantic YAML')}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {/* Toggle YAML / dbt / original view */}
+        {onToggleYaml && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn('h-7 w-7', showYaml && 'bg-purple-500/10 text-purple-600')}
+                  onClick={onToggleYaml}
+                >
+                  <FileJson className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{showYaml ? t('editor.viewOriginal', '查看原始') : t('editor.viewYaml', '查看 YAML')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

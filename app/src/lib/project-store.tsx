@@ -80,6 +80,7 @@ export interface ProjectFile {
   isProcedure?: boolean;
   transformedContent?: string | null;
   dbtContent?: string | null;
+  dbtYaml?: string | null;
 }
 
 export interface Project {
@@ -120,6 +121,7 @@ interface ProjectContextType {
       isProcedure?: boolean;
       transformedContent?: string | null;
       dbtContent?: string | null;
+      dbtYaml?: string | null;
       dialect?: string;
     }>
   ) => void;
@@ -950,6 +952,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
                     isProcedure: result.isProcedure ?? f.isProcedure,
                     transformedContent: result.transformedContent ?? f.transformedContent,
                     dbtContent: result.dbtContent ?? null,
+                    dbtYaml: result.dbtYaml ?? null,
                   }
                 : f
             ),
@@ -1010,6 +1013,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         isProcedure?: boolean;
         transformedContent?: string | null;
         dbtContent?: string | null;
+        dbtYaml?: string | null;
         dialect?: string;
       }>
     ) => {
@@ -1042,6 +1046,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
               }
               if (update.dbtContent !== undefined) {
                 result.dbtContent = update.dbtContent;
+              }
+              if (update.dbtYaml !== undefined) {
+                result.dbtYaml = update.dbtYaml;
               }
               if (update.dialect !== undefined) {
                 result.dialect = update.dialect;
