@@ -160,6 +160,133 @@ pub fn convert_sql_to_dbt_with_tables(
     }
 }
 
+/// Convert SQL to dbt using precise table names from `table_level_edges`.
+///
+/// Instead of regex-scanning for FROM/JOIN keywords, this function takes a set
+/// of known physical table names (from lineage analysis) and does exact
+/// string replacement. This is far more accurate — no false positives on
+/// comments, CTE aliases, multi-space, cross-line, etc.
+///
+/// - `source_tables`: tables this script reads from (from_table in edges)
+/// - `target_tables`: tables this script writes to (to_table in edges)
+/// - `model_tables`: all tables produced by any script in the project
+///   (used to decide ref() vs source())
+pub fn convert_sql_to_dbt_with_edges(
+    source_tables: &HashSet<String>,
+    target_tables: &HashSet<String>,
+    model_tables: &HashSet<String>,
+    sql: &str,
+) -> ConvertResult {
+    let mut warnings = Vec::new();
+    let mut source_count = 0usize;
+
+    // Build a sorted list of all table names to replace (longest first so
+    // `his_db.ctv_video_info` is matched before `ctv_video_info`).
+    let mut all_tables: Vec<&String> = source_tables.iter().chain(target_tables.iter()).collect();
+    all_tables.sort_by(|a, b| b.len().cmp(&a.len()));
+    all_tables.dedup();
+
+    // Process line by line — skip comment lines, replace table names in the rest.
+    let mut output = String::with_capacity(sql.len());
+    for line in sql.lines() {
+        let trimmed = line.trim();
+
+        // Skip empty lines at the start
+        if output.is_empty() && trimmed.is_empty() {
+            continue;
+        }
+
+        // Comment lines — keep as-is (no replacement).
+        if trimmed.starts_with("--") {
+            output.push_str(line);
+            output.push('\n');
+            continue;
+        }
+
+        // Replace all known table names in this line.
+        let mut converted = line.to_string();
+        for table_name in &all_tables {
+            if table_name.is_empty() {
+                continue;
+            }
+            // Check if this table name appears in the line (case-insensitive).
+            if !converted.to_lowercase().contains(&table_name.to_lowercase()) {
+                continue;
+            }
+            // Determine replacement: ref() if it's a model output, else source().
+            let normalized = normalize_table_name(table_name);
+            let is_model = model_tables.contains(&normalized)
+                || model_tables.contains(table_name.as_str());
+            let (schema, table) = if let Some(pos) = table_name.rfind('.') {
+                (&table_name[..pos], &table_name[pos + 1..])
+            } else {
+                ("raw", table_name.as_str())
+            };
+            let replacement = if is_model {
+                format!("{{{{ ref('{normalized}') }}}}")
+            } else {
+                source_count += 1;
+                format!("{{{{ source('{schema}', '{table}') }}}}")
+            };
+
+            // Replace all occurrences with word-boundary awareness.
+            converted = replace_table_name_exact(&converted, table_name, &replacement);
+        }
+
+        output.push_str(&converted);
+        output.push('\n');
+    }
+
+    ConvertResult {
+        dbt_content: output,
+        model_count: target_tables.len(),
+        source_count,
+        warnings,
+    }
+}
+
+/// Replace all occurrences of `table_name` in `text` with `replacement`,
+/// ensuring word boundaries (the char before/after the match must not be a
+/// letter, digit, underscore, or dot — prevents partial matches like
+/// `ctv_video_info` matching inside `ctv_video_info_2`).
+fn replace_table_name_exact(text: &str, table_name: &str, replacement: &str) -> String {
+    let lower_text = text.to_lowercase();
+    let lower_name = table_name.to_lowercase();
+    let name_len = table_name.len();
+
+    let mut result = String::with_capacity(text.len());
+    let mut last_end = 0usize;
+    let mut search = 0usize;
+
+    while let Some(pos) = lower_text[search..].find(&lower_name) {
+        let abs_pos = search + pos;
+        // Check word boundary before.
+        let ok_before = if abs_pos == 0 {
+            true
+        } else {
+            let prev = text[..abs_pos].chars().last().unwrap_or('\0');
+            !prev.is_ascii_alphanumeric() && prev != '_' && prev != '.'
+        };
+        // Check word boundary after.
+        let after_pos = abs_pos + name_len;
+        let ok_after = if after_pos >= text.len() {
+            true
+        } else {
+            let next = text[after_pos..].chars().next().unwrap_or('\0');
+            !next.is_ascii_alphanumeric() && next != '_'
+        };
+
+        if ok_before && ok_after {
+            result.push_str(&text[last_end..abs_pos]);
+            result.push_str(replacement);
+            last_end = after_pos;
+        }
+        search = abs_pos + 1;
+    }
+    result.push_str(&text[last_end..]);
+    result
+}
+
 /// Load all tables that are produced by scripts (appear as `to_table` in table_level_edges).
 pub fn load_model_tables_pub(conn: &Connection, project_id: &str) -> HashSet<String> {
     load_model_tables(conn, project_id)
@@ -180,6 +307,68 @@ fn load_model_tables(conn: &Connection, project_id: &str) -> HashSet<String> {  
         }
     }
     tables
+}
+
+/// Load the source tables (from_table) and target tables (to_table) for a
+/// specific script from `table_level_edges`.
+///
+/// Returns `(source_tables, target_tables)` where each is a set of full table
+/// names (e.g. `his_db.ctv_video_info`). These are the physically-identified
+/// table references — far more accurate than regex scanning.
+pub fn load_script_edges(
+    conn: &Connection,
+    project_id: &str,
+    script_name: &str,
+) -> (HashSet<String>, HashSet<String>) {
+    let mut sources = HashSet::new();
+    let mut targets = HashSet::new();
+
+    // Try exact script match, then script_name match (path may differ).
+    let queries = [
+        (
+            "SELECT DISTINCT from_table FROM table_level_edges WHERE project_id = ?1 AND script = ?2",
+            project_id,
+            script_name,
+        ),
+        (
+            "SELECT DISTINCT from_table FROM table_level_edges WHERE project_id = ?1 AND script_name = ?2",
+            project_id,
+            script_name,
+        ),
+    ];
+    for (q, pid, sn) in &queries {
+        if let Ok(mut stmt) = conn.prepare(q) {
+            if let Ok(rows) = stmt.query_map(params![pid, sn], |row| row.get::<_, String>(0)) {
+                for row in rows.flatten() {
+                    sources.insert(row);
+                }
+            }
+        }
+    }
+    // Targets
+    let queries2 = [
+        (
+            "SELECT DISTINCT to_table FROM table_level_edges WHERE project_id = ?1 AND script = ?2",
+            project_id,
+            script_name,
+        ),
+        (
+            "SELECT DISTINCT to_table FROM table_level_edges WHERE project_id = ?1 AND script_name = ?2",
+            project_id,
+            script_name,
+        ),
+    ];
+    for (q, pid, sn) in &queries2 {
+        if let Ok(mut stmt) = conn.prepare(q) {
+            if let Ok(rows) = stmt.query_map(params![pid, sn], |row| row.get::<_, String>(0)) {
+                for row in rows.flatten() {
+                    targets.insert(row);
+                }
+            }
+        }
+    }
+
+    (sources, targets)
 }
 
 /// Normalize a table name: strip schema prefix and database prefix.

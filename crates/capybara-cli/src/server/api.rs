@@ -3,7 +3,7 @@
 //! This module provides the API endpoints for the web UI to interact with
 //! the Capybara analysis engine.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::{BTreeMap, HashMap, HashSet}, sync::Arc};
 
 use axum::{
     body::Bytes,
@@ -3809,7 +3809,25 @@ async fn gov_convert_dbt(
         Ok(c) => c,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
     };
-    let result = super::governance::dbt_fusion::convert_sql_to_dbt(&conn, &req.project_id, &sql);
+
+    // Try edge-based conversion first (precise table names from lineage).
+    // Fall back to regex-based conversion if no edges data exists.
+    let script_name = std::path::Path::new(&req.file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&req.file_path);
+    let model_tables = super::governance::dbt_fusion::load_model_tables_pub(&conn, &req.project_id);
+    let (sources, targets) =
+        super::governance::dbt_fusion::load_script_edges(&conn, &req.project_id, script_name);
+
+    let result = if !sources.is_empty() || !targets.is_empty() {
+        super::governance::dbt_fusion::convert_sql_to_dbt_with_edges(
+            &sources, &targets, &model_tables, &sql,
+        )
+    } else {
+        super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, &sql)
+    };
+
     Json(result).into_response()
 }
 
@@ -3891,17 +3909,53 @@ async fn gov_convert_dbt_batch(
     let mut error_paths = Vec::new();
     let mut updates: Vec<(String, String)> = Vec::new();
 
-    // 3. Preload model tables once (avoids per-file DB queries), then convert
-    let model_tables = {
+    // 3. Preload model tables and edges once (avoids per-file DB queries)
+    let (model_tables, all_edges) = {
         let conn = match state.db.lock() {
             Ok(c) => c,
             Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
         };
-        super::governance::dbt_fusion::load_model_tables_pub(&conn, &req.project_id)
+        let mt = super::governance::dbt_fusion::load_model_tables_pub(&conn, &req.project_id);
+        // Preload all edges as (script_name → (sources, targets)) map.
+        let mut edges_map: HashMap<String, (HashSet<String>, HashSet<String>)> = HashMap::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT script_name, from_table, to_table FROM table_level_edges WHERE project_id = ?1",
+        ) {
+            use rusqlite::params;
+            let rows = stmt.query_map(params![&req.project_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            });
+            if let Ok(rows) = rows {
+                for row in rows.flatten() {
+                    let entry: &mut (HashSet<String>, HashSet<String>) =
+                        edges_map.entry(row.0).or_insert_with(|| (HashSet::new(), HashSet::new()));
+                    entry.0.insert(row.1); // from_table
+                    entry.1.insert(row.2); // to_table
+                }
+            }
+        }
+        (mt, edges_map)
     };
     for (path, sql) in &sql_files {
-        let result =
-            super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, sql);
+        // Derive script_name from path (e.g. "etl/ALL/Foo.sql" → "Foo.sql").
+        let script_name = std::path::Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path);
+
+        // Use edge-based conversion if edges data exists, else fallback to regex.
+        let result = if let Some((sources, targets)) = all_edges.get(script_name) {
+            if !sources.is_empty() || !targets.is_empty() {
+                super::governance::dbt_fusion::convert_sql_to_dbt_with_edges(
+                    sources, targets, &model_tables, sql,
+                )
+            } else {
+                super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, sql)
+            }
+        } else {
+            super::governance::dbt_fusion::convert_sql_to_dbt_with_tables(&model_tables, sql)
+        };
+
         if !result.dbt_content.trim().is_empty() {
             success_paths.push(path.clone());
             updates.push((path.clone(), result.dbt_content));
