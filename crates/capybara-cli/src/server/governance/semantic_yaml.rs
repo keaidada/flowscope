@@ -351,7 +351,7 @@ fn find_output_from_nodes(
     let sql_edges = "SELECT from_id, to_id FROM lineage_edges \
                      INDEXED BY idx_lineage_edges_path \
                      WHERE project_id = ?1 AND file_path = ?2 \
-                     AND edge_type IN ('DataFlow','data_flow','dataflow')";
+                     AND edge_type = 'data_flow'";
     if let Ok(mut stmt) = conn.prepare(sql_edges) {
         if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -589,7 +589,7 @@ pub fn load_edges_map(
     let mut graph: EdgeGraph = std::collections::HashMap::new();
     let sql = "SELECT to_id, edge_type, expression, from_id FROM lineage_edges \
                WHERE project_id = ?1 AND file_name = ?2 \
-               AND REPLACE(LOWER(edge_type),'_','') IN ('derivation', 'dataflow', 'crossstatement')";
+               AND edge_type IN ('derivation', 'data_flow', 'cross_statement')";
     if let Ok(mut stmt) = conn.prepare(sql) {
         let rows = stmt.query_map(params![project_id, file_name], |row| {
             Ok((
@@ -672,7 +672,7 @@ fn resolve_column_sources(
     let sql_edges = "SELECT from_id, to_id FROM lineage_edges \
                      INDEXED BY idx_lineage_edges_path \
                      WHERE project_id = ?1 AND file_path = ?2 \
-                     AND edge_type IN ('Ownership','ownership')";
+                     AND edge_type = 'ownership'";
     if let Ok(mut stmt) = conn.prepare(sql_edges) {
         if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -697,7 +697,7 @@ fn resolve_column_sources(
     let sql_flow = "SELECT to_id, from_id FROM lineage_edges \
                     INDEXED BY idx_lineage_edges_path \
                     WHERE project_id = ?1 AND file_path = ?2 \
-                    AND edge_type IN ('DataFlow','data_flow','dataflow')";
+                    AND edge_type = 'data_flow'";
     if let Ok(mut stmt) = conn.prepare(sql_flow) {
         if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -809,7 +809,7 @@ fn resolve_measure_source(
     let sql_flow = "SELECT to_id, from_id FROM lineage_edges \
                     INDEXED BY idx_lineage_edges_path \
                     WHERE project_id = ?1 AND file_path = ?2 \
-                    AND edge_type IN ('DataFlow','data_flow','dataflow')";
+                    AND edge_type = 'data_flow'";
     if let Ok(mut stmt) = conn.prepare(sql_flow) {
         if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -825,7 +825,7 @@ fn resolve_measure_source(
     let sql_nf = "SELECT to_id, from_id FROM lineage_edges \
                   INDEXED BY idx_lineage_edges_path \
                   WHERE project_id = ?1 AND file_path = ?2 \
-                  AND edge_type IN ('DataFlow','data_flow','dataflow') \
+                  AND edge_type = 'data_flow' \
                   AND to_id LIKE 'derived_%'";
     if let Ok(mut stmt) = conn.prepare(sql_nf) {
         if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {

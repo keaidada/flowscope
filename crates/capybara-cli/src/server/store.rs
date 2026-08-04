@@ -2412,7 +2412,7 @@ pub fn rebuild_table_level_edges(conn: &Connection, project_id: &str) -> Result<
     // Build column → owning table map from ownership edges
     let mut col_owner: std::collections::HashMap<(String, String), (String, String)> = std::collections::HashMap::new();
     let mut stmt2 = conn.prepare(
-        "SELECT to_id, from_id, file_path FROM lineage_edges WHERE project_id = ?1 AND REPLACE(LOWER(edge_type),'_','') = 'ownership'"
+        "SELECT to_id, from_id, file_path FROM lineage_edges WHERE project_id = ?1 AND edge_type = 'ownership'"
     )?;
     let rows = stmt2.query_map(params![project_id], |row| {
         Ok((
@@ -2431,7 +2431,7 @@ pub fn rebuild_table_level_edges(conn: &Connection, project_id: &str) -> Result<
 
     // Collect reads/writes per (file_path, statement_index)
     let mut stmt = conn.prepare(
-        "SELECT from_id, to_id, file_path, statement_index FROM lineage_edges WHERE project_id = ?1 AND REPLACE(LOWER(edge_type),'_','') = 'dataflow' AND statement_index IS NOT NULL"
+        "SELECT from_id, to_id, file_path, statement_index FROM lineage_edges WHERE project_id = ?1 AND edge_type = 'data_flow' AND statement_index IS NOT NULL"
     )?;
     let mut stmt_reads: std::collections::HashMap<(String, i64), std::collections::HashSet<String>> = std::collections::HashMap::new();
     let mut stmt_writes: std::collections::HashMap<(String, i64), std::collections::HashSet<String>> = std::collections::HashMap::new();

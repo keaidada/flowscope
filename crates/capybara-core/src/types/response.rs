@@ -670,6 +670,22 @@ pub enum EdgeType {
     CrossStatement,
 }
 
+impl EdgeType {
+    /// Canonical string form, matching the serde `snake_case` serialization.
+    /// Used when persisting to the DB so all edge types are written uniformly
+    /// (historical rows used `Debug` PascalCase like `DataFlow`, which must
+    /// not be produced anymore).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EdgeType::Ownership => "ownership",
+            EdgeType::DataFlow => "data_flow",
+            EdgeType::Derivation => "derivation",
+            EdgeType::JoinDependency => "join_dependency",
+            EdgeType::CrossStatement => "cross_statement",
+        }
+    }
+}
+
 /// Global lineage graph spanning all statements in the analyzed SQL.
 ///
 /// Provides a unified view of data flow across multiple statements.

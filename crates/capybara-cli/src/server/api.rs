@@ -2588,7 +2588,7 @@ fn convert_to_lineage_rows(
                     edge_id: edge.id.to_string(),
                     from_id: edge.from.to_string(),
                     to_id: edge.to.to_string(),
-                    edge_type: format!("{:?}", edge.edge_type),
+                    edge_type: edge.edge_type.as_str().to_string(),
                     expression: edge.expression.as_ref().map(|s| s.to_string()),
                     statement_index: Some(si as i64),
                     file_path: fp.to_string(),
