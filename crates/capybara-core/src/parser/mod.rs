@@ -2193,6 +2193,20 @@ fn sanitize_hive_spark_sql(sql: &str) -> Option<String> {
         out_lines.push(line.to_string());
     }
 
+    // Post-process: rewrite Hive `SORT BY` inside OVER() to `ORDER BY`.
+    // sqlparser-rs doesn't recognize `SORT BY` in window definitions and
+    // fails with "Expected: ROWS, RANGE, GROUPS, found: sort".
+    for line in out_lines.iter_mut() {
+        let lower = line.to_lowercase();
+        if lower.contains("over(sort by") || lower.contains("over (sort by") {
+            let fixed = line.replacen("sort by", "order by", 1);
+            if fixed != *line {
+                *line = fixed;
+                changed = true;
+            }
+        }
+    }
+
     // Post-process: add semicolons between adjacent INSERT blocks
     let mut result_lines: Vec<String> = Vec::new();
     let mut prev_was_insert = false;
