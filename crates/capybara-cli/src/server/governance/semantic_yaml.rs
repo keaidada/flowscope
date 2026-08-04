@@ -349,8 +349,9 @@ fn find_output_from_nodes(
     let mut written: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut read: std::collections::HashSet<String> = std::collections::HashSet::new();
     let sql_edges = "SELECT from_id, to_id FROM lineage_edges \
+                     INDEXED BY idx_lineage_edges_path \
                      WHERE project_id = ?1 AND file_path = ?2 \
-                     AND REPLACE(LOWER(edge_type),'_','') = 'dataflow'";
+                     AND edge_type IN ('DataFlow','data_flow','dataflow')";
     if let Ok(mut stmt) = conn.prepare(sql_edges) {
         if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -669,8 +670,9 @@ fn resolve_column_sources(
     // where from is a real table/view that is NOT the output table.
     let mut owned_by_source: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
     let sql_edges = "SELECT from_id, to_id FROM lineage_edges \
+                     INDEXED BY idx_lineage_edges_path \
                      WHERE project_id = ?1 AND file_path = ?2 \
-                     AND REPLACE(LOWER(edge_type),'_','') = 'ownership'";
+                     AND edge_type IN ('Ownership','ownership')";
     if let Ok(mut stmt) = conn.prepare(sql_edges) {
         if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -693,8 +695,9 @@ fn resolve_column_sources(
     // Build data_flow adjacency: to_id → [from_id].
     let mut flow_to_from: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
     let sql_flow = "SELECT to_id, from_id FROM lineage_edges \
+                    INDEXED BY idx_lineage_edges_path \
                     WHERE project_id = ?1 AND file_path = ?2 \
-                    AND REPLACE(LOWER(edge_type),'_','') = 'dataflow'";
+                    AND edge_type IN ('DataFlow','data_flow','dataflow')";
     if let Ok(mut stmt) = conn.prepare(sql_flow) {
         if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -800,10 +803,13 @@ fn resolve_measure_source(
     }
 
     // Load data_flow adjacency: to_id → [from_id].
+    // INDEXED BY idx_lineage_edges_path forces the file_path index; without it
+    // SQLite prefers the covering cov index and scans the whole project.
     let mut flow: HashMap<String, Vec<String>> = HashMap::new();
     let sql_flow = "SELECT to_id, from_id FROM lineage_edges \
+                    INDEXED BY idx_lineage_edges_path \
                     WHERE project_id = ?1 AND file_path = ?2 \
-                    AND REPLACE(LOWER(edge_type),'_','') = 'dataflow'";
+                    AND edge_type IN ('DataFlow','data_flow','dataflow')";
     if let Ok(mut stmt) = conn.prepare(sql_flow) {
         if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -817,8 +823,9 @@ fn resolve_measure_source(
     // Load DataFlow incoming edges for CTE nodes: node_id → [source_table_id].
     let mut node_flow_src: HashMap<String, Vec<String>> = HashMap::new();
     let sql_nf = "SELECT to_id, from_id FROM lineage_edges \
+                  INDEXED BY idx_lineage_edges_path \
                   WHERE project_id = ?1 AND file_path = ?2 \
-                  AND REPLACE(LOWER(edge_type),'_','') = 'dataflow' \
+                  AND edge_type IN ('DataFlow','data_flow','dataflow') \
                   AND to_id LIKE 'derived_%'";
     if let Ok(mut stmt) = conn.prepare(sql_nf) {
         if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {

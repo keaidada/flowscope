@@ -958,12 +958,15 @@ fn indexes_for(table: &str) -> &'static [&'static str] {
         ],
         "lineage_columns" => &[
             "CREATE INDEX IF NOT EXISTS idx_lineage_columns_project ON lineage_columns(project_id);",
+            "CREATE INDEX IF NOT EXISTS idx_lineage_columns_column ON lineage_columns(project_id, column_id);",
+            "CREATE INDEX IF NOT EXISTS idx_lineage_columns_parent ON lineage_columns(project_id, parent_node_id);",
         ],
         "lineage_edges" => &[
             "CREATE INDEX IF NOT EXISTS idx_lineage_edges_project ON lineage_edges(project_id);",
             "CREATE INDEX IF NOT EXISTS idx_lineage_edges_from ON lineage_edges(project_id, from_id);",
             "CREATE INDEX IF NOT EXISTS idx_lineage_edges_to ON lineage_edges(project_id, to_id);",
             "CREATE INDEX IF NOT EXISTS idx_lineage_edges_file ON lineage_edges(project_id, file_name);",
+            "CREATE INDEX IF NOT EXISTS idx_lineage_edges_path ON lineage_edges(project_id, file_path);",
         ],
         "project_file_results" => &[
             "CREATE INDEX IF NOT EXISTS idx_project_file_results_project ON project_file_results(project_id);",
@@ -1204,6 +1207,10 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_lineage_columns_project ON lineage_columns(project_id);
         CREATE INDEX IF NOT EXISTS idx_lineage_edges_project ON lineage_edges(project_id);
         CREATE INDEX IF NOT EXISTS idx_lineage_nodes_type ON lineage_nodes(project_id, node_type);
+        CREATE INDEX IF NOT EXISTS idx_lineage_columns_column ON lineage_columns(project_id, column_id);
+        CREATE INDEX IF NOT EXISTS idx_lineage_columns_parent ON lineage_columns(project_id, parent_node_id);
+        CREATE INDEX IF NOT EXISTS idx_lineage_edges_path ON lineage_edges(project_id, file_path);
+        CREATE INDEX IF NOT EXISTS idx_lineage_edges_file ON lineage_edges(project_id, file_name);
         CREATE INDEX IF NOT EXISTS idx_project_file_results_project ON project_file_results(project_id);
         CREATE INDEX IF NOT EXISTS idx_table_metadata_project ON table_metadata(project_id);
         CREATE INDEX IF NOT EXISTS idx_column_metadata_table ON column_metadata(table_id);
