@@ -57,6 +57,11 @@ pub fn convert_sql_to_dbt_with_tables(
     // CTE / subquery aliases that must NOT be rewritten to ref()/source().
     let cte_names = extract_cte_names(sql);
 
+    // Preprocess: merge lines where FROM/JOIN/INTO/OVERWRITE is at the end of
+    // a line and the table name is on the next line. This ensures
+    // replace_table_refs (which works line-by-line) can see the table name.
+    let sql = merge_trailing_keywords(sql);
+
     for line in sql.lines() {
         let trimmed = line.trim();
 
@@ -214,6 +219,45 @@ fn extract_engine(line: &str) -> Option<String> {
     // Take just the engine name (before parenthesis)
     let end = engine.find('(').unwrap_or(engine.len());
     Some(engine[..end].trim().to_string())
+}
+
+/// Merge lines where a keyword (FROM/JOIN/INTO/OVERWRITE TABLE) is the last
+/// token on a line and the table name follows on the next line.
+///
+/// Example:
+///   `from\nm01_rep_db.xxx` → `from m01_rep_db.xxx`
+///
+/// This lets `replace_table_refs` (line-by-line) see the table name.
+fn merge_trailing_keywords(sql: &str) -> String {
+    let lines: Vec<&str> = sql.lines().collect();
+    let mut result: Vec<String> = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim_end();
+        let upper = trimmed.to_uppercase();
+        // Check if the line ends with a keyword that expects a table name next.
+        let last_token = upper.split_whitespace().last().unwrap_or("");
+        let needs_merge = matches!(last_token, "FROM" | "JOIN" | "INTO" | "TABLE")
+            || upper.ends_with("LEFT JOIN")
+            || upper.ends_with("RIGHT JOIN")
+            || upper.ends_with("INNER JOIN")
+            || upper.ends_with("FULL JOIN")
+            || upper.ends_with("CROSS JOIN")
+            || upper.ends_with("JOIN");
+
+        if needs_merge && i + 1 < lines.len() {
+            // Merge this line with the next non-empty line.
+            let next = lines[i + 1].trim();
+            if !next.is_empty() && !next.starts_with("--") {
+                result.push(format!("{trimmed} {next}"));
+                i += 2;
+                continue;
+            }
+        }
+        result.push(lines[i].to_string());
+        i += 1;
+    }
+    result.join("\n")
 }
 
 /// Replace table references in a line with {{ ref() }} or {{ source() }}.
