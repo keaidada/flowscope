@@ -137,7 +137,8 @@ pub fn generate_semantic_yaml(
     //    Load ONLY this script's lineage edges (by file_name) — the DB is the
     //    source of truth, no full-project preload.
     let edge_map = load_edges_map(conn, project_id, script_name);
-    let mut dimensions: Vec<DimInfo> = Vec::new();
+    // Resolve each output column's source table/column by tracing data_flow.
+    let col_sources = resolve_column_sources(conn, project_id, file_path, &columns, &to_table);    let mut dimensions: Vec<DimInfo> = Vec::new();
     let mut measures: Vec<MeasureInfo> = Vec::new();
     let time_dim_name = find_time_dimension(&columns);
 
@@ -148,6 +149,11 @@ pub fn generate_semantic_yaml(
                 agg,
                 expr,
                 agg_time_dimension: time_dim_name.clone(),
+                source_table: col_sources
+                    .get(&col.column_id)
+                    .cloned()
+                    .flatten()
+                    .map(|(t, c)| if c.is_empty() { t } else { format!("{t}.{c}") }),
             });
         } else {
             let dim_type = classify_dimension(&col.label);
@@ -174,6 +180,11 @@ pub fn generate_semantic_yaml(
                 name,
                 dim_type,
                 description,
+                source_table: col_sources
+                    .get(&col.column_id)
+                    .cloned()
+                    .flatten()
+                    .map(|(t, c)| if c.is_empty() { t } else { format!("{t}.{c}") }),
             });
         }
     }
@@ -203,6 +214,8 @@ struct DimInfo {
     name: String,
     dim_type: DimensionType,
     description: Option<String>,
+    /// Origin table (qualified name) this dimension traces back to.
+    source_table: Option<String>,
 }
 
 enum DimensionType {
@@ -215,6 +228,8 @@ struct MeasureInfo {
     agg: String,
     expr: String,
     agg_time_dimension: Option<String>,
+    /// Origin table (qualified name) this measure traces back to.
+    source_table: Option<String>,
 }
 
 // ── Query helpers ────────────────────────────────────────────────────────
@@ -560,6 +575,128 @@ pub fn load_edges_map(
     graph
 }
 
+/// For each output column, resolve its origin source table AND source column.
+///
+/// Strategy: build the set of columns owned by a real source table via
+/// Ownership edges (`source_table --Ownership--> column`), then BFS each
+/// output column backward along data_flow edges until it reaches an owned
+/// column. The output table's own self-ownership is ignored.
+///
+/// Returns column_id → (qualified source table, source column label).
+fn resolve_column_sources(
+    conn: &Connection,
+    project_id: &str,
+    file_path: &str,
+    columns: &[ColInfo],
+    output_table: &str,
+) -> std::collections::HashMap<String, Option<(String, String)>> {
+    let mut result = std::collections::HashMap::new();
+
+    // Load node → qualified_name and node_type for this file.
+    let mut node_qn: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut table_nodes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let sql_nodes = "SELECT node_id, node_type, COALESCE(qualified_name, label) FROM lineage_nodes \
+                     WHERE project_id = ?1 AND file_path = ?2";
+    if let Ok(mut stmt) = conn.prepare(sql_nodes) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }) {
+            for (nid, ntype, qn) in rows.flatten() {
+                if ntype == "table" || ntype == "view" {
+                    table_nodes.insert(nid.clone());
+                }
+                node_qn.insert(nid, qn);
+            }
+        }
+    }
+
+    // Normalize the output table name for self-reference filtering.
+    let out_norm = normalize_name(output_table);
+
+    // Load column_id → label so we can report the source column name.
+    let mut col_label: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let sql_cols = "SELECT column_id, label FROM lineage_columns WHERE project_id = ?1 AND file_path = ?2";
+    if let Ok(mut stmt) = conn.prepare(sql_cols) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for (cid, lbl) in rows.flatten() {
+                col_label.insert(cid, lbl);
+            }
+        }
+    }
+
+    // Build "column → (source table, source column)" from Ownership edges
+    // where from is a real table/view that is NOT the output table.
+    let mut owned_by_source: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
+    let sql_edges = "SELECT from_id, to_id FROM lineage_edges \
+                     WHERE project_id = ?1 AND file_path = ?2 \
+                     AND REPLACE(LOWER(edge_type),'_','') = 'ownership'";
+    if let Ok(mut stmt) = conn.prepare(sql_edges) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for (from_id, to_id) in rows.flatten() {
+                if !table_nodes.contains(&from_id) {
+                    continue;
+                }
+                if let Some(qn) = node_qn.get(&from_id) {
+                    if normalize_name(qn) == out_norm {
+                        continue; // self-reference
+                    }
+                    let src_col = col_label.get(&to_id).cloned().unwrap_or_default();
+                    owned_by_source.insert(to_id, (qn.clone(), src_col));
+                }
+            }
+        }
+    }
+
+    // Build data_flow adjacency: to_id → [from_id].
+    let mut flow_to_from: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let sql_flow = "SELECT to_id, from_id FROM lineage_edges \
+                    WHERE project_id = ?1 AND file_path = ?2 \
+                    AND REPLACE(LOWER(edge_type),'_','') = 'dataflow'";
+    if let Ok(mut stmt) = conn.prepare(sql_flow) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for (to_id, from_id) in rows.flatten() {
+                flow_to_from.entry(to_id).or_default().push(from_id);
+            }
+        }
+    }
+
+    // For each output column, BFS backward along data_flow until we hit a
+    // column owned by a source table.
+    for col in columns {
+        let mut visited = HashSet::new();
+        let mut queue = vec![col.column_id.clone()];
+        let mut found: Option<(String, String)> = None;
+
+        while let Some(cur) = queue.pop() {
+            if !visited.insert(cur.clone()) {
+                continue;
+            }
+            if let Some(src) = owned_by_source.get(&cur) {
+                found = Some(src.clone());
+                break;
+            }
+            if let Some(froms) = flow_to_from.get(&cur) {
+                for f in froms {
+                    queue.push(f.clone());
+                }
+            }
+        }
+        result.insert(col.column_id.clone(), found);
+    }
+
+    result
+}
+
 /// BFS backward over the in-memory edge graph to find if a column traces
 /// back to an aggregation derivation.
 /// Returns (agg_function, inner_expression).
@@ -875,6 +1012,7 @@ fn generate_minimal_yaml_from_sql(
                     name: to_snake_case(alias),
                     dim_type,
                     description: None,
+                    source_table: None,
                 });
             }
         }
@@ -951,8 +1089,14 @@ fn format_yaml(
         let mut first_time = true;
         for d in dimensions {
             yaml.push_str(&format!("      - name: {}\n", d.name));
-            let desc = d.description.as_deref().unwrap_or("");
-            yaml.push_str(&format!("        description: '{}'\n", desc.replace('\'', "''")));
+            // description: base + source table
+            let base_desc = d.description.as_deref().unwrap_or("").trim();
+            let src_desc = match (&d.source_table, base_desc.is_empty()) {
+                (Some(st), true) => format!("Source: {st}"),
+                (Some(st), false) => format!("{base_desc} | Source: {st}"),
+                (None, _) => base_desc.to_string(),
+            };
+            yaml.push_str(&format!("        description: '{}'\n", src_desc.replace('\'', "''")));
             let expr_val = d.description.as_deref().filter(|s| !s.is_empty()).unwrap_or(&d.name);
             match &d.dim_type {
                 DimensionType::Time { granularity } => {
@@ -980,7 +1124,12 @@ fn format_yaml(
         for m in measures {
             let label = capitalize_words(&m.name);
             yaml.push_str(&format!("      - name: {}\n", m.name));
-            yaml.push_str(&format!("        description: '{}'\n", label));
+            // description: measure label + source table
+            let src_desc = match &m.source_table {
+                Some(st) => format!("{label} | Source: {st}"),
+                None => label.clone(),
+            };
+            yaml.push_str(&format!("        description: '{}'\n", src_desc.replace('\'', "''")));
             yaml.push_str(&format!("        agg: {}\n", m.agg));
             yaml.push_str(&format!("        expr: {}\n", m.expr));
             if let Some(td) = &m.agg_time_dimension {
