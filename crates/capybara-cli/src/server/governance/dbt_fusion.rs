@@ -244,15 +244,20 @@ fn replace_table_refs(
                 break;
             }
 
+            // Skip any whitespace between the keyword and the table name
+            // (handles `FROM  table` with multiple spaces/tabs).
+            let rest_raw = &line[abs_pos..];
+            let leading_ws = rest_raw.len() - rest_raw.trim_start().len();
+            let rest = &rest_raw[leading_ws..];
+
             // Extract the table name (until space, comma, paren, or end)
-            let rest = &line[abs_pos..];
             let end = rest
                 .find(|c: char| c == ' ' || c == ',' || c == '(' || c == '\n' || c == ';')
                 .unwrap_or(rest.len());
             let table_ref = rest[..end].trim().trim_matches(|c: char| c == '`' || c == '"');
 
             if table_ref.is_empty() || table_ref.starts_with('(') || table_ref.starts_with("{{") {
-                search_start = abs_pos;
+                search_start = abs_pos + leading_ws + 1;
                 continue;
             }
 
@@ -284,7 +289,7 @@ fn replace_table_refs(
 
             // Skip CTE / subquery aliases — they are not physical tables.
             if cte_names.contains(&normalized) || cte_names.contains(actual_ref) {
-                search_start = abs_pos + actual_end;
+                search_start = abs_pos + leading_ws + actual_end;
                 continue;
             }
 
@@ -303,11 +308,14 @@ fn replace_table_refs(
             };
 
             // Replace in the result string — only the table name is replaced,
-            // so `INSERT INTO TABLE` keeps its `TABLE` keyword.
-            let full_ref = &line[abs_pos + actual_start..abs_pos + actual_end];
+            // so `INSERT INTO TABLE` keeps its `TABLE` keyword. The leading
+            // whitespace skipped after the keyword must be added back so the
+            // slice offsets align with the original `line`.
+            let off = abs_pos + leading_ws;
+            let full_ref = &line[off + actual_start..off + actual_end];
             result = result.replacen(full_ref, &replacement, 1);
 
-            search_start = abs_pos + actual_end;
+            search_start = off + actual_end;
         }
     }
 
