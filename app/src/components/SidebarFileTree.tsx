@@ -16,7 +16,7 @@ import {
 } from '@/lib/constants';
 import { genId } from '@/lib/utils';
 import { saveProjectFiles } from '@/lib/file-storage';
-import { convertToDbtBatch } from '@/lib/file-storage';
+import { convertToDbtBatch, generateSemanticYamlBatch } from '@/lib/file-storage';
 import { convertProceduresOnServer } from '@/lib/server-db';
 import { ConvertFolderDialog } from './ConvertFolderDialog';
 import { DbtConvertDialog } from './DbtConvertDialog';
@@ -88,6 +88,18 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
   const [dbtFolderFiles, setDbtFolderFiles] = useState<string[]>([]);
   const [isConvertingDbtFolder, setIsConvertingDbtFolder] = useState(false);
   const [dbtFolderProgress, setDbtFolderProgress] = useState<{
+    done: number;
+    total: number;
+    success: string[];
+    errors: string[];
+    skipped: number;
+  } | null>(null);
+  // YAML folder batch
+  const [yamlFolderPath, setYamlFolderPath] = useState<string | null>(null);
+  const [yamlFolderOpen, setYamlFolderOpen] = useState(false);
+  const [yamlFolderFiles, setYamlFolderFiles] = useState<string[]>([]);
+  const [isGeneratingYaml, setIsGeneratingYaml] = useState(false);
+  const [yamlFolderProgress, setYamlFolderProgress] = useState<{
     done: number;
     total: number;
     success: string[];
@@ -383,6 +395,73 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     setDbtFolderProgress({ done: total, total, success, errors, skipped });
     setIsConvertingDbtFolder(false);
   }, [currentProject, dbtFolderPath]);
+
+  // Open the YAML folder dialog with a file list (no generation yet)
+  const handleGenerateYamlFolder = useCallback(
+    (folderPath: string) => {
+      if (!currentProject) return;
+      const prefix = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+      const sqlFiles = currentProject.files.filter(
+        (f) =>
+          f.path.startsWith(prefix) &&
+          (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path))
+      );
+      setYamlFolderPath(folderPath);
+      setYamlFolderFiles(sqlFiles.map((f) => f.path));
+      setYamlFolderProgress(null);
+      setYamlFolderOpen(true);
+    },
+    [currentProject]
+  );
+
+  // Execute YAML generation after user confirms in the dialog
+  const handleConfirmYamlFolder = useCallback(async () => {
+    if (!currentProject || !yamlFolderPath) return;
+    setYamlFolderOpen(false);
+    setIsGeneratingYaml(true);
+    setYamlFolderProgress({ done: 0, total: 0, success: [], errors: [], skipped: 0 });
+
+    const prefix = yamlFolderPath.endsWith('/') ? yamlFolderPath : yamlFolderPath + '/';
+    const sqlFiles = currentProject.files.filter(
+      (f) =>
+        f.path.startsWith(prefix) &&
+        (f.language === 'sql' || /\.(sql|hql|hive|ddl|bigquery|spark)$/i.test(f.path))
+    );
+    const total = sqlFiles.length;
+    const success: string[] = [];
+    const errors: string[] = [];
+    let skipped = 0;
+
+    if (total === 0) {
+      setYamlFolderProgress({ done: 0, total: 0, success, errors, skipped });
+      setIsGeneratingYaml(false);
+      return;
+    }
+
+    const CHUNK = 100;
+    let done = 0;
+    for (let i = 0; i < sqlFiles.length; i += CHUNK) {
+      const chunk = sqlFiles.slice(i, i + CHUNK);
+      try {
+        const result = await generateSemanticYamlBatch(
+          currentProject.id,
+          yamlFolderPath,
+          chunk.map((f) => ({ path: f.path, content: f.content || '' }))
+        );
+        success.push(...result.successPaths);
+        errors.push(...result.errorPaths);
+        skipped += result.skipped;
+      } catch (e) {
+        console.error('[generate-yaml-batch] chunk failed:', e);
+        errors.push(...chunk.map((f) => f.path));
+      }
+      done += chunk.length;
+      setYamlFolderProgress({ done, total, success, errors, skipped });
+    }
+
+    setYamlFolderProgress({ done: total, total, success, errors, skipped });
+    setIsGeneratingYaml(false);
+  }, [currentProject, yamlFolderPath]);
 
   const handleConvertFolder = useCallback(
     async (dialect: Dialect) => {
@@ -910,6 +989,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
             onConvertProcedureInFolder={!isReadOnly ? handleOpenConvertFolder : undefined}
             onConvertDbtFile={!isReadOnly ? handleConvertDbtFile : undefined}
             onConvertDbtInFolder={!isReadOnly ? handleConvertDbtFolder : undefined}
+            onGenerateYamlInFolder={!isReadOnly ? handleGenerateYamlFolder : undefined}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4 text-center">
@@ -1026,6 +1106,28 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
         convertProgress={dbtFolderProgress ? { done: dbtFolderProgress.done, total: dbtFolderProgress.total } : null}
         convertResult={dbtFolderProgress ? { success: dbtFolderProgress.success, errors: dbtFolderProgress.errors, skipped: dbtFolderProgress.skipped } : null}
         onConfirm={handleConfirmDbtFolder}
+      />
+
+      {/* Folder YAML generation dialog */}
+      <DbtConvertFolderDialog
+        open={yamlFolderOpen || Boolean(yamlFolderProgress)}
+        onOpenChange={(open) => {
+          if (!isGeneratingYaml) {
+            setYamlFolderOpen(open);
+            if (!open) {
+              setYamlFolderPath(null);
+              setYamlFolderFiles([]);
+              setYamlFolderProgress(null);
+            }
+          }
+        }}
+        folderPath={yamlFolderPath ?? ''}
+        sqlFiles={yamlFolderFiles}
+        totalFileCount={yamlFolderFiles.length}
+        isConverting={isGeneratingYaml}
+        convertProgress={yamlFolderProgress ? { done: yamlFolderProgress.done, total: yamlFolderProgress.total } : null}
+        convertResult={yamlFolderProgress ? { success: yamlFolderProgress.success, errors: yamlFolderProgress.errors, skipped: yamlFolderProgress.skipped } : null}
+        onConfirm={handleConfirmYamlFolder}
       />
     </div>
   );

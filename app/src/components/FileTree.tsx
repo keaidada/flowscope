@@ -7,6 +7,7 @@ import {
   FolderPlus,
   FileCode,
   FileCode2,
+  FileJson,
   Pencil,
   Trash2,
   Plus,
@@ -79,6 +80,8 @@ interface FileTreeProps {
   onConvertDbtFile?: (filePath: string) => void;
   /** Called when user clicks the convert-to-dbt button on a folder */
   onConvertDbtInFolder?: (folderPath: string) => void;
+  /** Called when user clicks the generate-yaml button on a folder */
+  onGenerateYamlInFolder?: (folderPath: string) => void;
   /** Current search query — when non-empty, auto-expand folders containing matched files */
   searchQuery?: string;
   /** Reports the rendered tree content width so the sidebar can auto-resize */
@@ -437,6 +440,18 @@ const FolderNode = memo(function FolderNode({
                 title={t('fileTree.convertDbtFolder', 'Convert to dbt in folder')}
               >
                 <FileCode2 className="size-3" />
+              </button>
+            )}
+            {props.onGenerateYamlInFolder && (
+              <button
+                className="p-0.5 rounded hover:bg-purple-500/20 text-muted-foreground hover:text-purple-500"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onGenerateYamlInFolder!(node.path);
+                }}
+                title={t('fileTree.generateYamlFolder', 'Generate Semantic YAML in folder')}
+              >
+                <FileJson className="size-3" />
               </button>
             )}
           </div>

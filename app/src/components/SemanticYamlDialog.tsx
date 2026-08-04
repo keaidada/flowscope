@@ -120,7 +120,20 @@ export function SemanticYamlDialog({
               </Button>
             )}
           </div>
-          {saved && <span className="text-xs text-green-600 flex items-center gap-1"><Check className="h-3 w-3" /> {t('editor.saved', '已保存')}</span>}
+          <div className="flex items-center gap-2">
+            {saved && <span className="text-xs text-green-600 flex items-center gap-1"><Check className="h-3 w-3" /> {t('editor.saved', '已保存')}</span>}
+            {yaml && !error && (
+              <Button
+                size="sm"
+                className="h-7 gap-1 bg-purple-500 hover:bg-purple-600 text-white text-[11px] px-3"
+                onClick={handleApply}
+                disabled={!yaml.trim() || saving}
+              >
+                {saving ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : saved ? <Check className="h-3 w-3 mr-1" /> : null}
+                {saved ? t('editor.saved', '已保存') : t('editor.apply', '应用')}
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* YAML output panel */}
@@ -140,21 +153,6 @@ export function SemanticYamlDialog({
             </div>
           )}
         </div>
-
-        {/* Footer with Apply button */}
-        {yaml && !error && (
-          <div className="flex justify-end px-3 py-2 border-t shrink-0">
-            <Button
-              size="sm"
-              className="h-7 gap-1 bg-purple-500 hover:bg-purple-600 text-white text-[11px] px-3"
-              onClick={handleApply}
-              disabled={!yaml.trim() || saving}
-            >
-              {saving ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : saved ? <Check className="h-3 w-3 mr-1" /> : null}
-              {saved ? t('editor.saved', '已保存') : t('editor.apply', '应用')}
-            </Button>
-          </div>
-        )}
       </DialogContent>
     </Dialog>
   );
