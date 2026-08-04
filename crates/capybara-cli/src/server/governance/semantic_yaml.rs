@@ -347,7 +347,7 @@ pub fn load_edges_map(
     let mut graph: EdgeGraph = std::collections::HashMap::new();
     let sql = "SELECT to_id, edge_type, expression, from_id FROM lineage_edges \
                WHERE project_id = ?1 AND file_name = ?2 \
-               AND edge_type IN ('derivation', 'data_flow', 'cross_statement')";
+               AND REPLACE(LOWER(edge_type),'_','') IN ('derivation', 'dataflow', 'crossstatement')";
     if let Ok(mut stmt) = conn.prepare(sql) {
         let rows = stmt.query_map(params![project_id, file_name], |row| {
             Ok((

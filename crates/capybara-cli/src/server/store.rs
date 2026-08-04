@@ -2405,7 +2405,7 @@ pub fn rebuild_table_level_edges(conn: &Connection, project_id: &str) -> Result<
     // Build column → owning table map from ownership edges
     let mut col_owner: std::collections::HashMap<(String, String), (String, String)> = std::collections::HashMap::new();
     let mut stmt2 = conn.prepare(
-        "SELECT to_id, from_id, file_path FROM lineage_edges WHERE project_id = ?1 AND edge_type = 'ownership'"
+        "SELECT to_id, from_id, file_path FROM lineage_edges WHERE project_id = ?1 AND REPLACE(LOWER(edge_type),'_','') = 'ownership'"
     )?;
     let rows = stmt2.query_map(params![project_id], |row| {
         Ok((
@@ -2424,7 +2424,7 @@ pub fn rebuild_table_level_edges(conn: &Connection, project_id: &str) -> Result<
 
     // Collect reads/writes per (file_path, statement_index)
     let mut stmt = conn.prepare(
-        "SELECT from_id, to_id, file_path, statement_index FROM lineage_edges WHERE project_id = ?1 AND edge_type = 'data_flow' AND statement_index IS NOT NULL"
+        "SELECT from_id, to_id, file_path, statement_index FROM lineage_edges WHERE project_id = ?1 AND REPLACE(LOWER(edge_type),'_','') = 'dataflow' AND statement_index IS NOT NULL"
     )?;
     let mut stmt_reads: std::collections::HashMap<(String, i64), std::collections::HashSet<String>> = std::collections::HashMap::new();
     let mut stmt_writes: std::collections::HashMap<(String, i64), std::collections::HashSet<String>> = std::collections::HashMap::new();
@@ -2784,13 +2784,13 @@ pub fn load_lineage_edges(
 ) -> Result<Vec<LineageEdgeRow>, rusqlite::Error> {
     let sql = match (file_path, edge_type) {
         (Some(_), Some(_)) => format!(
-            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND status = 1 AND file_path = ?2 AND edge_type = ?3"
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND status = 1 AND file_path = ?2 AND REPLACE(LOWER(edge_type),'_','') = ?3"
         ),
         (Some(_), None) => format!(
             "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND status = 1 AND file_path = ?2"
         ),
         (None, Some(_)) => format!(
-            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND status = 1 AND edge_type = ?2"
+            "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND status = 1 AND REPLACE(LOWER(edge_type),'_','') = ?2"
         ),
         (None, None) => format!(
             "SELECT edge_id, from_id, to_id, edge_type, expression, statement_index, file_path, file_name, dir_path FROM lineage_edges WHERE project_id = ?1 AND status = 1"
@@ -2801,7 +2801,9 @@ pub fn load_lineage_edges(
         params_vec.push(fp.to_string());
     }
     if let Some(et) = edge_type {
-        params_vec.push(et.to_string());
+        // Normalize to lowercase-without-underscores so both 'DataFlow' and
+        // 'data_flow' match (older analysis wrote 'DataFlow').
+        params_vec.push(et.to_lowercase().replace('_', ""));
     }
     let params: Vec<&dyn rusqlite::types::ToSql> = params_vec
         .iter()
