@@ -346,11 +346,11 @@ fn parse_insert_target_from_sql(sql: &str) -> Option<String> {
             };
             let rest_lower = rest.to_lowercase();
             let after_table = if rest_lower.starts_with("table ") {
-                &rest[6..] // skip "table "
+                rest[6..].trim_start() // skip "table " + any extra spaces
             } else {
-                rest
+                rest.trim_start()
             };
-            // Read table name until space, paren, or partition.
+            // Read table name until space, paren, or end.
             let name: String = after_table
                 .chars()
                 .take_while(|c| !c.is_whitespace() && *c != '(' && *c != ';')
