@@ -54,12 +54,8 @@ pub fn convert_sql_to_dbt_with_tables(
     let mut config_parts: Vec<String> = Vec::new();
     let mut has_config = false;
 
-    // CTE / subquery aliases that must NOT be rewritten to ref()/source().
     let cte_names = extract_cte_names(sql);
 
-    // Preprocess: merge lines where FROM/JOIN/INTO/OVERWRITE is at the end of
-    // a line and the table name is on the next line. This ensures
-    // replace_table_refs (which works line-by-line) can see the table name.
     let sql = merge_trailing_keywords(sql);
 
     for line in sql.lines() {

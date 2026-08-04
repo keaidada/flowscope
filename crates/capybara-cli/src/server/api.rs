@@ -3862,15 +3862,21 @@ async fn gov_convert_dbt_batch(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ConvertDbtBatchRequest>,
 ) -> impl IntoResponse {
-    // 1. Load the DB file list (to get DB-stored content / names for the
-    //    paths the frontend sent). We only process `req.files` — NOT the
-    //    whole folder — so chunked frontend calls don't double-count.
+    // 1. Load ONLY the requested file paths from the DB (not the whole
+    //    project). Loading everything per 100-file chunk is O(project size)
+    //    and gets slower as dbt_content grows — the "slows down after 1400"
+    //    symptom.
+    let req_paths: Vec<String> = req
+        .files
+        .iter()
+        .map(|f| f.path.clone())
+        .collect();
     let db_files: Vec<store::ProjectFileRow> = {
         let conn = match state.db.lock() {
             Ok(c) => c,
             Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
         };
-        store::load_project_files(&conn, &req.project_id).unwrap_or_default()
+        store::load_project_files_by_paths(&conn, &req.project_id, &req_paths).unwrap_or_default()
     };
 
     // Map path → DB row for content fallback.

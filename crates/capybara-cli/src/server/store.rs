@@ -1308,6 +1308,50 @@ pub fn load_project_files(
     rows.collect()
 }
 
+/// Load only the requested file paths (batch) — avoids loading the entire
+/// project's content when only a subset of files is needed (e.g. a batch
+/// conversion chunk of 100 files).
+pub fn load_project_files_by_paths(
+    conn: &Connection,
+    project_id: &str,
+    paths: &[String],
+) -> Result<Vec<ProjectFileRow>, rusqlite::Error> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Build placeholders: (?, ?, ...)
+    let placeholders: Vec<String> = paths.iter().map(|_| "?".to_string()).collect();
+    let sql = format!(
+        "SELECT name, path, content, language, size, COALESCE(dialect,'') as dialect, COALESCE(is_procedure,0) as is_procedure, COALESCE(transformed_content,'') as transformed_content, COALESCE(dbt_content,'') as dbt_content, created_at, updated_at FROM project_files WHERE project_id = ?1 AND status = 1 AND path IN ({})",
+        placeholders.join(", ")
+    );
+
+    // Build params: project_id followed by each path.
+    let mut stmt = conn.prepare(&sql)?;
+    let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(paths.len() + 1);
+    params_vec.push(&project_id);
+    for p in paths {
+        params_vec.push(p);
+    }
+
+    let rows = stmt.query_map(params_vec.as_slice(), |row| {
+        Ok(ProjectFileRow {
+            name: row.get(0)?,
+            path: row.get(1)?,
+            content: row.get(2)?,
+            language: row.get(3)?,
+            size: row.get(4)?,
+            dialect: row.get(5)?,
+            is_procedure: row.get(6)?,
+            transformed_content: row.get(7)?,
+            dbt_content: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        })
+    })?;
+    rows.collect()
+}
+
 // ── file metadata (no content) ────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
