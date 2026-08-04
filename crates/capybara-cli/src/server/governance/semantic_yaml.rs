@@ -101,8 +101,8 @@ pub fn generate_semantic_yaml(
         }
     };
 
-    // 3. Get all columns of the output table.
-    let columns = match query_output_columns(conn, project_id, &output_node_id) {
+    // 3. Get all columns of the output table — scoped to THIS file only.
+    let columns = match query_output_columns(conn, project_id, file_path, &output_node_id) {
         Ok(c) if !c.is_empty() => c,
         _ => {
             // No columns in lineage — try SQL content.
@@ -464,29 +464,30 @@ fn find_output_node(
     ))
 }
 
-/// Query all columns belonging to the output table node.
+/// Query columns belonging to the output table node, **scoped to the
+/// current file_path only**. This prevents column contamination from other
+/// scripts that reference the same table (they share the same node_id hash
+/// but have their own columns under a different file_path).
 fn query_output_columns(
     conn: &Connection,
     project_id: &str,
+    file_path: &str,
     node_id: &str,
 ) -> Result<Vec<ColInfo>, String> {
     let mut columns = Vec::new();
 
-    // Columns belong to the table NODE, which may live under a different
-    // file_path than the current script (a table can be written by many
-    // scripts). Query by parent_node_id across the project.
+    // Query ONLY this file's columns for the output node.
     let sql = "SELECT column_id, label FROM lineage_columns \
-               WHERE project_id = ?1 AND parent_node_id = ?2 \
+               WHERE project_id = ?1 AND file_path = ?2 AND parent_node_id = ?3 \
                ORDER BY label";
     if let Ok(mut stmt) = conn.prepare(sql) {
-        let rows = stmt.query_map(params![project_id, node_id], |row| {
+        let rows = stmt.query_map(params![project_id, file_path, node_id], |row| {
             Ok(ColInfo {
                 column_id: row.get(0)?,
                 label: row.get(1)?,
             })
         });
         if let Ok(rows) = rows {
-            // Deduplicate by label (some files have duplicate column entries).
             let mut seen = HashSet::new();
             for col in rows.flatten() {
                 if seen.insert(col.label.to_lowercase()) {
