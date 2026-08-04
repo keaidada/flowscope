@@ -213,21 +213,10 @@ pub fn convert_sql_to_dbt_with_edges(
             if !converted.to_lowercase().contains(&table_name.to_lowercase()) {
                 continue;
             }
-            // Determine replacement: ref() if it's a model output, else source().
-            let normalized = normalize_table_name(table_name);
-            let is_model = model_tables.contains(&normalized)
-                || model_tables.contains(table_name.as_str());
-            let (schema, table) = if let Some(pos) = table_name.rfind('.') {
-                (&table_name[..pos], &table_name[pos + 1..])
-            } else {
-                ("raw", table_name.as_str())
-            };
-            let replacement = if is_model {
-                format!("{{{{ ref('{normalized}') }}}}")
-            } else {
-                source_count += 1;
-                format!("{{{{ source('{schema}', '{table}') }}}}")
-            };
+            // Use ref() with the full table name (catalog.schema.table) so the
+            // complete path is visible in the converted SQL.
+            let replacement = format!("{{{{ ref('{table_name}') }}}}");
+            source_count += 1;
 
             // Replace all occurrences with word-boundary awareness.
             converted = replace_table_name_exact(&converted, table_name, &replacement);
