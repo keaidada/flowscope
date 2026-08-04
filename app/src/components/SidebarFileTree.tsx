@@ -16,7 +16,7 @@ import {
 } from '@/lib/constants';
 import { genId } from '@/lib/utils';
 import { saveProjectFiles } from '@/lib/file-storage';
-import { convertToDbtBatch, generateSemanticYamlBatch } from '@/lib/file-storage';
+import { convertToDbtBatch, generateSemanticYaml, saveDbtYaml } from '@/lib/file-storage';
 import { convertProceduresOnServer } from '@/lib/server-db';
 import { ConvertFolderDialog } from './ConvertFolderDialog';
 import { DbtConvertDialog } from './DbtConvertDialog';
@@ -483,6 +483,7 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
     const total = sqlFiles.length;
     const success: string[] = [];
     const errors: string[] = [];
+    const updates: { path: string; yaml: string }[] = [];
     let skipped = 0;
 
     if (total === 0) {
@@ -491,27 +492,35 @@ export function SidebarFileTree({ onContentWidthChange, lineageFileIds }: Sideba
       return;
     }
 
-    const CHUNK = 100;
+    // 逐个文件按顺序解析（1 → total），每个请求只处理一个文件，
+    // 后端只查询当前脚本相关的 lineage 信息（数据以数据库为准）。
     let done = 0;
-    for (let i = 0; i < sqlFiles.length; i += CHUNK) {
-      const chunk = sqlFiles.slice(i, i + CHUNK);
-      console.log(`[generate-yaml-folder] chunk ${i / CHUNK + 1}/${Math.ceil(sqlFiles.length / CHUNK)} (${chunk.length} files)`);
+    for (let i = 0; i < sqlFiles.length; i++) {
+      const file = sqlFiles[i];
       try {
-        const result = await generateSemanticYamlBatch(
-          currentProject.id,
-          yamlFolderPath,
-          chunk.map((f) => ({ path: f.path, content: f.content || '' }))
-        );
-        console.log(`[generate-yaml-folder] chunk ${i / CHUNK + 1} done: success=${result.success} errors=${result.errors} skipped=${result.skipped}`);
-        success.push(...result.successPaths);
-        errors.push(...result.errorPaths);
-        skipped += result.skipped;
+        console.log(`[generate-yaml-folder] ${i + 1}/${sqlFiles.length} ${file.path}`);
+        const result = await generateSemanticYaml(currentProject.id, file.path);
+        if (result.yaml && result.yaml.trim()) {
+          success.push(file.path);
+          updates.push({ path: file.path, yaml: result.yaml });
+        } else {
+          errors.push(file.path);
+        }
       } catch (e) {
-        console.error('[generate-yaml-batch] chunk failed:', e);
-        errors.push(...chunk.map((f) => f.path));
+        console.error(`[generate-yaml-folder] file failed: ${file.path}`, e);
+        errors.push(file.path);
       }
-      done += chunk.length;
+      done += 1;
       setYamlFolderProgress({ done, total, success, errors, skipped });
+    }
+
+    // 逐个文件按顺序保存生成的 YAML 到 DB
+    for (const u of updates) {
+      try {
+        await saveDbtYaml(currentProject.id, u.path, u.yaml);
+      } catch (e) {
+        console.error(`[generate-yaml-folder] save failed: ${u.path}`, e);
+      }
     }
 
     setYamlFolderProgress({ done: total, total, success, errors, skipped });

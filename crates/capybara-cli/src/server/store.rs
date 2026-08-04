@@ -963,6 +963,7 @@ fn indexes_for(table: &str) -> &'static [&'static str] {
             "CREATE INDEX IF NOT EXISTS idx_lineage_edges_project ON lineage_edges(project_id);",
             "CREATE INDEX IF NOT EXISTS idx_lineage_edges_from ON lineage_edges(project_id, from_id);",
             "CREATE INDEX IF NOT EXISTS idx_lineage_edges_to ON lineage_edges(project_id, to_id);",
+            "CREATE INDEX IF NOT EXISTS idx_lineage_edges_file ON lineage_edges(project_id, file_name);",
         ],
         "project_file_results" => &[
             "CREATE INDEX IF NOT EXISTS idx_project_file_results_project ON project_file_results(project_id);",
