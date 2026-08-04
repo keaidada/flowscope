@@ -338,11 +338,11 @@ interface OutputGroup {
 }
 
 export async function writeTableLevelEdges(projectId: string): Promise<void> {
-  const [rawNodes, rawEdges] = await Promise.all([
-    serverDb.getLineageNodes(projectId),
-    serverDb.getLineageEdges(projectId, undefined, 'data_flow'),
-  ]);
-  await _writeTableLevelEdgesInternal(projectId, rawNodes, rawEdges);
+  // Delegate to the backend rebuild: it normalizes edge_type (handles legacy
+  // uppercase 'DataFlow') and recomputes reads×writes per statement from
+  // lineage_nodes + lineage_edges. This is more reliable than the old
+  // client-side union-find which silently missed some files.
+  await serverDb.rebuildTableLevelEdges(projectId);
 }
 
 /** 内部函数：直接用已加载的数据重建 TLE，避免重复请求 */

@@ -498,6 +498,12 @@ export async function saveTableLevelEdges(
   await api<void>('POST', '/table-level-edges', { project_id: projectId, edges });
 }
 
+/** Rebuild table_level_edges server-side from lineage data (normalized
+ *  edge_type — includes legacy uppercase 'DataFlow' edges). */
+export async function rebuildTableLevelEdges(projectId: string): Promise<void> {
+  await api<void>('POST', '/rebuild-table-level-edges', { project_id: projectId });
+}
+
 export async function loadTableLevelEdges(
   projectId: string
 ): Promise<Array<[string, string, string]>> {

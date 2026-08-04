@@ -69,6 +69,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/db/lineage/tables", get(get_table_lineage))
         .route("/db/table-level-edges", post(save_table_level_edges_api))
         .route("/db/table-level-edges", get(get_table_level_edges))
+        .route("/db/rebuild-table-level-edges", post(rebuild_table_level_edges_api))
         .route("/db/lineage/columns", get(get_lineage_columns_api))
         .route("/db/lineage/edges", get(get_lineage_edges_api))
         .route("/db/table-metadata", post(save_table_metadata_api))
@@ -1398,6 +1399,29 @@ pub(crate) async fn save_table_level_edges_api(
         .lock()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     store::save_table_level_edges(&db, &payload.project_id, &payload.edges)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(StatusCode::OK)
+}
+
+/// POST /api/db/rebuild-table-level-edges — rebuild table_level_edges from
+/// lineage_nodes + lineage_edges (normalized edge_type, includes old
+/// uppercase 'DataFlow'). Deletes existing rows for the project then
+/// recomputes reads×writes per statement.
+#[derive(Deserialize)]
+struct RebuildTableLevelEdgesRequest {
+    #[serde(alias = "projectId")]
+    project_id: String,
+}
+
+pub(crate) async fn rebuild_table_level_edges_api(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<RebuildTableLevelEdgesRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    store::rebuild_table_level_edges(&db, &payload.project_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
 }
