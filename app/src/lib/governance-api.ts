@@ -180,7 +180,78 @@ export interface MetricAnalysis {
   tips: OptimizationTip[];
 }
 
-export type GovernanceTab = 'dashboard' | 'models' | 'metrics' | 'contracts' | 'designer' | 'settings';
+export type GovernanceTab = 'dashboard' | 'models' | 'metrics' | 'dimensions' | 'contracts' | 'designer' | 'settings';
+
+// ── Dimension Registry types ──────────────────────────────────────
+export interface DimensionEntry {
+  id: number;
+  dim_name: string;
+  dim_name_cn: string;
+  dim_column: string;
+  master_table: string;
+  attributes: string[];
+  ref_count: number;
+  ref_tables: string[];
+  status: string;
+  owner: string;
+  description: string;
+}
+
+// ── Metric Decomposition types ────────────────────────────────────
+export interface AtomicMetricEntry {
+  id: number;
+  metric_name: string;
+  expression: string;
+  agg_func: string;
+  source_column: string;
+  source_table: string;
+  description: string;
+  status: string;
+}
+
+export interface QualifierEntry {
+  id: number;
+  qualifier_name: string;
+  qualifier_expr: string;
+  field_name: string;
+  ref_count: number;
+}
+
+export interface DerivedMetricEntry {
+  id: number;
+  metric_name: string;
+  atomic_metric_name: string;
+  qualifier_names: string[];
+  time_period: string;
+  stat_granularity: string[];
+  full_expression: string;
+  full_sql: string;
+}
+
+export interface DecomposeStats {
+  total: number;
+  atomic_count: number;
+  qualifier_count: number;
+  derived_count: number;
+  compound_count: number;
+  skipped_count: number;
+}
+
+// ── Summary Table Recommendation types ────────────────────────────
+export interface SummaryRecommendation {
+  id: number;
+  recommended_table_name: string;
+  recommended_layer: string;
+  stat_granularity: string[];
+  time_period: string;
+  source_table: string;
+  metric_count: number;
+  metric_names: string[];
+  suggested_sql: string;
+  source_scripts: string[];
+  potential_savings: string;
+  status: string;
+}
 
 function apiBase(): string {
   if (typeof window !== 'undefined') {
@@ -367,5 +438,64 @@ export const governanceApi = {
   // === Contract templates ===
   async contractTemplates(): Promise<Array<{ name: string; description: string; content: string }>> {
     return govFetch('/contracts/templates');
+  },
+
+  // === Dimension Registry ===
+  async discoverDimensions(projectId: string): Promise<{ discovered: number }> {
+    return govFetch('/dimensions/discover', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId }),
+    });
+  },
+
+  async listDimensions(projectId: string, status?: string): Promise<DimensionEntry[]> {
+    const q = status ? `?project_id=${encodeURIComponent(projectId)}&status=${status}` : `?project_id=${encodeURIComponent(projectId)}`;
+    return govFetch(`/dimensions${q}`);
+  },
+
+  async updateDimension(projectId: string, dimId: number, data: { status?: string; dim_name?: string; dim_name_cn?: string; description?: string }): Promise<void> {
+    await govFetch(`/dimensions/${dimId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ project_id: projectId, ...data }),
+    });
+  },
+
+  // === Metric Decomposition ===
+  async decomposeMetrics(projectId: string): Promise<DecomposeStats> {
+    return govFetch('/metrics/decompose', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId }),
+    });
+  },
+
+  async listAtomicMetrics(projectId: string): Promise<AtomicMetricEntry[]> {
+    return govFetch(`/metrics/atomic?project_id=${encodeURIComponent(projectId)}`);
+  },
+
+  async listQualifiers(projectId: string): Promise<QualifierEntry[]> {
+    return govFetch(`/metrics/qualifiers?project_id=${encodeURIComponent(projectId)}`);
+  },
+
+  async listDerivedMetrics(projectId: string): Promise<DerivedMetricEntry[]> {
+    return govFetch(`/metrics/derived?project_id=${encodeURIComponent(projectId)}`);
+  },
+
+  // === Summary Table Recommendations ===
+  async generateSummaryRecs(projectId: string): Promise<{ generated: number }> {
+    return govFetch('/recommendations/summary-tables', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId }),
+    });
+  },
+
+  async listSummaryRecs(projectId: string): Promise<SummaryRecommendation[]> {
+    return govFetch(`/recommendations/summary-tables?project_id=${encodeURIComponent(projectId)}`);
+  },
+
+  async updateSummaryRec(projectId: string, recId: number, status: string): Promise<void> {
+    await govFetch(`/recommendations/summary-tables/${recId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ project_id: projectId, status }),
+    });
   },
 };

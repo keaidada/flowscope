@@ -4,13 +4,14 @@
 
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, LayoutDashboard, Box, BarChart3, FileText, Settings, Palette } from 'lucide-react';
+import { Shield, LayoutDashboard, Box, BarChart3, FileText, Settings, Palette, Ruler } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useGovernanceData } from '@/hooks/useGovernanceData';
 import { GovernanceDashboard } from './dashboard/GovernanceDashboard';
 import { ContractManager } from './contract/ContractManager';
 import { ModelManager } from './model/ModelManager';
 import { MetricManager } from './metric/MetricManager';
+import { DimensionManager } from './dimension/DimensionManager';
 import { VisualModelDesigner } from './designer/VisualModelDesigner';
 import { GovernanceSettings } from './settings/GovernanceSettings';
 import type { GovernanceTab } from '@/lib/governance-api';
@@ -23,6 +24,7 @@ const TABS: Array<{ id: GovernanceTab; icon: React.ElementType; labelKey: string
   { id: 'dashboard', icon: LayoutDashboard, labelKey: 'governance.dashboard' },
   { id: 'models', icon: Box, labelKey: 'governance.models' },
   { id: 'metrics', icon: BarChart3, labelKey: 'governance.metrics' },
+  { id: 'dimensions', icon: Ruler, labelKey: 'governance.dimensions' },
   { id: 'contracts', icon: FileText, labelKey: 'governance.contracts' },
   { id: 'designer', icon: Palette, labelKey: 'governance.designer' },
   { id: 'settings', icon: Settings, labelKey: 'governance.settings' },
@@ -87,6 +89,7 @@ export function GovernanceWorkspace({ projectId }: GovernanceWorkspaceProps) {
         {activeTab === 'contracts' && <ContractManager contracts={gov.contracts} onRefresh={gov.refreshContracts} />}
         {activeTab === 'models' && <ModelManager projectId={projectId} />}
         {activeTab === 'metrics' && <MetricManager projectId={projectId} />}
+        {activeTab === 'dimensions' && <DimensionManager projectId={projectId} />}
         {activeTab === 'designer' && <VisualModelDesigner />}
         {activeTab === 'settings' && <GovernanceSettings projectId={projectId} />}
       </div>
