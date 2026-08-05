@@ -526,9 +526,11 @@ fn replace_table_refs(
                 continue;
             }
 
-            // Decide ref() vs source()
+            // Decide ref() vs source(). ref() keeps the full schema-qualified
+            // name (e.g. his_db.ctv_video_info) so the schema is preserved —
+            // consistent with the source() branch below.
             let replacement = if model_tables.contains(&normalized) || model_tables.contains(actual_ref) {
-                format!("{{{{ ref('{}') }}}}", normalized)
+                format!("{{{{ ref('{}') }}}}", actual_ref)
             } else {
                 // Extract schema from the table ref
                 let (schema, table) = if let Some(pos) = actual_ref.rfind('.') {
