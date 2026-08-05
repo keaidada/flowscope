@@ -17,7 +17,7 @@ import {
 import { Button } from '@/components/ui/button';
 import {
   FunctionSquare, Filter, Layers, Sparkles, Check, Copy, ArrowRight,
-  RefreshCw, Loader2, FileCode2,
+  RefreshCw, Loader2, FileCode2, Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -41,12 +41,19 @@ interface MockQualifier {
   expr: string;
   field: string;
 }
+interface MockPeriod {
+  name: string;
+  expr: string;
+  unit: string;
+  label: string;
+}
 interface MockDerived {
   name: string;
   atomic: string;
   qualifiers: string[];
-  gran: string;
   period: string;
+  periodExpr: string;
+  gran: string;
 }
 
 function seedFromPath(fp: string): number {
@@ -55,7 +62,17 @@ function seedFromPath(fp: string): number {
   return h;
 }
 
-function buildMock(fp: string): { atomics: MockAtomic[]; qualifiers: MockQualifier[]; derived: MockDerived[] } {
+// Standard time periods (周期限定): name / SQL condition / unit / label
+const PERIOD_POOL: MockPeriod[] = [
+  { name: '昨日', expr: `data_dt = date_sub('${'${bizdate}'}', 1)`, unit: 'daily', label: '按日' },
+  { name: '近7日', expr: `data_dt >= date_sub('${'${bizdate}'}', 7)`, unit: 'rolling_7d', label: '近7日' },
+  { name: '近30日', expr: `data_dt >= date_sub('${'${bizdate}'}', 30)`, unit: 'rolling_30d', label: '近30日' },
+  { name: '本月', expr: `data_dt >= trunc('${'${bizdate}'}', 'MM')`, unit: 'monthly', label: '按月' },
+  { name: '自然周', expr: `data_dt >= date_sub('${'${bizdate}'}', 6)`, unit: 'weekly', label: '按周' },
+  { name: '累计', expr: `data_dt <= '${'${bizdate}'}'`, unit: 'cumulative', label: '累计' },
+];
+
+function buildMock(fp: string): { atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; derived: MockDerived[] } {
   const s = seedFromPath(fp);
   const cols = ['usr_id', 'vid', 'play_duration', 'dau', 'vv', 'pv', 'pay_amount', 'order_cnt', 'actv_time', 'exp_uv'];
   const aggFns = ['sum', 'count', 'count_distinct', 'avg', 'max', 'min'];
@@ -89,33 +106,43 @@ function buildMock(fp: string): { atomics: MockAtomic[]; qualifiers: MockQualifi
     });
   }
 
-  // derived = atomics × qualifiers (subset)
+  // 3-4 period qualifiers (deterministic subset of PERIOD_POOL)
+  const pCount = 3 + (s % 2);
+  const periods: MockPeriod[] = [];
+  for (let i = 0; i < pCount; i++) {
+    const p = PERIOD_POOL[(s + i) % PERIOD_POOL.length];
+    if (!periods.some(x => x.name === p.name)) periods.push(p);
+  }
+
+  // derived = atomics × qualifiers × period (subset)
   const derived: MockDerived[] = [];
   for (let i = 0; i < Math.min(6, atomics.length); i++) {
     const a = atomics[(i + 1) % atomics.length];
     const q = qualifiers[i % qualifiers.length];
+    const p = periods[i % periods.length];
     const gran = ['video_side', 'video_ctgy', 'channel_id', 'usr_id'][i % 4];
     derived.push({
-      name: `${a.name}_${q.field}_daily`,
+      name: `${a.name}_${p.name}_${q.field}`,
       atomic: a.expr,
       qualifiers: [q.expr],
-      gran: `按日·${gran}`,
-      period: 'daily',
+      period: p.unit,
+      periodExpr: p.expr,
+      gran: `${p.label}·${gran}`,
     });
   }
 
-  return { atomics, qualifiers, derived };
+  return { atomics, qualifiers, periods, derived };
 }
 
 export function MetricExtractDialog({ open, onClose, filePath }: MetricExtractDialogProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'atomic' | 'qualifier' | 'derived'>('atomic');
+  const [tab, setTab] = useState<'atomic' | 'qualifier' | 'period' | 'derived'>('atomic');
   const [selected, setSelected] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   // Deterministic mock data for this file.
-  const mock = open ? buildMock(filePath) : { atomics: [], qualifiers: [], derived: [] };
+  const mock = open ? buildMock(filePath) : { atomics: [], qualifiers: [], periods: [], derived: [] };
   const scriptName = filePath.split('/').pop() || filePath;
 
   useEffect(() => {
@@ -130,6 +157,7 @@ export function MetricExtractDialog({ open, onClose, filePath }: MetricExtractDi
 
   const totalAtomic = mock.atomics.length;
   const totalQualifier = mock.qualifiers.length;
+  const totalPeriod = mock.periods.length;
   const totalDerived = mock.derived.length;
 
   const handleCopy = () => {
@@ -137,7 +165,9 @@ export function MetricExtractDialog({ open, onClose, filePath }: MetricExtractDi
       ? mock.atomics.map(a => `-- ${a.name}\n--   ${a.expr}`).join('\n')
       : tab === 'qualifier'
         ? mock.qualifiers.map(q => `-- ${q.name}: ${q.expr}`).join('\n')
-        : mock.derived.map(d => `-- ${d.name} = ${d.atomic} WHERE ${d.qualifiers.join(' AND ')} GROUP BY ${d.gran}`).join('\n');
+        : tab === 'period'
+          ? mock.periods.map(p => `-- ${p.name}: ${p.expr}`).join('\n')
+          : mock.derived.map(d => `-- ${d.name} = ${d.atomic} WHERE ${d.qualifiers.join(' AND ')} AND ${d.periodExpr} GROUP BY ${d.gran}`).join('\n');
     navigator.clipboard.writeText(lines).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
@@ -154,7 +184,7 @@ export function MetricExtractDialog({ open, onClose, filePath }: MetricExtractDi
             </div>
             <DialogTitle>{t('editor.extractMetrics', '提取指标')}</DialogTitle>
             <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
-              {totalAtomic} 原子 · {totalQualifier} 限定 · {totalDerived} 派生
+              {totalAtomic} 原子 · {totalQualifier} 限定 · {totalPeriod} 周期 · {totalDerived} 派生
             </span>
           </div>
           <DialogDescription className="leading-tight flex items-center gap-1.5">
@@ -170,6 +200,7 @@ export function MetricExtractDialog({ open, onClose, filePath }: MetricExtractDi
             {([
               { id: 'atomic' as const, label: `原子指标 (${totalAtomic})`, icon: FunctionSquare, color: 'text-sky-500' },
               { id: 'qualifier' as const, label: `业务限定 (${totalQualifier})`, icon: Filter, color: 'text-amber-500' },
+              { id: 'period' as const, label: `周期限定 (${totalPeriod})`, icon: Clock, color: 'text-violet-500' },
               { id: 'derived' as const, label: `派生指标 (${totalDerived})`, icon: Layers, color: 'text-emerald-500' },
             ]).map(x => {
               const Icon = x.icon;
@@ -230,6 +261,21 @@ export function MetricExtractDialog({ open, onClose, filePath }: MetricExtractDi
                   </button>
                 ))}
               </div>
+            ) : tab === 'period' ? (
+              <div className="p-3 space-y-1.5">
+                {mock.periods.map(p => (
+                  <button key={p.name} onClick={() => setSelected(p.name)}
+                    className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border bg-card hover:border-violet-400/50 transition-colors text-left',
+                      selected === p.name && 'border-violet-500/60 ring-1 ring-violet-500/30')}>
+                    <Clock className="h-4 w-4 shrink-0 text-violet-500" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium truncate">{p.name}</div>
+                      <div className="text-[10px] font-mono text-violet-600 dark:text-violet-400 truncate">{p.expr}</div>
+                    </div>
+                    <Badge className="text-[10px] bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400 shrink-0">{p.label}</Badge>
+                  </button>
+                ))}
+              </div>
             ) : (
               <div className="p-3 space-y-1.5">
                 {mock.derived.map(d => (
@@ -245,6 +291,7 @@ export function MetricExtractDialog({ open, onClose, filePath }: MetricExtractDi
                         {d.qualifiers.map((q, i) => (
                           <span key={i} className="px-1 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 font-mono">{q}</span>
                         ))}
+                        <span className="px-1 py-0.5 rounded bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400 font-mono">{d.periodExpr}</span>
                       </div>
                     </div>
                     <Badge className="text-[10px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400 shrink-0">{d.gran}</Badge>
@@ -274,9 +321,9 @@ export function MetricExtractDialog({ open, onClose, filePath }: MetricExtractDi
 }
 
 function DetailPanel({ tab, selected, mock }: {
-  tab: 'atomic' | 'qualifier' | 'derived';
+  tab: 'atomic' | 'qualifier' | 'period' | 'derived';
   selected: string;
-  mock: { atomics: MockAtomic[]; qualifiers: MockQualifier[]; derived: MockDerived[] };
+  mock: { atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; derived: MockDerived[] };
 }) {
   if (tab === 'atomic') {
     const a = mock.atomics.find(x => x.name === selected);
@@ -309,6 +356,22 @@ function DetailPanel({ tab, selected, mock }: {
       </div>
     );
   }
+  if (tab === 'period') {
+    const p = mock.periods.find(x => x.name === selected);
+    if (!p) return null;
+    return (
+      <div className="space-y-3">
+        <DetailRow k="周期限定" v={p.name} />
+        <DetailRow k="时间单位" v={p.unit} mono />
+        <DetailRow k="周期标签" v={p.label} />
+        <DetailRow k="周期表达式" v={p.expr} mono code />
+        <div>
+          <div className="text-[9px] uppercase text-muted-foreground mb-1">WHERE 片段</div>
+          <pre className="text-[10px] font-mono bg-muted rounded p-2 overflow-auto whitespace-pre-wrap">{`WHERE ${p.expr}`}</pre>
+        </div>
+      </div>
+    );
+  }
   const d = mock.derived.find(x => x.name === selected);
   if (!d) return null;
   return (
@@ -316,11 +379,12 @@ function DetailPanel({ tab, selected, mock }: {
       <DetailRow k="派生指标" v={d.name} />
       <DetailRow k="原子指标" v={d.atomic} mono />
       <DetailRow k="业务限定" v={d.qualifiers.join(' AND ')} mono />
+      <DetailRow k="周期限定" v={d.periodExpr} mono />
       <DetailRow k="统计粒度" v={d.gran} />
       <DetailRow k="时间周期" v={d.period} mono />
       <div>
         <div className="text-[9px] uppercase text-muted-foreground mb-1">完整 SQL</div>
-        <pre className="text-[10px] font-mono bg-muted rounded p-2 overflow-auto whitespace-pre-wrap">{`SELECT\n  ${d.gran.split('·')[1] ?? 'dt'},\n  ${d.atomic} AS ${d.name}\nFROM <源表>\nWHERE ${d.qualifiers.join(' AND ')}\nGROUP BY ${d.gran.split('·')[1] ?? 'dt'}`}</pre>
+        <pre className="text-[10px] font-mono bg-muted rounded p-2 overflow-auto whitespace-pre-wrap">{`SELECT\n  ${d.gran.split('·')[1] ?? 'dt'},\n  ${d.atomic} AS ${d.name}\nFROM <源表>\nWHERE ${d.qualifiers.join(' AND ')}\n  AND ${d.periodExpr}\nGROUP BY ${d.gran.split('·')[1] ?? 'dt'}`}</pre>
       </div>
     </div>
   );
