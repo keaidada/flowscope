@@ -469,6 +469,8 @@ pub fn save_report(
 }
 
 /// Get recent governance reports for a project.
+/// WARNING: report_json can be 700MB+ — this is extremely slow.
+/// Use get_report_summary unless you truly need the full violation list.
 pub fn get_reports(
     conn: &Connection,
     project_id: &str,
@@ -492,6 +494,49 @@ pub fn get_reports(
         }
     }
     Ok(reports)
+}
+
+/// Lightweight report summary — reads only scalar columns, skips the
+/// 700MB+ report_json. Returns just enough for the dashboard header.
+pub fn get_report_summary(
+    conn: &Connection,
+    project_id: &str,
+    limit: usize,
+) -> Result<Vec<ReportSummary>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, health_score, dimension_scores_json,
+                file_count, violation_count, created_at
+         FROM governance_reports
+         WHERE project_id = ?1 AND status = 1
+         ORDER BY id DESC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![project_id, limit], |row| {
+        let dim_json: String = row.get::<_, String>(3).unwrap_or_default();
+        let dim_scores: std::collections::BTreeMap<String, u32> =
+            serde_json::from_str(&dim_json).unwrap_or_default();
+        Ok(ReportSummary {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            health_score: row.get::<_, i64>(2).unwrap_or(0) as u32,
+            dimension_scores: dim_scores,
+            file_count: row.get::<_, i64>(4).unwrap_or(0) as usize,
+            violation_count: row.get::<_, i64>(5).unwrap_or(0) as usize,
+            created_at: row.get::<_, String>(6).unwrap_or_default(),
+        })
+    })?;
+    rows.collect()
+}
+
+/// Lightweight report summary (no 700MB JSON deserialization).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReportSummary {
+    pub id: i64,
+    pub project_id: String,
+    pub health_score: u32,
+    pub dimension_scores: std::collections::BTreeMap<String, u32>,
+    pub file_count: usize,
+    pub violation_count: usize,
+    pub created_at: String,
 }
 
 /// Get health score trend.

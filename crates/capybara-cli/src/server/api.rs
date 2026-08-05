@@ -2973,7 +2973,7 @@ async fn gov_get_report(
                 .into_response();
         }
     };
-    match super::governance::db::get_reports(&conn, &q.project_id, q.limit) {
+    match super::governance::db::get_report_summary(&conn, &q.project_id, q.limit) {
         Ok(reports) => Json(reports).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

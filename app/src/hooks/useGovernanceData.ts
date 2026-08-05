@@ -2,7 +2,7 @@
  * Governance data hook — manages scan state, reports, and contracts.
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import {
   governanceApi,
   type GovernanceReport,
@@ -57,11 +57,10 @@ export function useGovernanceData(projectId: string | null) {
     }
   }, [projectId, refreshReport]);
 
-  // Only fetch contracts on mount (lightweight). Report is lazy-loaded
-  // when the dashboard tab is opened to avoid blocking other governance APIs.
-  useEffect(() => {
-    refreshContracts();
-  }, [refreshContracts]);
+  // Do NOT auto-fetch report or contracts on mount — they can be very slow
+  // (714MB report JSON) and block all other governance APIs via the Mutex.
+  // They are loaded lazily only when the dashboard/contracts tab is opened.
+  // useEffect(() => { refreshContracts(); }, [refreshContracts]);
 
   return {
     report,
