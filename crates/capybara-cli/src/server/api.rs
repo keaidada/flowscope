@@ -4622,27 +4622,17 @@ async fn gov_extract_script_metrics(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ExtractScriptMetricsRequest>,
 ) -> impl IntoResponse {
-    // Read script content.
-    let sql = read_project_file(&state, &req.project_id, &req.file_path);
-    if sql.trim().is_empty() {
-        return Json(serde_json::json!({ "metrics": [], "error": "empty script" })).into_response();
-    }
-
-    // Analyze the script SQL.
-    let analyze_request = capybara_core::AnalyzeRequest {
-        sql: sql.clone(),
-        files: None,
-        dialect: state.config.dialect,
-        source_name: Some(req.file_path.clone()),
-        options: None,
-        schema: None,
-        #[cfg(feature = "templating")]
-        template_config: None,
+    // Extract metrics by querying persisted lineage_* tables (project_id +
+    // file_path scoped, indexed — no full scan). The aggregation expressions
+    // (SUM/COUNT/AVG/MIN/MAX incl. IF/CASE conditions) are already stored in
+    // lineage_edges derivation edges.
+    let conn = match state.db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
     };
-    let result = capybara_core::analyze(&analyze_request);
-
-    // Extract metrics from the analysis result.
-    let metrics = super::governance::metric::extract_script_metrics(&result, &req.file_path);
+    let metrics = super::governance::metric::extract_script_metrics_from_lineage(
+        &conn, &req.project_id, &req.file_path,
+    );
 
     Json(serde_json::json!({
         "metrics": metrics,

@@ -1262,125 +1262,257 @@ pub struct ScriptMetric {
     pub period: String,
 }
 
-/// Extract metrics from a single script's AnalyzeResult by scanning statement
-/// nodes for aggregation columns (SUM/COUNT/AVG/MIN/MAX/etc).
-pub fn extract_script_metrics(
-    result: &capybara_core::AnalyzeResult,
+/// Extract metrics for a single script by querying persisted lineage tables
+/// (`lineage_edges` derivation edges + `lineage_columns` + `lineage_nodes`).
+///
+/// All queries are scoped by (project_id, file_path) and use indexed columns
+/// (idx_lineage_edges_path / idx_lineage_columns_parent / idx_lineage_nodes_node)
+/// — no full-table scans.
+///
+/// A derivation edge whose expression is an aggregation (SUM/COUNT/AVG/MIN/MAX,
+/// possibly wrapped in IF()/CASE WHEN) represents a real metric. The edge's
+/// `from_id` resolves to a source column whose parent node is the source table.
+pub fn extract_script_metrics_from_lineage(
+    conn: &Connection,
+    project_id: &str,
     file_path: &str,
 ) -> Vec<ScriptMetric> {
     let mut metrics: Vec<ScriptMetric> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for stmt in &result.statements {
-        // Collect source table names from table nodes in this statement.
-        let source_tables: Vec<String> = stmt
-            .nodes
-            .iter()
-            .filter(|n| n.node_type == capybara_core::NodeType::Table)
-            .map(|n| n.qualified_name.as_deref().unwrap_or(&n.label).to_string())
-            .collect();
-        let source_table = source_tables.first().cloned().unwrap_or_default();
-
-        // Collect grouping dims for period inference.
-        let dims: Vec<String> = stmt
-            .nodes
-            .iter()
-            .filter_map(|n| {
-                n.aggregation.as_ref().and_then(|a| {
-                    if a.is_grouping_key {
-                        Some(n.label.as_ref().to_string())
-                    } else {
-                        None
-                    }
-                })
-            })
-            .collect();
-        let period = if dims.iter().any(|d| {
-            let dl = d.to_lowercase();
-            dl.contains("dt") || dl.contains("date") || dl.contains("time") || dl == "day" || dl == "month"
+    // Load column metadata for THIS file: id → (label, parent_node_id).
+    let mut col_label: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut col_parent: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT column_id, label, COALESCE(parent_node_id,'') FROM lineage_columns \
+         WHERE project_id = ?1 AND file_path = ?2",
+    ) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         }) {
-            "daily".to_string()
-        } else {
-            String::new()
-        };
-
-        for node in &stmt.nodes {
-            let agg = match &node.aggregation {
-                Some(a) if !a.is_grouping_key => a,
-                _ => continue,
-            };
-            let func = match &agg.function {
-                Some(f) if !f.is_empty() => f.to_lowercase(),
-                _ => continue,
-            };
-            let col = node.label.as_ref();
-            let distinct = agg.distinct.unwrap_or(false);
-
-            // Aggregate function → metric name.
-            let agg_name = if func == "count" && distinct {
-                "count_distinct".to_string()
-            } else {
-                func.clone()
-            };
-
-            // Business filter: from the node's CASE WHEN / expression, or filters.
-            let filter = extract_filter_from_node(node);
-
-            let key = format!("{agg_name}({col})|{filter}");
-            if !seen.insert(key.clone()) {
-                continue;
+            for (cid, lbl, par) in rows.flatten() {
+                col_label.insert(cid.clone(), lbl);
+                col_parent.insert(cid, par);
             }
-
-            let expr = node
-                .expression
-                .as_deref()
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| {
-                    if distinct {
-                        format!("{}(distinct {})", func, col)
-                    } else {
-                        format!("{}({})", func, col)
-                    }
-                });
-
-            metrics.push(ScriptMetric {
-                name: format!("{}_{}", agg_name, to_snake(&col)),
-                expression: expr,
-                agg_func: agg_name,
-                distinct,
-                source_table: source_table.clone(),
-                column: col.to_string(),
-                business_filter: filter,
-                period: period.clone(),
-            });
         }
     }
 
-    // Sort: aggregations first, then by name.
-    metrics.sort_by(|a, b| a.name.cmp(&b.name));
-    let _ = file_path;
-    metrics
-}
+    // Load node metadata for THIS file: id → (label, qualified_name, node_type).
+    let mut node_qn: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut node_type: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT node_id, label, node_type, COALESCE(qualified_name,'') FROM lineage_nodes \
+         WHERE project_id = ?1 AND file_path = ?2",
+    ) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        }) {
+            for (nid, _lbl, typ, qn) in rows.flatten() {
+                node_type.insert(nid.clone(), typ);
+                node_qn.insert(nid, qn);
+            }
+        }
+    }
 
-/// Extract a business filter from a node's expression (CASE WHEN conditions)
-/// or its WHERE filters.
-fn extract_filter_from_node(node: &capybara_core::Node) -> String {
-    if let Some(expr) = node.expression.as_deref() {
-        let lower = expr.to_lowercase();
-        if lower.contains("case when") {
-            if let Some(when) = lower.find("case when") {
-                let after = &expr[when + 9..];
-                if let Some(then) = after.to_lowercase().find("then") {
-                    return after[..then].trim().to_string();
+    // Load data_flow incoming edges for CTE nodes in THIS file:
+    // derived_<id> → predecessor (CTE or source table). Multi-hop CTE chains
+    // are resolved via BFS below so every CTE column maps to a real source
+    // table (aggregations happen on CTE output).
+    let mut cte_to_source: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut cte_adj: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT to_id, from_id FROM lineage_edges \
+         INDEXED BY idx_lineage_edges_path \
+         WHERE project_id = ?1 AND file_path = ?2 \
+         AND REPLACE(LOWER(edge_type),'_','') = 'dataflow'",
+    ) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for (to_id, from_id) in rows.flatten() {
+                // Only edges into CTE nodes.
+                if to_id.starts_with("derived_") {
+                    cte_adj.entry(to_id.clone()).or_default().push(from_id.clone());
+                    // If predecessor is directly a table, record immediately.
+                    if let Some(t) = node_type.get(&from_id) {
+                        if t == "table" || t == "view" {
+                            cte_to_source
+                                .entry(to_id.clone())
+                                .or_insert_with(|| node_qn.get(&from_id).cloned().unwrap_or_default());
+                        }
+                    }
                 }
             }
         }
     }
-    node.filters
-        .iter()
-        .map(|f| f.expression.clone())
-        .collect::<Vec<_>>()
-        .join(" AND ")
+    // BFS multi-hop CTE chains: CTE → data_flow → CTE → ... → source table.
+    let cte_ids: Vec<String> = cte_adj.keys().cloned().collect();
+    for cte in &cte_ids {
+        if cte_to_source.contains_key(cte) {
+            continue;
+        }
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = vec![cte.clone()];
+        while let Some(cur) = queue.pop() {
+            if !visited.insert(cur.clone()) {
+                continue;
+            }
+            if let Some(src) = cte_to_source.get(&cur) {
+                cte_to_source.insert(cte.clone(), src.clone());
+                break;
+            }
+            if let Some(preds) = cte_adj.get(&cur) {
+                for p in preds {
+                    queue.push(p.clone());
+                }
+            }
+        }
+    }
+
+    // 1. Query aggregation derivation edges for this file (indexed by path).
+    let sql_edges = "SELECT to_id, expression, from_id FROM lineage_edges \
+                     INDEXED BY idx_lineage_edges_path \
+                     WHERE project_id = ?1 AND file_path = ?2 \
+                     AND REPLACE(LOWER(edge_type),'_','') = 'derivation' \
+                     AND expression IS NOT NULL \
+                     AND (LOWER(expression) LIKE '%count(%' \
+                          OR LOWER(expression) LIKE '%sum(%' \
+                          OR LOWER(expression) LIKE '%avg(%' \
+                          OR LOWER(expression) LIKE '%min(%' \
+                          OR LOWER(expression) LIKE '%max(%')";
+    if let Ok(mut stmt) = conn.prepare(sql_edges) {
+        if let Ok(rows) = stmt.query_map(params![project_id, file_path], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }) {
+            for (to_id, expr, from_id) in rows.flatten() {
+                // Metric name = the destination column's label.
+                let name = col_label.get(&to_id).cloned().unwrap_or_else(|| to_id.clone());
+
+                // Aggregate function + distinct from the expression.
+                let (agg_func, distinct) = parse_agg_from_expr(&expr);
+
+                // Resolve source table: from_id → column → parent node.
+                let source_table = resolve_source_table(
+                    &from_id, &col_parent, &node_type, &node_qn, &cte_to_source,
+                );
+
+                // Business filter from IF()/CASE WHEN conditions inside the expr.
+                let business_filter = extract_filter_from_expression(&expr);
+
+                // Key for dedup: agg(column)|filter|source.
+                let key = format!("{agg_func}({name})|{business_filter}|{source_table}");
+                if !seen.insert(key.clone()) {
+                    continue;
+                }
+
+                metrics.push(ScriptMetric {
+                    name: format!("{}_{}", agg_func, to_snake(&name)),
+                    expression: expr,
+                    agg_func,
+                    distinct,
+                    source_table,
+                    column: name.clone(),
+                    business_filter,
+                    period: String::new(),
+                });
+            }
+        }
+    }
+
+    metrics.sort_by(|a, b| a.name.cmp(&b.name));
+    metrics
+}
+
+/// Parse "COUNT(DISTINCT ...)" / "SUM(...)" from an expression.
+fn parse_agg_from_expr(expr: &str) -> (String, bool) {
+    let lower = expr.to_lowercase();
+    for agg in ["count_distinct", "count", "sum", "avg", "min", "max", "median"] {
+        let prefix = format!("{agg}(");
+        if lower.starts_with(&prefix) {
+            // count(distinct X) → count_distinct
+            if agg == "count" {
+                let rest = &lower[prefix.len()..];
+                if rest.starts_with("distinct") {
+                    return ("count_distinct".to_string(), true);
+                }
+            }
+            return (agg.to_string(), false);
+        }
+    }
+    // fallback: find any agg( anywhere
+    for agg in ["count", "sum", "avg", "min", "max"] {
+        if lower.contains(&format!("{agg}(")) {
+            let distinct = agg == "count" && lower.contains("distinct");
+            return (if distinct { "count_distinct".to_string() } else { agg.to_string() }, distinct);
+        }
+    }
+    ("agg".to_string(), false)
+}
+
+/// Resolve a source table from a column id: column → parent node → node qn.
+/// If the parent is a CTE (aggregation on CTE output), fall back to the CTE's
+/// incoming data_flow source table.
+fn resolve_source_table(
+    from_id: &str,
+    col_parent: &std::collections::HashMap<String, String>,
+    node_type: &std::collections::HashMap<String, String>,
+    node_qn: &std::collections::HashMap<String, String>,
+    cte_to_source: &std::collections::HashMap<String, String>,
+) -> String {
+    if let Some(parent) = col_parent.get(from_id) {
+        if !parent.is_empty() {
+            if let Some(t) = node_type.get(parent) {
+                if t == "table" || t == "view" {
+                    return node_qn
+                        .get(parent)
+                        .cloned()
+                        .unwrap_or_default();
+                }
+                if t == "cte" {
+                    if let Some(src) = cte_to_source.get(parent) {
+                        return src.clone();
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+/// Extract a business filter from IF(cond, then, else) or CASE WHEN cond THEN.
+fn extract_filter_from_expression(expr: &str) -> String {
+    let lower = expr.to_lowercase();
+    // IF(cond, then, else)
+    if let Some(pos) = lower.find("if(") {
+        // find first comma after '('
+        let after = &expr[pos + 3..];
+        let after_lower = after.to_lowercase();
+        if let Some(comma) = after_lower.find(',') {
+            return after[..comma].trim().to_string();
+        }
+    }
+    // CASE WHEN cond THEN
+    if let Some(pos) = lower.find("case when") {
+        let after = &expr[pos + 9..];
+        let after_lower = after.to_lowercase();
+        if let Some(then) = after_lower.find("then") {
+            return after[..then].trim().to_string();
+        }
+    }
+    String::new()
 }
 
 /// Convert a label to snake_case for metric naming.
