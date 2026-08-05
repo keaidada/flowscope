@@ -16,7 +16,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Search, Plus, ChevronRight, Pencil, Copy, Trash2,
   RefreshCw, Save, Check, X, ArrowLeft, ArrowRight, GitMerge,
-  Table2, Layers, FunctionSquare, Filter, Box, Database, List, Share2, Grid3x3,
+  Table2, Layers, FunctionSquare, Filter, Box, Database, List, Share2, Grid3x3, Network, Rocket,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -166,7 +166,7 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
   const [showWizard, setShowWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardName, setWizardName] = useState('');
-  const [viewMode, setViewMode] = useState<'list' | 'graph' | 'matrix'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'graph' | 'matrix' | 'concept' | 'publish'>('list');
 
   const currentModule = MOCK_MODULES.find(m => m.id === module)!;
   const list = MOCK_DATA[module].filter(m =>
@@ -210,6 +210,14 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
               className={cn('flex items-center gap-1 h-6 px-2 rounded text-[11px] font-medium', viewMode === 'matrix' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground')}>
               <Grid3x3 className="h-3 w-3" />总线矩阵
             </button>
+            <button onClick={() => setViewMode('concept')}
+              className={cn('flex items-center gap-1 h-6 px-2 rounded text-[11px] font-medium', viewMode === 'concept' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+              <Network className="h-3 w-3" />概念模型
+            </button>
+            <button onClick={() => setViewMode('publish')}
+              className={cn('flex items-center gap-1 h-6 px-2 rounded text-[11px] font-medium', viewMode === 'publish' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+              <Rocket className="h-3 w-3" />发布管理
+            </button>
           </div>
           <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowWizard(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />{t('governance.create', '新建')}
@@ -222,6 +230,10 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
         <ModelRelationshipGraph onSelect={setSelected} />
       ) : viewMode === 'matrix' ? (
         <BusMatrix />
+      ) : viewMode === 'concept' ? (
+        <ConceptModel onSelect={setSelected} />
+      ) : viewMode === 'publish' ? (
+        <PublishManager onSelect={setSelected} />
       ) : (
         <div className="flex flex-1 min-h-0">
         {/* Left: module tree */}
@@ -610,6 +622,30 @@ function StepFields() {
 }
 
 function StepLogic() {
+  const [expr, setExpr] = useState('SELECT\n  vid,\n  usr_id,\n  play_duration\nFROM fct_video_play_di');
+  const [dragging, setDragging] = useState<string | null>(null);
+
+  const SOURCE_FIELDS = [
+    { name: 'vid', type: 'bigint', desc: '视频ID' },
+    { name: 'usr_id', type: 'bigint', desc: '用户ID' },
+    { name: 'play_duration', type: 'bigint', desc: '播放时长' },
+    { name: 'play_ts', type: 'timestamp', desc: '播放时间' },
+    { name: 'video_ctgy', type: 'string', desc: '视频分类' },
+    { name: 'video_side', type: 'string', desc: '视频端' },
+  ];
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const field = e.dataTransfer.getData('text/plain');
+    if (!field) return;
+    // Insert field at cursor position.
+    const ta = e.currentTarget as HTMLTextAreaElement;
+    const start = ta.selectionStart ?? expr.length;
+    const end = ta.selectionEnd ?? expr.length;
+    setExpr(expr.slice(0, start) + field + expr.slice(end));
+    setDragging(null);
+  };
+
   return (
     <div className="grid grid-cols-2 gap-4">
       <div>
@@ -621,21 +657,46 @@ function StepLogic() {
             <Badge variant="outline" className="text-[10px]">物理表</Badge>
           </div>
           <div className="text-[11px] text-muted-foreground font-mono">{'过滤条件: ds = ${bizdate}'}</div>
+          <div className="text-[10px] text-muted-foreground">拖拽字段到右侧计算逻辑编辑器</div>
+          <div className="flex flex-wrap gap-1">
+            {SOURCE_FIELDS.map(f => (
+              <div key={f.name}
+                draggable
+                onDragStart={e => { e.dataTransfer.setData('text/plain', f.name); setDragging(f.name); }}
+                onDragEnd={() => setDragging(null)}
+                className={cn('px-2 py-1 rounded border bg-blue-50/60 dark:bg-blue-950/40 border-blue-200/50 dark:border-blue-800/50 cursor-grab hover:border-blue-400 hover:shadow-sm transition-all',
+                  dragging === f.name && 'opacity-40 border-blue-400')}>
+                <div className="text-[10px] font-mono text-blue-700 dark:text-blue-400">{f.name}</div>
+                <div className="text-[9px] text-muted-foreground">{f.type} · {f.desc}</div>
+              </div>
+            ))}
+          </div>
           <Button size="sm" variant="outline" className="h-6 text-[11px]"><Plus className="h-3 w-3 mr-1" />添加来源对象</Button>
         </div>
       </div>
       <div>
-        <h3 className="text-sm font-semibold mb-3">计算逻辑</h3>
+        <h3 className="text-sm font-semibold mb-3">计算逻辑 <span className="text-[10px] font-normal text-muted-foreground">（拖拽字段到编辑器）</span></h3>
         <div className="border rounded-lg p-3">
           <div className="flex flex-wrap gap-1 mb-2">
-            {['vid', 'usr_id', 'play_duration', 'play_ts'].map(f => (
-              <span key={f} className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400 text-[10px] font-mono cursor-pointer hover:bg-blue-100">{f}</span>
+            {['sum', 'count', 'count_distinct', 'avg', 'max', 'min'].map(f => (
+              <span key={f}
+                draggable
+                onDragStart={e => { e.dataTransfer.setData('text/plain', `${f}(`); setDragging(f); }}
+                onDragEnd={() => setDragging(null)}
+                className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400 text-[10px] font-mono cursor-grab hover:bg-purple-100">{f}(</span>
             ))}
           </div>
-          <textarea rows={4} className="w-full p-2 text-xs font-mono rounded border bg-muted/20 focus:outline-none focus:ring-1 focus:ring-ring"
-            value={'SELECT\n  vid,\n  usr_id,\n  play_duration\nFROM fct_video_play_di'} readOnly />
+          <textarea rows={6}
+            value={expr}
+            onChange={e => setExpr(e.target.value)}
+            onDrop={onDrop}
+            onDragOver={e => e.preventDefault()}
+            placeholder="SELECT ...  (拖拽字段/函数到此处)"
+            className="w-full p-2 text-xs font-mono rounded border bg-muted/20 focus:outline-none focus:ring-1 focus:ring-ring"
+          />
           <div className="flex items-center gap-2 mt-2">
             <Button size="sm" variant="outline" className="h-6 text-[11px]">同名字段快速映射</Button>
+            <Button size="sm" variant="outline" className="h-6 text-[11px]">语法校验</Button>
             <Button size="sm" variant="outline" className="h-6 text-[11px]">预览SQL</Button>
           </div>
         </div>
@@ -920,6 +981,237 @@ function BusMatrix() {
       <div className="mt-3 text-[11px] text-muted-foreground">
         点击「+」将维度关联到业务过程；已关联的维度组合将用于派生指标的统计粒度。
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Concept Model (概念模型): 业务对象/业务活动 → 生成逻辑表
+// ============================================================
+
+interface ConceptEntity {
+  id: string;
+  name: string;
+  nameCn: string;
+  type: '业务对象' | '业务活动';
+  domain: string;
+  generated: Array<{ code: string; name: string; type: string }>;
+}
+
+const CONCEPT_ENTITIES: ConceptEntity[] = [
+  {
+    id: 'ent_user', name: 'USER', nameCn: '用户', type: '业务对象', domain: '用户域',
+    generated: [{ code: 'dim_user_df', name: '用户维度表', type: '维度逻辑表' }],
+  },
+  {
+    id: 'ent_video', name: 'VIDEO', nameCn: '视频', type: '业务对象', domain: '视频域',
+    generated: [{ code: 'dim_video_df', name: '视频维度表', type: '维度逻辑表' }, { code: 'dim_channel_df', name: '频道维度表', type: '维度逻辑表' }],
+  },
+  {
+    id: 'act_play', name: 'VIDEO_PLAY', nameCn: '视频播放', type: '业务活动', domain: '视频域',
+    generated: [{ code: 'fct_video_play_di', name: '视频播放事实表', type: '事实逻辑表' }, { code: 'dws_video_play_daily', name: '视频播放日汇总表', type: '汇总逻辑表' }],
+  },
+  {
+    id: 'act_login', name: 'USER_LOGIN', nameCn: '用户登录', type: '业务活动', domain: '用户域',
+    generated: [{ code: 'fct_login_di', name: '登录事实表', type: '事实逻辑表' }, { code: 'dws_user_active_daily', name: '用户活跃日汇总表', type: '汇总逻辑表' }],
+  },
+];
+
+function ConceptModel({ onSelect }: { onSelect: (m: MockModel | null) => void }) {
+  return (
+    <div className="flex-1 min-h-0 overflow-auto p-4">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4">
+        <Network className="h-4 w-4 text-primary" />
+        <span className="text-sm font-semibold">概念模型</span>
+        <span className="text-xs text-muted-foreground">业务对象 / 业务活动 → 自动生成逻辑表</span>
+        <Button size="sm" variant="outline" className="h-6 ml-auto text-[11px]"><Plus className="h-3 w-3 mr-1" />新建业务实体</Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        {CONCEPT_ENTITIES.map(e => (
+          <div key={e.id} className="border rounded-lg overflow-hidden bg-card">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b" style={{ borderColor: `${e.type === '业务对象' ? '#8b5cf6' : '#3b82f6'}33` }}>
+              <span className="w-2 h-2 rounded-full" style={{ background: e.type === '业务对象' ? '#8b5cf6' : '#3b82f6' }} />
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold">{e.nameCn}</span>
+                  <span className="text-[10px] font-mono text-muted-foreground">{e.name}</span>
+                </div>
+                <div className="text-[10px] text-muted-foreground">{e.type} · {e.domain}</div>
+              </div>
+              <Badge className={cn('ml-auto text-[10px]', e.type === '业务对象' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400')}>{e.type}</Badge>
+            </div>
+            <div className="p-3 space-y-2">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wide">已生成逻辑表</div>
+              {e.generated.map(g => (
+                <button key={g.code} onClick={() => onSelect(toMockModelByCode(g.code))}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded border hover:border-primary/40 hover:bg-accent/30 transition-colors text-left">
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  <div className="flex-1">
+                    <div className="text-xs font-medium">{g.name}</div>
+                    <div className="text-[10px] font-mono text-muted-foreground">{g.code}</div>
+                  </div>
+                  <Badge variant="outline" className="text-[10px]">{g.type}</Badge>
+                </button>
+              ))}
+              <Button size="sm" variant="ghost" className="h-6 w-full text-[11px] text-muted-foreground">
+                <Plus className="h-3 w-3 mr-1" />添加逻辑表
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function toMockModelByCode(code: string): MockModel {
+  const m = Object.values(GRAPH_MODELS).find(g => g.code === code);
+  return m ? toMockModel(m) : { code, name: code, owner: '张伟', status: '已发布', updated: '2026-08-04', layer: 'DWD', fields: [] };
+}
+
+// ============================================================
+// Publish Manager (发布管理): 草稿 → 已发布 → 已上线 + 版本
+// ============================================================
+
+interface PublishItem {
+  code: string;
+  name: string;
+  version: string;
+  status: '草稿' | '待发布' | '已发布' | '已上线' | '开发中';
+  owner: string;
+  updated: string;
+  history: Array<{ version: string; time: string; operator: string; note: string }>;
+}
+
+const PUBLISH_ITEMS: PublishItem[] = [
+  {
+    code: 'dim_user_df', name: '用户维度表', version: 'v2.1.0', status: '已上线', owner: '张伟', updated: '2026-08-04 14:23',
+    history: [
+      { version: 'v2.1.0', time: '2026-08-04 14:23', operator: '张伟', note: '新增 usr_type 字段' },
+      { version: 'v2.0.0', time: '2026-08-01 09:00', operator: '李娜', note: '字段标准调整' },
+      { version: 'v1.0.0', time: '2026-07-20 10:00', operator: '王强', note: '首次发布' },
+    ],
+  },
+  {
+    code: 'fct_video_play_di', name: '视频播放事实表', version: 'v1.3.0', status: '已发布', owner: '张伟', updated: '2026-08-04 15:02',
+    history: [
+      { version: 'v1.3.0', time: '2026-08-04 15:02', operator: '张伟', note: '增加播放时长度量' },
+      { version: 'v1.2.0', time: '2026-07-28 11:00', operator: '李娜', note: '关联视频维度' },
+    ],
+  },
+  {
+    code: 'dim_channel_df', name: '频道维度表', version: 'v0.9.0', status: '开发中', owner: '王强', updated: '2026-08-02 16:40',
+    history: [
+      { version: 'v0.9.0', time: '2026-08-02 16:40', operator: '王强', note: '草稿' },
+    ],
+  },
+  {
+    code: 'dws_user_active_daily', name: '用户活跃日汇总表', version: 'v1.1.0', status: '待发布', owner: '李娜', updated: '2026-08-03 14:00',
+    history: [
+      { version: 'v1.1.0', time: '2026-08-03 14:00', operator: '李娜', note: '提交审核' },
+    ],
+  },
+];
+
+function PublishManager({ onSelect: _onSelect }: { onSelect: (m: MockModel | null) => void }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const item = PUBLISH_ITEMS.find(i => i.code === selected);
+
+  return (
+    <div className="flex-1 min-h-0 overflow-auto p-4">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4">
+        <Rocket className="h-4 w-4 text-primary" />
+        <span className="text-sm font-semibold">发布管理</span>
+        <span className="text-xs text-muted-foreground">模型生命周期：草稿 → 待发布 → 已发布 → 已上线</span>
+        <div className="ml-auto flex items-center gap-3 text-xs">
+          {['草稿', '待发布', '已发布', '已上线'].map(s => (
+            <span key={s} className="flex items-center gap-1">
+              <span className={cn('w-2.5 h-2.5 rounded-full',
+                s === '已上线' && 'bg-emerald-500', s === '已发布' && 'bg-blue-500',
+                s === '待发布' && 'bg-amber-500', s === '草稿' && 'bg-gray-400')} />
+              {s} <span className="text-muted-foreground tabular-nums">{PUBLISH_ITEMS.filter(i => i.status === s).length}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="border rounded-lg overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/40">
+            <tr className="text-left text-muted-foreground">
+              <th className="px-3 py-2 font-medium">名称</th>
+              <th className="px-3 py-2 font-medium">编码</th>
+              <th className="px-3 py-2 font-medium">当前版本</th>
+              <th className="px-3 py-2 font-medium">状态</th>
+              <th className="px-3 py-2 font-medium">负责人</th>
+              <th className="px-3 py-2 font-medium">更新时间</th>
+              <th className="px-3 py-2 font-medium w-40">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {PUBLISH_ITEMS.map(i => (
+              <tr key={i.code} onClick={() => setSelected(i.code)}
+                className={cn('border-t cursor-pointer hover:bg-accent/30', selected === i.code && 'bg-accent/50')}>
+                <td className="px-3 py-2 font-medium">{i.name}</td>
+                <td className="px-3 py-2 font-mono text-[11px] text-muted-foreground">{i.code}</td>
+                <td className="px-3 py-2 font-mono text-[11px]">{i.version}</td>
+                <td className="px-3 py-2">
+                  <Badge className={cn('text-[10px] font-medium',
+                    i.status === '已上线' && 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400',
+                    i.status === '已发布' && 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400',
+                    i.status === '待发布' && 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
+                    i.status === '草稿' && 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400')}>{i.status}</Badge>
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">{i.owner}</td>
+                <td className="px-3 py-2 text-muted-foreground">{i.updated}</td>
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-1">
+                    <Button size="sm" variant="outline" className="h-6 text-[10px] px-2">编辑</Button>
+                    {i.status === '草稿' && <Button size="sm" className="h-6 text-[10px] px-2">提交发布</Button>}
+                    {i.status === '待发布' && <Button size="sm" className="h-6 text-[10px] px-2 bg-blue-600 hover:bg-blue-700 text-white">发布</Button>}
+                    {i.status === '已发布' && <Button size="sm" className="h-6 text-[10px] px-2 bg-emerald-600 hover:bg-emerald-700 text-white">上线</Button>}
+                    <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2">版本</Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Version history */}
+      {item && (
+        <div className="mt-4 border rounded-lg p-4 bg-card">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm font-semibold">{item.name}</span>
+            <Badge className="text-[10px] bg-primary/10 text-primary font-mono">{item.version}</Badge>
+            <span className="text-xs text-muted-foreground">版本历史</span>
+          </div>
+          <div className="space-y-0">
+            {item.history.map((h, i) => (
+              <div key={h.version} className="flex gap-3 pb-3">
+                <div className="flex flex-col items-center">
+                  <span className={cn('w-3 h-3 rounded-full border-2 mt-1', i === 0 ? 'bg-emerald-500 border-emerald-500' : 'bg-background border-muted-foreground/40')} />
+                  {i < item.history.length - 1 && <span className="w-px flex-1 bg-muted" />}
+                </div>
+                <div className="flex-1 pb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-medium">{h.version}</span>
+                    <span className="text-[10px] text-muted-foreground">{h.time}</span>
+                    <span className="text-[10px] text-muted-foreground">by {h.operator}</span>
+                    {i === 0 && <Badge className="text-[9px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">当前</Badge>}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">{h.note}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
