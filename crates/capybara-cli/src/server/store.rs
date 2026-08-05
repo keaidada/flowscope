@@ -2429,26 +2429,26 @@ pub fn rebuild_table_level_edges(conn: &Connection, project_id: &str) -> Result<
         }
     }
 
-    // Collect reads/writes per (file_path, statement_index)
+    // Collect reads/writes per (file_path). Aggregate across statements so
+    // a script's source tables (in earlier statements) are linked to its
+    // final target table even when the data-flow chain crosses statements
+    // (e.g. CTE chains like si=1 source → si=3 b → target).
     let mut stmt = conn.prepare(
-        "SELECT from_id, to_id, file_path, statement_index FROM lineage_edges WHERE project_id = ?1 AND edge_type = 'data_flow' AND statement_index IS NOT NULL"
+        "SELECT from_id, to_id, file_path FROM lineage_edges WHERE project_id = ?1 AND edge_type = 'data_flow'"
     )?;
-    let mut stmt_reads: std::collections::HashMap<(String, i64), std::collections::HashSet<String>> = std::collections::HashMap::new();
-    let mut stmt_writes: std::collections::HashMap<(String, i64), std::collections::HashSet<String>> = std::collections::HashMap::new();
-    let mut all_keys = std::collections::HashSet::new();
+    let mut stmt_reads: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
+    let mut stmt_writes: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
 
     let rows = stmt.query_map(params![project_id], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
-            row.get::<_, i64>(3)?,
         ))
     })?;
     for row in rows {
-        let (from_id, to_id, fp, si) = row?;
-        let key = (fp.clone(), si);
-        all_keys.insert(key.clone());
+        let (from_id, to_id, fp) = row?;
+        let key = fp.clone();
 
         let from_key = (fp.clone(), from_id.clone());
         let to_key = (fp.clone(), to_id.clone());
@@ -2475,14 +2475,18 @@ pub fn rebuild_table_level_edges(conn: &Connection, project_id: &str) -> Result<
         }
     }
 
-    // Insert table-level edges: for each statement, read_table × write_table
+    // Insert table-level edges: for each script, read_table × write_table.
+    // A table may only be a write (terminal) or read+write (intermediate CTE
+    // chains); only tables that are reads but never the final write participate
+    // as from_table. To avoid self-loops, a table that is both read and write
+    // is treated as a source for the final write tables only.
     let now = chrono::Local::now().to_rfc3339();
     let mut insert = conn.prepare(
         "INSERT OR IGNORE INTO table_level_edges (project_id, from_table, to_table, script, script_name, dir_path, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)"
     )?;
 
-    for ((fp, _si), reads) in &stmt_reads {
-        let writes = stmt_writes.get(&(fp.clone(), *_si));
+    for (fp, reads) in &stmt_reads {
+        let writes = stmt_writes.get(fp);
         if writes.is_none() || writes.unwrap().is_empty() { continue; }
 
         let script_name = fp.rsplit('/').next().unwrap_or(fp);
