@@ -3557,18 +3557,29 @@ async fn gov_discover_dimensions(
     State(state): State<Arc<AppState>>,
     Json(req): Json<GovProjectIdBody>,
 ) -> impl IntoResponse {
-    let main_conn = match state.db.lock() {
-        Ok(c) => c,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    // Phase 1: Read from main DB (scan lineage). Hold ONLY main lock.
+    let candidates = {
+        let main_conn = match state.db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+        };
+        match super::governance::dimension::discover_read(&main_conn, &req.project_id) {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Discovery read failed: {e}")).into_response(),
+        }
     };
-    let gov_conn = match state.gov_db.lock() {
-        Ok(c) => c,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Gov DB lock: {e}")).into_response(),
+    // Phase 2: Write to gov DB. Hold ONLY gov lock.
+    let count = {
+        let gov_conn = match state.gov_db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Gov DB lock: {e}")).into_response(),
+        };
+        match super::governance::dimension::discover_write(&gov_conn, &req.project_id, &candidates) {
+            Ok(n) => n,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Discovery write failed: {e}")).into_response(),
+        }
     };
-    match super::governance::dimension::discover_dimensions(&main_conn, &gov_conn, &req.project_id) {
-        Ok(count) => Json(serde_json::json!({"discovered": count})).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Discovery failed: {e}")).into_response(),
-    }
+    Json(serde_json::json!({"discovered": count})).into_response()
 }
 
 /// GET /api/governance/dimensions — list dimensions (optional ?status=candidate|confirmed)

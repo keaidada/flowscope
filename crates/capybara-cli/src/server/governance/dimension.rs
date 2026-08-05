@@ -45,16 +45,22 @@ const TIME_COLUMNS: &[&str] = &[
 /// 3. Aggregate by column label: a column referenced by ≥3 distinct tables
 ///    is a dimension candidate.
 /// 4. For each candidate, find the "master table" (the table with the most
-///    columns) and its other columns as dimension attributes.
-pub fn discover_dimensions(
-    main_conn: &Connection,
-    gov_conn: &Connection,
-    project_id: &str,
-) -> Result<usize, String> {
-    let now = chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string();
+/// A dimension candidate discovered from lineage (read phase output).
+pub struct DimensionCandidate {
+    pub dim_name: String,
+    pub dim_column: String,
+    pub master_table: String,
+    pub attributes: Vec<String>,
+    pub ref_count: usize,
+    pub ref_tables: Vec<String>,
+}
 
+/// Phase 1 (read from main DB): Scan lineage to discover dimension candidates.
+/// Does NOT touch gov_db. Returns candidates for phase 2 to persist.
+pub fn discover_read(
+    main_conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<DimensionCandidate>, String> {
     // Step 1: Collect table node IDs → table label.
     let mut table_labels: HashMap<String, String> = HashMap::new();
     let sql_tables =
@@ -75,29 +81,21 @@ pub fn discover_dimensions(
         return Err("No table nodes found in lineage".into());
     }
 
-    // Step 2: Collect ownership edges → column → set of parent tables.
-    // We query columns whose parent is a table node.
+    // Step 2: Query ALL columns once — used for both col→tables map AND table→cols map.
     let mut col_to_tables: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut table_to_cols: HashMap<String, Vec<String>> = HashMap::new();
     let sql_cols =
         "SELECT label, parent_node_id FROM lineage_columns \
          WHERE project_id = ?1 AND parent_node_id IS NOT NULL";
     if let Ok(mut stmt) = main_conn.prepare(sql_cols) {
         let rows = stmt.query_map(params![project_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-            ))
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         });
         if let Ok(rows) = rows {
             for (label, parent) in rows.flatten() {
-                if table_labels.contains_key(&parent) {
-                    let table_label = table_labels.get(&parent).cloned().unwrap_or_default();
-                    if !table_label.is_empty() {
-                        col_to_tables
-                            .entry(label)
-                            .or_default()
-                            .insert(table_label);
-                    }
+                if let Some(tbl) = table_labels.get(&parent) {
+                    col_to_tables.entry(label.clone()).or_default().insert(tbl.clone());
+                    table_to_cols.entry(tbl.clone()).or_default().push(label);
                 }
             }
         }
@@ -107,7 +105,7 @@ pub fn discover_dimensions(
     let noise_set: HashSet<&str> = NOISE_COLUMNS.iter().copied().collect();
     let time_set: HashSet<&str> = TIME_COLUMNS.iter().copied().collect();
 
-    let mut candidates: Vec<(String, Vec<String>)> = col_to_tables
+    let mut candidates_raw: Vec<(String, Vec<String>)> = col_to_tables
         .into_iter()
         .filter(|(col, tables)| {
             let lower = col.to_lowercase();
@@ -122,61 +120,68 @@ pub fn discover_dimensions(
             (col, tbls)
         })
         .collect();
-    candidates.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    candidates_raw.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
 
-    // Step 4: For each candidate, find master table + attributes.
-    // Master table = the candidate's table with the most columns.
-    let mut table_to_cols: HashMap<String, Vec<String>> = HashMap::new();
-    let sql_tc =
-        "SELECT label, parent_node_id FROM lineage_columns \
-         WHERE project_id = ?1 AND parent_node_id IS NOT NULL";
-    if let Ok(mut stmt) = main_conn.prepare(sql_tc) {
-        let rows = stmt.query_map(params![project_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-            ))
-        });
-        if let Ok(rows) = rows {
-            for (label, parent) in rows.flatten() {
-                if let Some(tbl) = table_labels.get(&parent) {
-                    table_to_cols.entry(tbl.clone()).or_default().push(label);
-                }
+    // Step 4: Build DimensionCandidate with master table + attributes.
+    let candidates: Vec<DimensionCandidate> = candidates_raw
+        .into_iter()
+        .map(|(col, ref_tables)| {
+            let master_table = ref_tables
+                .iter()
+                .max_by_key(|t| table_to_cols.get(*t).map(|c| c.len()).unwrap_or(0))
+                .cloned()
+                .unwrap_or_default();
+
+            let attributes: Vec<String> = table_to_cols
+                .get(&master_table)
+                .map(|cols| {
+                    cols.iter()
+                        .filter(|c| {
+                            **c != col
+                                && !noise_set.contains(&c.to_lowercase().as_str())
+                                && c.len() > 1
+                        })
+                        .take(20)
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let dim_name = generate_dim_name(&col);
+            let ref_count = ref_tables.len();
+            DimensionCandidate {
+                dim_name,
+                dim_column: col,
+                master_table,
+                attributes,
+                ref_count,
+                ref_tables,
             }
-        }
-    }
+        })
+        .collect();
 
-    // Step 5: Upsert into dimension_registry.
+    Ok(candidates)
+}
+
+/// Phase 2 (write to gov DB): Persist dimension candidates.
+pub fn discover_write(
+    gov_conn: &Connection,
+    project_id: &str,
+    candidates: &[DimensionCandidate],
+) -> Result<usize, String> {
+    let now = chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
+    let noise_set: HashSet<&str> = NOISE_COLUMNS.iter().copied().collect();
+
     let mut upserted = 0usize;
-    for (col, ref_tables) in &candidates {
-        // Find master table: the one with the most columns.
-        let master_table = ref_tables
-            .iter()
-            .max_by_key(|t| table_to_cols.get(*t).map(|c| c.len()).unwrap_or(0))
-            .cloned()
-            .unwrap_or_default();
-
-        // Attributes = master table's other columns (excluding noise).
-        let attributes: Vec<String> = table_to_cols
-            .get(&master_table)
-            .map(|cols| {
-                cols.iter()
-                    .filter(|c| {
-                        c != &col
-                            && !noise_set.contains(&c.to_lowercase().as_str())
-                            && c.len() > 1
-                    })
-                    .take(20)
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        // Generate dimension name from column name.
-        let dim_name = generate_dim_name(&col);
-        let ref_count = ref_tables.len();
-        let ref_tables_json = serde_json::to_string(ref_tables).unwrap_or_default();
-        let attrs_json = serde_json::to_string(&attributes).unwrap_or_default();
+    for c in candidates {
+        // Truncate ref_tables for storage.
+        let ref_tables_json = serde_json::to_string(
+            &c.ref_tables.iter().take(10).cloned().collect::<Vec<_>>(),
+        )
+        .unwrap_or_default();
+        let attrs_json = serde_json::to_string(&c.attributes).unwrap_or_default();
 
         let result = gov_conn.execute(
             "INSERT INTO dimension_registry
@@ -192,11 +197,11 @@ pub fn discover_dimensions(
                 updated_at = excluded.updated_at",
             params![
                 project_id,
-                dim_name,
-                col,
-                master_table,
+                c.dim_name,
+                c.dim_column,
+                c.master_table,
                 attrs_json,
-                ref_count,
+                c.ref_count,
                 ref_tables_json,
                 now,
             ],
@@ -207,6 +212,7 @@ pub fn discover_dimensions(
         }
     }
 
+    let _ = noise_set; // suppress unused
     Ok(upserted)
 }
 
