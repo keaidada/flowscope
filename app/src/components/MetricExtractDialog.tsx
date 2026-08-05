@@ -15,7 +15,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { SqlView } from '@pondpilot/capybara-react';
 import {
   FunctionSquare, Filter, Layers, Sparkles, Check, Copy, ArrowRight,
   RefreshCw, Loader2, FileCode2, Clock,
@@ -330,12 +329,10 @@ export function MetricExtractDialog({ open, onClose, filePath, sqlContent }: Met
               <span className="ml-auto">{showSql ? '收起 ▲' : '展开 ▼'}</span>
             </button>
             {showSql && (
-              <div className="h-56 shrink-0">
-                <SqlView
-                  value={sqlContent}
-                  editable={false}
-                  lineWrapping
-                />
+              <div className="h-56 shrink-0 overflow-auto bg-background">
+                <pre className="text-[11px] font-mono p-3 leading-relaxed whitespace-pre">
+                  {highlightSql(sqlContent)}
+                </pre>
               </div>
             )}
           </div>
@@ -426,4 +423,81 @@ function DetailRow({ k, v, mono, code }: { k: string; v: string; mono?: boolean;
       )}
     </div>
   );
+}
+
+// ── Lightweight SQL syntax highlighter (keyword / comment / string / number) ──
+const SQL_KEYWORDS = new Set([
+  'select', 'from', 'where', 'insert', 'into', 'overwrite', 'table', 'partition',
+  'create', 'temporary', 'as', 'join', 'left', 'right', 'inner', 'full', 'on',
+  'group', 'by', 'order', 'having', 'limit', 'union', 'all', 'distinct', 'case',
+  'when', 'then', 'else', 'end', 'and', 'or', 'not', 'in', 'is', 'null', 'between',
+  'like', 'if', 'elseif', 'for', 'while', 'return', 'set', 'declare', 'begin',
+  'select', 'sum', 'count', 'avg', 'max', 'min', 'coalesce', 'nvl', 'date_sub',
+  'date_add', 'from_unixtime', 'unix_timestamp', 'split', 'substr', 'concat',
+  'round', 'trunc', 'row_number', 'over', 'partition', 'rank', 'dense_rank',
+]);
+
+function highlightSql(sql: string): React.ReactNode[] {
+  const lines = sql.split('\n');
+  const out: React.ReactNode[] = [];
+  let inBlock = false;
+
+  lines.forEach((line, li) => {
+    const nodes: React.ReactNode[] = [];
+    let i = 0;
+    while (i < line.length) {
+      const ch = line[i];
+      const rest = line.slice(i);
+
+      // block comment /* ... */
+      if (!inBlock && rest.startsWith('/*')) { inBlock = true; nodes.push(<span key={i} className="text-muted-foreground/70 italic">{'/*'}</span>); i += 2; continue; }
+      if (inBlock) {
+        const end = rest.indexOf('*/');
+        if (end >= 0) { nodes.push(<span key={i} className="text-muted-foreground/70 italic">{rest.slice(0, end + 2)}</span>); i += end + 2; inBlock = false; }
+        else { nodes.push(<span key={i} className="text-muted-foreground/70 italic">{rest}</span>); i = line.length; }
+        continue;
+      }
+      // line comment --
+      if (rest.startsWith('--')) { nodes.push(<span key={i} className="text-emerald-600/70 dark:text-emerald-500/70 italic">{rest}</span>); i = line.length; continue; }
+      // string literal
+      if (ch === "'" || ch === '"' || ch === '`') {
+        const quote = ch;
+        let j = i + 1;
+        while (j < line.length && line[j] !== quote) j++;
+        if (j < line.length) j++;
+        nodes.push(<span key={i} className="text-orange-600 dark:text-orange-400">{line.slice(i, j)}</span>);
+        i = j; continue;
+      }
+      // identifier / keyword / number
+      if (/[a-zA-Z_]/.test(ch)) {
+        let j = i;
+        while (j < line.length && /[a-zA-Z0-9_$]/.test(line[j])) j++;
+        const word = line.slice(i, j);
+        const lower = word.toLowerCase();
+        if (SQL_KEYWORDS.has(lower)) {
+          nodes.push(<span key={i} className="text-blue-600 font-medium dark:text-blue-400">{word}</span>);
+        } else {
+          nodes.push(<span key={i}>{word}</span>);
+        }
+        i = j; continue;
+      }
+      // number
+      if (/[0-9]/.test(ch)) {
+        let j = i;
+        while (j < line.length && /[0-9.]/.test(line[j])) j++;
+        nodes.push(<span key={i} className="text-purple-600 dark:text-purple-400">{line.slice(i, j)}</span>);
+        i = j; continue;
+      }
+      // template var ${...}
+      if (ch === '$' && line[i + 1] === '{') {
+        const end = line.indexOf('}', i);
+        if (end >= 0) { nodes.push(<span key={i} className="text-pink-600 dark:text-pink-400">{line.slice(i, end + 1)}</span>); i = end + 1; continue; }
+      }
+      // punctuation / space
+      nodes.push(<span key={i}>{ch}</span>);
+      i++;
+    }
+    out.push(<div key={li}>{nodes}</div>);
+  });
+  return out;
 }
