@@ -41,6 +41,7 @@ interface MockField {
 }
 
 interface MockModel {
+  id?: string;
   code: string;
   name: string;
   owner: string;
@@ -167,11 +168,41 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardName, setWizardName] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'graph' | 'matrix' | 'concept' | 'publish'>('list');
+  const [statusFilter, setStatusFilter] = useState<string>('全部');
+
+  // Mutable mock data: seeded once, then users can add/edit/delete/duplicate.
+  const [data, setData] = useState<Record<ModuleId, MockModel[]>>(() => {
+    let counter = 0;
+    const seeded: Record<ModuleId, MockModel[]> = {} as Record<ModuleId, MockModel[]>;
+    (Object.keys(MOCK_DATA) as ModuleId[]).forEach(k => {
+      seeded[k] = MOCK_DATA[k].map(m => ({ ...m, id: m.id ?? `m_${++counter}` }));
+    });
+    return seeded;
+  });
 
   const currentModule = MOCK_MODULES.find(m => m.id === module)!;
-  const list = MOCK_DATA[module].filter(m =>
-    !search.trim() || m.name.toLowerCase().includes(search.toLowerCase()) || m.code.toLowerCase().includes(search.toLowerCase())
+  const list = data[module].filter(m =>
+    (!search.trim() || m.name.toLowerCase().includes(search.toLowerCase()) || m.code.toLowerCase().includes(search.toLowerCase())) &&
+    (statusFilter === '全部' || m.status === statusFilter)
   );
+
+  // ── CRUD operations (mock) ─────────────────────────────────
+  const addModel = (m: MockModel) => {
+    const withId = { ...m, id: `m_${Date.now()}`, updated: new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-') };
+    setData(prev => ({ ...prev, [module]: [withId, ...prev[module]] }));
+  };
+  const deleteModel = (id: string) => {
+    setData(prev => ({ ...prev, [module]: prev[module].filter(x => x.id !== id) }));
+    setSelected(prev => (prev?.id === id ? null : prev));
+  };
+  const duplicateModel = (m: MockModel) => {
+    const copy = { ...m, id: `m_${Date.now()}`, code: `${m.code}_copy`, name: `${m.name}(副本)`, status: '草稿' as const };
+    setData(prev => ({ ...prev, [module]: [copy, ...prev[module]] }));
+  };
+  const updateModel = (m: MockModel) => {
+    setData(prev => ({ ...prev, [module]: prev[module].map(x => (x.id === m.id ? { ...m, updated: new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-') } : x)) }));
+    setSelected(m);
+  };
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -251,7 +282,7 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
                     active ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-accent/50')}>
                   <Icon className={cn('h-3.5 w-3.5', m.color)} />
                   <span className="flex-1">{m.name}</span>
-                  <span className="text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground">{MOCK_DATA[m.id].length}</span>
+                  <span className="text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground">{data[m.id].length}</span>
                   <ChevronRight className={cn('h-3 w-3 transition-transform', active && 'rotate-90')} />
                 </button>
               );
@@ -268,9 +299,13 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
                 placeholder="搜索名称/编码..." className="w-full pl-8 pr-2 py-1.5 text-xs rounded border bg-transparent focus:outline-none focus:ring-1 focus:ring-ring" />
             </div>
             <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-              <span className="px-2 py-1 rounded border bg-muted/30">全部</span>
-              <span className="px-2 py-1 rounded border">已发布</span>
-              <span className="px-2 py-1 rounded border">草稿</span>
+              {['全部', '已发布', '开发中', '草稿'].map(s => (
+                <button key={s} onClick={() => setStatusFilter(s)}
+                  className={cn('px-2 py-1 rounded border transition-colors',
+                    statusFilter === s ? 'bg-primary/10 text-primary border-primary/30' : 'bg-muted/30 hover:bg-accent')}>
+                  {s}
+                </button>
+              ))}
             </div>
             <span className="ml-auto text-[11px] text-muted-foreground">{list.length} 个对象</span>
           </div>
@@ -311,9 +346,9 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
                     <td className="px-3 py-2 text-muted-foreground">{m.updated}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-0.5">
-                        <button className="p-1 rounded hover:bg-accent" title="编辑"><Pencil className="h-3 w-3" /></button>
-                        <button className="p-1 rounded hover:bg-accent" title="复制"><Copy className="h-3 w-3" /></button>
-                        <button className="p-1 rounded hover:bg-destructive/10 hover:text-destructive" title="删除"><Trash2 className="h-3 w-3" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); setSelected(m); }} className="p-1 rounded hover:bg-accent" title="编辑"><Pencil className="h-3 w-3" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); duplicateModel(m); }} className="p-1 rounded hover:bg-accent" title="复制"><Copy className="h-3 w-3" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); deleteModel(m.id!); }} className="p-1 rounded hover:bg-destructive/10 hover:text-destructive" title="删除"><Trash2 className="h-3 w-3" /></button>
                       </div>
                     </td>
                   </tr>
@@ -326,7 +361,7 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
         {/* Right: detail */}
         <div className="w-[30rem] border-l flex flex-col shrink-0 bg-muted/5">
           {selected ? (
-            <ModelDetail model={selected} module={module} />
+            <ModelDetail model={selected} module={module} onUpdate={updateModel} onDelete={deleteModel} />
           ) : (
             <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">
               <div className="text-center p-6">
@@ -348,7 +383,16 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
           onName={setWizardName}
           onStep={setWizardStep}
           onClose={() => { setShowWizard(false); setWizardStep(0); setWizardName(''); }}
-          onSubmit={() => { setShowWizard(false); setWizardStep(0); setWizardName(''); }}
+          onSubmit={() => {
+            // 新建 → 添加到当前模块列表，并选中它。
+            if (wizardName.trim()) {
+              addModel({
+                id: '', code: `new_${Date.now()}`, name: wizardName, owner: '当前用户',
+                status: '草稿', updated: '', layer: 'DWD', fields: [],
+              });
+            }
+            setShowWizard(false); setWizardStep(0); setWizardName('');
+          }}
         />
       )}
     </div>
@@ -359,7 +403,11 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
 // Model Detail
 // ============================================================
 
-function ModelDetail({ model, module }: { model: MockModel; module: ModuleId }) {
+function ModelDetail({ model, module, onUpdate, onDelete }: {
+  model: MockModel; module: ModuleId;
+  onUpdate: (m: MockModel) => void;
+  onDelete: (id: string) => void;
+}) {
   const moduleMeta = MOCK_MODULES.find(m => m.id === module)!;
 
   return (
@@ -367,14 +415,24 @@ function ModelDetail({ model, module }: { model: MockModel; module: ModuleId }) 
       <div className="px-4 py-3 border-b shrink-0">
         <div className="flex items-center gap-2 mb-1">
           <moduleMeta.icon className={cn('h-4 w-4', moduleMeta.color)} />
-          <span className="text-sm font-semibold">{model.name}</span>
-          <Badge className={cn('text-[10px] font-medium', STATUS_STYLE[model.status])}>{model.status}</Badge>
-          <Badge className={cn('text-[10px] font-medium', LAYER_STYLE[model.layer] ?? 'bg-muted text-muted-foreground')}>{model.layer}</Badge>
+          <input value={model.name} onChange={e => onUpdate({ ...model, name: e.target.value })}
+            className="text-sm font-semibold bg-transparent border-b border-transparent hover:border-muted focus:border-primary focus:outline-none px-1 -mx-1"
+            placeholder="模型名称" />
+          <div className="ml-auto flex items-center gap-1">
+            <select value={model.status} onChange={e => onUpdate({ ...model, status: e.target.value as MockModel['status'] })}
+              className="text-[10px] px-1.5 py-0.5 rounded border bg-transparent focus:outline-none">
+              {['草稿', '开发中', '已发布', '未提交'].map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <button onClick={() => onDelete(model.id!)} className="p-1 rounded hover:bg-destructive/10 hover:text-destructive" title="删除">
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
           <span className="font-mono">{model.code}</span>
+          <Badge className={cn('text-[10px] font-medium', LAYER_STYLE[model.layer] ?? 'bg-muted text-muted-foreground')}>{model.layer}</Badge>
           <span>负责人: {model.owner}</span>
-          <span>更新: {model.updated}</span>
+          <span>更新: {model.updated || '-'}</span>
         </div>
         {model.granularity && (
           <div className="mt-1.5 flex items-center gap-1 text-[11px]">
@@ -927,12 +985,27 @@ const BUS_MATRIX: Record<string, string[]> = {
 };
 
 function BusMatrix() {
+  const [matrix, setMatrix] = useState<Record<string, string[]>>(() =>
+    JSON.parse(JSON.stringify(BUS_MATRIX)));
+
+  const toggle = (process: string, dim: string) => {
+    setMatrix(prev => {
+      const cur = prev[process] ?? [];
+      const has = cur.includes(dim);
+      const next = has ? cur.filter(d => d !== dim) : [...cur, dim];
+      return { ...prev, [process]: next };
+    });
+  };
+
+  const totalLinks = Object.values(matrix).reduce((s, arr) => s + arr.length, 0);
+
   return (
     <div className="flex-1 min-h-0 overflow-auto p-4">
       {/* Legend */}
       <div className="flex items-center gap-4 mb-3 text-xs text-muted-foreground">
         <span className="font-semibold text-foreground">总线矩阵</span>
         <span>用于管理维度与业务过程的组合关系</span>
+        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">{totalLinks} 个关联组合</span>
         <div className="ml-auto flex items-center gap-3">
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-emerald-100 border border-emerald-300" /> 已关联</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm border border-dashed border-muted-foreground/40" /> 未关联</span>
@@ -954,16 +1027,16 @@ function BusMatrix() {
               <tr key={p} className="border-t hover:bg-accent/30">
                 <td className="px-3 py-2 font-medium">{p}</td>
                 {BUS_DIMS.map(d => {
-                  const linked = BUS_MATRIX[p]?.includes(d);
+                  const linked = (matrix[p] ?? []).includes(d);
                   return (
                     <td key={d} className="px-2 py-2 text-center">
                       {linked ? (
-                        <button className="w-5 h-5 inline-flex items-center justify-center rounded bg-emerald-100 text-emerald-600 border border-emerald-300 hover:bg-emerald-200 transition-colors"
-                          title={`${p} × ${d}`}>
+                        <button onClick={() => toggle(p, d)} className="w-5 h-5 inline-flex items-center justify-center rounded bg-emerald-100 text-emerald-600 border border-emerald-300 hover:bg-emerald-200 transition-colors"
+                          title={`取消 ${p} × ${d}`}>
                           <Check className="h-3 w-3" />
                         </button>
                       ) : (
-                        <button className="w-5 h-5 inline-flex items-center justify-center rounded border border-dashed border-muted-foreground/30 text-muted-foreground/40 hover:border-emerald-300 hover:text-emerald-500 transition-colors"
+                        <button onClick={() => toggle(p, d)} className="w-5 h-5 inline-flex items-center justify-center rounded border border-dashed border-muted-foreground/30 text-muted-foreground/40 hover:border-emerald-300 hover:text-emerald-500 transition-colors"
                           title={`关联 ${p} × ${d}`}>
                           <Plus className="h-3 w-3" />
                         </button>
@@ -979,7 +1052,7 @@ function BusMatrix() {
 
       {/* Selected combination hint */}
       <div className="mt-3 text-[11px] text-muted-foreground">
-        点击「+」将维度关联到业务过程；已关联的维度组合将用于派生指标的统计粒度。
+        点击「+」将维度关联到业务过程；点击绿色勾选可取消关联。已关联组合将用于派生指标的统计粒度。
       </div>
     </div>
   );
@@ -1018,6 +1091,21 @@ const CONCEPT_ENTITIES: ConceptEntity[] = [
 ];
 
 function ConceptModel({ onSelect }: { onSelect: (m: MockModel | null) => void }) {
+  const [entities, setEntities] = useState<ConceptEntity[]>(() => JSON.parse(JSON.stringify(CONCEPT_ENTITIES)));
+  const [showNew, setShowNew] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newType, setNewType] = useState<'业务对象' | '业务活动'>('业务对象');
+  const [selectedGen, setSelectedGen] = useState<string | null>(null);
+
+  const addEntity = () => {
+    if (!newName.trim()) return;
+    setEntities(prev => [...prev, {
+      id: `ent_${Date.now()}`, name: newName.toUpperCase().replace(/\s+/g, '_'),
+      nameCn: newName, type: newType, domain: '待定域', generated: [],
+    }]);
+    setNewName(''); setShowNew(false);
+  };
+
   return (
     <div className="flex-1 min-h-0 overflow-auto p-4">
       {/* Header */}
@@ -1025,11 +1113,29 @@ function ConceptModel({ onSelect }: { onSelect: (m: MockModel | null) => void })
         <Network className="h-4 w-4 text-primary" />
         <span className="text-sm font-semibold">概念模型</span>
         <span className="text-xs text-muted-foreground">业务对象 / 业务活动 → 自动生成逻辑表</span>
-        <Button size="sm" variant="outline" className="h-6 ml-auto text-[11px]"><Plus className="h-3 w-3 mr-1" />新建业务实体</Button>
+        <span className="px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{entities.length} 个业务实体</span>
+        <Button size="sm" variant="outline" className="h-6 ml-auto text-[11px]" onClick={() => setShowNew(!showNew)}>
+          <Plus className="h-3 w-3 mr-1" />新建业务实体
+        </Button>
       </div>
 
+      {/* New entity inline form */}
+      {showNew && (
+        <div className="flex items-center gap-2 mb-3 p-2 border rounded-lg bg-accent/20">
+          <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="实体中文名，如：订单"
+            className="flex-1 px-2 py-1 text-xs rounded border bg-background focus:outline-none focus:ring-1 focus:ring-ring" />
+          <select value={newType} onChange={e => setNewType(e.target.value as '业务对象' | '业务活动')}
+            className="px-2 py-1 text-xs rounded border bg-background focus:outline-none">
+            <option value="业务对象">业务对象</option>
+            <option value="业务活动">业务活动</option>
+          </select>
+          <Button size="sm" className="h-7 text-xs" onClick={addEntity} disabled={!newName.trim()}>确定</Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowNew(false)}>取消</Button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4">
-        {CONCEPT_ENTITIES.map(e => (
+        {entities.map(e => (
           <div key={e.id} className="border rounded-lg overflow-hidden bg-card">
             <div className="flex items-center gap-2 px-4 py-2.5 border-b" style={{ borderColor: `${e.type === '业务对象' ? '#8b5cf6' : '#3b82f6'}33` }}>
               <span className="w-2 h-2 rounded-full" style={{ background: e.type === '业务对象' ? '#8b5cf6' : '#3b82f6' }} />
@@ -1043,10 +1149,11 @@ function ConceptModel({ onSelect }: { onSelect: (m: MockModel | null) => void })
               <Badge className={cn('ml-auto text-[10px]', e.type === '业务对象' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400')}>{e.type}</Badge>
             </div>
             <div className="p-3 space-y-2">
-              <div className="text-[10px] text-muted-foreground uppercase tracking-wide">已生成逻辑表</div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wide">已生成逻辑表 ({e.generated.length})</div>
               {e.generated.map(g => (
-                <button key={g.code} onClick={() => onSelect(toMockModelByCode(g.code))}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded border hover:border-primary/40 hover:bg-accent/30 transition-colors text-left">
+                <button key={g.code} onClick={() => { setSelectedGen(g.code); onSelect(toMockModelByCode(g.code)); }}
+                  className={cn('w-full flex items-center gap-2 px-3 py-2 rounded border hover:border-primary/40 hover:bg-accent/30 transition-colors text-left',
+                    selectedGen === g.code && 'border-primary/60 bg-accent/40')}>
                   <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                   <div className="flex-1">
                     <div className="text-xs font-medium">{g.name}</div>
@@ -1055,7 +1162,14 @@ function ConceptModel({ onSelect }: { onSelect: (m: MockModel | null) => void })
                   <Badge variant="outline" className="text-[10px]">{g.type}</Badge>
                 </button>
               ))}
-              <Button size="sm" variant="ghost" className="h-6 w-full text-[11px] text-muted-foreground">
+              <Button size="sm" variant="ghost" className="h-6 w-full text-[11px] text-muted-foreground"
+                onClick={() => {
+                  const code = `new_${e.name.toLowerCase()}_${e.generated.length + 1}`;
+                  const type = e.type === '业务对象' ? '维度逻辑表' : '事实逻辑表';
+                  setEntities(prev => prev.map(x => x.id === e.id
+                    ? { ...x, generated: [...x.generated, { code, name: `${e.nameCn}${type}`, type }] }
+                    : x));
+                }}>
                 <Plus className="h-3 w-3 mr-1" />添加逻辑表
               </Button>
             </div>
@@ -1115,9 +1229,34 @@ const PUBLISH_ITEMS: PublishItem[] = [
   },
 ];
 
+function bumpVersion(v: string): string {
+  // v1.2.0 → v1.3.0
+  const parts = v.replace(/^v/, '').split('.').map(Number);
+  if (parts.length >= 2 && !isNaN(parts[1])) {
+    parts[1] += 1;
+    return `v${parts.join('.')}`;
+  }
+  return `${v}.1`;
+}
+
 function PublishManager({ onSelect: _onSelect }: { onSelect: (m: MockModel | null) => void }) {
+  const [items, setItems] = useState<PublishItem[]>(() => JSON.parse(JSON.stringify(PUBLISH_ITEMS)));
   const [selected, setSelected] = useState<string | null>(null);
-  const item = PUBLISH_ITEMS.find(i => i.code === selected);
+  const item = items.find(i => i.code === selected);
+
+  // State transition: 草稿 → 待发布 → 已发布 → 已上线
+  const advance = (code: string) => {
+    setItems(prev => prev.map(i => {
+      if (i.code !== code) return i;
+      const next: Record<PublishItem['status'], PublishItem['status']> = { '草稿': '待发布', '待发布': '已发布', '已发布': '已上线', '已上线': '已上线', '开发中': '待发布' };
+      const newStatus = next[i.status] ?? i.status;
+      const now = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-');
+      const ver = i.status === '已发布' ? bumpVersion(i.version) : i.version;
+      return { ...i, status: newStatus, version: ver, updated: now };
+    }));
+  };
+
+  const countBy = (s: string) => items.filter(i => i.status === s).length;
 
   return (
     <div className="flex-1 min-h-0 overflow-auto p-4">
@@ -1132,7 +1271,7 @@ function PublishManager({ onSelect: _onSelect }: { onSelect: (m: MockModel | nul
               <span className={cn('w-2.5 h-2.5 rounded-full',
                 s === '已上线' && 'bg-emerald-500', s === '已发布' && 'bg-blue-500',
                 s === '待发布' && 'bg-amber-500', s === '草稿' && 'bg-gray-400')} />
-              {s} <span className="text-muted-foreground tabular-nums">{PUBLISH_ITEMS.filter(i => i.status === s).length}</span>
+              {s} <span className="text-muted-foreground tabular-nums">{countBy(s)}</span>
             </span>
           ))}
         </div>
@@ -1153,7 +1292,7 @@ function PublishManager({ onSelect: _onSelect }: { onSelect: (m: MockModel | nul
             </tr>
           </thead>
           <tbody>
-            {PUBLISH_ITEMS.map(i => (
+            {items.map(i => (
               <tr key={i.code} onClick={() => setSelected(i.code)}
                 className={cn('border-t cursor-pointer hover:bg-accent/30', selected === i.code && 'bg-accent/50')}>
                 <td className="px-3 py-2 font-medium">{i.name}</td>
@@ -1170,11 +1309,11 @@ function PublishManager({ onSelect: _onSelect }: { onSelect: (m: MockModel | nul
                 <td className="px-3 py-2 text-muted-foreground">{i.updated}</td>
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-1">
-                    <Button size="sm" variant="outline" className="h-6 text-[10px] px-2">编辑</Button>
-                    {i.status === '草稿' && <Button size="sm" className="h-6 text-[10px] px-2">提交发布</Button>}
-                    {i.status === '待发布' && <Button size="sm" className="h-6 text-[10px] px-2 bg-blue-600 hover:bg-blue-700 text-white">发布</Button>}
-                    {i.status === '已发布' && <Button size="sm" className="h-6 text-[10px] px-2 bg-emerald-600 hover:bg-emerald-700 text-white">上线</Button>}
-                    <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2">版本</Button>
+                    <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" onClick={e => { e.stopPropagation(); setSelected(i.code); }}>编辑</Button>
+                    {i.status === '草稿' && <Button size="sm" className="h-6 text-[10px] px-2" onClick={e => { e.stopPropagation(); advance(i.code); }}>提交发布</Button>}
+                    {i.status === '待发布' && <Button size="sm" className="h-6 text-[10px] px-2 bg-blue-600 hover:bg-blue-700 text-white" onClick={e => { e.stopPropagation(); advance(i.code); }}>发布</Button>}
+                    {i.status === '已发布' && <Button size="sm" className="h-6 text-[10px] px-2 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={e => { e.stopPropagation(); advance(i.code); }}>上线</Button>}
+                    <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={e => { e.stopPropagation(); setSelected(i.code); }}>版本</Button>
                   </div>
                 </td>
               </tr>
