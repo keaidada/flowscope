@@ -75,6 +75,7 @@ const PERIOD_POOL: MockPeriod[] = [
 function deriveFromMetrics(ms: Array<{
   name: string; expression: string; agg_func: string; distinct: boolean;
   source_table: string; column: string; business_filter: string; period: string;
+  dimensions: string[];
 }>): { atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; derived: MockDerived[] } {
   const atomics: MockAtomic[] = ms.map(m => ({
     name: m.name,
@@ -99,26 +100,34 @@ function deriveFromMetrics(ms: Array<{
     }
   }
 
-  // Periods: use real period if detected, else a fixed subset.
-  const hasDaily = ms.some(m => m.period === 'daily');
-  const periods: MockPeriod[] = hasDaily
+  // Periods: derive from the script's real period; fall back to a fixed subset.
+  const realPeriod = ms.find(m => m.period)?.period || '';
+  const periods: MockPeriod[] = realPeriod === 'daily'
     ? PERIOD_POOL.filter(p => p.unit === 'daily' || p.unit === 'rolling_7d' || p.unit === 'rolling_30d')
-    : PERIOD_POOL.slice(0, 3);
+    : realPeriod === 'monthly'
+      ? PERIOD_POOL.filter(p => p.unit === 'monthly' || p.unit === 'daily')
+      : realPeriod === 'weekly'
+        ? PERIOD_POOL.filter(p => p.unit === 'weekly' || p.unit === 'daily')
+        : PERIOD_POOL.slice(0, 3);
 
-  // Derived: atomic × first qualifier × first period (subset).
+  // Dimensions (统计粒度) from GROUP BY.
+  const dims: string[] = ms.length > 0 ? ms[0].dimensions : [];
+
+  // Derived: atomic × qualifier × period, granularity from real dimensions.
   const derived: MockDerived[] = [];
-  const maxD = Math.min(6, atomics.length, qualifiers.length || 1);
+  const maxD = Math.min(6, atomics.length, Math.max(1, qualifiers.length));
   for (let i = 0; i < maxD; i++) {
     const a = atomics[i];
     const q = qualifiers[i % (qualifiers.length || 1)];
     const p = periods[i % periods.length];
+    const gran = dims[i % (dims.length || 1)] || q?.field || 'all';
     derived.push({
       name: `${a.name}_${(q?.field || 'total')}_${p.label}`,
       atomic: a.expr,
       qualifiers: q ? [q.expr] : [],
       period: p.unit,
       periodExpr: p.expr,
-      gran: `${p.label}·${q?.field || 'all'}`,
+      gran: `${p.label}·${gran}`,
     });
   }
 

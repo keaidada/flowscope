@@ -4625,13 +4625,15 @@ async fn gov_extract_script_metrics(
     // Extract metrics by querying persisted lineage_* tables (project_id +
     // file_path scoped, indexed — no full scan). The aggregation expressions
     // (SUM/COUNT/AVG/MIN/MAX incl. IF/CASE conditions) are already stored in
-    // lineage_edges derivation edges.
+    // lineage_edges derivation edges. The script SQL is also read to infer
+    // period (data_dt/imp_date) and GROUP BY dimensions.
+    let sql = read_project_file(&state, &req.project_id, &req.file_path);
     let conn = match state.db.lock() {
         Ok(c) => c,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
     };
     let metrics = super::governance::metric::extract_script_metrics_from_lineage(
-        &conn, &req.project_id, &req.file_path,
+        &conn, &req.project_id, &req.file_path, &sql,
     );
 
     Json(serde_json::json!({

@@ -1260,6 +1260,8 @@ pub struct ScriptMetric {
     pub column: String,
     pub business_filter: String,
     pub period: String,
+    /// Group-by / statistical-granularity columns (dimensions).
+    pub dimensions: Vec<String>,
 }
 
 /// Extract metrics for a single script by querying persisted lineage tables
@@ -1276,9 +1278,15 @@ pub fn extract_script_metrics_from_lineage(
     conn: &Connection,
     project_id: &str,
     file_path: &str,
+    sql: &str,
 ) -> Vec<ScriptMetric> {
     let mut metrics: Vec<ScriptMetric> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Parse the script's time period (from PARTITION/WHERE data_dt/imp_date)
+    // and statistical granularity (GROUP BY columns) once per script.
+    let period = infer_period_from_sql(sql);
+    let dimensions = extract_group_by_from_sql(sql);
 
     // Load column metadata for THIS file: id → (label, parent_node_id).
     let mut col_label: std::collections::HashMap<String, String> = std::collections::HashMap::new();
@@ -1426,7 +1434,8 @@ pub fn extract_script_metrics_from_lineage(
                     source_table,
                     column: name.clone(),
                     business_filter,
-                    period: String::new(),
+                    period: period.clone(),
+                    dimensions: dimensions.clone(),
                 });
             }
         }
@@ -1527,6 +1536,80 @@ fn to_snake(s: &str) -> String {
     out.replace([' ', '-'], "_")
 }
 
+/// Infer the time period from a script's SQL by scanning PARTITION / WHERE
+/// clauses for `data_dt` / `imp_date` / `dt` / `day` conditions.
+///
+/// Returns "daily" / "weekly" / "monthly" / "cumulative", or "" if none.
+fn infer_period_from_sql(sql: &str) -> String {
+    let lower = sql.to_lowercase();
+    // Partition by a day-level column → daily snapshot.
+    if lower.contains("partition(data_dt")
+        || lower.contains("partition(imp_date")
+        || lower.contains("partition(dt")
+    {
+        return "daily".to_string();
+    }
+    // WHERE / filter on day-level column.
+    if lower.contains("data_dt =") || lower.contains("imp_date =") || lower.contains("dt =")
+        || lower.contains("data_dt ==") || lower.contains("imp_date ==")
+    {
+        return "daily".to_string();
+    }
+    // Date arithmetic hints at a rolling window.
+    if lower.contains("date_sub(") || lower.contains("date_add(") {
+        return "rolling".to_string();
+    }
+    if lower.contains("month") || lower.contains("trunc(") {
+        return "monthly".to_string();
+    }
+    if lower.contains("week") {
+        return "weekly".to_string();
+    }
+    String::new()
+}
+
+/// Extract statistical-granularity (GROUP BY) columns from a script's SQL.
+/// Collects identifiers after GROUP BY until FROM/HAVING/ORDER/LIMIT/;.
+fn extract_group_by_from_sql(sql: &str) -> Vec<String> {
+    let mut dims: Vec<String> = Vec::new();
+    let lower = sql.to_lowercase();
+    let mut search_from = 0usize;
+    while let Some(gpos) = lower[search_from..].find("group by") {
+        let start = search_from + gpos + 8;
+        // Read until FROM / HAVING / ORDER BY / LIMIT / ';' / end of statement.
+        let after = &sql[start..];
+        let after_lower = after.to_lowercase();
+        let mut end = after.len();
+        for kw in ["having", "order by", "limit", ";" , "union", ")" ] {
+            if let Some(p) = after_lower.find(kw) {
+                if p < end {
+                    end = p;
+                }
+            }
+        }
+        let group_clause = &after[..end];
+        // Split on commas, keep identifiers.
+        for part in group_clause.split(',') {
+            let t = part.trim();
+            // Strip alias prefix (a.cid → cid) and backticks.
+            let t = t.replace('`', "").replace('"', "");
+            let col = match t.rfind('.') {
+                Some(pos) => t[pos + 1..].to_string(),
+                None => t.to_string(),
+            };
+            let col = col.trim();
+            // Skip empty, function calls (contains '('), comments.
+            if col.is_empty() || col.contains('(') || col.starts_with("--") {
+                continue;
+            }
+            if !dims.iter().any(|d| d == col) {
+                dims.push(col.to_string());
+            }
+        }
+        search_from = start + end;
+    }
+    dims
+}
 
 
 /// Decomposition statistics returned by decompose_metrics.

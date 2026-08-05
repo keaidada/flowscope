@@ -299,6 +299,7 @@ export async function extractScriptMetrics(
     column: string;
     business_filter: string;
     period: string;
+    dimensions: string[];
   }>;
   script_name: string;
 }> {
