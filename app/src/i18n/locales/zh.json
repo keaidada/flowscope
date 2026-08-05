@@ -885,6 +885,7 @@
     "modelingEmpty": "暂无建模数据，先点击「发现主题域」初始化",
     "objectDetail": "对象详情",
     "selectObject": "选择左侧对象查看详情",
+    "create": "新建",
     "healthScore": "数据资产健康分",
     "export": "导出报告",
     "rescan": "重新扫描",

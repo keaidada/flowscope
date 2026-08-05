@@ -885,6 +885,7 @@
     "modelingEmpty": "No modeling data. Click 'Discover Domains' to initialize.",
     "objectDetail": "Object Detail",
     "selectObject": "Select an object on the left to view details",
+    "create": "Create",
     "healthScore": "Data Asset Health Score",
     "export": "Export Report",
     "rescan": "Rescan",
