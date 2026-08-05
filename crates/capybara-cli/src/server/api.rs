@@ -2637,7 +2637,6 @@ async fn gov_list_contracts(State(state): State<Arc<AppState>>) -> impl IntoResp
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
         let content = std::fs::read_to_string(&path).unwrap_or_default();
-        let hash = super::governance::contract::compute_file_hash(&content);
         let contract = super::governance::contract::parse_contract(&content).ok();
         let status = contract
             .as_ref()
@@ -2649,12 +2648,15 @@ async fn gov_list_contracts(State(state): State<Arc<AppState>>) -> impl IntoResp
             status,
             violation_count: 0,
         });
-        // Register in DB
+    }
+    // Batch upsert contracts in a single lock acquisition (not per-file).
+    if !result.is_empty() {
         if let Ok(conn) = state.gov_db.lock() {
-            let _ = super::governance::db::upsert_contract(
-                &conn, "default", &result.last().unwrap().name,
-                &result.last().unwrap().file_path, &hash,
-            );
+            for c in &result {
+                let _ = super::governance::db::upsert_contract(
+                    &conn, "default", &c.name, &c.file_path, "",
+                );
+            }
         }
     }
     Json(result)

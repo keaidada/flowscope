@@ -15,6 +15,8 @@ export function useGovernanceData(projectId: string | null) {
   const [contracts, setContracts] = useState<ContractInfo[]>([]);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reportLoaded, setReportLoaded] = useState(false);
+  const [contractsLoaded, setContractsLoaded] = useState(false);
 
   const refreshReport = useCallback(async () => {
     if (!projectId) return;
@@ -23,6 +25,8 @@ export function useGovernanceData(projectId: string | null) {
       setReport(reports[0] ?? null);
     } catch (e) {
       setError(String(e));
+    } finally {
+      setReportLoaded(true);
     }
   }, [projectId]);
 
@@ -32,6 +36,8 @@ export function useGovernanceData(projectId: string | null) {
       setContracts(list);
     } catch (e) {
       setError(String(e));
+    } finally {
+      setContractsLoaded(true);
     }
   }, []);
 
@@ -51,10 +57,11 @@ export function useGovernanceData(projectId: string | null) {
     }
   }, [projectId, refreshReport]);
 
+  // Only fetch contracts on mount (lightweight). Report is lazy-loaded
+  // when the dashboard tab is opened to avoid blocking other governance APIs.
   useEffect(() => {
     refreshContracts();
-    refreshReport();
-  }, [refreshContracts, refreshReport]);
+  }, [refreshContracts]);
 
   return {
     report,
@@ -64,5 +71,7 @@ export function useGovernanceData(projectId: string | null) {
     scan,
     refreshReport,
     refreshContracts,
+    reportLoaded,
+    contractsLoaded,
   };
 }

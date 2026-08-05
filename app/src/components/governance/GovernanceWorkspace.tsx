@@ -2,7 +2,7 @@
  * GovernanceWorkspace — full-screen governance workspace with tab navigation.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Shield, LayoutDashboard, Box, BarChart3, FileText, Settings, Palette, Ruler } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -34,6 +34,13 @@ export function GovernanceWorkspace({ projectId }: GovernanceWorkspaceProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<GovernanceTab>('dashboard');
   const gov = useGovernanceData(projectId);
+
+  // Lazy-load report only when dashboard tab is opened (report JSON is 700MB+).
+  useEffect(() => {
+    if (activeTab === 'dashboard' && !gov.reportLoaded) {
+      gov.refreshReport();
+    }
+  }, [activeTab, gov.reportLoaded, gov.refreshReport]);
 
   const score = gov.report?.health_score;
   const scoreColor = score === undefined ? '' : score >= 80 ? 'text-emerald-500' : score >= 60 ? 'text-amber-500' : 'text-red-500';
