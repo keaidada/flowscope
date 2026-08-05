@@ -3582,8 +3582,15 @@ async fn gov_list_dimensions(
     };
     let project_id = q.remove("project_id").unwrap_or_default();
     let status = q.get("status").map(|s| s.as_str());
-    match super::governance::dimension::list_dimensions(&conn, &project_id, status) {
-        Ok(dims) => Json(dims).into_response(),
+    let limit: usize = q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(50);
+    let offset: usize = q.get("offset").and_then(|s| s.parse().ok()).unwrap_or(0);
+    match super::governance::dimension::list_dimensions(&conn, &project_id, status, limit, offset) {
+        Ok((dims, total)) => Json(serde_json::json!({
+            "items": dims,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        })).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("List failed: {e}")).into_response(),
     }
 }

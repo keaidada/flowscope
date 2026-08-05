@@ -19,26 +19,33 @@ import {
 export function DimensionManager({ projectId }: { projectId: string | null }) {
   const { t } = useTranslation();
   const [dimensions, setDimensions] = useState<DimensionEntry[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [filter, setFilter] = useState<'all' | 'candidate' | 'confirmed'>('all');
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<number | null>(null);
+  const PAGE = 50;
+  const [page, setPage] = useState(0);
 
   const load = useCallback(async () => {
     if (!projectId) return;
     setLoading(true);
     try {
-      const dims = await governanceApi.listDimensions(projectId, filter === 'all' ? undefined : filter);
-      setDimensions(dims);
+      const r = await governanceApi.listDimensions(projectId, filter === 'all' ? undefined : filter, PAGE, page * PAGE);
+      setDimensions(r.items);
+      setTotal(r.total);
     } catch (e) {
       console.error('Dimension list failed:', e);
     } finally {
       setLoading(false);
     }
-  }, [projectId, filter]);
+  }, [projectId, filter, page]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Reset page when filter changes
+  useEffect(() => { setPage(0); }, [filter]);
 
   const handleDiscover = async () => {
     if (!projectId) return;
@@ -76,8 +83,9 @@ export function DimensionManager({ projectId }: { projectId: string | null }) {
         d.dim_column.toLowerCase().includes(search.toLowerCase()))
     : dimensions;
 
-  const candidateCount = dimensions.filter(d => d.status === 'candidate').length;
-  const confirmedCount = dimensions.filter(d => d.status === 'confirmed').length;
+  const totalPages = Math.ceil(total / PAGE);
+  const canPrev = page > 0;
+  const canNext = (page + 1) * PAGE < total;
 
   if (!projectId) {
     return <div className="flex items-center justify-center h-full text-muted-foreground text-sm">{t('governance.selectProject', '请先选择项目')}</div>;
@@ -89,13 +97,13 @@ export function DimensionManager({ projectId }: { projectId: string | null }) {
       <div className="flex items-center justify-between px-3 py-1.5 border-b shrink-0">
         <div className="flex items-center gap-1">
           <Button variant={filter === 'all' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('all')} className="h-6 px-2 text-xs">
-            全部 ({dimensions.length})
+            全部
           </Button>
           <Button variant={filter === 'candidate' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('candidate')} className="h-6 px-2 text-xs">
-            候选 ({candidateCount})
+            候选
           </Button>
           <Button variant={filter === 'confirmed' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('confirmed')} className="h-6 px-2 text-xs">
-            已确认 ({confirmedCount})
+            已确认
           </Button>
         </div>
         <div className="flex items-center gap-1">
@@ -174,6 +182,15 @@ export function DimensionManager({ projectId }: { projectId: string | null }) {
           </div>
         )}
       </div>
+
+      {/* Pagination */}
+      {total > PAGE && (
+        <div className="flex items-center justify-center gap-2 px-3 py-2 border-t shrink-0 text-xs text-muted-foreground">
+          <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={!canPrev} onClick={() => setPage(page - 1)}>上一页</Button>
+          <span className="tabular-nums">第 {page + 1} / {totalPages} 页 · 共 {total} 个维度</span>
+          <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={!canNext} onClick={() => setPage(page + 1)}>下一页</Button>
+        </div>
+      )}
     </div>
   );
 }

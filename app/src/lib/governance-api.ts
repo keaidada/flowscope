@@ -448,9 +448,10 @@ export const governanceApi = {
     });
   },
 
-  async listDimensions(projectId: string, status?: string): Promise<DimensionEntry[]> {
-    const q = status ? `?project_id=${encodeURIComponent(projectId)}&status=${status}` : `?project_id=${encodeURIComponent(projectId)}`;
-    return govFetch(`/dimensions${q}`);
+  async listDimensions(projectId: string, status?: string, limit = 50, offset = 0): Promise<{ items: DimensionEntry[]; total: number }> {
+    const params = new URLSearchParams({ project_id: projectId, limit: String(limit), offset: String(offset) });
+    if (status) params.set('status', status);
+    return govFetch(`/dimensions?${params.toString()}`);
   },
 
   async updateDimension(projectId: string, dimId: number, data: { status?: string; dim_name?: string; dim_name_cn?: string; description?: string }): Promise<void> {

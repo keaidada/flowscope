@@ -229,23 +229,40 @@ fn generate_dim_name(col: &str) -> String {
     }
 }
 
-/// List dimensions with optional status filter.
+/// List dimensions with optional status filter and pagination.
 pub fn list_dimensions(
     conn: &Connection,
     project_id: &str,
     status: Option<&str>,
-) -> Result<Vec<DimensionEntry>, rusqlite::Error> {
+    limit: usize,
+    offset: usize,
+) -> Result<(Vec<DimensionEntry>, usize), rusqlite::Error> {
+    // Count total first.
+    let count_sql = match status {
+        Some(_) => "SELECT COUNT(*) FROM dimension_registry WHERE project_id = ?1 AND status = ?2",
+        None => "SELECT COUNT(*) FROM dimension_registry WHERE project_id = ?1",
+    };
+    let total: usize = if let Some(s) = status {
+        conn.query_row(count_sql, params![project_id, s], |row| row.get::<_, i64>(0).map(|v| v as usize))?
+    } else {
+        conn.query_row(count_sql, params![project_id], |row| row.get::<_, i64>(0).map(|v| v as usize))?
+    };
+
     let mut sql = String::from(
         "SELECT id, project_id, dim_name, dim_name_cn, dim_column, master_table,
                 attributes, ref_count, ref_tables, status, owner, description
          FROM dimension_registry WHERE project_id = ?1",
     );
     let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(project_id.to_string())];
+    let mut idx = 2;
     if let Some(s) = status {
-        sql.push_str(" AND status = ?2");
+        sql.push_str(&format!(" AND status = ?{idx}"));
         params_vec.push(Box::new(s.to_string()));
+        idx += 1;
     }
-    sql.push_str(" ORDER BY ref_count DESC");
+    sql.push_str(&format!(" ORDER BY ref_count DESC LIMIT ?{idx} OFFSET ?{}", idx + 1));
+    params_vec.push(Box::new(limit as i64));
+    params_vec.push(Box::new(offset as i64));
 
     let mut stmt = conn.prepare(&sql)?;
     let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
@@ -253,7 +270,9 @@ pub fn list_dimensions(
         let attrs_json: String = row.get(6)?;
         let attrs: Vec<String> = serde_json::from_str(&attrs_json).unwrap_or_default();
         let ref_tables_json: String = row.get(8)?;
-        let ref_tables: Vec<String> = serde_json::from_str(&ref_tables_json).unwrap_or_default();
+        let mut ref_tables: Vec<String> = serde_json::from_str(&ref_tables_json).unwrap_or_default();
+        // Truncate ref_tables to keep payload small (max 10).
+        ref_tables.truncate(10);
         Ok(DimensionEntry {
             id: row.get(0)?,
             project_id: row.get(1)?,
@@ -270,7 +289,8 @@ pub fn list_dimensions(
         })
     })?;
 
-    rows.collect()
+    let dims: Vec<DimensionEntry> = rows.collect::<Result<Vec<_>, _>>()?;
+    Ok((dims, total))
 }
 
 /// Update a dimension (confirm / edit / dismiss).
