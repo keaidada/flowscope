@@ -56,7 +56,7 @@ export function GovernanceWorkspace({ projectId }: GovernanceWorkspaceProps) {
         <span className="font-semibold text-sm shrink-0">{t('governance.title')}</span>
         {gov.report && (
           <span className="text-xs text-muted-foreground hidden md:inline">
-            {gov.report.summary.total_files} files · {gov.report.summary.total_violations} violations
+            {(gov.report as any).file_count ?? gov.report.summary?.total_files ?? 0} files · {(gov.report as any).violation_count ?? gov.report.summary?.total_violations ?? 0} violations
           </span>
         )}
         {score !== undefined && (

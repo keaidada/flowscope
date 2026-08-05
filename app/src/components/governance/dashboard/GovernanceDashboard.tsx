@@ -7,7 +7,7 @@ import { useState, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   RefreshCw, Download, AlertCircle, ChevronDown, ChevronRight,
-  Activity, Shield, Code2, Database, Lock, Boxes, Clock,
+  Activity, Shield, Code2, Database, Lock, Boxes, Clock, Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -77,6 +77,10 @@ export function GovernanceDashboard({ gov, projectId }: DashboardProps) {
 
         {!report ? (
           <EmptyState onScan={() => scan()} scanning={scanning} />
+        ) : !(report as any).summary ? (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm py-8">
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> 加载报告详情...
+          </div>
         ) : (
           <div className="space-y-4">
             {/* Score row: ring + dimensions side by side */}
