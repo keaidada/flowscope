@@ -22,21 +22,24 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
+import { extractScriptMetrics } from '@/lib/file-storage';
 
 interface MetricExtractDialogProps {
   open: boolean;
   onClose: () => void;
+  projectId: string;
   filePath: string;
   sqlContent?: string;
 }
 
-// ── Mock data generators (deterministic by file name) ───────────
+// ── Display types (derived from real extracted metrics) ───────────
 
 interface MockAtomic {
   name: string;
   expr: string;
   agg: string;
   column: string;
+  sourceTable: string;
 }
 interface MockQualifier {
   name: string;
@@ -58,13 +61,7 @@ interface MockDerived {
   gran: string;
 }
 
-function seedFromPath(fp: string): number {
-  let h = 0;
-  for (let i = 0; i < fp.length; i++) h = (h * 31 + fp.charCodeAt(i)) >>> 0;
-  return h;
-}
-
-// Standard time periods (周期限定): name / SQL condition / unit / label
+// Standard time periods (周期限定)
 const PERIOD_POOL: MockPeriod[] = [
   { name: '昨日', expr: `data_dt = date_sub('${'${bizdate}'}', 1)`, unit: 'daily', label: '按日' },
   { name: '近7日', expr: `data_dt >= date_sub('${'${bizdate}'}', 7)`, unit: 'rolling_7d', label: '近7日' },
@@ -74,89 +71,85 @@ const PERIOD_POOL: MockPeriod[] = [
   { name: '累计', expr: `data_dt <= '${'${bizdate}'}'`, unit: 'cumulative', label: '累计' },
 ];
 
-function buildMock(fp: string): { atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; derived: MockDerived[] } {
-  const s = seedFromPath(fp);
-  const cols = ['usr_id', 'vid', 'play_duration', 'dau', 'vv', 'pv', 'pay_amount', 'order_cnt', 'actv_time', 'exp_uv'];
-  const aggFns = ['sum', 'count', 'count_distinct', 'avg', 'max', 'min'];
-  const qualFields = ['video_side', 'video_ctgy', 'channel_id', 'app_id', 'is_vip', 'source'];
+/** Derive display data (atomics/qualifiers/periods/derived) from real extracted metrics. */
+function deriveFromMetrics(ms: Array<{
+  name: string; expression: string; agg_func: string; distinct: boolean;
+  source_table: string; column: string; business_filter: string; period: string;
+}>): { atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; derived: MockDerived[] } {
+  const atomics: MockAtomic[] = ms.map(m => ({
+    name: m.name,
+    expr: m.expression,
+    agg: m.distinct && m.agg_func === 'count' ? 'count_distinct' : m.agg_func,
+    column: m.column,
+    sourceTable: m.source_table,
+  }));
 
-  // 4-6 atomic metrics
-  const atomicCount = 4 + (s % 3);
-  const atomics: MockAtomic[] = [];
-  for (let i = 0; i < atomicCount; i++) {
-    const agg = aggFns[(s + i) % aggFns.length];
-    const col = cols[(s + i * 3) % cols.length];
-    const distinct = agg === 'count' && (s + i) % 3 === 0 ? 'distinct ' : '';
-    atomics.push({
-      name: `${agg}${distinct ? '_distinct' : ''}_${col}`,
-      expr: `${agg}(${distinct}${col})`,
-      agg,
-      column: col,
-    });
-  }
-
-  // 3-4 qualifiers
-  const qCount = 3 + (s % 2);
+  // Qualifiers from business filters (deduplicated).
   const qualifiers: MockQualifier[] = [];
-  for (let i = 0; i < qCount; i++) {
-    const field = qualFields[(s + i) % qualFields.length];
-    const val = `'${['APP', '端内', '端外', 'OLYL', 'VIDE', '1080', '1'][(s + i) % 7]}'`;
-    qualifiers.push({
-      name: `${field}_${val.replace(/'/g, '')}`,
-      expr: `${field} = ${val}`,
-      field,
-    });
+  const seenQ = new Set<string>();
+  for (const m of ms) {
+    if (!m.business_filter) continue;
+    const parts = m.business_filter.split(' AND ');
+    for (const p of parts) {
+      const t = p.trim();
+      if (!t || seenQ.has(t)) continue;
+      seenQ.add(t);
+      const field = (t.split(/[=<>!]+/)[0] || t).trim();
+      qualifiers.push({ name: `${field}_q${qualifiers.length + 1}`, expr: t, field });
+    }
   }
 
-  // 3-4 period qualifiers (deterministic subset of PERIOD_POOL)
-  const pCount = 3 + (s % 2);
-  const periods: MockPeriod[] = [];
-  for (let i = 0; i < pCount; i++) {
-    const p = PERIOD_POOL[(s + i) % PERIOD_POOL.length];
-    if (!periods.some(x => x.name === p.name)) periods.push(p);
-  }
+  // Periods: use real period if detected, else a fixed subset.
+  const hasDaily = ms.some(m => m.period === 'daily');
+  const periods: MockPeriod[] = hasDaily
+    ? PERIOD_POOL.filter(p => p.unit === 'daily' || p.unit === 'rolling_7d' || p.unit === 'rolling_30d')
+    : PERIOD_POOL.slice(0, 3);
 
-  // derived = atomics × qualifiers × period (subset)
+  // Derived: atomic × first qualifier × first period (subset).
   const derived: MockDerived[] = [];
-  for (let i = 0; i < Math.min(6, atomics.length); i++) {
-    const a = atomics[(i + 1) % atomics.length];
-    const q = qualifiers[i % qualifiers.length];
+  const maxD = Math.min(6, atomics.length, qualifiers.length || 1);
+  for (let i = 0; i < maxD; i++) {
+    const a = atomics[i];
+    const q = qualifiers[i % (qualifiers.length || 1)];
     const p = periods[i % periods.length];
-    const gran = ['video_side', 'video_ctgy', 'channel_id', 'usr_id'][i % 4];
     derived.push({
-      name: `${a.name}_${p.name}_${q.field}`,
+      name: `${a.name}_${(q?.field || 'total')}_${p.label}`,
       atomic: a.expr,
-      qualifiers: [q.expr],
+      qualifiers: q ? [q.expr] : [],
       period: p.unit,
       periodExpr: p.expr,
-      gran: `${p.label}·${gran}`,
+      gran: `${p.label}·${q?.field || 'all'}`,
     });
   }
 
   return { atomics, qualifiers, periods, derived };
 }
 
-export function MetricExtractDialog({ open, onClose, filePath, sqlContent }: MetricExtractDialogProps) {
+export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlContent }: MetricExtractDialogProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'atomic' | 'qualifier' | 'period' | 'derived'>('atomic');
   const [selected, setSelected] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showSql, setShowSql] = useState(false);
+  const [err, setErr] = useState('');
+  const [mock, setMock] = useState<{ atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; derived: MockDerived[] }>({
+    atomics: [], qualifiers: [], periods: [], derived: [],
+  });
 
-  // Deterministic mock data for this file.
-  const mock = open ? buildMock(filePath) : { atomics: [], qualifiers: [], periods: [], derived: [] };
   const scriptName = filePath.split('/').pop() || filePath;
 
   useEffect(() => {
-    if (open) {
-      setLoading(true);
-      setTab('atomic');
-      setSelected(null);
-      const timer = setTimeout(() => setLoading(false), 400);
-      return () => clearTimeout(timer);
-    }
-  }, [open, filePath]);
+    if (!open) return;
+    setLoading(true);
+    setTab('atomic');
+    setSelected(null);
+    setErr('');
+    extractScriptMetrics(projectId, filePath)
+      .then(r => setMock(deriveFromMetrics(r.metrics)))
+      .catch(e => setErr(String(e)))
+      .finally(() => setLoading(false));
+  }, [open, projectId, filePath]);
 
   const totalAtomic = mock.atomics.length;
   const totalQualifier = mock.qualifiers.length;
@@ -217,7 +210,13 @@ export function MetricExtractDialog({ open, onClose, filePath, sqlContent }: Met
             })}
           </div>
           <div className="flex items-center gap-1.5">
-            <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => { setLoading(true); setTimeout(() => setLoading(false), 400); }}>
+            <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => {
+              setLoading(true); setErr('');
+              extractScriptMetrics(projectId, filePath)
+                .then(r => setMock(deriveFromMetrics(r.metrics)))
+                .catch(e => setErr(String(e)))
+                .finally(() => setLoading(false));
+            }}>
               <RefreshCw className="h-3 w-3 mr-1" />重新提取
             </Button>
             <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={handleCopy}>
@@ -234,6 +233,15 @@ export function MetricExtractDialog({ open, onClose, filePath, sqlContent }: Met
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 <Loader2 className="h-5 w-5 mr-2 animate-spin" />{t('editor.generating', '生成中...')}
               </div>
+            ) : err ? (
+              <div className="p-4 text-sm text-destructive">
+                <p className="font-medium mb-1">提取失败</p>
+                <pre className="whitespace-pre-wrap text-xs">{err}</pre>
+              </div>
+            ) : mock.atomics.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm p-6 text-center">
+                未从脚本中解析到聚合指标（SUM/COUNT/AVG/MIN/MAX）
+              </div>
             ) : tab === 'atomic' ? (
               <div className="p-3 space-y-1.5">
                 {mock.atomics.map(a => (
@@ -243,7 +251,7 @@ export function MetricExtractDialog({ open, onClose, filePath, sqlContent }: Met
                     <FunctionSquare className="h-4 w-4 shrink-0 text-sky-500" />
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-medium truncate">{a.name}</div>
-                      <div className="text-[10px] text-muted-foreground">来源: {scriptName.replace(/\.HQL$/i, '')}</div>
+                      <div className="text-[10px] text-muted-foreground">来源: {a.sourceTable || scriptName.replace(/\.HQL$/i, '')}</div>
                     </div>
                     <Badge className="text-[10px] bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-400 shrink-0">{a.agg}</Badge>
                   </button>

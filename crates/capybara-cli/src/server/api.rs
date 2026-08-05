@@ -133,6 +133,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/generate-semantic-yaml", post(gov_generate_semantic_yaml))
         .route("/generate-semantic-yaml-batch", post(gov_generate_semantic_yaml_batch))
         .route("/files/dbt-yaml", put(gov_save_dbt_yaml))
+        .route("/extract-script-metrics", post(gov_extract_script_metrics))
 }
 
 // === Request/Response types ===
@@ -4606,4 +4607,46 @@ async fn gov_save_dbt_yaml(
         Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response(),
     }
+}
+
+#[derive(Deserialize)]
+struct ExtractScriptMetricsRequest {
+    project_id: String,
+    file_path: String,
+}
+
+/// POST /api/extract-script-metrics — extract metrics from a single script
+/// by actually analyzing its SQL (not mock). Returns real aggregation columns
+/// (SUM/COUNT/AVG/MIN/MAX) with expressions, filters, and source tables.
+async fn gov_extract_script_metrics(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ExtractScriptMetricsRequest>,
+) -> impl IntoResponse {
+    // Read script content.
+    let sql = read_project_file(&state, &req.project_id, &req.file_path);
+    if sql.trim().is_empty() {
+        return Json(serde_json::json!({ "metrics": [], "error": "empty script" })).into_response();
+    }
+
+    // Analyze the script SQL.
+    let analyze_request = capybara_core::AnalyzeRequest {
+        sql: sql.clone(),
+        files: None,
+        dialect: state.config.dialect,
+        source_name: Some(req.file_path.clone()),
+        options: None,
+        schema: None,
+        #[cfg(feature = "templating")]
+        template_config: None,
+    };
+    let result = capybara_core::analyze(&analyze_request);
+
+    // Extract metrics from the analysis result.
+    let metrics = super::governance::metric::extract_script_metrics(&result, &req.file_path);
+
+    Json(serde_json::json!({
+        "metrics": metrics,
+        "script_name": req.file_path.split('/').next_back().unwrap_or(&req.file_path),
+    }))
+    .into_response()
 }

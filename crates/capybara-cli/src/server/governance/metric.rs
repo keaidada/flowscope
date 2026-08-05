@@ -1243,11 +1243,159 @@ fn pct(n: usize, total: usize) -> f64 {
     } else {
          (n as f64 / total as f64 * 100.0 * 10.0).round() / 10.0
      }
- }
+  }
 
 // ============================================================
-// Metric Decomposition (Route A: expression parsing)
+// Script metric extraction (real, from AnalyzeResult)
 // ============================================================
+
+/// A metric extracted from a script's analysis result.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ScriptMetric {
+    pub name: String,
+    pub expression: String,
+    pub agg_func: String,
+    pub distinct: bool,
+    pub source_table: String,
+    pub column: String,
+    pub business_filter: String,
+    pub period: String,
+}
+
+/// Extract metrics from a single script's AnalyzeResult by scanning statement
+/// nodes for aggregation columns (SUM/COUNT/AVG/MIN/MAX/etc).
+pub fn extract_script_metrics(
+    result: &capybara_core::AnalyzeResult,
+    file_path: &str,
+) -> Vec<ScriptMetric> {
+    let mut metrics: Vec<ScriptMetric> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for stmt in &result.statements {
+        // Collect source table names from table nodes in this statement.
+        let source_tables: Vec<String> = stmt
+            .nodes
+            .iter()
+            .filter(|n| n.node_type == capybara_core::NodeType::Table)
+            .map(|n| n.qualified_name.as_deref().unwrap_or(&n.label).to_string())
+            .collect();
+        let source_table = source_tables.first().cloned().unwrap_or_default();
+
+        // Collect grouping dims for period inference.
+        let dims: Vec<String> = stmt
+            .nodes
+            .iter()
+            .filter_map(|n| {
+                n.aggregation.as_ref().and_then(|a| {
+                    if a.is_grouping_key {
+                        Some(n.label.as_ref().to_string())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+        let period = if dims.iter().any(|d| {
+            let dl = d.to_lowercase();
+            dl.contains("dt") || dl.contains("date") || dl.contains("time") || dl == "day" || dl == "month"
+        }) {
+            "daily".to_string()
+        } else {
+            String::new()
+        };
+
+        for node in &stmt.nodes {
+            let agg = match &node.aggregation {
+                Some(a) if !a.is_grouping_key => a,
+                _ => continue,
+            };
+            let func = match &agg.function {
+                Some(f) if !f.is_empty() => f.to_lowercase(),
+                _ => continue,
+            };
+            let col = node.label.as_ref();
+            let distinct = agg.distinct.unwrap_or(false);
+
+            // Aggregate function → metric name.
+            let agg_name = if func == "count" && distinct {
+                "count_distinct".to_string()
+            } else {
+                func.clone()
+            };
+
+            // Business filter: from the node's CASE WHEN / expression, or filters.
+            let filter = extract_filter_from_node(node);
+
+            let key = format!("{agg_name}({col})|{filter}");
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+
+            let expr = node
+                .expression
+                .as_deref()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| {
+                    if distinct {
+                        format!("{}(distinct {})", func, col)
+                    } else {
+                        format!("{}({})", func, col)
+                    }
+                });
+
+            metrics.push(ScriptMetric {
+                name: format!("{}_{}", agg_name, to_snake(&col)),
+                expression: expr,
+                agg_func: agg_name,
+                distinct,
+                source_table: source_table.clone(),
+                column: col.to_string(),
+                business_filter: filter,
+                period: period.clone(),
+            });
+        }
+    }
+
+    // Sort: aggregations first, then by name.
+    metrics.sort_by(|a, b| a.name.cmp(&b.name));
+    let _ = file_path;
+    metrics
+}
+
+/// Extract a business filter from a node's expression (CASE WHEN conditions)
+/// or its WHERE filters.
+fn extract_filter_from_node(node: &capybara_core::Node) -> String {
+    if let Some(expr) = node.expression.as_deref() {
+        let lower = expr.to_lowercase();
+        if lower.contains("case when") {
+            if let Some(when) = lower.find("case when") {
+                let after = &expr[when + 9..];
+                if let Some(then) = after.to_lowercase().find("then") {
+                    return after[..then].trim().to_string();
+                }
+            }
+        }
+    }
+    node.filters
+        .iter()
+        .map(|f| f.expression.clone())
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+/// Convert a label to snake_case for metric naming.
+fn to_snake(s: &str) -> String {
+    let mut out = String::new();
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_uppercase() && i > 0 {
+            out.push('_');
+        }
+        out.push(ch.to_ascii_lowercase());
+    }
+    out.replace([' ', '-'], "_")
+}
+
+
 
 /// Decomposition statistics returned by decompose_metrics.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

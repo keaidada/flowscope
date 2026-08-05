@@ -616,6 +616,7 @@ export function EditorArea({
         <MetricExtractDialog
           open={metricDialogOpen}
           onClose={() => setMetricDialogOpen(false)}
+          projectId={currentProject.id}
           filePath={activeFile.path}
           sqlContent={activeFile.content}
         />

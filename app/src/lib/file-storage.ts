@@ -284,3 +284,29 @@ export async function saveDbtYaml(
   });
   if (!res.ok) throw new Error(`Save YAML failed: ${res.status}`);
 }
+
+/** Real metric extraction from a script's SQL (backend analyzes the actual SQL). */
+export async function extractScriptMetrics(
+  projectId: string,
+  filePath: string
+): Promise<{
+  metrics: Array<{
+    name: string;
+    expression: string;
+    agg_func: string;
+    distinct: boolean;
+    source_table: string;
+    column: string;
+    business_filter: string;
+    period: string;
+  }>;
+  script_name: string;
+}> {
+  const res = await fetchWithTimeout(`${apiBase()}/api/extract-script-metrics`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, file_path: filePath }),
+  });
+  if (!res.ok) throw new Error(`Extract metrics failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
