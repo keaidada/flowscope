@@ -131,6 +131,7 @@
     "loading": "Loading...",
     "viewYaml": "YAML",
     "viewTable": "Table",
+    "extractMetrics": "Extract metrics",
     "yamlView": "YAML view",
     "tableView": "Visual table",
     "colName": "Name",

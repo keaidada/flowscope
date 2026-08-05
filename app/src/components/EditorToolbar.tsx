@@ -18,6 +18,7 @@ import {
   FileCode2,
   FileJson,
   Boxes,
+  BarChart3,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -87,6 +88,8 @@ interface EditorToolbarProps {
   onGenerateYaml?: () => void;
   showYaml?: boolean;
   onToggleYaml?: () => void;
+  // metric extraction (per script)
+  onExtractMetrics?: () => void;
   // Open file tabs
   openFiles?: ProjectFile[];
   activeFileId?: string | null;
@@ -133,6 +136,7 @@ export function EditorToolbar({
   onGenerateYaml,
   showYaml,
   onToggleYaml,
+  onExtractMetrics,
   openFiles,
   activeFileId,
   onOpenFile,
@@ -570,6 +574,21 @@ export function EditorToolbar({
               </TooltipTrigger>
               <TooltipContent>
                 <p>{showYaml ? t('editor.viewOriginal', '查看原始') : t('editor.viewYaml', '查看 YAML')}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+        {/* Extract metrics (per script) */}
+        {onExtractMetrics && (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onExtractMetrics}>
+                  <BarChart3 className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{t('editor.extractMetrics', '提取指标')}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

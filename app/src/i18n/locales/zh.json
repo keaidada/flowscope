@@ -131,6 +131,7 @@
     "loading": "加载中...",
     "viewYaml": "YAML",
     "viewTable": "表格",
+    "extractMetrics": "提取指标",
     "yamlView": "YAML 视图",
     "tableView": "可视化表格",
     "colName": "名称",

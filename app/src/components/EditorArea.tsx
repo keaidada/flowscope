@@ -15,6 +15,7 @@ import { EtlDialog } from './EtlDialog';
 import { ProcedureRepairDialog } from './ProcedureRepairDialog';
 import { DbtConvertDialog } from './DbtConvertDialog';
 import { SemanticYamlDialog } from './SemanticYamlDialog';
+import { MetricExtractDialog } from './MetricExtractDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_FILE_NAMES } from '@/lib/constants';
 import type { RunMode } from '@/lib/project-store';
@@ -230,6 +231,7 @@ export function EditorArea({
   const [dbtDialogOpen, setDbtDialogOpen] = useState(false);
   const [showYaml, setShowYaml] = useState(false);
   const [yamlDialogOpen, setYamlDialogOpen] = useState(false);
+  const [metricDialogOpen, setMetricDialogOpen] = useState(false);
   const showTransformedRef = useRef(showTransformed);
   showTransformedRef.current = showTransformed;
   const showDbtRef = useRef(showDbt);
@@ -513,6 +515,7 @@ export function EditorArea({
         onGenerateYaml={() => setYamlDialogOpen(true)}
         showYaml={showYaml}
         onToggleYaml={() => setShowYaml(!showYamlRef.current)}
+        onExtractMetrics={() => setMetricDialogOpen(true)}
         openFiles={
           (currentProject?.openFileIds || [])
             .map((id) => currentProject?.files.find((f) => f.id === id))
@@ -606,6 +609,14 @@ export function EditorArea({
           onSaved={(yaml) => {
             updateFiles([{ fileId: activeFile.id, dbtYaml: yaml }]);
           }}
+        />
+      )}
+
+      {currentProject && activeFile && (
+        <MetricExtractDialog
+          open={metricDialogOpen}
+          onClose={() => setMetricDialogOpen(false)}
+          filePath={activeFile.path}
         />
       )}
     </div>
