@@ -88,3 +88,4 @@ app/governance.db-wal
 app/governance.db-shm
 app/flowscope.db-wal
 app/flowscope.db-shm
+.flowscope/
