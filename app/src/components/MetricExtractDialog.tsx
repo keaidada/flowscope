@@ -15,6 +15,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { SqlView } from '@pondpilot/capybara-react';
 import {
   FunctionSquare, Filter, Layers, Sparkles, Check, Copy, ArrowRight,
   RefreshCw, Loader2, FileCode2, Clock,
@@ -329,9 +330,13 @@ export function MetricExtractDialog({ open, onClose, filePath, sqlContent }: Met
               <span className="ml-auto">{showSql ? '收起 ▲' : '展开 ▼'}</span>
             </button>
             {showSql && (
-              <pre className="text-[11px] font-mono p-3 overflow-auto max-h-56 bg-background whitespace-pre-wrap break-all leading-relaxed">
-                {sqlContent}
-              </pre>
+              <div className="h-56 shrink-0">
+                <SqlView
+                  value={sqlContent}
+                  editable={false}
+                  lineWrapping
+                />
+              </div>
             )}
           </div>
         )}
