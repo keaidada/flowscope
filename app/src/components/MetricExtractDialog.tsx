@@ -26,6 +26,7 @@ interface MetricExtractDialogProps {
   open: boolean;
   onClose: () => void;
   filePath: string;
+  sqlContent?: string;
 }
 
 // ── Mock data generators (deterministic by file name) ───────────
@@ -134,12 +135,13 @@ function buildMock(fp: string): { atomics: MockAtomic[]; qualifiers: MockQualifi
   return { atomics, qualifiers, periods, derived };
 }
 
-export function MetricExtractDialog({ open, onClose, filePath }: MetricExtractDialogProps) {
+export function MetricExtractDialog({ open, onClose, filePath, sqlContent }: MetricExtractDialogProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'atomic' | 'qualifier' | 'period' | 'derived'>('atomic');
   const [selected, setSelected] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showSql, setShowSql] = useState(false);
 
   // Deterministic mock data for this file.
   const mock = open ? buildMock(filePath) : { atomics: [], qualifiers: [], periods: [], derived: [] };
@@ -315,6 +317,24 @@ export function MetricExtractDialog({ open, onClose, filePath }: MetricExtractDi
             </div>
           </div>
         </div>
+
+        {/* ===== Bottom: full SQL script ===== */}
+        {sqlContent && (
+          <div className="border-t shrink-0 flex flex-col">
+            <button onClick={() => setShowSql(v => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-muted/20 hover:bg-muted/40 text-[11px] font-medium text-muted-foreground transition-colors">
+              <FileCode2 className="h-3.5 w-3.5" />
+              完整脚本 SQL
+              <span className="text-[10px] text-muted-foreground/70">（{sqlContent.split('\n').length} 行）</span>
+              <span className="ml-auto">{showSql ? '收起 ▲' : '展开 ▼'}</span>
+            </button>
+            {showSql && (
+              <pre className="text-[11px] font-mono p-3 overflow-auto max-h-56 bg-background whitespace-pre-wrap break-all leading-relaxed">
+                {sqlContent}
+              </pre>
+            )}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

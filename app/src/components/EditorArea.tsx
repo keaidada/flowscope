@@ -617,6 +617,7 @@ export function EditorArea({
           open={metricDialogOpen}
           onClose={() => setMetricDialogOpen(false)}
           filePath={activeFile.path}
+          sqlContent={activeFile.content}
         />
       )}
     </div>
