@@ -16,11 +16,16 @@ import { useTranslation } from 'react-i18next';
 import {
   Search, Plus, ChevronRight, Pencil, Copy, Trash2,
   RefreshCw, Save, Check, X, ArrowLeft, ArrowRight, GitMerge,
-  Table2, Layers, FunctionSquare, Filter, Box, Database,
+  Table2, Layers, FunctionSquare, Filter, Box, Database, List, Share2, Grid3x3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  ReactFlow, Background, Controls, MiniMap,
+  type Node, type Edge,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 
 // ============================================================
 // MOCK DATA
@@ -161,6 +166,7 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
   const [showWizard, setShowWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardName, setWizardName] = useState('');
+  const [viewMode, setViewMode] = useState<'list' | 'graph' | 'matrix'>('list');
 
   const currentModule = MOCK_MODULES.find(m => m.id === module)!;
   const list = MOCK_DATA[module].filter(m =>
@@ -190,14 +196,34 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
           <span className="text-xs text-muted-foreground">Basic模式</span>
         </div>
         <div className="ml-auto flex items-center gap-1">
+          {/* View toggle */}
+          <div className="flex items-center rounded-md border bg-background p-0.5 mr-1">
+            <button onClick={() => setViewMode('list')}
+              className={cn('flex items-center gap-1 h-6 px-2 rounded text-[11px] font-medium', viewMode === 'list' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+              <List className="h-3 w-3" />列表
+            </button>
+            <button onClick={() => setViewMode('graph')}
+              className={cn('flex items-center gap-1 h-6 px-2 rounded text-[11px] font-medium', viewMode === 'graph' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+              <Share2 className="h-3 w-3" />模型关系
+            </button>
+            <button onClick={() => setViewMode('matrix')}
+              className={cn('flex items-center gap-1 h-6 px-2 rounded text-[11px] font-medium', viewMode === 'matrix' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+              <Grid3x3 className="h-3 w-3" />总线矩阵
+            </button>
+          </div>
           <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowWizard(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />{t('governance.create', '新建')}
           </Button>
         </div>
       </div>
 
-      {/* ===== Module tree nav (left) + list (center) + detail (right) ===== */}
-      <div className="flex flex-1 min-h-0">
+      {/* ===== Model relationship graph (Dataphin 模型关系) ===== */}
+      {viewMode === 'graph' ? (
+        <ModelRelationshipGraph onSelect={setSelected} />
+      ) : viewMode === 'matrix' ? (
+        <BusMatrix />
+      ) : (
+        <div className="flex flex-1 min-h-0">
         {/* Left: module tree */}
         <div className="w-56 border-r flex flex-col shrink-0 bg-muted/10">
           <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -299,6 +325,7 @@ export function ModelingWorkspace({ projectId: _projectId }: { projectId: string
           )}
         </div>
       </div>
+      )}
 
       {/* ===== 新建 Wizard ===== */}
       {showWizard && (
@@ -698,5 +725,246 @@ function FormRow({ label, children }: { label: string; children: React.ReactNode
       <label className="w-28 shrink-0 text-xs text-muted-foreground">{label}</label>
       <div className="flex-1">{children}</div>
     </div>
+  );
+}
+
+// ============================================================
+// Model Relationship Graph (Dataphin 模型关系视图)
+// Shows 维度逻辑表 → 事实逻辑表 → 汇总逻辑表 relationships.
+// ============================================================
+
+const GRAPH_LAYERS = [
+  { id: 'dim', label: '维度逻辑表', color: '#8b5cf6' },
+  { id: 'fact', label: '事实逻辑表', color: '#3b82f6' },
+  { id: 'summary', label: '汇总逻辑表', color: '#10b981' },
+];
+
+const GRAPH_MODELS: Record<string, { id: string; name: string; code: string; layer: string; desc: string; fields: string[] }> = {
+  // DIM
+  dim_user: { id: 'dim_user', name: '用户维度表', code: 'dim_user_df', layer: 'dim', desc: '用户属性', fields: ['usr_id', 'usr_name', 'usr_type'] },
+  dim_video: { id: 'dim_video', name: '视频维度表', code: 'dim_video_df', layer: 'dim', desc: '视频属性', fields: ['vid', 'video_ctgy', 'video_side'] },
+  dim_channel: { id: 'dim_channel', name: '频道维度表', code: 'dim_channel_df', layer: 'dim', desc: '频道属性', fields: ['channel_id', 'channel_name'] },
+  // FACT
+  fact_play: { id: 'fact_play', name: '视频播放事实表', code: 'fct_video_play_di', layer: 'fact', desc: '播放事件', fields: ['vid', 'usr_id', 'play_duration'] },
+  fact_login: { id: 'fact_login', name: '登录事实表', code: 'fct_login_di', layer: 'fact', desc: '登录事件', fields: ['usr_id', 'login_ts', 'login_side'] },
+  // SUMMARY
+  sum_video: { id: 'sum_video', name: '视频播放日汇总表', code: 'dws_video_play_daily', layer: 'summary', desc: '按日·视频维度', fields: ['ds', 'vid', 'app_play_duration', 'h5_play_duration'] },
+  sum_user: { id: 'sum_user', name: '用户活跃日汇总表', code: 'dws_user_active_daily', layer: 'summary', desc: '按日·用户维度', fields: ['ds', 'usr_id', 'app_dau'] },
+};
+
+const GRAPH_EDGES: Array<{ from: string; to: string; label: string }> = [
+  { from: 'dim_video', to: 'fact_play', label: '关联维度' },
+  { from: 'dim_user', to: 'fact_play', label: '关联维度' },
+  { from: 'dim_user', to: 'fact_login', label: '关联维度' },
+  { from: 'dim_channel', to: 'fact_play', label: '关联维度' },
+  { from: 'fact_play', to: 'sum_video', label: '汇总' },
+  { from: 'fact_login', to: 'sum_user', label: '汇总' },
+  { from: 'dim_video', to: 'sum_video', label: '粒度' },
+  { from: 'dim_user', to: 'sum_user', label: '粒度' },
+];
+
+function ModelRelationshipGraph({ onSelect }: { onSelect: (m: MockModel | null) => void }) {
+  const layerColor = (l: string) => GRAPH_LAYERS.find(g => g.id === l)?.color ?? '#94a3b8';
+
+  const nodes: Node[] = GRAPH_LAYERS.map((layer, li) => ({
+    id: `label-${layer.id}`,
+    type: 'default',
+    position: { x: 20 + li * 320, y: 12 },
+    data: {
+      label: (
+        <div className="flex items-center gap-1.5 text-xs font-semibold">
+          <span className="w-2 h-2 rounded-sm" style={{ background: layer.color }} />
+          {layer.label}
+        </div>
+      ),
+    },
+    style: { background: 'transparent', border: 'none', boxShadow: 'none' },
+    draggable: false,
+  }));
+
+  GRAPH_LAYERS.forEach((layer, li) => {
+    const models = Object.values(GRAPH_MODELS).filter(m => m.layer === layer.id);
+    models.forEach((m, mi) => {
+      nodes.push({
+        id: m.id,
+        position: { x: 20 + li * 320, y: 60 + mi * 150 },
+        data: { label: <GraphNode model={m} color={layer.color} onClick={() => onSelect(toMockModel(m))} /> },
+        style: { padding: 0, background: 'transparent', border: 'none', width: 240 },
+      });
+    });
+  });
+
+  const edges: Edge[] = GRAPH_EDGES.map((e, i) => {
+    const color = layerColor(GRAPH_MODELS[e.from].layer);
+    return {
+      id: `e-${i}`,
+      source: e.from,
+      target: e.to,
+      animated: true,
+      label: e.label,
+      labelStyle: { fontSize: 9, fill: '#64748b' },
+      labelBgStyle: { fill: 'rgba(255,255,255,0.8)' },
+      style: { stroke: color, strokeWidth: 1.5 },
+    };
+  });
+
+  return (
+    <div className="flex-1 min-h-0">
+      {/* Legend bar */}
+      <div className="flex items-center gap-4 px-4 py-1.5 border-b bg-muted/20 shrink-0">
+        {GRAPH_LAYERS.map(l => (
+          <div key={l.id} className="flex items-center gap-1.5 text-xs">
+            <span className="w-2.5 h-2.5 rounded-sm" style={{ background: l.color }} />
+            <span className="font-medium">{l.label}</span>
+            <span className="text-muted-foreground tabular-nums">{Object.values(GRAPH_MODELS).filter(m => m.layer === l.id).length}</span>
+          </div>
+        ))}
+        <span className="text-xs text-muted-foreground ml-auto">
+          7 个模型 · {GRAPH_EDGES.length} 条关系
+        </span>
+      </div>
+      <div className="flex-1 min-h-0">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          fitView
+          fitViewOptions={{ padding: 0.15 }}
+          attributionPosition="bottom-left"
+          minZoom={0.3}
+          maxZoom={2}
+          nodesDraggable={true}
+          nodesConnectable={false}
+        >
+          <Background color="#e2e8f0" gap={24} />
+          <Controls showInteractive={false} />
+          <MiniMap
+            nodeColor={(n) => {
+              const m = Object.values(GRAPH_MODELS).find(g => g.id === n.id);
+              return m ? layerColor(m.layer) : '#94a3b8';
+            }}
+            maskColor="rgba(0,0,0,0.1)"
+          />
+        </ReactFlow>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Bus Matrix (Dataphin 总线矩阵): 维度 × 业务过程 矩阵
+// ============================================================
+
+const BUS_DIMS = ['用户', '视频', '频道', '视频分类', '视频端'];
+const BUS_PROCESSES = ['视频播放', '视频发布', '用户登录', '内容浏览', '互动收藏'];
+
+const BUS_MATRIX: Record<string, string[]> = {
+  '视频播放': ['用户', '视频', '视频分类', '视频端'],
+  '视频发布': ['用户', '视频', '频道'],
+  '用户登录': ['用户', '视频端'],
+  '内容浏览': ['用户', '视频', '频道'],
+  '互动收藏': ['用户', '视频'],
+};
+
+function BusMatrix() {
+  return (
+    <div className="flex-1 min-h-0 overflow-auto p-4">
+      {/* Legend */}
+      <div className="flex items-center gap-4 mb-3 text-xs text-muted-foreground">
+        <span className="font-semibold text-foreground">总线矩阵</span>
+        <span>用于管理维度与业务过程的组合关系</span>
+        <div className="ml-auto flex items-center gap-3">
+          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-emerald-100 border border-emerald-300" /> 已关联</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm border border-dashed border-muted-foreground/40" /> 未关联</span>
+        </div>
+      </div>
+
+      <div className="border rounded-lg overflow-hidden">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-muted/40">
+              <th className="px-3 py-2 text-left font-medium w-32">业务过程 \ 维度</th>
+              {BUS_DIMS.map(d => (
+                <th key={d} className="px-3 py-2 text-center font-medium">{d}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {BUS_PROCESSES.map(p => (
+              <tr key={p} className="border-t hover:bg-accent/30">
+                <td className="px-3 py-2 font-medium">{p}</td>
+                {BUS_DIMS.map(d => {
+                  const linked = BUS_MATRIX[p]?.includes(d);
+                  return (
+                    <td key={d} className="px-2 py-2 text-center">
+                      {linked ? (
+                        <button className="w-5 h-5 inline-flex items-center justify-center rounded bg-emerald-100 text-emerald-600 border border-emerald-300 hover:bg-emerald-200 transition-colors"
+                          title={`${p} × ${d}`}>
+                          <Check className="h-3 w-3" />
+                        </button>
+                      ) : (
+                        <button className="w-5 h-5 inline-flex items-center justify-center rounded border border-dashed border-muted-foreground/30 text-muted-foreground/40 hover:border-emerald-300 hover:text-emerald-500 transition-colors"
+                          title={`关联 ${p} × ${d}`}>
+                          <Plus className="h-3 w-3" />
+                        </button>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Selected combination hint */}
+      <div className="mt-3 text-[11px] text-muted-foreground">
+        点击「+」将维度关联到业务过程；已关联的维度组合将用于派生指标的统计粒度。
+      </div>
+    </div>
+  );
+}
+
+function toMockModel(m: typeof GRAPH_MODELS[string]): MockModel {  const layerMap: Record<string, string> = { dim: 'DIM', fact: 'DWD', summary: 'DWS' };
+  return {
+    code: m.code,
+    name: m.name,
+    owner: '张伟',
+    status: '已发布',
+    updated: '2026-08-04 15:30',
+    layer: layerMap[m.layer] ?? 'DWS',
+    granularity: m.desc,
+    fields: m.fields.map((f, i) => ({
+      name: f,
+      desc: f,
+      type: i === 0 ? 'bigint' : i === 1 ? 'string' : 'bigint',
+      category: i === 0 ? '主键' : '属性',
+      dim: '',
+      constraint: '',
+    })),
+  };
+}
+
+function GraphNode({ model, color, onClick }: { model: { name: string; code: string; desc: string; fields: string[] }; color: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="w-full text-left rounded-lg border bg-card shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+      {/* Header */}
+      <div className="px-3 py-2 border-b" style={{ borderColor: `${color}33` }}>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full" style={{ background: color }} />
+          <span className="text-xs font-semibold truncate">{model.name}</span>
+        </div>
+        <div className="text-[9px] font-mono text-muted-foreground mt-0.5">{model.code}</div>
+      </div>
+      {/* Fields */}
+      <div className="px-3 py-1.5 space-y-0.5">
+        {model.fields.map(f => (
+          <div key={f} className="flex items-center justify-between text-[9px]">
+            <span className="font-mono text-muted-foreground">{f}</span>
+            <span className="text-muted-foreground/50">·</span>
+          </div>
+        ))}
+        <div className="text-[9px] text-muted-foreground/70 pt-0.5">{model.desc}</div>
+      </div>
+    </button>
   );
 }
