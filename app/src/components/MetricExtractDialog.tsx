@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { SqlView } from '@pondpilot/capybara-react';
 import {
   FunctionSquare, Filter, Layers, Sparkles, Check, Copy, ArrowRight,
-  RefreshCw, Loader2, FileCode2, Clock,
+  RefreshCw, Loader2, FileCode2, Clock, Grid3x3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -60,6 +60,11 @@ interface MockDerived {
   periodExpr: string;
   gran: string;
 }
+interface MockDimension {
+  name: string;
+  desc: string;
+  type: string;
+}
 
 // Standard time periods (周期限定)
 const PERIOD_POOL: MockPeriod[] = [
@@ -76,7 +81,7 @@ function deriveFromMetrics(ms: Array<{
   name: string; expression: string; agg_func: string; distinct: boolean;
   source_table: string; column: string; business_filter: string; period: string;
   dimensions: string[];
-}>): { atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; derived: MockDerived[] } {
+}>): { atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; dimensions: MockDimension[]; derived: MockDerived[] } {
   const atomics: MockAtomic[] = ms.map(m => ({
     name: m.name,
     expr: m.expression,
@@ -112,6 +117,11 @@ function deriveFromMetrics(ms: Array<{
 
   // Dimensions (统计粒度) from GROUP BY.
   const dims: string[] = ms.length > 0 ? ms[0].dimensions : [];
+  const dimensions: MockDimension[] = dims.map((d, i) => ({
+    name: d,
+    desc: d,
+    type: i === 0 ? '主维度' : '属性',
+  }));
 
   // Derived: atomic × qualifier × period, granularity from real dimensions.
   const derived: MockDerived[] = [];
@@ -131,19 +141,19 @@ function deriveFromMetrics(ms: Array<{
     });
   }
 
-  return { atomics, qualifiers, periods, derived };
+  return { atomics, qualifiers, periods, dimensions, derived };
 }
 
 export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlContent }: MetricExtractDialogProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'atomic' | 'qualifier' | 'period' | 'derived'>('atomic');
+  const [tab, setTab] = useState<'atomic' | 'qualifier' | 'period' | 'dimension' | 'derived'>('atomic');
   const [selected, setSelected] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showSql, setShowSql] = useState(false);
   const [err, setErr] = useState('');
-  const [mock, setMock] = useState<{ atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; derived: MockDerived[] }>({
-    atomics: [], qualifiers: [], periods: [], derived: [],
+  const [mock, setMock] = useState<{ atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; dimensions: MockDimension[]; derived: MockDerived[] }>({
+    atomics: [], qualifiers: [], periods: [], dimensions: [], derived: [],
   });
 
   const scriptName = filePath.split('/').pop() || filePath;
@@ -163,6 +173,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
   const totalAtomic = mock.atomics.length;
   const totalQualifier = mock.qualifiers.length;
   const totalPeriod = mock.periods.length;
+  const totalDimension = mock.dimensions.length;
   const totalDerived = mock.derived.length;
 
   const handleCopy = () => {
@@ -172,7 +183,9 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
         ? mock.qualifiers.map(q => `-- ${q.name}: ${q.expr}`).join('\n')
         : tab === 'period'
           ? mock.periods.map(p => `-- ${p.name}: ${p.expr}`).join('\n')
-          : mock.derived.map(d => `-- ${d.name} = ${d.atomic} WHERE ${d.qualifiers.join(' AND ')} AND ${d.periodExpr} GROUP BY ${d.gran}`).join('\n');
+          : tab === 'dimension'
+            ? mock.dimensions.map(d => `-- 维度: ${d.name} (${d.type})`).join('\n')
+            : mock.derived.map(d => `-- ${d.name} = ${d.atomic} WHERE ${d.qualifiers.join(' AND ')} AND ${d.periodExpr} GROUP BY ${d.gran}`).join('\n');
     navigator.clipboard.writeText(lines).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
@@ -189,7 +202,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
             </div>
             <DialogTitle>{t('editor.extractMetrics', '提取指标')}</DialogTitle>
             <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
-              {totalAtomic} 原子 · {totalQualifier} 限定 · {totalPeriod} 周期 · {totalDerived} 派生
+              {totalAtomic} 原子 · {totalQualifier} 限定 · {totalPeriod} 周期 · {totalDimension} 维度 · {totalDerived} 派生
             </span>
           </div>
           <DialogDescription className="leading-tight flex items-center gap-1.5">
@@ -206,6 +219,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
               { id: 'atomic' as const, label: `原子指标 (${totalAtomic})`, icon: FunctionSquare, color: 'text-sky-500' },
               { id: 'qualifier' as const, label: `业务限定 (${totalQualifier})`, icon: Filter, color: 'text-amber-500' },
               { id: 'period' as const, label: `周期限定 (${totalPeriod})`, icon: Clock, color: 'text-violet-500' },
+              { id: 'dimension' as const, label: `维度 (${totalDimension})`, icon: Grid3x3, color: 'text-purple-500' },
               { id: 'derived' as const, label: `派生指标 (${totalDerived})`, icon: Layers, color: 'text-emerald-500' },
             ]).map(x => {
               const Icon = x.icon;
@@ -296,6 +310,21 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
                   </button>
                 ))}
               </div>
+            ) : tab === 'dimension' ? (
+              <div className="p-3 space-y-1.5">
+                {mock.dimensions.map(d => (
+                  <button key={d.name} onClick={() => setSelected(d.name)}
+                    className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border bg-card hover:border-purple-400/50 transition-colors text-left',
+                      selected === d.name && 'border-purple-500/60 ring-1 ring-purple-500/30')}>
+                    <Grid3x3 className="h-4 w-4 shrink-0 text-purple-500" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium truncate">{d.name}</div>
+                      <div className="text-[10px] text-muted-foreground">{d.desc}</div>
+                    </div>
+                    <Badge className="text-[10px] bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400 shrink-0">{d.type}</Badge>
+                  </button>
+                ))}
+              </div>
             ) : (
               <div className="p-3 space-y-1.5">
                 {mock.derived.map(d => (
@@ -364,9 +393,9 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
 }
 
 function DetailPanel({ tab, selected, mock }: {
-  tab: 'atomic' | 'qualifier' | 'period' | 'derived';
+  tab: 'atomic' | 'qualifier' | 'period' | 'dimension' | 'derived';
   selected: string;
-  mock: { atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; derived: MockDerived[] };
+  mock: { atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; dimensions: MockDimension[]; derived: MockDerived[] };
 }) {
   if (tab === 'atomic') {
     const a = mock.atomics.find(x => x.name === selected);
@@ -411,6 +440,21 @@ function DetailPanel({ tab, selected, mock }: {
         <div>
           <div className="text-[9px] uppercase text-muted-foreground mb-1">WHERE 片段</div>
           <pre className="text-[10px] font-mono bg-muted rounded p-2 overflow-auto whitespace-pre-wrap">{`WHERE ${p.expr}`}</pre>
+        </div>
+      </div>
+    );
+  }
+  if (tab === 'dimension') {
+    const d = mock.dimensions.find(x => x.name === selected);
+    if (!d) return null;
+    return (
+      <div className="space-y-3">
+        <DetailRow k="维度" v={d.name} />
+        <DetailRow k="类型" v={d.type} mono />
+        <DetailRow k="说明" v={d.desc} />
+        <div>
+          <div className="text-[9px] uppercase text-muted-foreground mb-1">GROUP BY 片段</div>
+          <pre className="text-[10px] font-mono bg-muted rounded p-2 overflow-auto whitespace-pre-wrap">{`GROUP BY ${d.name}`}</pre>
         </div>
       </div>
     );
