@@ -310,6 +310,104 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             updated_at      TEXT    NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_quality_results_contract ON quality_check_results(project_id, contract_id);
+
+        -- ── Dimension Registry ─────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS dimension_registry (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id      TEXT    NOT NULL,
+            dim_name        TEXT    NOT NULL,
+            dim_name_cn     TEXT    NOT NULL DEFAULT '',
+            dim_column      TEXT    NOT NULL,
+            master_table    TEXT    NOT NULL DEFAULT '',
+            attributes      TEXT    NOT NULL DEFAULT '[]',
+            ref_count       INTEGER NOT NULL DEFAULT 0,
+            ref_tables      TEXT    NOT NULL DEFAULT '[]',
+            status          TEXT    NOT NULL DEFAULT 'candidate',
+            owner           TEXT    NOT NULL DEFAULT '',
+            description     TEXT    NOT NULL DEFAULT '',
+            created_at      TEXT    NOT NULL DEFAULT '',
+            updated_at      TEXT    NOT NULL DEFAULT '',
+            UNIQUE(project_id, dim_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dimension_registry_project ON dimension_registry(project_id);
+        CREATE INDEX IF NOT EXISTS idx_dimension_registry_status ON dimension_registry(project_id, status);
+
+        -- ── Atomic Metric Registry ────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS atomic_metric_registry (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id      TEXT    NOT NULL,
+            metric_name     TEXT    NOT NULL,
+            expression      TEXT    NOT NULL DEFAULT '',
+            agg_func        TEXT    NOT NULL DEFAULT '',
+            source_column   TEXT    NOT NULL DEFAULT '',
+            source_table    TEXT    NOT NULL DEFAULT '',
+            description     TEXT    NOT NULL DEFAULT '',
+            status          TEXT    NOT NULL DEFAULT 'confirmed',
+            owner           TEXT    NOT NULL DEFAULT '',
+            created_at      TEXT    NOT NULL DEFAULT '',
+            updated_at      TEXT    NOT NULL DEFAULT '',
+            UNIQUE(project_id, metric_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_atomic_metric_project ON atomic_metric_registry(project_id);
+
+        -- ── Business Qualifier Registry ────────────────────────────────
+        CREATE TABLE IF NOT EXISTS business_qualifier_registry (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id      TEXT    NOT NULL,
+            qualifier_name  TEXT    NOT NULL,
+            qualifier_expr  TEXT    NOT NULL DEFAULT '',
+            field_name      TEXT    NOT NULL DEFAULT '',
+            description     TEXT    NOT NULL DEFAULT '',
+            ref_count       INTEGER NOT NULL DEFAULT 0,
+            status          TEXT    NOT NULL DEFAULT 'confirmed',
+            created_at      TEXT    NOT NULL DEFAULT '',
+            updated_at      TEXT    NOT NULL DEFAULT '',
+            UNIQUE(project_id, qualifier_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_business_qualifier_project ON business_qualifier_registry(project_id);
+
+        -- ── Derived Metric Registry ────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS derived_metric_registry (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id          TEXT    NOT NULL,
+            metric_name         TEXT    NOT NULL,
+            atomic_metric_id    INTEGER NOT NULL DEFAULT 0,
+            atomic_metric_name  TEXT    NOT NULL DEFAULT '',
+            qualifier_ids       TEXT    NOT NULL DEFAULT '[]',
+            qualifier_names     TEXT    NOT NULL DEFAULT '[]',
+            time_period         TEXT    NOT NULL DEFAULT '',
+            stat_granularity    TEXT    NOT NULL DEFAULT '[]',
+            full_expression     TEXT    NOT NULL DEFAULT '',
+            full_sql            TEXT    NOT NULL DEFAULT '',
+            source_metric_id    INTEGER NOT NULL DEFAULT 0,
+            status              TEXT    NOT NULL DEFAULT 'confirmed',
+            created_at          TEXT    NOT NULL DEFAULT '',
+            updated_at          TEXT    NOT NULL DEFAULT '',
+            UNIQUE(project_id, metric_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_derived_metric_project ON derived_metric_registry(project_id);
+        CREATE INDEX IF NOT EXISTS idx_derived_metric_atomic ON derived_metric_registry(project_id, atomic_metric_id);
+
+        -- ── Summary Table Recommendation ───────────────────────────────
+        CREATE TABLE IF NOT EXISTS summary_table_recommendation (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id              TEXT    NOT NULL,
+            recommended_table_name  TEXT    NOT NULL,
+            recommended_layer       TEXT    NOT NULL DEFAULT 'DWS',
+            stat_granularity        TEXT    NOT NULL DEFAULT '[]',
+            time_period             TEXT    NOT NULL DEFAULT 'daily',
+            source_table            TEXT    NOT NULL DEFAULT '',
+            metric_count            INTEGER NOT NULL DEFAULT 0,
+            metric_names            TEXT    NOT NULL DEFAULT '[]',
+            suggested_sql           TEXT    NOT NULL DEFAULT '',
+            source_scripts          TEXT    NOT NULL DEFAULT '[]',
+            potential_savings       TEXT    NOT NULL DEFAULT '',
+            status                  TEXT    NOT NULL DEFAULT 'pending',
+            created_at              TEXT    NOT NULL DEFAULT '',
+            updated_at              TEXT    NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_summary_rec_project ON summary_table_recommendation(project_id);
+        CREATE INDEX IF NOT EXISTS idx_summary_rec_status ON summary_table_recommendation(project_id, status);
         ",
     )?;
     Ok(())

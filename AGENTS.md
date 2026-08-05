@@ -472,3 +472,12 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 - **dbt 数据建模支持**：当前仅支持基础 dbt/Jinja 宏（`ref()`、`source()`、
   `var()`）。需要完整支持 dbt 模型解析、`config()` 宏、`{{ this }}` 引用、
   snapshots、seeds、tests 等，提供 dbt 项目级别的血缘分析。
+
+- **`replace_format_placeholders` 未接线（pre-existing test failure）**：
+  `parser/mod.rs:1019` 的 `replace_format_placeholders`（`%d`→`0`、`%s`→`x`、
+  `%f`→`0.0`、`%%`→`%`）已完整实现但从未被调用（dead code）。导致
+  `test_bigquery_execute_immediate_with_triple_quotes` 失败：sanitize 后的 SQL
+  里残留 `WHERE a.prd_id = %d`，sqlparser 报 `found: %`。
+  修复：在 `sanitize_bigquery_procedure`（mod.rs:631-654）的两个返回点
+  （Case 1 line 639-641、Case 2 line 648-651）对 body 应用
+  `replace_format_placeholders`。一次改 2 行，覆盖所有调用方。

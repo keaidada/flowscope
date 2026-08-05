@@ -10,6 +10,7 @@ pub mod db;
 pub mod dbt;
 pub mod dbt_fusion;
 pub mod designer;
+pub mod dimension;
 pub mod duplicate;
 pub mod evaluator;
 pub mod fingerprint;

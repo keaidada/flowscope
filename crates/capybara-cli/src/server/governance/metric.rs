@@ -1241,9 +1241,855 @@ fn pct(n: usize, total: usize) -> f64 {
     if total == 0 {
         0.0
     } else {
-        (n as f64 / total as f64 * 100.0 * 10.0).round() / 10.0
+         (n as f64 / total as f64 * 100.0 * 10.0).round() / 10.0
+     }
+ }
+
+// ============================================================
+// Metric Decomposition (Route A: expression parsing)
+// ============================================================
+
+/// Decomposition statistics returned by decompose_metrics.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DecomposeStats {
+    pub total: usize,
+    pub atomic_count: usize,
+    pub qualifier_count: usize,
+    pub derived_count: usize,
+    pub compound_count: usize,
+    pub skipped_count: usize,
+}
+
+/// An atomic metric entry.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AtomicMetricEntry {
+    pub id: i64,
+    pub metric_name: String,
+    pub expression: String,
+    pub agg_func: String,
+    pub source_column: String,
+    pub source_table: String,
+    pub description: String,
+    pub status: String,
+}
+
+/// A business qualifier entry.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct QualifierEntry {
+    pub id: i64,
+    pub qualifier_name: String,
+    pub qualifier_expr: String,
+    pub field_name: String,
+    pub ref_count: usize,
+}
+
+/// A derived metric entry.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DerivedMetricEntry {
+    pub id: i64,
+    pub metric_name: String,
+    pub atomic_metric_name: String,
+    pub qualifier_names: Vec<String>,
+    pub time_period: String,
+    pub stat_granularity: Vec<String>,
+    pub full_expression: String,
+    pub full_sql: String,
+}
+
+/// Parsed decomposition result for a single metric expression.
+struct ParsedDecomposition {
+    metric_type: String, // "atomic" | "derived" | "compound"
+    agg_func: String,
+    atomic_expr: String, // e.g. "sum(vv)"
+    source_column: String,
+    qualifiers: Vec<(String, String)>, // (field, condition_expr)
+}
+
+/// Decompose all metrics in metrics_registry into atomic/qualifier/derived tables.
+pub fn decompose_metrics(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<DecomposeStats, rusqlite::Error> {
+    let now = chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
+
+    // Load all metrics.
+    let metrics = list_metrics(conn, project_id, None, None, None, None)?;
+
+    // Clear old decomposition data.
+    conn.execute_batch(
+        "DELETE FROM atomic_metric_registry WHERE project_id = ?1;
+         DELETE FROM business_qualifier_registry WHERE project_id = ?1;
+         DELETE FROM derived_metric_registry WHERE project_id = ?1;",
+    )?;
+    // Use a workaround for project_id param.
+    conn.execute(
+        "DELETE FROM atomic_metric_registry WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    conn.execute(
+        "DELETE FROM business_qualifier_registry WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    conn.execute(
+        "DELETE FROM derived_metric_registry WHERE project_id = ?1",
+        params![project_id],
+    )?;
+
+    let mut atomic_map: HashMap<String, i64> = HashMap::new(); // atomic_expr → id
+    let mut qualifier_map: HashMap<String, i64> = HashMap::new(); // qualifier_expr → id
+    let mut stats = DecomposeStats {
+        total: 0,
+        atomic_count: 0,
+        qualifier_count: 0,
+        derived_count: 0,
+        compound_count: 0,
+        skipped_count: 0,
+    };
+
+    for m in &metrics {
+        if m.expression.is_empty() {
+            stats.skipped_count += 1;
+            continue;
+        }
+        stats.total += 1;
+
+        let parsed = parse_expression_decomposition(&m.expression);
+        match parsed.metric_type.as_str() {
+            "atomic" => {
+                // Upsert atomic metric.
+                let atomic_name =
+                    build_atomic_name(&parsed.agg_func, &parsed.source_column);
+                let id = upsert_atomic_metric(
+                    conn,
+                    project_id,
+                    &atomic_name,
+                    &parsed.atomic_expr,
+                    &parsed.agg_func,
+                    &parsed.source_column,
+                    &m.source_tables,
+                    &now,
+                )?;
+                atomic_map.insert(parsed.atomic_expr.clone(), id);
+                stats.atomic_count += 1;
+            }
+            "derived" => {
+                // Upsert atomic metric for the inner expression.
+                let atomic_name =
+                    build_atomic_name(&parsed.agg_func, &parsed.source_column);
+                let atomic_id = upsert_atomic_metric(
+                    conn,
+                    project_id,
+                    &atomic_name,
+                    &parsed.atomic_expr,
+                    &parsed.agg_func,
+                    &parsed.source_column,
+                    &m.source_tables,
+                    &now,
+                )?;
+                atomic_map.insert(parsed.atomic_expr.clone(), atomic_id);
+                stats.atomic_count += 1;
+
+                // Upsert qualifiers.
+                let mut qual_ids = Vec::new();
+                let mut qual_names = Vec::new();
+                for (field, cond) in &parsed.qualifiers {
+                    let q_name = build_qualifier_name(field, &cond);
+                    let q_id = upsert_qualifier(
+                        conn,
+                        project_id,
+                        &q_name,
+                        &cond,
+                        field,
+                        &now,
+                    )?;
+                    qualifier_map.insert(cond.clone(), q_id);
+                    qual_ids.push(q_id);
+                    qual_names.push(q_name);
+                }
+                stats.qualifier_count += qual_ids.len();
+
+                // Build granularity from qualifier fields.
+                let granularity: Vec<String> = parsed
+                    .qualifiers
+                    .iter()
+                    .map(|(f, _)| f.clone())
+                    .collect::<HashSet<_>>()
+                    .into_iter()
+                    .collect();
+
+                // Insert derived metric.
+                let qual_ids_json = serde_json::to_string(&qual_ids).unwrap_or_default();
+                let qual_names_json = serde_json::to_string(&qual_names).unwrap_or_default();
+                let gran_json = serde_json::to_string(&granularity).unwrap_or_default();
+                let full_sql = build_derived_sql(&parsed.agg_func, &parsed.source_column, &m.source_tables, &granularity);
+
+                conn.execute(
+                    "INSERT OR REPLACE INTO derived_metric_registry
+                        (project_id, metric_name, atomic_metric_id, atomic_metric_name,
+                         qualifier_ids, qualifier_names, time_period, stat_granularity,
+                         full_expression, full_sql, source_metric_id, status, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'confirmed', ?12, ?12)",
+                    params![
+                        project_id,
+                        m.metric_name,
+                        atomic_id,
+                        atomic_name,
+                        qual_ids_json,
+                        qual_names_json,
+                        m.period,
+                        gran_json,
+                        m.expression,
+                        full_sql,
+                        m.id,
+                        now,
+                    ],
+                )?;
+                stats.derived_count += 1;
+            }
+            "compound" => {
+                stats.compound_count += 1;
+            }
+            _ => {
+                stats.skipped_count += 1;
+            }
+        }
+    }
+
+    Ok(stats)
+}
+
+/// Parse a metric expression and decompose into atomic + qualifiers.
+fn parse_expression_decomposition(expr: &str) -> ParsedDecomposition {
+    let trimmed = expr.trim();
+    let lower = trimmed.to_lowercase();
+
+    // Pattern 1: AGG(CASE WHEN <cond> THEN <val> ELSE <else> END)
+    // Extract aggregation + CASE WHEN condition + inner value.
+    let case_re = regex_lite(
+        r"(?i)^(sum|count|avg|average|max|min|median)\s*\(\s*case\s+when\s+(.+?)\s+then\s+(.+?)\s+else\s+(.+?)\s+end\s*\)$",
+    );
+    if let Some(caps) = case_re.captures(trimmed) {
+        let agg = caps.get(1).unwrap().to_lowercase();
+        let condition = caps.get(2).unwrap().trim().to_string();
+        let then_val = caps.get(3).unwrap().trim().to_string();
+
+        // Extract qualifier fields from the condition.
+        let qualifiers = extract_qualifier_fields(&condition);
+
+        // Atomic metric = agg(then_val) if then_val != "1", else count(*).
+        let (atomic_agg, source_col) = if then_val == "1" || then_val == "1" {
+            ("count".to_string(), "*".to_string())
+        } else {
+            let col = strip_alias(&then_val);
+            (agg.clone(), col)
+        };
+        let atomic_expr = format!("{}({})", atomic_agg, source_col);
+
+        return ParsedDecomposition {
+            metric_type: "derived".into(),
+            agg_func: atomic_agg,
+            atomic_expr,
+            source_column: source_col,
+            qualifiers,
+        };
+    }
+
+    // Pattern 2: AGG(DISTINCT? column) — simple atomic.
+    let simple_re = regex_lite(r"(?i)^(sum|count|avg|average|max|min|median)\s*\(\s*(distinct\s+)?(.+?)\s*\)$");
+    if let Some(caps) = simple_re.captures(trimmed) {
+        let agg_raw = caps.get(1).unwrap().to_lowercase();
+        let distinct = caps.get(2).map(|m| m.trim()).unwrap_or("");
+        let col = caps.get(3).unwrap().trim();
+
+        let agg_name = match (agg_raw.as_str(), !distinct.is_empty()) {
+            ("count", true) => "count_distinct".to_string(),
+            ("average", _) => "avg".to_string(),
+            _ => agg_raw,
+        };
+        let source_col = strip_alias(col);
+        let atomic_expr = format!("{}({})", agg_name, source_col);
+
+        return ParsedDecomposition {
+            metric_type: "atomic".into(),
+            agg_func: agg_name,
+            atomic_expr,
+            source_column: source_col,
+            qualifiers: vec![],
+        };
+    }
+
+    // Pattern 3: compound (contains +, /, *)
+    if trimmed.contains('+') || trimmed.contains('/') || trimmed.contains('*') {
+        return ParsedDecomposition {
+            metric_type: "compound".into(),
+            agg_func: String::new(),
+            atomic_expr: trimmed.to_string(),
+            source_column: String::new(),
+            qualifiers: vec![],
+        };
+    }
+
+    ParsedDecomposition {
+        metric_type: "unknown".into(),
+        agg_func: String::new(),
+        atomic_expr: trimmed.to_string(),
+        source_column: String::new(),
+        qualifiers: vec![],
     }
 }
+
+/// Extract qualifier fields from a CASE WHEN condition string.
+/// "video_side = 'APP'" → [("video_side", "video_side = 'APP'")]
+/// "video_ctgy IN ('OLYL','VIDE') AND video_side = 'APP'" → [("video_ctgy", "..."), ("video_side", "...")]
+fn extract_qualifier_fields(condition: &str) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    for clause in condition.split(" AND ") {
+        let c = clause.trim();
+        if c.is_empty() {
+            continue;
+        }
+        // Extract field name (first identifier).
+        let field = c
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !field.is_empty() {
+            result.push((field, c.to_string()));
+        }
+    }
+    if result.is_empty() {
+        result.push((String::new(), condition.to_string()));
+    }
+    result
+}
+
+/// Strip table alias from a column reference: "a.pid" → "pid".
+fn strip_alias(expr: &str) -> String {
+    if expr.contains(' ') {
+        return expr.to_string();
+    }
+    if let Some(pos) = expr.rfind('.') {
+        expr[pos + 1..].to_string()
+    } else {
+        expr.to_string()
+    }
+}
+
+/// Build a standardized atomic metric name.
+fn build_atomic_name(agg: &str, col: &str) -> String {
+    let clean_col = col.replace('.', "_").replace(' ', "_").to_lowercase();
+    format!("{}_{}", agg, clean_col)
+}
+
+/// Build a qualifier name from field + condition.
+fn build_qualifier_name(field: &str, cond: &str) -> String {
+    // Try to extract the value from conditions like field = 'value' or field IN (...)
+    let lower = cond.to_lowercase();
+    if let Some(pos) = lower.find('=') {
+        let val = cond[pos + 1..].trim().trim_matches(|c| c == '\'' || c == '"' || c == ' ');
+        if !val.is_empty() {
+            return format!("{}_{}", field, val.to_lowercase());
+        }
+    }
+    field.to_string()
+}
+
+/// Build a derived metric SQL.
+fn build_derived_sql(agg: &str, col: &str, source_table: &str, granularity: &[String]) -> String {
+    let from = if source_table.is_empty() {
+        "unknown_table"
+    } else {
+        source_table.split(',').next().unwrap_or(source_table)
+    };
+    let group_by = if granularity.is_empty() {
+        String::new()
+    } else {
+        format!("\nGROUP BY {}", granularity.join(", "))
+    };
+    format!(
+        "SELECT {}({}) AS derived_metric{}\nFROM {}{}",
+        agg, col,
+        if granularity.is_empty() {
+            String::new()
+        } else {
+            format!(", {}", granularity.join(", "))
+        },
+        from,
+        group_by
+    )
+}
+
+/// Upsert an atomic metric, returning its id.
+fn upsert_atomic_metric(
+    conn: &Connection,
+    project_id: &str,
+    name: &str,
+    expr: &str,
+    agg: &str,
+    source_col: &str,
+    source_table: &str,
+    now: &str,
+) -> Result<i64, rusqlite::Error> {
+    conn.execute(
+        "INSERT INTO atomic_metric_registry
+            (project_id, metric_name, expression, agg_func, source_column, source_table, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'confirmed', ?7, ?7)
+         ON CONFLICT(project_id, metric_name) DO UPDATE SET
+            expression = excluded.expression,
+            agg_func = excluded.agg_func,
+            source_column = excluded.source_column,
+            source_table = excluded.source_table,
+            updated_at = excluded.updated_at",
+        params![project_id, name, expr, agg, source_col, source_table.split(',').next().unwrap_or(""), now],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Upsert a business qualifier, returning its id.
+fn upsert_qualifier(
+    conn: &Connection,
+    project_id: &str,
+    name: &str,
+    expr: &str,
+    field: &str,
+    now: &str,
+) -> Result<i64, rusqlite::Error> {
+    conn.execute(
+        "INSERT INTO business_qualifier_registry
+            (project_id, qualifier_name, qualifier_expr, field_name, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'confirmed', ?5, ?5)
+         ON CONFLICT(project_id, qualifier_name) DO UPDATE SET
+            qualifier_expr = excluded.qualifier_expr,
+            field_name = excluded.field_name,
+            ref_count = ref_count + 1,
+            updated_at = excluded.updated_at",
+        params![project_id, name, expr, field, now],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// List atomic metrics.
+pub fn list_atomic_metrics(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<AtomicMetricEntry>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, metric_name, expression, agg_func, source_column, source_table, description, status
+         FROM atomic_metric_registry WHERE project_id = ?1 AND status = 'confirmed'
+         ORDER BY source_column, agg_func",
+    )?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(AtomicMetricEntry {
+            id: row.get(0)?,
+            metric_name: row.get(1)?,
+            expression: row.get(2)?,
+            agg_func: row.get(3)?,
+            source_column: row.get(4)?,
+            source_table: row.get(5)?,
+            description: row.get::<_, String>(6).unwrap_or_default(),
+            status: row.get(7)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// List business qualifiers.
+pub fn list_qualifiers(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<QualifierEntry>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, qualifier_name, qualifier_expr, field_name, ref_count
+         FROM business_qualifier_registry WHERE project_id = ?1
+         ORDER BY ref_count DESC",
+    )?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(QualifierEntry {
+            id: row.get(0)?,
+            qualifier_name: row.get(1)?,
+            qualifier_expr: row.get(2)?,
+            field_name: row.get(3)?,
+            ref_count: row.get::<_, i64>(4).unwrap_or(0) as usize,
+        })
+    })?;
+    rows.collect()
+}
+
+/// List derived metrics.
+pub fn list_derived_metrics(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<DerivedMetricEntry>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, metric_name, atomic_metric_name, qualifier_names, time_period,
+                stat_granularity, full_expression, full_sql
+         FROM derived_metric_registry WHERE project_id = ?1
+         ORDER BY atomic_metric_name, metric_name",
+    )?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        let qn_json: String = row.get::<_, String>(3).unwrap_or_default();
+        let qn: Vec<String> = serde_json::from_str(&qn_json).unwrap_or_default();
+        let gran_json: String = row.get::<_, String>(5).unwrap_or_default();
+        let gran: Vec<String> = serde_json::from_str(&gran_json).unwrap_or_default();
+        Ok(DerivedMetricEntry {
+            id: row.get(0)?,
+            metric_name: row.get(1)?,
+            atomic_metric_name: row.get::<_, String>(2).unwrap_or_default(),
+            qualifier_names: qn,
+            time_period: row.get::<_, String>(4).unwrap_or_default(),
+            stat_granularity: gran,
+            full_expression: row.get::<_, String>(6).unwrap_or_default(),
+            full_sql: row.get::<_, String>(7).unwrap_or_default(),
+        })
+    })?;
+    rows.collect()
+}
+
+// ============================================================
+// Summary Table Recommendations
+// ============================================================
+
+/// A summary table recommendation entry.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SummaryRecommendation {
+    pub id: i64,
+    pub recommended_table_name: String,
+    pub recommended_layer: String,
+    pub stat_granularity: Vec<String>,
+    pub time_period: String,
+    pub source_table: String,
+    pub metric_count: usize,
+    pub metric_names: Vec<String>,
+    pub suggested_sql: String,
+    pub source_scripts: Vec<String>,
+    pub potential_savings: String,
+    pub status: String,
+}
+
+/// Generate summary table recommendations from metric analysis families.
+pub fn generate_summary_recommendations(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<usize, rusqlite::Error> {
+    let now = chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
+
+    // Get metric analysis families (same model, same pattern, count ≥ 3).
+    let analysis = analyze_metrics(conn, project_id)?;
+
+    // Clear old recommendations.
+    conn.execute(
+        "DELETE FROM summary_table_recommendation WHERE project_id = ?1",
+        params![project_id],
+    )?;
+
+    let mut count = 0usize;
+    for family in &analysis.families {
+        if family.count < 3 {
+            continue;
+        }
+
+        // Infer stat granularity from the pattern (CASE WHEN fields).
+        let granularity = extract_granularity_from_pattern(&family.pattern);
+
+        // Infer source table from the model.
+        let source_table = &family.bound_model;
+
+        // Generate recommended table name.
+        let rec_name = generate_summary_table_name(source_table, &granularity);
+
+        // Build suggested SQL.
+        let suggested_sql = build_summary_sql(source_table, &family.columns, &granularity);
+
+        let savings = format!("合并 {} 个同模式指标为 1 个汇总表", family.count);
+
+        let cols_json = serde_json::to_string(&family.columns).unwrap_or_default();
+        let gran_json = serde_json::to_string(&granularity).unwrap_or_default();
+
+        conn.execute(
+            "INSERT INTO summary_table_recommendation
+                (project_id, recommended_table_name, recommended_layer, stat_granularity,
+                 time_period, source_table, metric_count, metric_names, suggested_sql,
+                 source_scripts, potential_savings, status, created_at, updated_at)
+             VALUES (?1, ?2, 'DWS', ?3, 'daily', ?4, ?5, ?6, ?7, '[]', ?8, 'pending', ?9, ?9)",
+            params![
+                project_id,
+                rec_name,
+                gran_json,
+                source_table,
+                family.count,
+                cols_json,
+                suggested_sql,
+                savings,
+                now,
+            ],
+        )?;
+        count += 1;
+    }
+
+    // Also generate from cross-model duplicates with high count.
+    for dup in &analysis.duplicates {
+        if dup.metric_count < 5 {
+            continue;
+        }
+        let granularity = extract_granularity_from_pattern(&dup.normalized_expr);
+        let rec_name = format!("dws_{}_{}", dup.aggregation, "consolidated");
+        let cols_json = serde_json::to_string(&dup.metric_names).unwrap_or_default();
+        let gran_json = serde_json::to_string(&granularity).unwrap_or_default();
+        let savings = format!("跨 {} 个模型合并 {} 个重复指标", dup.bound_models.len(), dup.metric_count);
+
+        conn.execute(
+            "INSERT INTO summary_table_recommendation
+                (project_id, recommended_table_name, recommended_layer, stat_granularity,
+                 time_period, source_table, metric_count, metric_names, suggested_sql,
+                 source_scripts, potential_savings, status, created_at, updated_at)
+             VALUES (?1, ?2, 'DWS', ?3, 'daily', '', ?4, ?5, '', '[]', ?6, 'pending', ?7, ?7)",
+            params![
+                project_id,
+                rec_name,
+                gran_json,
+                dup.metric_count,
+                cols_json,
+                savings,
+                now,
+            ],
+        )?;
+        count += 1;
+    }
+
+    Ok(count)
+}
+
+/// List summary table recommendations.
+pub fn list_summary_recommendations(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<SummaryRecommendation>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, recommended_table_name, recommended_layer, stat_granularity,
+                time_period, source_table, metric_count, metric_names, suggested_sql,
+                source_scripts, potential_savings, status
+         FROM summary_table_recommendation WHERE project_id = ?1
+         ORDER BY metric_count DESC",
+    )?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        let gran_json: String = row.get::<_, String>(3).unwrap_or_default();
+        let gran: Vec<String> = serde_json::from_str(&gran_json).unwrap_or_default();
+        let mn_json: String = row.get::<_, String>(7).unwrap_or_default();
+        let mn: Vec<String> = serde_json::from_str(&mn_json).unwrap_or_default();
+        let ss_json: String = row.get::<_, String>(9).unwrap_or_default();
+        let ss: Vec<String> = serde_json::from_str(&ss_json).unwrap_or_default();
+        Ok(SummaryRecommendation {
+            id: row.get(0)?,
+            recommended_table_name: row.get(1)?,
+            recommended_layer: row.get::<_, String>(2).unwrap_or_default(),
+            stat_granularity: gran,
+            time_period: row.get::<_, String>(4).unwrap_or_default(),
+            source_table: row.get::<_, String>(5).unwrap_or_default(),
+            metric_count: row.get::<_, i64>(6).unwrap_or(0) as usize,
+            metric_names: mn,
+            suggested_sql: row.get::<_, String>(8).unwrap_or_default(),
+            source_scripts: ss,
+            potential_savings: row.get::<_, String>(10).unwrap_or_default(),
+            status: row.get(11)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// Extract granularity dimensions from a normalized expression pattern.
+/// "sum(case when video_ctgy = ? ...)" → ["video_ctgy"]
+fn extract_granularity_from_pattern(pattern: &str) -> Vec<String> {
+    let lower = pattern.to_lowercase();
+    if !lower.contains("when") {
+        return vec![];
+    }
+    // Find identifiers between WHEN and THEN.
+    let mut fields = Vec::new();
+    let keywords = [
+        "case", "when", "then", "else", "end", "and", "or", "not",
+        "in", "is", "null", "like", "between",
+    ];
+    for token in lower.split(|c: char| !c.is_alphanumeric() && c != '_') {
+        let t = token.trim();
+        if t.is_empty() || keywords.contains(&t) || t == "?" {
+            continue;
+        }
+        // This is likely a field name.
+        fields.push(t.to_string());
+    }
+    // Deduplicate preserving order.
+    let mut seen = HashSet::new();
+    fields.retain(|f| seen.insert(f.clone()));
+    fields
+}
+
+/// Generate a recommended summary table name.
+fn generate_summary_table_name(source: &str, granularity: &[String]) -> String {
+    let gran_part = if granularity.is_empty() {
+        "statt".to_string()
+    } else {
+        granularity
+            .iter()
+            .map(|g| g.split('_').next().unwrap_or(g))
+            .collect::<Vec<_>>()
+            .join("_")
+    };
+    // Extract meaningful part from source table name.
+    let src_clean = source
+        .split('.')
+        .last()
+        .unwrap_or(source)
+        .trim_start_matches("s20_")
+        .trim_start_matches("s02_")
+        .trim_start_matches("s03_")
+        .trim_start_matches("s99_");
+    format!("dws_{}_{}_statt", src_clean, gran_part)
+}
+
+/// Build a suggested summary SQL.
+fn build_summary_sql(source: &str, columns: &[String], granularity: &[String]) -> String {
+    let group_cols = if granularity.is_empty() {
+        "dt".to_string()
+    } else {
+        granularity.join(", ")
+    };
+    let mut sql = format!("SELECT\n  {},\n", group_cols);
+    for (i, col) in columns.iter().enumerate() {
+        if i < columns.len() - 1 {
+            sql.push_str(&format!("  -- {} (from CASE WHEN)\n", col));
+        }
+    }
+    sql.push_str(&format!("\nFROM {}\nGROUP BY {}", source, group_cols));
+    sql
+}
+
+/// A lightweight regex helper (avoids pulling in the regex crate if not available).
+fn regex_lite(_pat: &'static str) -> RegexLite {
+    RegexLite
+}
+
+struct RegexLite;
+
+impl RegexLite {
+    fn captures<'a>(&self, text: &'a str) -> Option<RegexCaps> {
+        // Simple sequential matching for our patterns.
+        // We do case-insensitive matching.
+        let lower_text = text.to_lowercase();
+        let lower_pat = String::new(); // unused
+
+        // Find AGG( prefix.
+        let aggs = ["sum", "count", "avg", "average", "max", "min", "median"];
+        let mut matched_agg = None;
+        let mut after_agg = 0;
+        for agg in &aggs {
+            if lower_text.starts_with(agg) {
+                let after = &text[agg.len()..];
+                let after_trimmed = after.trim_start();
+                if after_trimmed.starts_with('(') {
+                    matched_agg = Some(*agg);
+                    after_agg = text.len() - after_trimmed.len();
+                    break;
+                }
+            }
+        }
+
+        // Only handle the two patterns we care about.
+        let trimmed = text.trim();
+
+        // Pattern 1: CASE WHEN inside
+        let lower_t = trimmed.to_lowercase();
+        if lower_t.contains("case when") && lower_t.contains("then") && lower_t.contains("else") {
+            // Try to match: AGG(CASE WHEN <cond> THEN <val> ELSE <else> END)
+            let agg = matched_agg?;
+            // Find the content inside AGG(...).
+            let open = trimmed.find('(')?;
+            let close = trimmed.rfind(')')?;
+            if close <= open {
+                return None;
+            }
+            let inner = &trimmed[open + 1..close];
+            let lower_inner = inner.to_lowercase();
+            let when_pos = lower_inner.find("case when")?;
+            let then_pos = lower_inner.find("then")?;
+            let else_pos = lower_inner.find("else")?;
+            let end_pos = lower_inner.find("end")?;
+
+            if !(when_pos < then_pos && then_pos < else_pos && else_pos < end_pos) {
+                return None;
+            }
+
+            let cond = inner[when_pos + 9..then_pos].trim().to_string();
+            let then_val = inner[then_pos + 4..else_pos].trim().to_string();
+            let else_val = inner[else_pos + 4..end_pos].trim().to_string();
+
+            return Some(RegexCaps {
+                groups: vec![
+                    agg.to_string(),
+                    cond,
+                    then_val,
+                    else_val,
+                ],
+            });
+        }
+
+        // Pattern 2: simple AGG(DISTINCT? col)
+        if let Some(agg) = matched_agg {
+            let open = trimmed.find('(')?;
+            let close = trimmed.rfind(')')?;
+            if close <= open {
+                return None;
+            }
+            let inner = trimmed[open + 1..close].trim();
+            let distinct = if inner.to_lowercase().starts_with("distinct ") {
+                "distinct ".to_string()
+            } else {
+                String::new()
+            };
+            let col = if !distinct.is_empty() {
+                inner[9..].trim()
+            } else {
+                inner
+            };
+
+            // Reject if contains spaces (compound) or operators.
+            if col.contains('+') || col.contains('/') || col.contains('*') {
+                return None;
+            }
+
+            return Some(RegexCaps {
+                groups: vec![
+                    agg.to_string(),
+                    distinct,
+                    col.to_string(),
+                ],
+            });
+        }
+
+        let _ = self; // RegexLite is unit struct
+        None
+    }
+}
+
+struct RegexCaps {
+    groups: Vec<String>,
+}
+
+impl RegexCaps {
+    fn get(&self, i: usize) -> Option<&str> {
+        // Index 0 = full match (not stored), 1+ = capture groups.
+        if i == 0 {
+            return None;
+        }
+        self.groups.get(i - 1).map(|s| s.as_str())
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

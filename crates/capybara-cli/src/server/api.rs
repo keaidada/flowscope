@@ -101,6 +101,18 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/governance/metrics/extract-lineage", post(gov_extract_lineage_metrics))
         .route("/governance/metrics/analysis", get(gov_metric_analysis))
         .route("/governance/metrics/scripts", get(gov_metric_scripts))
+        // Dimensions
+        .route("/governance/dimensions", get(gov_list_dimensions))
+        .route("/governance/dimensions/discover", post(gov_discover_dimensions))
+        .route("/governance/dimensions/{id}", put(gov_update_dimension))
+        // Metric decomposition (atomic / qualifier / derived)
+        .route("/governance/metrics/decompose", post(gov_decompose_metrics))
+        .route("/governance/metrics/atomic", get(gov_list_atomic_metrics))
+        .route("/governance/metrics/qualifiers", get(gov_list_qualifiers))
+        .route("/governance/metrics/derived", get(gov_list_derived_metrics))
+        // Summary table recommendations
+        .route("/governance/recommendations/summary-tables", get(gov_list_summary_recs).post(gov_generate_summary_recs))
+        .route("/governance/recommendations/summary-tables/{id}", put(gov_update_summary_rec))
         // Designer
         .route("/governance/gen-ddl", post(gov_gen_ddl))
         .route("/governance/reverse-engineer", post(gov_reverse_engineer))
@@ -3534,6 +3546,201 @@ async fn gov_metric_scripts(
         Ok(scripts) => Json(scripts).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Script list failed: {e}")).into_response(),
     }
+}
+
+// ============================================================
+// Dimension Registry handlers
+// ============================================================
+
+/// POST /api/governance/dimensions/discover — auto-discover dimension candidates
+async fn gov_discover_dimensions(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GovProjectIdBody>,
+) -> impl IntoResponse {
+    let main_conn = match state.db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    let gov_conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Gov DB lock: {e}")).into_response(),
+    };
+    match super::governance::dimension::discover_dimensions(&main_conn, &gov_conn, &req.project_id) {
+        Ok(count) => Json(serde_json::json!({"discovered": count})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Discovery failed: {e}")).into_response(),
+    }
+}
+
+/// GET /api/governance/dimensions — list dimensions (optional ?status=candidate|confirmed)
+async fn gov_list_dimensions(
+    State(state): State<Arc<AppState>>,
+    Query(mut q): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    let project_id = q.remove("project_id").unwrap_or_default();
+    let status = q.get("status").map(|s| s.as_str());
+    match super::governance::dimension::list_dimensions(&conn, &project_id, status) {
+        Ok(dims) => Json(dims).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("List failed: {e}")).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateDimensionRequest {
+    project_id: String,
+    status: Option<String>,
+    dim_name: Option<String>,
+    dim_name_cn: Option<String>,
+    description: Option<String>,
+}
+
+/// PUT /api/governance/dimensions/:id — confirm/edit/dismiss a dimension
+async fn gov_update_dimension(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+    Json(req): Json<UpdateDimensionRequest>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::dimension::update_dimension(
+        &conn, &req.project_id, id,
+        req.status.as_deref(),
+        req.dim_name.as_deref(),
+        req.dim_name_cn.as_deref(),
+        req.description.as_deref(),
+    ) {
+        Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {e}")).into_response(),
+    }
+}
+
+// ============================================================
+// Metric Decomposition handlers (atomic / qualifier / derived)
+// ============================================================
+
+/// POST /api/governance/metrics/decompose — decompose metrics into atomic/qualifier/derived
+async fn gov_decompose_metrics(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GovProjectIdBody>,
+) -> impl IntoResponse {
+    let gov_conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Gov DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::decompose_metrics(&gov_conn, &req.project_id) {
+        Ok(stats) => Json(stats).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Decompose failed: {e}")).into_response(),
+    }
+}
+
+/// GET /api/governance/metrics/atomic — list atomic metrics
+async fn gov_list_atomic_metrics(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::list_atomic_metrics(&conn, &q.project_id) {
+        Ok(metrics) => Json(metrics).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("List failed: {e}")).into_response(),
+    }
+}
+
+/// GET /api/governance/metrics/qualifiers — list business qualifiers
+async fn gov_list_qualifiers(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::list_qualifiers(&conn, &q.project_id) {
+        Ok(qualifiers) => Json(qualifiers).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("List failed: {e}")).into_response(),
+    }
+}
+
+/// GET /api/governance/metrics/derived — list derived metrics
+async fn gov_list_derived_metrics(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::list_derived_metrics(&conn, &q.project_id) {
+        Ok(metrics) => Json(metrics).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("List failed: {e}")).into_response(),
+    }
+}
+
+// ============================================================
+// Summary Table Recommendation handlers
+// ============================================================
+
+/// GET /api/governance/recommendations/summary-tables — list recommendations
+async fn gov_list_summary_recs(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::list_summary_recommendations(&conn, &q.project_id) {
+        Ok(recs) => Json(recs).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("List failed: {e}")).into_response(),
+    }
+}
+
+/// POST /api/governance/recommendations/summary-tables — generate recommendations
+async fn gov_generate_summary_recs(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GovProjectIdBody>,
+) -> impl IntoResponse {
+    let gov_conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Gov DB lock: {e}")).into_response(),
+    };
+    match super::governance::metric::generate_summary_recommendations(&gov_conn, &req.project_id) {
+        Ok(count) => Json(serde_json::json!({"generated": count})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Generation failed: {e}")).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateSummaryRecRequest {
+    project_id: String,
+    status: Option<String>,
+}
+
+/// PUT /api/governance/recommendations/summary-tables/:id — update status
+async fn gov_update_summary_rec(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+    Json(req): Json<UpdateSummaryRecRequest>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    if let Some(status) = req.status {
+        let _ = conn.execute(
+            "UPDATE summary_table_recommendation SET status = ?1, updated_at = ?2 WHERE id = ?3 AND project_id = ?4",
+            rusqlite::params![status, now, id, req.project_id],
+        );
+    }
+    Json(serde_json::json!({"ok": true})).into_response()
 }
 
 #[derive(Deserialize)]
