@@ -180,7 +180,7 @@ export interface MetricAnalysis {
   tips: OptimizationTip[];
 }
 
-export type GovernanceTab = 'dashboard' | 'models' | 'metrics' | 'dimensions' | 'contracts' | 'designer' | 'settings';
+export type GovernanceTab = 'dashboard' | 'models' | 'modeling' | 'metrics' | 'dimensions' | 'contracts' | 'designer' | 'settings';
 
 // ── Dimension Registry types ──────────────────────────────────────
 export interface DimensionEntry {
@@ -251,6 +251,24 @@ export interface SummaryRecommendation {
   source_scripts: string[];
   potential_savings: string;
   status: string;
+}
+
+// ── Modeling (Dataphin-style) types ─────────────────────────────
+export interface ModelingDomain {
+  domain_name: string;
+  model_count: number;
+  description: string;
+}
+
+export interface ModelingOverview {
+  total_models: number;
+  total_dimensions: number;
+  total_atomic_metrics: number;
+  total_derived_metrics: number;
+  total_qualifiers: number;
+  total_summary_tables: number;
+  layers: Record<string, number>;
+  domains: ModelingDomain[];
 }
 
 function apiBase(): string {
@@ -498,5 +516,21 @@ export const governanceApi = {
       method: 'PUT',
       body: JSON.stringify({ project_id: projectId, status }),
     });
+  },
+
+  // === Modeling (Dataphin-style) ===
+  async discoverDomains(projectId: string): Promise<{ discovered: number }> {
+    return govFetch('/domains/discover', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId }),
+    });
+  },
+
+  async listDomains(projectId: string): Promise<Array<{ id: number; domain_name: string; description: string; model_count: number }>> {
+    return govFetch(`/domains?project_id=${encodeURIComponent(projectId)}`);
+  },
+
+  async modelingOverview(projectId: string): Promise<ModelingOverview> {
+    return govFetch(`/modeling/overview?project_id=${encodeURIComponent(projectId)}`);
   },
 };

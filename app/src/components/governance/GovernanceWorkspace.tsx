@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, LayoutDashboard, Box, BarChart3, FileText, Settings, Palette, Ruler } from 'lucide-react';
+import { Shield, LayoutDashboard, Box, BarChart3, FileText, Settings, Palette, Ruler, GitMerge } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useGovernanceData } from '@/hooks/useGovernanceData';
 import { GovernanceDashboard } from './dashboard/GovernanceDashboard';
@@ -12,6 +12,7 @@ import { ContractManager } from './contract/ContractManager';
 import { ModelManager } from './model/ModelManager';
 import { MetricManager } from './metric/MetricManager';
 import { DimensionManager } from './dimension/DimensionManager';
+import { ModelingWorkspace } from './modeling/ModelingWorkspace';
 import { VisualModelDesigner } from './designer/VisualModelDesigner';
 import { GovernanceSettings } from './settings/GovernanceSettings';
 import type { GovernanceTab } from '@/lib/governance-api';
@@ -22,6 +23,7 @@ interface GovernanceWorkspaceProps {
 
 const TABS: Array<{ id: GovernanceTab; icon: React.ElementType; labelKey: string }> = [
   { id: 'dashboard', icon: LayoutDashboard, labelKey: 'governance.dashboard' },
+  { id: 'modeling', icon: GitMerge, labelKey: 'governance.modeling' },
   { id: 'models', icon: Box, labelKey: 'governance.models' },
   { id: 'metrics', icon: BarChart3, labelKey: 'governance.metrics' },
   { id: 'dimensions', icon: Ruler, labelKey: 'governance.dimensions' },
@@ -93,6 +95,7 @@ export function GovernanceWorkspace({ projectId }: GovernanceWorkspaceProps) {
       {/* Content — fills remaining space */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === 'dashboard' && <GovernanceDashboard gov={gov} projectId={projectId} />}
+        {activeTab === 'modeling' && <ModelingWorkspace projectId={projectId} />}
         {activeTab === 'contracts' && <ContractManager contracts={gov.contracts} onRefresh={gov.refreshContracts} />}
         {activeTab === 'models' && <ModelManager projectId={projectId} />}
         {activeTab === 'metrics' && <MetricManager projectId={projectId} />}

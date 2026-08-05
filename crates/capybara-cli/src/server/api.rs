@@ -113,6 +113,10 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         // Summary table recommendations
         .route("/governance/recommendations/summary-tables", get(gov_list_summary_recs).post(gov_generate_summary_recs))
         .route("/governance/recommendations/summary-tables/{id}", put(gov_update_summary_rec))
+        // Modeling (Dataphin-style)
+        .route("/governance/domains", get(gov_list_domains))
+        .route("/governance/domains/discover", post(gov_discover_domains))
+        .route("/governance/modeling/overview", get(gov_modeling_overview))
         // Designer
         .route("/governance/gen-ddl", post(gov_gen_ddl))
         .route("/governance/reverse-engineer", post(gov_reverse_engineer))
@@ -3784,6 +3788,94 @@ struct GovProjectIdQuery {
 }
 
 // ============================================================
+// Modeling (Dataphin-style) handlers
+// ============================================================
+
+/// POST /api/governance/domains/discover — discover domains from file paths
+async fn gov_discover_domains(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GovProjectIdBody>,
+) -> impl IntoResponse {
+    // Phase 1: read file paths from main DB (hold main lock only).
+    let domains = {
+        let main_conn = match state.db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+        };
+        let mut map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let sql = "SELECT DISTINCT file_path FROM lineage_nodes WHERE project_id = ?1 AND file_path != ''";
+        if let Ok(mut stmt) = main_conn.prepare(sql) {
+            let rows = stmt.query_map(rusqlite::params![&req.project_id], |row| row.get::<_, String>(0));
+            if let Ok(rows) = rows {
+                for fp in rows.flatten() {
+                    let normalized = fp.replace('\\', "/");
+                    let segs: Vec<&str> = normalized.split('/').filter(|s| !s.is_empty()).collect();
+                    if segs.len() >= 2 {
+                        let d = segs[1].to_string();
+                        if d.len() >= 2 && !matches!(d.as_str(), "ALL" | "TMP" | "tmp" | "temp") {
+                            *map.entry(d).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+        }
+        map
+    };
+    // Phase 2: write to gov DB (hold gov lock only).
+    let count = {
+        let gov_conn = match state.gov_db.lock() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Gov DB lock: {e}")).into_response(),
+        };
+        let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        let mut upserted = 0usize;
+        for (name, cnt) in &domains {
+            let desc = format!("{cnt} 个模型");
+            let _ = gov_conn.execute(
+                "INSERT INTO domain_registry (project_id, domain_name, description, status, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 1, ?4, ?4)
+                 ON CONFLICT(project_id, domain_name) DO UPDATE SET
+                    description = excluded.description, updated_at = excluded.updated_at",
+                rusqlite::params![&req.project_id, name, desc, now],
+            );
+            upserted += 1;
+        }
+        upserted
+    };
+    Json(serde_json::json!({"discovered": count})).into_response()
+}
+
+/// GET /api/governance/domains — list domains
+async fn gov_list_domains(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::modeling::list_domains(&conn, &q.project_id) {
+        Ok(domains) => Json(domains).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("List failed: {e}")).into_response(),
+    }
+}
+
+/// GET /api/governance/modeling/overview — modeling overview stats
+async fn gov_modeling_overview(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    match super::governance::modeling::modeling_overview(&conn, &q.project_id) {
+        Ok(overview) => Json(overview).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Overview failed: {e}")).into_response(),
+    }
+}
+
+// ============================================================
 // Designer handlers
 // ============================================================
 
@@ -4229,7 +4321,7 @@ async fn gov_convert_dbt_batch(
             "SELECT script_name, from_table, to_table FROM table_level_edges WHERE project_id = ?1",
         ) {
             use rusqlite::params;
-            let rows = stmt.query_map(params![&req.project_id], |row| {
+            let rows = stmt.query_map(rusqlite::params![&req.project_id], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
             });
             if let Ok(rows) = rows {

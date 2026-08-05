@@ -17,6 +17,7 @@ pub mod fingerprint;
 pub mod health;
 pub mod metric;
 pub mod model;
+pub mod modeling;
 pub mod report;
 pub mod semantic_yaml;
 
