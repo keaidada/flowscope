@@ -46,7 +46,27 @@ fn get_active_model(conn: &Connection, project_id: &str) -> (String, String) {
 pub fn get_ai_config(conn: &Connection, project_id: &str) -> AiConfig {
     let (provider, model) = get_active_model(conn, project_id);
     get_model_config(conn, project_id, &provider, &model)
-        .unwrap_or_else(|| AiConfig { provider, model, ..AiConfig::default() })
+        .unwrap_or_else(|| default_config_for(&provider, &model))
+}
+
+/// Provider-aware defaults so switching to a model that was never saved
+/// still routes to the correct provider (Ollama local vs DeepSeek cloud).
+fn default_config_for(provider: &str, model: &str) -> AiConfig {
+    match provider {
+        "ollama" => AiConfig {
+            provider: "ollama".into(),
+            api_key: "ollama".into(),
+            model: model.to_string(),
+            endpoint: "http://localhost:11434".into(),
+            system_prompt: AiConfig::default().system_prompt,
+            temperature: 0.7,
+        },
+        _ => AiConfig {
+            provider: provider.to_string(),
+            model: model.to_string(),
+            ..AiConfig::default()
+        },
+    }
 }
 
 /// Load a specific model's config (or None if never configured).

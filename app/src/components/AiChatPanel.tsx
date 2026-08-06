@@ -192,10 +192,13 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
   const quickSwitchModel = (provider: string, model: string) => {
     console.log('[ai] quickSwitchModel', provider, model, 'projectId=', projectId);
     setActiveKey(modelKey(provider, model));
+    const cfg = modelConfig(provider, model);
+    // Send the full config so the backend has this model's own endpoint/api_key.
+    // If it was never saved, this persists the preset defaults for it.
     fetch(`${apiBase()}/api/ai/config`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: projectId, provider, model }),
+      body: JSON.stringify({ project_id: projectId, ...cfg }),
     }).then(r => console.log('[ai] quickSwitch response', r.status)).catch(e => console.error('[ai] quickSwitch failed', e));
   };
 
