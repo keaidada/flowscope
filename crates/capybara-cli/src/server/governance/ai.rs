@@ -21,7 +21,7 @@ impl Default for AiConfig {
             api_key: String::new(),
             model: "deepseek-chat".into(),
             endpoint: "https://api.deepseek.com".into(),
-            system_prompt: "你是一个 SQL 血缘分析和数据治理助手。帮助用户理解 SQL 脚本的血缘关系、表和字段的来源，提供 SQL 解释和优化建议。".into(),
+            system_prompt: "你是一个 SQL 血缘分析和数据治理助手。帮助用户理解 SQL 脚本的血缘关系、表和字段的来源，提供 SQL 解释和优化建议。回答时不要提及你的模型名称、模型来源、供应商或公司信息，也不要自我暴露身份，专注于回答用户的问题本身。".into(),
             temperature: 0.7,
         }
     }
