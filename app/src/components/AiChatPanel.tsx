@@ -594,6 +594,37 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
   );
 }
 
+// Normalize LLM-generated markdown that often omits the space after
+// ATX heading markers and list bullets (e.g. `###1.标题` / `-**定义**`),
+// which GFM otherwise treats as plain text. Fenced code blocks are skipped.
+function normalizeMarkdown(src: string): string {
+  if (!src) return src;
+  const lines = src.split('\n');
+  let inFence = false;
+  const out: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^```/.test(t) || /^~~~/.test(t)) {
+      inFence = !inFence;
+      out.push(line);
+      continue;
+    }
+    if (inFence) {
+      out.push(line);
+      continue;
+    }
+    let fixed = line;
+    // heading: ###text -> ### text
+    fixed = fixed.replace(/^(#{1,6})(?=[^\s#])/, '$1 ');
+    // bullet: -text / *text / +text -> - text
+    fixed = fixed.replace(/^([-*+])(?=[^\s])/, '$1 ');
+    // table row missing leading pipe spacing (e.g. `|序号|...`) is fine;
+    // but a heading line that ends with | could merge with a table — handled by heading fix.
+    out.push(fixed);
+  }
+  return out.join('\n');
+}
+
 function MessageBubble({ message, loading }: { message: Message; loading?: boolean }) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -670,7 +701,7 @@ function MessageBubble({ message, loading }: { message: Message; loading?: boole
                 hr: () => <hr className="my-2 border-border" />,
               }}
             >
-              {message.content}
+              {normalizeMarkdown(message.content)}
             </ReactMarkdown>
             </div>
             {/* Copy button below the message */}
