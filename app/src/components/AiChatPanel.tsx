@@ -54,6 +54,13 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
   const [configSaved, setConfigSaved] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Preset models for quick switching.
+  const PRESETS = [
+    { label: 'Ollama · qwen2.5:3b', provider: 'ollama', model: 'qwen2.5:3b', endpoint: 'http://localhost:11434', api_key: 'ollama' },
+    { label: 'DeepSeek · deepseek-chat', provider: 'deepseek', model: 'deepseek-chat', endpoint: 'https://api.deepseek.com', api_key: '' },
+    { label: 'DeepSeek · deepseek-reasoner', provider: 'deepseek', model: 'deepseek-reasoner', endpoint: 'https://api.deepseek.com', api_key: '' },
+  ];
+
   // Load config on mount / project change.
   useEffect(() => {
     if (!projectId) return;
@@ -72,18 +79,34 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
       .catch(() => {});
   }, [projectId]);
 
-  const saveConfig = async () => {
+  const saveConfig = async (cfg?: typeof config) => {
     if (!projectId) return;
     try {
+      const c = cfg ?? config;
       await fetch(`${apiBase()}/api/ai/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, ...config }),
+        body: JSON.stringify({ project_id: projectId, ...c }),
       });
-      setConfigSaved(true);
-      setShowSettings(false);
-      setTimeout(() => setConfigSaved(false), 1500);
+      if (!cfg) {
+        setConfigSaved(true);
+        setShowSettings(false);
+        setTimeout(() => setConfigSaved(false), 1500);
+      }
     } catch (e) { console.error('save config failed', e); }
+  };
+
+  // Quick model switch: swap provider/model and persist immediately.
+  const quickSwitchModel = (preset: { provider: string; model: string; endpoint: string; api_key: string }) => {
+    const next = {
+      ...config,
+      provider: preset.provider,
+      model: preset.model,
+      endpoint: preset.endpoint,
+      api_key: config.api_key || preset.api_key,
+    };
+    setConfig(next);
+    saveConfig(next);
   };
 
   // Auto-scroll to bottom on new messages.
@@ -220,12 +243,20 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
           <Sparkles className="h-3.5 w-3.5 text-primary" />
         </div>
         <span className="font-semibold text-sm">AI 助手</span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{config.provider}</span>
-        {currentFilePath && (
-          <span className="text-[10px] text-muted-foreground truncate max-w-[100px]" title={currentFilePath}>
-            · {currentFilePath.split('/').pop()}
-          </span>
-        )}
+        {/* Model quick-switch dropdown */}
+        <select
+          value={`${config.provider}|${config.model}`}
+          onChange={e => {
+            const preset = PRESETS.find(p => `${p.provider}|${p.model}` === e.target.value);
+            if (preset) quickSwitchModel(preset);
+          }}
+          className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border focus:outline-none max-w-[130px]"
+          title="切换模型"
+        >
+          {PRESETS.map(p => (
+            <option key={`${p.provider}|${p.model}`} value={`${p.provider}|${p.model}`}>{p.label}</option>
+          ))}
+        </select>
         <div className="ml-auto flex items-center gap-0.5">
           {configSaved && <span className="text-[10px] text-green-600 flex items-center gap-0.5 mr-1"><Check className="h-3 w-3" /></span>}
           <button onClick={() => setMessages([{ role: 'assistant', content: '对话已清空，可以开始新的提问。' }])} className="p-1 rounded hover:bg-accent" title="清空对话">
@@ -243,30 +274,16 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
       {/* Settings panel */}
       {showSettings && (
         <div className="border-b px-3 py-3 space-y-2.5 bg-muted/10 shrink-0">
-          <div className="flex items-center gap-2">
-            <label className="w-16 text-[11px] text-muted-foreground shrink-0">Provider</label>
-            <select value={config.provider} onChange={e => {
-              const p = e.target.value;
-              if (p === 'ollama') setConfig({ ...config, provider: p, endpoint: 'http://localhost:11434', model: 'qwen2.5:3b', api_key: 'ollama' });
-              else if (p === 'deepseek') setConfig({ ...config, provider: p, endpoint: 'https://api.deepseek.com', model: 'deepseek-chat', api_key: '' });
-              else setConfig({ ...config, provider: p });
-            }} className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none">
-              <option value="ollama">Ollama (本地)</option>
-              <option value="deepseek">DeepSeek</option>
-            </select>
+          <div className="text-[11px] text-muted-foreground mb-1">
+            当前模型：{config.provider} / {config.model}
           </div>
-          {config.provider !== 'ollama' && (
+          {config.provider === 'deepseek' && (
             <div className="flex items-center gap-2">
               <label className="w-16 text-[11px] text-muted-foreground shrink-0">API Key</label>
               <input type="password" value={config.api_key} onChange={e => setConfig({ ...config, api_key: e.target.value })}
                 placeholder="sk-..." className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <label className="w-16 text-[11px] text-muted-foreground shrink-0">Model</label>
-            <input value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })}
-              className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
-          </div>
           <div className="flex items-center gap-2">
             <label className="w-16 text-[11px] text-muted-foreground shrink-0">Endpoint</label>
             <input value={config.endpoint} onChange={e => setConfig({ ...config, endpoint: e.target.value })}
@@ -284,7 +301,7 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
               onChange={e => setConfig({ ...config, temperature: Number(e.target.value) })}
               className="w-20 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
           </div>
-          <Button size="sm" className="h-7 w-full text-xs mt-1" onClick={saveConfig}>保存配置</Button>
+          <Button size="sm" className="h-7 w-full text-xs mt-1" onClick={() => saveConfig()}>保存配置</Button>
         </div>
       )}
 
