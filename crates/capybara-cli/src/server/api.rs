@@ -4688,6 +4688,7 @@ struct SaveAiConfigRequest {
     endpoint: Option<String>,
     system_prompt: Option<String>,
     temperature: Option<f64>,
+    output_template: Option<String>,
 }
 
 /// PUT /api/ai/config — save AI configuration.
@@ -4731,6 +4732,7 @@ async fn gov_save_ai_config(
         if let Some(e) = req.endpoint { cfg.endpoint = e; }
         if let Some(s) = req.system_prompt { cfg.system_prompt = s; }
         if let Some(t) = req.temperature { cfg.temperature = t; }
+        if let Some(t) = req.output_template { cfg.output_template = t; }
         if let Err(e) = super::governance::ai::save_model_config(&conn, &req.project_id, &cfg) {
             eprintln!("[ai] PUT save_model_config FAILED: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response();

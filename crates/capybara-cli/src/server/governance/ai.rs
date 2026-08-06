@@ -12,6 +12,9 @@ pub struct AiConfig {
     pub endpoint: String,
     pub system_prompt: String,
     pub temperature: f64,
+    /// Id of the selected output-format template (e.g. "script-analysis").
+    #[serde(default)]
+    pub output_template: String,
 }
 
 impl Default for AiConfig {
@@ -23,6 +26,7 @@ impl Default for AiConfig {
             endpoint: "https://api.deepseek.com".into(),
             system_prompt: "你是一个 SQL 血缘分析和数据治理助手。帮助用户理解 SQL 脚本的血缘关系、表和字段的来源，提供 SQL 解释和优化建议。回答时不要提及你的模型名称、模型来源、供应商或公司信息，也不要自我暴露身份，专注于回答用户的问题本身。".into(),
             temperature: 0.7,
+            output_template: "none".into(),
         }
     }
 }
@@ -60,6 +64,7 @@ fn default_config_for(provider: &str, model: &str) -> AiConfig {
             endpoint: "http://localhost:11434".into(),
             system_prompt: AiConfig::default().system_prompt,
             temperature: 0.7,
+            output_template: "none".into(),
         },
         _ => AiConfig {
             provider: provider.to_string(),
@@ -77,7 +82,7 @@ pub fn get_model_config(
     model: &str,
 ) -> Option<AiConfig> {
     conn.query_row(
-        "SELECT provider, api_key, model, endpoint, system_prompt, temperature
+        "SELECT provider, api_key, model, endpoint, system_prompt, temperature, output_template
          FROM ai_model_config WHERE project_id = ?1 AND provider = ?2 AND model = ?3",
         params![project_id, provider, model],
         |row| {
@@ -88,6 +93,7 @@ pub fn get_model_config(
                 endpoint: row.get(3)?,
                 system_prompt: row.get(4)?,
                 temperature: row.get(5)?,
+                output_template: row.get(6)?,
             })
         },
     )
@@ -97,7 +103,7 @@ pub fn get_model_config(
 /// List all configured models for a project (each with its own config).
 pub fn list_model_configs(conn: &Connection, project_id: &str) -> Vec<AiConfig> {
     let mut stmt = match conn.prepare(
-        "SELECT provider, api_key, model, endpoint, system_prompt, temperature
+        "SELECT provider, api_key, model, endpoint, system_prompt, temperature, output_template
          FROM ai_model_config WHERE project_id = ?1",
     ) {
         Ok(s) => s,
@@ -111,6 +117,7 @@ pub fn list_model_configs(conn: &Connection, project_id: &str) -> Vec<AiConfig> 
             endpoint: row.get(3)?,
             system_prompt: row.get(4)?,
             temperature: row.get(5)?,
+            output_template: row.get(6)?,
         })
     }) {
         Ok(rows) => rows,
@@ -129,13 +136,14 @@ pub fn save_model_config(
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
     conn.execute(
-        "INSERT INTO ai_model_config (project_id, provider, api_key, model, endpoint, system_prompt, temperature, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+        "INSERT INTO ai_model_config (project_id, provider, api_key, model, endpoint, system_prompt, temperature, output_template, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
          ON CONFLICT(project_id, provider, model) DO UPDATE SET
             api_key = excluded.api_key,
             endpoint = excluded.endpoint,
             system_prompt = excluded.system_prompt,
             temperature = excluded.temperature,
+            output_template = excluded.output_template,
             updated_at = excluded.updated_at",
         params![
             project_id,
@@ -145,6 +153,7 @@ pub fn save_model_config(
             cfg.endpoint,
             cfg.system_prompt,
             cfg.temperature,
+            cfg.output_template,
             now,
         ],
     )?;

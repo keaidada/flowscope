@@ -39,7 +39,81 @@ interface ModelConfig {
   endpoint: string;
   system_prompt: string;
   temperature: number;
+  output_template?: string;
 }
+
+// Predefined output format templates appended to the system prompt.
+// Each is a standalone instruction block telling the model how to format
+// its reply. Selecting one persists it on the model config.
+interface OutputTemplate {
+  id: string;
+  label: string;
+  description: string;
+  content: string;
+}
+
+const OUTPUT_TEMPLATES: OutputTemplate[] = [
+  {
+    id: 'none',
+    label: '无（默认自由输出）',
+    description: '不附加模板，按系统提示词自由回答',
+    content: '',
+  },
+  {
+    id: 'script-analysis',
+    label: '脚本分析报告',
+    description: '结构化输出：指标清单表格 + 明细说明 + 优化建议',
+    content: `请按照以下模板结构输出脚本分析报告，使用规范的 Markdown 格式（标题 # 后必须有空格，列表 - 后必须有空格，表格每行用 | 分隔且表头后需有分隔行）：
+# 一、指标清单
+（用表格列出：序号 | 指标名称 | 字段名 | 计算逻辑 | 数据来源）
+# 二、指标明细说明
+（对每个指标用 ### 小节说明：定义 / 计算方式 / 数据来源 / 过滤条件）
+# 三、指标间关系
+（列出指标之间的计算公式关系）
+# 四、数据清洗规则
+（说明写入前过滤哪些无效数据）`,
+  },
+  {
+    id: 'sql-explain',
+    label: 'SQL 解释',
+    description: '逐段解释 SQL：表、字段、逻辑、执行流程',
+    content: `请按照以下模板结构解释 SQL 脚本，使用规范的 Markdown 格式：
+# 一、脚本概览
+（用一段话概括脚本目的）
+# 二、源表与目标表
+（用表格列出：表名 | 角色（源/目标） | 用途）
+# 三、核心逻辑拆解
+（用 ### 小节逐段解释关键 SQL：临时表、CTE、join 逻辑）
+# 四、关键字段说明
+（用表格列出：字段名 | 含义 | 来源）`,
+  },
+  {
+    id: 'optimize-suggest',
+    label: '优化建议',
+    description: '定位瓶颈并给出可落地的优化方案',
+    content: `请按照以下模板结构给出 SQL 优化建议，使用规范的 Markdown 格式：
+# 一、性能问题清单
+（用表格列出：序号 | 问题描述 | 严重程度 | 影响）
+# 二、优化建议
+（每条用 ### 小节：问题 / 优化方案 / 修改前后的 SQL 对比（用代码块））
+# 三、优化总结
+（总结收益：预计性能提升、可读性改善等）`,
+  },
+  {
+    id: 'lineage-analysis',
+    label: '血缘分析',
+    description: '梳理表与字段的血缘链路',
+    content: `请按照以下模板结构梳理 SQL 血缘关系，使用规范的 Markdown 格式：
+# 一、血缘概览
+（用文字或 mermaid 图描述数据流向）
+# 二、表级血缘
+（用表格列出：上游表 | 下游表 | 关联关系）
+# 三、字段级血缘
+（用表格列出：目标字段 | 来源表 | 来源字段 | 转换逻辑）
+# 四、风险与建议
+（标注断链、孤儿字段等风险点）`,
+  },
+];
 
 interface AiChatPanelProps {
   open: boolean;
@@ -126,6 +200,7 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
       endpoint: saved?.endpoint ?? preset?.endpoint ?? '',
       system_prompt: saved?.system_prompt ?? DEFAULT_SYSTEM_PROMPT,
       temperature: saved?.temperature ?? 0.7,
+      output_template: saved?.output_template ?? 'none',
     };
   }, [models]);
 
@@ -134,6 +209,15 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
     const [provider, model] = activeKey.split('|');
     return modelConfig(provider, model);
   }, [activeKey, modelConfig]);
+
+  // Compose the final system prompt = base prompt + selected output template.
+  const composeSystemPrompt = useCallback((cfg: ModelConfig): string => {
+    const tpl = OUTPUT_TEMPLATES.find(t => t.id === cfg.output_template);
+    if (tpl && tpl.content) {
+      return `${cfg.system_prompt}\n\n${tpl.content}`;
+    }
+    return cfg.system_prompt;
+  }, []);
 
   // Load config on mount / project change.
   useEffect(() => {
@@ -153,6 +237,7 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
             endpoint: item.endpoint || '',
             system_prompt: item.system_prompt || DEFAULT_SYSTEM_PROMPT,
             temperature: item.temperature ?? 0.7,
+            output_template: item.output_template || 'none',
           };
         }
         setModels(map);
@@ -171,11 +256,17 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
     console.log('[ai] saveConfig called, projectId=', projectId, 'cfg=', cfg ? `${cfg.provider}/${cfg.model}` : 'null(active)');
     try {
       const c = cfg ?? activeConfig;
-      console.log('[ai] saveConfig PUT body=', JSON.stringify({ project_id: projectId, ...c }));
+      // Compose base prompt + template into the persisted system_prompt.
+      const body = {
+        project_id: projectId,
+        ...c,
+        system_prompt: composeSystemPrompt(c),
+      };
+      console.log('[ai] saveConfig PUT body=', JSON.stringify(body));
       const res = await fetch(`${apiBase()}/api/ai/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, ...c }),
+        body: JSON.stringify(body),
       });
       console.log('[ai] saveConfig response status=', res.status);
       if (!res.ok) {
@@ -207,7 +298,11 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
     fetch(`${apiBase()}/api/ai/config`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: projectId, ...cfg }),
+      body: JSON.stringify({
+        project_id: projectId,
+        ...cfg,
+        system_prompt: composeSystemPrompt(cfg),
+      }),
     }).then(r => console.log('[ai] quickSwitch response', r.status)).catch(e => console.error('[ai] quickSwitch failed', e));
   };
 
@@ -562,6 +657,28 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
                   <input type="number" step="0.1" min="0" max="1" value={draft.temperature}
                     onChange={e => setDraft({ ...draft, temperature: Number(e.target.value) })}
                     className="w-20 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none focus:ring-1 focus:ring-ring" />
+                </div>
+                <div className="flex items-start gap-2">
+                  <label className="w-20 text-[11px] text-muted-foreground shrink-0 pt-1">输出模板</label>
+                  <div className="flex-1 space-y-1">
+                    <select
+                      value={draft.output_template ?? 'none'}
+                      onChange={e => setDraft({ ...draft, output_template: e.target.value })}
+                      className="w-full text-xs px-2 py-1 rounded border bg-transparent focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      {OUTPUT_TEMPLATES.map(t => (
+                        <option key={t.id} value={t.id}>{t.label}</option>
+                      ))}
+                    </select>
+                    {(() => {
+                      const tpl = OUTPUT_TEMPLATES.find(t => t.id === draft.output_template);
+                      return tpl && tpl.content ? (
+                        <p className="text-[10px] text-muted-foreground leading-snug">{tpl.description}</p>
+                      ) : (
+                        <p className="text-[10px] text-muted-foreground leading-snug">选择模板后，AI 回复将按该格式输出；未选择则自由输出。</p>
+                      );
+                    })()}
+                  </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-1">
                   <Button size="sm" variant="outline" className="text-xs" onClick={() => setDraftKey(null)}>取消</Button>

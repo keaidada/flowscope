@@ -24,6 +24,22 @@ pub fn open_gov_db(path: &Path) -> Result<Mutex<Connection>, rusqlite::Error> {
 pub fn init_gov_db(conn: &Connection) -> Result<(), rusqlite::Error> {
     create_tables(conn)?;
     migrate_metrics_registry(conn)?;
+    migrate_ai_model_config(conn)?;
+    Ok(())
+}
+
+/// Add the output_template column to ai_model_config if missing (existing DBs).
+fn migrate_ai_model_config(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let cols: Vec<String> = conn
+        .prepare("PRAGMA table_info(ai_model_config)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !cols.iter().any(|c| c == "output_template") {
+        conn.execute_batch(
+            "ALTER TABLE ai_model_config ADD COLUMN output_template TEXT NOT NULL DEFAULT 'none';",
+        )?;
+    }
     Ok(())
 }
 
@@ -434,6 +450,7 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             endpoint        TEXT    NOT NULL DEFAULT '',
             system_prompt   TEXT    NOT NULL DEFAULT '',
             temperature     REAL    NOT NULL DEFAULT 0.7,
+            output_template TEXT    NOT NULL DEFAULT 'none',
             created_at      TEXT    NOT NULL DEFAULT '',
             updated_at      TEXT    NOT NULL DEFAULT '',
             UNIQUE(project_id, provider, model)
