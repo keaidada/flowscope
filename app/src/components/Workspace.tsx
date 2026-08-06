@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { Share2, Github, Settings, Network, Trash2, Bug, Loader2, Shield } from 'lucide-react';
+import { Share2, Github, Settings, Network, Trash2, Bug, Loader2, Shield, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useLineageActions, useLineageState } from '@pondpilot/capybara-react';
@@ -37,6 +37,7 @@ import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { CommandPalette } from './CommandPalette';
 import { GlobalLineageView, type GlobalLineageMode } from './GlobalLineageView';
 import { GovernanceWorkspace } from './governance/GovernanceWorkspace';
+import { AiChatPanel } from './AiChatPanel';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './ui/sheet';
 import { useProject } from '@/lib/project-store';
 import { NavigationProvider } from '@/lib/navigation-context';
@@ -92,6 +93,7 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
   const [lineageWorkspaceOpen, setLineageWorkspaceOpen] = useState(false);
   const [globalLineageOpen, setGlobalLineageOpen] = useState(false);
   const [governanceOpen, setGovernanceOpen] = useState(false);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [globalLineageLoading, setGlobalLineageLoading] = useState(false);
   const [globalLineageView, setGlobalLineageView] = useState<GlobalLineageMode>('list');
   const [globalFocusNodeId, setGlobalFocusNodeId] = useState<string | undefined>(undefined);
@@ -606,6 +608,17 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
             <Shield className="h-3.5 w-3.5" />
             {t('governance.title', '数据治理')}
           </Button>
+
+          {/* AI Assistant Toggle */}
+          <Button
+            variant={aiPanelOpen ? 'secondary' : 'ghost'}
+            size="sm"
+            className="h-7 gap-1.5 text-xs"
+            onClick={() => setAiPanelOpen(!aiPanelOpen)}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            AI
+          </Button>
         </div>
 
         {/* Header Actions */}
@@ -874,6 +887,15 @@ export function Workspace({ backendReady, error, onRetry, isRetrying }: Workspac
                 </Sheet>
               </>
             )}
+
+            {/* AI Assistant Panel */}
+            <AiChatPanel
+              open={aiPanelOpen}
+              onClose={() => setAiPanelOpen(false)}
+              projectId={activeProjectId}
+              currentFilePath={currentProject?.files.find(f => f.id === currentProject.activeFileId)?.path}
+              currentSql={currentProject?.files.find(f => f.id === currentProject.activeFileId)?.content}
+            />
           </div>
         </FocusRegistryProvider>
       </NavigationProvider>

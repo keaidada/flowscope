@@ -408,6 +408,21 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
         );
         CREATE INDEX IF NOT EXISTS idx_summary_rec_project ON summary_table_recommendation(project_id);
         CREATE INDEX IF NOT EXISTS idx_summary_rec_status ON summary_table_recommendation(project_id, status);
+
+        -- ── AI Configuration ───────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS ai_config (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id      TEXT    NOT NULL UNIQUE,
+            provider        TEXT    NOT NULL DEFAULT 'deepseek',
+            api_key         TEXT    NOT NULL DEFAULT '',
+            model           TEXT    NOT NULL DEFAULT 'deepseek-chat',
+            endpoint        TEXT    NOT NULL DEFAULT 'https://api.deepseek.com',
+            system_prompt   TEXT    NOT NULL DEFAULT '',
+            temperature     REAL    NOT NULL DEFAULT 0.7,
+            status          INTEGER NOT NULL DEFAULT 1,
+            created_at      TEXT    NOT NULL DEFAULT '',
+            updated_at      TEXT    NOT NULL DEFAULT ''
+        );
         ",
     )?;
     Ok(())

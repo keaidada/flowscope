@@ -31,7 +31,7 @@ metadata-provider = ["sqlx", "tokio"]
 # Integration tests require database connectivity
 integration-tests = ["metadata-provider"]
 # Serve mode: embedded web UI with REST API
-serve = ["dep:axum", "dep:tower-http", "dep:rust-embed", "dep:notify-debouncer-mini", "dep:mime_guess", "dep:open", "dep:walkdir", "dep:chrono", "dep:utoipa", "dep:utoipa-axum", "dep:utoipa-scalar", "dep:serde_yaml", "dep:sha2", "tokio/macros", "tokio/signal"]
+serve = ["dep:axum", "dep:tower-http", "dep:rust-embed", "dep:notify-debouncer-mini", "dep:mime_guess", "dep:open", "dep:walkdir", "dep:chrono", "dep:utoipa", "dep:utoipa-axum", "dep:utoipa-scalar", "dep:serde_yaml", "dep:sha2", "dep:reqwest", "dep:async-stream", "dep:futures-util", "tokio/macros", "tokio/signal"]
 
 [dependencies]
 capybara-core.workspace = true
@@ -62,6 +62,9 @@ mime_guess = { version = "2", optional = true }
 open = { version = "5", optional = true }
 walkdir = { version = "2", optional = true }
 rusqlite = "0.32"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"], optional = true }
+async-stream = { version = "0.3", optional = true }
+futures-util = { version = "0.3", optional = true }
 
 # OpenAPI (serve mode)
 utoipa = { version = "5", features = ["axum_extras"], optional = true }
@@ -74,3 +77,5 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+async-stream = "0.3"
+futures-util = "0.3"

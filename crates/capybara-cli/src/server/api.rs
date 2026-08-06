@@ -9,7 +9,7 @@ use axum::{
     body::Bytes,
     extract::{Path, State},
     http::StatusCode,
-    response::{IntoResponse, Response},
+    response::{sse::{Event, Sse}, IntoResponse, Response},
     routing::{delete, get, post, put},
     Json, Router,
 };
@@ -134,7 +134,10 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/generate-semantic-yaml-batch", post(gov_generate_semantic_yaml_batch))
         .route("/files/dbt-yaml", put(gov_save_dbt_yaml))
         .route("/extract-script-metrics", post(gov_extract_script_metrics))
-}
+        // AI assistant
+        .route("/ai/config", get(gov_get_ai_config).put(gov_save_ai_config))
+        .route("/ai/chat", post(gov_ai_chat))
+        }
 
 // === Request/Response types ===
 
@@ -4641,4 +4644,160 @@ async fn gov_extract_script_metrics(
         "script_name": req.file_path.split('/').next_back().unwrap_or(&req.file_path),
     }))
     .into_response()
+}
+
+// ============================================================
+// AI Assistant handlers
+// ============================================================
+
+/// GET /api/ai/config — get AI configuration
+async fn gov_get_ai_config(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GovProjectIdQuery>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    let cfg = super::governance::ai::get_ai_config(&conn, &q.project_id);
+    Json(cfg).into_response()
+}
+
+#[derive(Deserialize)]
+struct SaveAiConfigRequest {
+    project_id: String,
+    provider: Option<String>,
+    api_key: Option<String>,
+    model: Option<String>,
+    endpoint: Option<String>,
+    system_prompt: Option<String>,
+    temperature: Option<f64>,
+}
+
+/// PUT /api/ai/config — save AI configuration
+async fn gov_save_ai_config(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SaveAiConfigRequest>,
+) -> impl IntoResponse {
+    let conn = match state.gov_db.lock() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
+    };
+    // Load existing or default, then apply patches.
+    let mut cfg = super::governance::ai::get_ai_config(&conn, &req.project_id);
+    if let Some(p) = req.provider { cfg.provider = p; }
+    if let Some(k) = req.api_key { cfg.api_key = k; }
+    if let Some(m) = req.model { cfg.model = m; }
+    if let Some(e) = req.endpoint { cfg.endpoint = e; }
+    if let Some(s) = req.system_prompt { cfg.system_prompt = s; }
+    if let Some(t) = req.temperature { cfg.temperature = t; }
+    match super::governance::ai::save_ai_config(&conn, &req.project_id, &cfg) {
+        Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response(),
+    }
+}
+
+/// POST /api/ai/chat — streaming chat via SSE (proxies to DeepSeek/Ollama)
+async fn gov_ai_chat(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<super::governance::ai::ChatRequest>,
+) -> impl IntoResponse {
+    // Load config.
+    let cfg = {
+        let conn = match state.gov_db.lock() {
+            Ok(c) => c,
+            Err(e) => return error_sse(format!("DB lock: {e}")),
+        };
+        super::governance::ai::get_ai_config(&conn, &req.project_id)
+    };
+
+    // Validate config.
+    if cfg.provider != "ollama" && cfg.api_key.is_empty() {
+        return error_sse("AI 未配置 API Key，请在设置中配置。".into());
+    }
+
+    // Build messages with context injection.
+    let llm_messages = super::governance::ai::build_llm_messages(&cfg, &req.messages, &req.context);
+    let body = super::governance::ai::build_request_body(&cfg, llm_messages);
+    let url = super::governance::ai::provider_chat_url(&cfg);
+
+    // Build HTTP request to LLM provider.
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return error_sse(format!("HTTP client error: {e}")),
+    };
+
+    let mut http_req = client
+        .post(&url)
+        .header("Content-Type", "application/json");
+
+    if let Some(auth) = super::governance::ai::auth_header(&cfg) {
+        http_req = http_req.header("Authorization", auth);
+    }
+
+    let http_req = http_req.json(&body);
+
+    // Send request and get streaming response.
+    let response = match http_req.send().await {
+        Ok(r) => r,
+        Err(e) => return error_sse(format!("LLM 请求失败: {e}\nURL: {url}\n请检查 endpoint 和网络。")),
+    };
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body_text = response.text().await.unwrap_or_default();
+        return error_sse(format!("LLM 返回错误 {status}: {body_text}"));
+    }
+
+    // Convert the reqwest streaming body into an axum SSE stream.
+    let byte_stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let stream = async_stream::stream! {
+        use futures_util::StreamExt;
+        let mut byte_stream = byte_stream;
+        while let Some(chunk_result) = byte_stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    buffer.push_str(&String::from_utf8_lossy(&chunk));
+                    // Process complete lines.
+                    while let Some(newline_pos) = buffer.find('\n') {
+                        let line = buffer[..newline_pos].to_string();
+                        buffer = buffer[newline_pos + 1..].to_string();
+                        if let Some(content) = super::governance::ai::parse_sse_delta(&line) {
+                            yield Ok::<_, std::convert::Infallible>(
+                                Event::default().data(content)
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    yield Ok(Event::default().data(format!("[ERROR] {e}")));
+                    break;
+                }
+            }
+        }
+        // Flush remaining buffer.
+        if !buffer.is_empty() {
+            if let Some(content) = super::governance::ai::parse_sse_delta(&buffer) {
+                yield Ok(Event::default().data(content));
+            }
+        }
+        yield Ok(Event::default().data("[DONE]"));
+    };
+
+    Sse::new(stream).into_response()
+}
+
+/// Helper: return an SSE stream with a single error message.
+fn error_sse(msg: String) -> Response {
+    let stream = async_stream::stream! {
+        yield Ok::<_, std::convert::Infallible>(
+            Event::default().data(format!("[ERROR] {msg}"))
+        );
+        yield Ok(Event::default().data("[DONE]"));
+    };
+    Sse::new(stream).into_response()
 }

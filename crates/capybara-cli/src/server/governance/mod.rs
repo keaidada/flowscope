@@ -6,6 +6,7 @@
 
 pub mod contract;
 pub mod contract_generator;
+pub mod ai;
 pub mod db;
 pub mod dbt;
 pub mod dbt_fusion;
