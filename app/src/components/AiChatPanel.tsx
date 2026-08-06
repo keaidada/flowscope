@@ -8,10 +8,12 @@
  * - Collapsible
  */
 
-import { useState, useRef, useEffect, useCallback, createElement } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
-  Sparkles, Send, Loader2, X, Settings, Trash2,
-  Bot, User, AlertCircle, Check,
+  Sparkles, Send, Loader2, X, Settings, Trash2, Copy, Check,
+  Bot, User, AlertCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -368,11 +370,18 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
 function MessageBubble({ message, loading }: { message: Message; loading?: boolean }) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const [copied, setCopied] = useState(false);
 
   if (isSystem) return null;
 
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
-    <div className={cn('flex gap-2', isUser && 'flex-row-reverse')}>
+    <div className={cn('group flex gap-2', isUser && 'flex-row-reverse')}>
       <div className={cn(
         'w-7 h-7 rounded-full flex items-center justify-center shrink-0',
         isUser ? 'bg-blue-500/10' : 'bg-primary/10'
@@ -380,11 +389,20 @@ function MessageBubble({ message, loading }: { message: Message; loading?: boole
         {isUser ? <User className="h-3.5 w-3.5 text-blue-500" /> : <Bot className="h-3.5 w-3.5 text-primary" />}
       </div>
       <div className={cn(
-        'flex-1 min-w-0 rounded-lg px-3 py-2 text-xs leading-relaxed',
+        'relative flex-1 min-w-0 rounded-lg px-3 py-2 text-xs leading-relaxed',
         isUser
           ? 'bg-blue-500/5 text-foreground'
           : 'bg-muted/30 text-foreground'
       )}>
+        {!isUser && message.content && (
+          <button
+            onClick={handleCopy}
+            className="absolute top-1.5 right-1.5 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity"
+            title="复制"
+          >
+            {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+          </button>
+        )}
         {loading && !message.content ? (
           <div className="flex items-center gap-1 text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -393,202 +411,46 @@ function MessageBubble({ message, loading }: { message: Message; loading?: boole
         ) : isUser ? (
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
         ) : (
-          <Markdown content={message.content} />
+          <div className="markdown-body">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                h1: ({ children }) => <h1 className="text-sm font-semibold my-1.5">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-sm font-semibold my-1.5">{children}</h2>,
+                h3: ({ children }) => <h3 className="text-xs font-semibold my-1.5">{children}</h3>,
+                h4: ({ children }) => <h4 className="text-xs font-semibold my-1.5">{children}</h4>,
+                p: ({ children }) => <p className="my-1 leading-relaxed">{children}</p>,
+                ul: ({ children }) => <ul className="list-disc pl-4 my-1 space-y-0.5">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal pl-4 my-1 space-y-0.5">{children}</ol>,
+                li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                a: ({ children, href }) => (
+                  <a href={href} target="_blank" rel="noreferrer" className="text-primary underline">{children}</a>
+                ),
+                code: ({ className: _className, children }) => (
+                  <code className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">{children}</code>
+                ),
+                pre: ({ children }) => (
+                  <pre className="bg-muted rounded p-2 my-1.5 overflow-x-auto text-[10px] font-mono leading-relaxed">{children}</pre>
+                ),
+                table: ({ children }) => (
+                  <div className="overflow-x-auto my-1.5">
+                    <table className="border-collapse text-[11px] w-full">{children}</table>
+                  </div>
+                ),
+                th: ({ children }) => <th className="border border-border px-1.5 py-0.5 text-left font-semibold bg-muted/40">{children}</th>,
+                td: ({ children }) => <td className="border border-border px-1.5 py-0.5">{children}</td>,
+                blockquote: ({ children }) => (
+                  <blockquote className="border-l-2 border-muted pl-2 my-1 text-muted-foreground">{children}</blockquote>
+                ),
+                hr: () => <hr className="my-2 border-border" />,
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-// ── Lightweight Markdown renderer ─────────────────────────────────
-
-/** Render common Markdown (headings, bold, italic, code, lists, tables, links). */
-function Markdown({ content }: { content: string }) {
-  const lines = content.split('\n');
-  const out: React.ReactNode[] = [];
-  let i = 0;
-  let listStack: string[] = []; // ordered? 'ol' : 'ul'
-  let tableBuffer: string[][] = [];
-
-  const flushList = () => {
-    for (const t of listStack) {
-      out.push(`</${t}>`);
-    }
-    listStack = [];
-  };
-  const flushTable = () => {
-    if (tableBuffer.length === 0) return;
-    out.push(<table key={`t${i}`} className="my-1.5 border-collapse text-[11px] w-full">
-      <thead><tr>{tableBuffer[0].map((c, ci) => <th key={ci} className="border border-border px-1.5 py-0.5 text-left font-semibold bg-muted/40">{inline(c)}</th>)}</tr></thead>
-      <tbody>
-        {tableBuffer.slice(2).map((row, ri) => (
-          <tr key={ri}>{row.map((c, ci) => <td key={ci} className="border border-border px-1.5 py-0.5">{inline(c)}</td>)}</tr>
-        ))}
-      </tbody>
-    </table>);
-    tableBuffer = [];
-  };
-
-  // Process block-level tokens.
-  while (i < lines.length) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    // Fence / code block
-    if (trimmed.startsWith('```')) {
-      flushList(); flushTable();
-      const lang = trimmed.slice(3).trim();
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].trim().startsWith('```')) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      i++; // skip closing ```
-      out.push(
-        <pre key={`c${i}`} className="bg-muted rounded p-2 my-1.5 overflow-x-auto text-[10px] font-mono leading-relaxed">
-          {lang && <div className="text-[9px] text-muted-foreground mb-1">{lang}</div>}
-          {codeLines.join('\n')}
-        </pre>
-      );
-      continue;
-    }
-
-    // Inline code-only line
-    if (trimmed.startsWith('`') && trimmed.endsWith('`') && trimmed.length > 2 && !trimmed.includes('``')) {
-      flushList(); flushTable();
-      out.push(<pre key={`ci${i}`} className="bg-muted rounded px-1.5 py-0.5 my-1 inline-block text-[10px] font-mono">{trimmed.slice(1, -1)}</pre>);
-      i++;
-      continue;
-    }
-
-    // Heading
-    const hMatch = trimmed.match(/^(#{1,4})\s+(.+)$/);
-    if (hMatch) {
-      flushList(); flushTable();
-      const level = hMatch[1].length;
-      const Tag = (level === 1 ? 'h1' : level === 2 ? 'h2' : level === 3 ? 'h3' : 'h4') as 'h1' | 'h2' | 'h3' | 'h4';
-      out.push(<Tag key={`h${i}`} className={cn('font-semibold mt-2 mb-1', level === 1 ? 'text-sm' : level === 2 ? 'text-sm' : 'text-xs')}>{inline(hMatch[2])}</Tag>);
-      i++;
-      continue;
-    }
-
-    // Horizontal rule
-    if (/^([-*_]\s*){3,}$/.test(trimmed)) {
-      flushList(); flushTable();
-      out.push(<hr key={`hr${i}`} className="my-2 border-border" />);
-      i++;
-      continue;
-    }
-
-    // Table separator row: |---|---|
-    if (trimmed.startsWith('|') && /^\|[\s:|-]+\|$/.test(trimmed) && tableBuffer.length === 1) {
-      // skip separator
-      i++;
-      continue;
-    }
-    // Table data row
-    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-      flushList();
-      const cells = trimmed
-        .slice(1, -1)
-        .split('|')
-        .map(c => c.trim());
-      tableBuffer.push(cells);
-      i++;
-      continue;
-    } else {
-      flushTable();
-    }
-
-    // List item
-    const ulMatch = trimmed.match(/^[-*+]\s+(.+)$/);
-    const olMatch = trimmed.match(/^\d+[.)]\s+(.+)$/);
-    if (ulMatch || olMatch) {
-      const isOl = !!olMatch;
-      const contentText = (olMatch || ulMatch)![1];
-      if (listStack.length === 0) {
-        // Use React.createElement for the dynamic list tag.
-        out.push(createElement(
-          isOl ? 'ol' : 'ul',
-          { key: `l${i}`, className: isOl ? 'list-decimal pl-4 my-1 space-y-0.5' : 'list-disc pl-4 my-1 space-y-0.5' }
-        ));
-        listStack.push(isOl ? 'ol' : 'ul');
-      }
-      // Nested list: if content starts with indent markers, treat as sub-list (simplified).
-      out.push(<li key={`li${i}`} className="leading-relaxed">{inline(contentText)}</li>);
-      i++;
-      continue;
-    } else {
-      flushList();
-    }
-
-    // Blockquote
-    if (trimmed.startsWith('>')) {
-      flushList();
-      const quoteText = trimmed.replace(/^>\s?/, '');
-      out.push(<div key={`q${i}`} className="border-l-2 border-muted pl-2 my-1 text-muted-foreground">{inline(quoteText)}</div>);
-      i++;
-      continue;
-    }
-
-    // Empty line → paragraph break
-    if (trimmed === '') {
-      out.push(<div key={`sp${i}`} className="h-1" />);
-      i++;
-      continue;
-    }
-
-    // Regular paragraph
-    flushList();
-    out.push(<p key={`p${i}`} className="my-1 leading-relaxed">{inline(trimmed)}</p>);
-    i++;
-  }
-
-  flushList();
-  flushTable();
-
-  return <div className="markdown-body">{out}</div>;
-}
-
-/** Render inline Markdown: code, bold, italic, links. */
-function inline(text: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  // Tokenize: code spans first, then bold/italic/link.
-  const tokens: Array<{ type: string; text: string; href?: string }> = [];
-  let rest = text;
-  let tokenRe = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))/;
-  while (rest) {
-    const m = rest.match(tokenRe);
-    if (!m) {
-      if (rest) tokens.push({ type: 'text', text: rest });
-      break;
-    }
-    if (m.index! > 0) tokens.push({ type: 'text', text: rest.slice(0, m.index) });
-    const tok = m[0];
-    if (tok.startsWith('`')) tokens.push({ type: 'code', text: tok.slice(1, -1) });
-    else if (tok.startsWith('**')) tokens.push({ type: 'bold', text: tok.slice(2, -2) });
-    else if (tok.startsWith('*')) tokens.push({ type: 'italic', text: tok.slice(1, -1) });
-    else if (tok.startsWith('[')) {
-      const lm = tok.match(/^\[([^\]]+)\]\(([^)]+)\)/);
-      if (lm) tokens.push({ type: 'link', text: lm[1], href: lm[2] });
-      else tokens.push({ type: 'text', text: tok });
-    }
-    rest = rest.slice(m.index! + m[0].length);
-  }
-
-  tokens.forEach((tok, idx) => {
-    if (tok.type === 'code') {
-      parts.push(<code key={idx} className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">{tok.text}</code>);
-    } else if (tok.type === 'bold') {
-      parts.push(<strong key={idx} className="font-semibold">{inline(tok.text)}</strong>);
-    } else if (tok.type === 'italic') {
-      parts.push(<em key={idx} className="italic">{inline(tok.text)}</em>);
-    } else if (tok.type === 'link') {
-      parts.push(<a key={idx} href={tok.href} target="_blank" rel="noreferrer" className="text-primary underline">{tok.text}</a>);
-    } else {
-      parts.push(<span key={idx}>{tok.text}</span>);
-    }
-  });
-  return parts;
-}

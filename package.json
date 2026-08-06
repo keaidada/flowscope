@@ -24,5 +24,8 @@
     "globals": "^16.5.0",
     "prettier": "^3.8.1",
     "typescript-eslint": "^8.48.0"
+  },
+  "dependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.62.4"
   }
 }
