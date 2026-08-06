@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  Sparkles, Send, Loader2, X, Settings,
+  Sparkles, Send, Loader2, X, Settings, Trash2,
   Bot, User, AlertCircle, Check,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -48,6 +48,8 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
     api_key: '',
     model: 'qwen2.5:3b',
     endpoint: 'http://localhost:11434',
+    system_prompt: '你是一个 SQL 血缘分析和数据治理助手。帮助用户理解 SQL 脚本的血缘关系、表和字段的来源，提供 SQL 解释和优化建议。',
+    temperature: 0.7,
   });
   const [configSaved, setConfigSaved] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -63,6 +65,8 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
           api_key: c.api_key || '',
           model: c.model || 'qwen2.5:3b',
           endpoint: c.endpoint || 'http://localhost:11434',
+          system_prompt: c.system_prompt || '你是一个 SQL 血缘分析和数据治理助手。帮助用户理解 SQL 脚本的血缘关系、表和字段的来源，提供 SQL 解释和优化建议。',
+          temperature: c.temperature ?? 0.7,
         });
       })
       .catch(() => {});
@@ -132,35 +136,55 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
         return;
       }
 
-      // Read SSE stream.
+      // Read SSE stream (robust: accumulate buffer across chunks so
+      // multi-line SSE events are parsed correctly).
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       let fullContent = '';
+      let sseBuffer = '';
 
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          const text = decoder.decode(value, { stream: true });
-          // Parse SSE: "data: <content>\n\n"
-          const lines = text.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') break;
+          sseBuffer += decoder.decode(value, { stream: true });
+
+          // Process complete SSE events (terminated by blank line \n\n).
+          let sepIdx;
+          while ((sepIdx = sseBuffer.indexOf('\n\n')) !== -1) {
+            const event = sseBuffer.slice(0, sepIdx);
+            sseBuffer = sseBuffer.slice(sepIdx + 2);
+            for (const line of event.split('\n')) {
+              if (!line.startsWith('data:')) continue;
+              const data = line.slice(5).trim();
+              if (data === '[DONE]') { sseBuffer = ''; break; }
               if (data.startsWith('[ERROR]')) {
                 setError(data.slice(7));
                 fullContent += `\n\n❌ ${data.slice(7)}`;
+                sseBuffer = '';
                 break;
               }
-              fullContent += data;
-              // Update the last message in real-time.
-              setMessages(prev => {
-                const copy = [...prev];
-                copy[copy.length - 1] = { role: 'assistant', content: fullContent };
-                return copy;
-              });
+              if (data) {
+                fullContent += data;
+                setMessages(prev => {
+                  const copy = [...prev];
+                  copy[copy.length - 1] = { role: 'assistant', content: fullContent };
+                  return copy;
+                });
+              }
             }
+          }
+        }
+        // Flush any remaining partial event.
+        if (sseBuffer.startsWith('data:')) {
+          const data = sseBuffer.slice(5).trim();
+          if (data && data !== '[DONE]') {
+            fullContent += data;
+            setMessages(prev => {
+              const copy = [...prev];
+              copy[copy.length - 1] = { role: 'assistant', content: fullContent };
+              return copy;
+            });
           }
         }
       }
@@ -204,6 +228,9 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
         )}
         <div className="ml-auto flex items-center gap-0.5">
           {configSaved && <span className="text-[10px] text-green-600 flex items-center gap-0.5 mr-1"><Check className="h-3 w-3" /></span>}
+          <button onClick={() => setMessages([{ role: 'assistant', content: '对话已清空，可以开始新的提问。' }])} className="p-1 rounded hover:bg-accent" title="清空对话">
+            <Trash2 className="h-4 w-4" />
+          </button>
           <button onClick={() => setShowSettings(!showSettings)} className={cn('p-1 rounded hover:bg-accent', showSettings && 'bg-accent')} title="设置">
             <Settings className="h-4 w-4" />
           </button>
@@ -244,6 +271,18 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
             <label className="w-16 text-[11px] text-muted-foreground shrink-0">Endpoint</label>
             <input value={config.endpoint} onChange={e => setConfig({ ...config, endpoint: e.target.value })}
               className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="w-16 text-[11px] text-muted-foreground shrink-0">System</label>
+            <textarea value={config.system_prompt} onChange={e => setConfig({ ...config, system_prompt: e.target.value })}
+              rows={3} className="flex-1 text-[11px] px-2 py-1 rounded border bg-transparent focus:outline-none resize-none"
+              placeholder="AI 系统提示词" />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="w-16 text-[11px] text-muted-foreground shrink-0">温度</label>
+            <input type="number" step="0.1" min="0" max="1" value={config.temperature}
+              onChange={e => setConfig({ ...config, temperature: Number(e.target.value) })}
+              className="w-20 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
           </div>
           <Button size="sm" className="h-7 w-full text-xs mt-1" onClick={saveConfig}>保存配置</Button>
         </div>

@@ -114,11 +114,11 @@ pub fn build_llm_messages(cfg: &AiConfig, messages: &[ChatMessage], ctx: &Option
             sys.push_str(&format!("\n\n当前打开的脚本: {fp}"));
         }
         if let Some(ref sql) = ctx.sql {
-            // Truncate very long SQL to ~4000 chars to stay within token limits.
-            let truncated = if sql.len() > 4000 {
-                &sql[..4000]
+            // Truncate very long SQL to ~4000 chars (char-safe for UTF-8).
+            let truncated = if sql.chars().count() > 4000 {
+                sql.chars().take(4000).collect::<String>()
             } else {
-                sql
+                sql.clone()
             };
             sys.push_str(&format!("\n\n脚本 SQL 内容:\n```sql\n{truncated}\n```"));
         }
