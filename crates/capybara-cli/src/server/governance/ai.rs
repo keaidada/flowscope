@@ -27,29 +27,80 @@ impl Default for AiConfig {
     }
 }
 
-/// Load AI config from governance DB. Returns default if not configured.
-pub fn get_ai_config(conn: &Connection, project_id: &str) -> AiConfig {
+/// Load the active model pointer from the legacy `ai_config` table.
+/// Returns (provider, model).
+fn get_active_model(conn: &Connection, project_id: &str) -> (String, String) {
     let row = conn
         .query_row(
-            "SELECT provider, api_key, model, endpoint, system_prompt, temperature
-             FROM ai_config WHERE project_id = ?1 AND status = 1",
+            "SELECT provider, model FROM ai_config WHERE project_id = ?1 AND status = 1",
             params![project_id],
-            |row| {
-                Ok(AiConfig {
-                    provider: row.get(0)?,
-                    api_key: row.get(1)?,
-                    model: row.get(2)?,
-                    endpoint: row.get(3)?,
-                    system_prompt: row.get(4)?,
-                    temperature: row.get(5)?,
-                })
-            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         );
-    row.unwrap_or_default()
+    row.unwrap_or_else(|_| {
+        let d = AiConfig::default();
+        (d.provider, d.model)
+    })
 }
 
-/// Save AI config (upsert).
-pub fn save_ai_config(
+/// Load the active model's full config.
+pub fn get_ai_config(conn: &Connection, project_id: &str) -> AiConfig {
+    let (provider, model) = get_active_model(conn, project_id);
+    get_model_config(conn, project_id, &provider, &model)
+        .unwrap_or_else(|| AiConfig { provider, model, ..AiConfig::default() })
+}
+
+/// Load a specific model's config (or None if never configured).
+pub fn get_model_config(
+    conn: &Connection,
+    project_id: &str,
+    provider: &str,
+    model: &str,
+) -> Option<AiConfig> {
+    conn.query_row(
+        "SELECT provider, api_key, model, endpoint, system_prompt, temperature
+         FROM ai_model_config WHERE project_id = ?1 AND provider = ?2 AND model = ?3",
+        params![project_id, provider, model],
+        |row| {
+            Ok(AiConfig {
+                provider: row.get(0)?,
+                api_key: row.get(1)?,
+                model: row.get(2)?,
+                endpoint: row.get(3)?,
+                system_prompt: row.get(4)?,
+                temperature: row.get(5)?,
+            })
+        },
+    )
+    .ok()
+}
+
+/// List all configured models for a project (each with its own config).
+pub fn list_model_configs(conn: &Connection, project_id: &str) -> Vec<AiConfig> {
+    let mut stmt = match conn.prepare(
+        "SELECT provider, api_key, model, endpoint, system_prompt, temperature
+         FROM ai_model_config WHERE project_id = ?1",
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    let rows = match stmt.query_map(params![project_id], |row| {
+        Ok(AiConfig {
+            provider: row.get(0)?,
+            api_key: row.get(1)?,
+            model: row.get(2)?,
+            endpoint: row.get(3)?,
+            system_prompt: row.get(4)?,
+            temperature: row.get(5)?,
+        })
+    }) {
+        Ok(rows) => rows,
+        Err(_) => return Vec::new(),
+    };
+    rows.filter_map(Result::ok).collect()
+}
+
+/// Save a specific model's config (upsert on project_id + provider + model).
+pub fn save_model_config(
     conn: &Connection,
     project_id: &str,
     cfg: &AiConfig,
@@ -58,12 +109,10 @@ pub fn save_ai_config(
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
     conn.execute(
-        "INSERT INTO ai_config (project_id, provider, api_key, model, endpoint, system_prompt, temperature, status, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?8)
-         ON CONFLICT(project_id) DO UPDATE SET
-            provider = excluded.provider,
+        "INSERT INTO ai_model_config (project_id, provider, api_key, model, endpoint, system_prompt, temperature, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+         ON CONFLICT(project_id, provider, model) DO UPDATE SET
             api_key = excluded.api_key,
-            model = excluded.model,
             endpoint = excluded.endpoint,
             system_prompt = excluded.system_prompt,
             temperature = excluded.temperature,
@@ -80,6 +129,38 @@ pub fn save_ai_config(
         ],
     )?;
     Ok(())
+}
+
+/// Set which model is active (pointer stored in the legacy `ai_config` table).
+pub fn set_active_model(
+    conn: &Connection,
+    project_id: &str,
+    provider: &str,
+    model: &str,
+) -> Result<(), rusqlite::Error> {
+    let now = chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
+    conn.execute(
+        "INSERT INTO ai_config (project_id, provider, model, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 1, ?4, ?4)
+         ON CONFLICT(project_id) DO UPDATE SET
+            provider = excluded.provider,
+            model = excluded.model,
+            updated_at = excluded.updated_at",
+        params![project_id, provider, model, now],
+    )?;
+    Ok(())
+}
+
+/// Save AI config (upsert). Kept for backward compat: also makes the model active.
+pub fn save_ai_config(
+    conn: &Connection,
+    project_id: &str,
+    cfg: &AiConfig,
+) -> Result<(), rusqlite::Error> {
+    save_model_config(conn, project_id, cfg)?;
+    set_active_model(conn, project_id, &cfg.provider, &cfg.model)
 }
 
 // ── Chat types ──────────────────────────────────────────────────

@@ -423,6 +423,21 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             created_at      TEXT    NOT NULL DEFAULT '',
             updated_at      TEXT    NOT NULL DEFAULT ''
         );
+
+        -- Per-model configs (each model keeps its own api_key/endpoint/system_prompt/temperature)
+        CREATE TABLE IF NOT EXISTS ai_model_config (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id      TEXT    NOT NULL,
+            provider        TEXT    NOT NULL,
+            model           TEXT    NOT NULL,
+            api_key         TEXT    NOT NULL DEFAULT '',
+            endpoint        TEXT    NOT NULL DEFAULT '',
+            system_prompt   TEXT    NOT NULL DEFAULT '',
+            temperature     REAL    NOT NULL DEFAULT 0.7,
+            created_at      TEXT    NOT NULL DEFAULT '',
+            updated_at      TEXT    NOT NULL DEFAULT '',
+            UNIQUE(project_id, provider, model)
+        );
         ",
     )?;
     Ok(())

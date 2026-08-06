@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use utoipa::ToSchema;
 
 use super::{state::MergeSession, AppState};
+use super::governance::ai::AiConfig;
 
 /// Build the API router with all endpoints.
 pub fn api_routes() -> Router<Arc<AppState>> {
@@ -4650,7 +4651,7 @@ async fn gov_extract_script_metrics(
 // AI Assistant handlers
 // ============================================================
 
-/// GET /api/ai/config — get AI configuration
+/// GET /api/ai/config — get AI configuration (active model + all model configs)
 async fn gov_get_ai_config(
     State(state): State<Arc<AppState>>,
     Query(q): Query<GovProjectIdQuery>,
@@ -4659,8 +4660,17 @@ async fn gov_get_ai_config(
         Ok(c) => c,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
     };
-    let cfg = super::governance::ai::get_ai_config(&conn, &q.project_id);
-    Json(cfg).into_response()
+    let active = super::governance::ai::get_ai_config(&conn, &q.project_id);
+    let models = super::governance::ai::list_model_configs(&conn, &q.project_id);
+    Json(serde_json::json!({
+        "active": {
+            "provider": active.provider,
+            "model": active.model,
+        },
+        "config": active,
+        "models": models,
+    }))
+    .into_response()
 }
 
 #[derive(Deserialize)]
@@ -4674,7 +4684,9 @@ struct SaveAiConfigRequest {
     temperature: Option<f64>,
 }
 
-/// PUT /api/ai/config — save AI configuration
+/// PUT /api/ai/config — save AI configuration.
+/// If only provider+model are given → switch the active model.
+/// If a full config is given → save that model's config and make it active.
 async fn gov_save_ai_config(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SaveAiConfigRequest>,
@@ -4683,17 +4695,43 @@ async fn gov_save_ai_config(
         Ok(c) => c,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
     };
-    // Load existing or default, then apply patches.
-    let mut cfg = super::governance::ai::get_ai_config(&conn, &req.project_id);
-    if let Some(p) = req.provider { cfg.provider = p; }
-    if let Some(k) = req.api_key { cfg.api_key = k; }
-    if let Some(m) = req.model { cfg.model = m; }
-    if let Some(e) = req.endpoint { cfg.endpoint = e; }
-    if let Some(s) = req.system_prompt { cfg.system_prompt = s; }
-    if let Some(t) = req.temperature { cfg.temperature = t; }
-    match super::governance::ai::save_ai_config(&conn, &req.project_id, &cfg) {
-        Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response(),
+
+    // Full config present → save this model's own config and activate it.
+    let has_full = req.api_key.is_some()
+        || req.endpoint.is_some()
+        || req.system_prompt.is_some()
+        || req.temperature.is_some();
+
+    if has_full && req.provider.is_some() && req.model.is_some() {
+        let provider = req.provider.clone().unwrap();
+        let model = req.model.clone().unwrap();
+        let mut cfg = super::governance::ai::get_model_config(&conn, &req.project_id, &provider, &model)
+            .unwrap_or(AiConfig {
+                provider: provider.clone(),
+                model: model.clone(),
+                ..Default::default()
+            });
+        if let Some(k) = req.api_key { cfg.api_key = k; }
+        if let Some(e) = req.endpoint { cfg.endpoint = e; }
+        if let Some(s) = req.system_prompt { cfg.system_prompt = s; }
+        if let Some(t) = req.temperature { cfg.temperature = t; }
+        if let Err(e) = super::governance::ai::save_model_config(&conn, &req.project_id, &cfg) {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response();
+        }
+        if let Err(e) = super::governance::ai::set_active_model(&conn, &req.project_id, &provider, &model) {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response();
+        }
+        return Json(serde_json::json!({"ok": true})).into_response();
+    }
+
+    // Only provider+model → just switch active model.
+    if let (Some(p), Some(m)) = (req.provider, req.model) {
+        match super::governance::ai::set_active_model(&conn, &req.project_id, &p, &m) {
+            Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response(),
+        }
+    } else {
+        (StatusCode::BAD_REQUEST, "provider and model required").into_response()
     }
 }
 

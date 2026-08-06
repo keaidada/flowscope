@@ -8,7 +8,7 @@
  * - Collapsible
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -16,6 +16,7 @@ import {
   Bot, AlertCircle, ChevronDown, Plus, Database, FileCode2,
   Wrench, Search,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -28,6 +29,15 @@ import {
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
+}
+
+interface ModelConfig {
+  provider: string;
+  api_key: string;
+  model: string;
+  endpoint: string;
+  system_prompt: string;
+  temperature: number;
 }
 
 interface AiChatPanelProps {
@@ -52,23 +62,43 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showSettings, setShowSettings] = useState(false);
-  const [config, setConfig] = useState({
-    provider: 'ollama',
-    api_key: '',
-    model: 'qwen2.5:3b',
-    endpoint: 'http://localhost:11434',
-    system_prompt: '你是一个 SQL 血缘分析和数据治理助手。帮助用户理解 SQL 脚本的血缘关系、表和字段的来源，提供 SQL 解释和优化建议。',
-    temperature: 0.7,
-  });
+  const [draftKey, setDraftKey] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ModelConfig | null>(null);
+  const [activeKey, setActiveKey] = useState('ollama|qwen2.5:3b');
+  const [models, setModels] = useState<Record<string, ModelConfig>>({});
   const [configSaved, setConfigSaved] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Preset models for quick switching.
+  // Preset models for quick switching (each keeps its own config).
   const PRESETS = [
     { label: 'Ollama · qwen2.5:3b', provider: 'ollama', model: 'qwen2.5:3b', endpoint: 'http://localhost:11434', api_key: 'ollama' },
     { label: 'DeepSeek · deepseek-chat', provider: 'deepseek', model: 'deepseek-chat', endpoint: 'https://api.deepseek.com', api_key: '' },
     { label: 'DeepSeek · deepseek-reasoner', provider: 'deepseek', model: 'deepseek-reasoner', endpoint: 'https://api.deepseek.com', api_key: '' },
-  ];
+  ] as const;
+
+  const DEFAULT_SYSTEM_PROMPT = '你是一个 SQL 血缘分析和数据治理助手。帮助用户理解 SQL 脚本的血缘关系、表和字段的来源，提供 SQL 解释和优化建议。';
+
+  const modelKey = (p: string, m: string) => `${p}|${m}`;
+
+  // Get a model's effective config: preset defaults merged with any saved config.
+  const modelConfig = useCallback((provider: string, model: string): ModelConfig => {
+    const saved = models[modelKey(provider, model)];
+    const preset = PRESETS.find(p => p.provider === provider && p.model === model);
+    return {
+      provider,
+      api_key: saved?.api_key ?? preset?.api_key ?? '',
+      model,
+      endpoint: saved?.endpoint ?? preset?.endpoint ?? '',
+      system_prompt: saved?.system_prompt ?? DEFAULT_SYSTEM_PROMPT,
+      temperature: saved?.temperature ?? 0.7,
+    };
+  }, [models]);
+
+  // Effective config for the active model.
+  const activeConfig = useMemo(() => {
+    const [provider, model] = activeKey.split('|');
+    return modelConfig(provider, model);
+  }, [activeKey, modelConfig]);
 
   // Load config on mount / project change.
   useEffect(() => {
@@ -76,46 +106,53 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
     fetch(`${apiBase()}/api/ai/config?project_id=${projectId}`)
       .then(r => r.json())
       .then(c => {
-        setConfig({
-          provider: c.provider || 'ollama',
-          api_key: c.api_key || '',
-          model: c.model || 'qwen2.5:3b',
-          endpoint: c.endpoint || 'http://localhost:11434',
-          system_prompt: c.system_prompt || '你是一个 SQL 血缘分析和数据治理助手。帮助用户理解 SQL 脚本的血缘关系、表和字段的来源，提供 SQL 解释和优化建议。',
-          temperature: c.temperature ?? 0.7,
-        });
+        const m = c.models || [];
+        const map: Record<string, ModelConfig> = {};
+        for (const item of m) {
+          map[modelKey(item.provider, item.model)] = {
+            provider: item.provider,
+            api_key: item.api_key || '',
+            model: item.model,
+            endpoint: item.endpoint || '',
+            system_prompt: item.system_prompt || DEFAULT_SYSTEM_PROMPT,
+            temperature: item.temperature ?? 0.7,
+          };
+        }
+        setModels(map);
+        if (c.active?.provider && c.active?.model) {
+          setActiveKey(modelKey(c.active.provider, c.active.model));
+        }
       })
       .catch(() => {});
   }, [projectId]);
 
-  const saveConfig = async (cfg?: typeof config) => {
+  const saveConfig = async (cfg?: ModelConfig) => {
     if (!projectId) return;
     try {
-      const c = cfg ?? config;
+      const c = cfg ?? activeConfig;
       await fetch(`${apiBase()}/api/ai/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId, ...c }),
       });
-      if (!cfg) {
-        setConfigSaved(true);
-        setShowSettings(false);
-        setTimeout(() => setConfigSaved(false), 1500);
+      if (cfg) {
+        // Save just this model's config.
+        setModels(prev => ({ ...prev, [modelKey(cfg.provider, cfg.model)]: cfg }));
+      } else {
+        // Saving settings dialog: model stays active, but merge into map.
+        setModels(prev => ({ ...prev, [modelKey(activeConfig.provider, activeConfig.model)]: activeConfig }));
       }
     } catch (e) { console.error('save config failed', e); }
   };
 
-  // Quick model switch: swap provider/model and persist immediately.
-  const quickSwitchModel = (preset: { provider: string; model: string; endpoint: string; api_key: string }) => {
-    const next = {
-      ...config,
-      provider: preset.provider,
-      model: preset.model,
-      endpoint: preset.endpoint,
-      api_key: config.api_key || preset.api_key,
-    };
-    setConfig(next);
-    saveConfig(next);
+  // Quick model switch: only change the active pointer, keep each model's own config.
+  const quickSwitchModel = (provider: string, model: string) => {
+    setActiveKey(modelKey(provider, model));
+    fetch(`${apiBase()}/api/ai/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId, provider, model }),
+    }).catch(() => {});
   };
 
   // Auto-scroll to bottom on new messages.
@@ -260,7 +297,12 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
         )}
         <div className="ml-auto flex items-center gap-0.5">
           {configSaved && <span className="text-[10px] text-green-600 flex items-center gap-0.5 mr-1"><Check className="h-3 w-3" /></span>}
-          <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-md hover:bg-accent text-muted-foreground" title="设置">
+          <button onClick={() => {
+            const [p, m] = activeKey.split('|');
+            setDraftKey(activeKey);
+            setDraft(modelConfig(p, m));
+            setShowSettings(true);
+          }} className="p-1.5 rounded-md hover:bg-accent text-muted-foreground" title="设置">
             <Settings className="h-4 w-4" />
           </button>
           <button onClick={onClose} className="p-1.5 rounded-md hover:bg-accent text-muted-foreground" title="收起">
@@ -351,8 +393,10 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
               <button className="flex items-center gap-1 px-2 py-1 rounded-lg border bg-background hover:bg-accent transition-colors text-[11px] text-foreground">
                 <Bot className="h-3 w-3 text-primary" />
                 <span className="max-w-[150px] truncate">
-                  {PRESETS.find(p => `${p.provider}|${p.model}` === `${config.provider}|${config.model}`)?.label
-                    ?? `${config.provider}/${config.model}`}
+                  {(() => {
+                    const [p, m] = activeKey.split('|');
+                    return PRESETS.find(x => x.provider === p && x.model === m)?.label ?? `${p}/${m}`;
+                  })()}
                 </span>
                 <ChevronDown className="h-3 w-3 text-muted-foreground" />
               </button>
@@ -361,10 +405,10 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
               <DropdownMenuLabel>选择模型</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuRadioGroup
-                value={`${config.provider}|${config.model}`}
+                value={activeKey}
                 onValueChange={val => {
-                  const preset = PRESETS.find(p => `${p.provider}|${p.model}` === val);
-                  if (preset) quickSwitchModel(preset);
+                  const [p, m] = val.split('|');
+                  quickSwitchModel(p, m);
                 }}
               >
                 {PRESETS.map(p => (
@@ -381,43 +425,94 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
         </div>
       </div>
 
-      {/* Settings Dialog (standalone modal, independent of panel) */}
+      {/* Settings Dialog: edit ANY model's config, independent of active model */}
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>AI 设置</DialogTitle>
+            <p className="text-[11px] text-muted-foreground">
+              每个模型可单独配置，切换模型时互不影响。
+            </p>
           </DialogHeader>
-          <div className="space-y-2.5">
-            <div className="text-[11px] text-muted-foreground">
-              当前模型：{config.provider} / {config.model}
+
+          <div className="space-y-3">
+            {/* Model selector tabs */}
+            <div className="flex flex-wrap gap-1.5">
+              {PRESETS.map(p => {
+                const key = modelKey(p.provider, p.model);
+                const isActive = key === activeKey;
+                const isEditing = key === draftKey;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      setDraftKey(key);
+                      setDraft(modelConfig(p.provider, p.model));
+                    }}
+                    className={cn(
+                      'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-colors',
+                      isEditing
+                        ? 'border-primary/60 bg-primary/10 text-foreground'
+                        : isActive
+                          ? 'border-primary/40 bg-muted text-foreground'
+                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                    )}
+                  >
+                    {isActive && <Bot className="h-3 w-3 text-primary" />}
+                    <span>{p.label}</span>
+                    {isActive && !isEditing && <span className="text-[9px] px-1 rounded bg-primary/10 text-primary">当前</span>}
+                  </button>
+                );
+              })}
             </div>
-            {config.provider === 'deepseek' && (
-              <div className="flex items-center gap-2">
-                <label className="w-16 text-[11px] text-muted-foreground shrink-0">API Key</label>
-                <input type="password" value={config.api_key} onChange={e => setConfig({ ...config, api_key: e.target.value })}
-                  placeholder="sk-..." className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
+
+            {/* Edit form for the selected draft model */}
+            {draftKey && draft && (
+              <div className="space-y-2.5 rounded-xl border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium">配置：{draft.provider} / {draft.model}</span>
+                  {draftKey === activeKey && <span className="text-[10px] text-primary">当前使用中</span>}
+                </div>
+                {draft.provider === 'deepseek' && (
+                  <div className="flex items-center gap-2">
+                    <label className="w-20 text-[11px] text-muted-foreground shrink-0">API Key</label>
+                    <input type="password" value={draft.api_key} onChange={e => setDraft({ ...draft, api_key: e.target.value })}
+                      placeholder="sk-..." className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none focus:ring-1 focus:ring-ring" />
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <label className="w-20 text-[11px] text-muted-foreground shrink-0">Endpoint</label>
+                  <input value={draft.endpoint} onChange={e => setDraft({ ...draft, endpoint: e.target.value })}
+                    className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none focus:ring-1 focus:ring-ring" />
+                </div>
+                <div className="flex items-start gap-2">
+                  <label className="w-20 text-[11px] text-muted-foreground shrink-0 pt-1">System</label>
+                  <textarea value={draft.system_prompt} onChange={e => setDraft({ ...draft, system_prompt: e.target.value })}
+                    rows={3} className="flex-1 text-[11px] px-2 py-1 rounded border bg-transparent focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+                    placeholder="AI 系统提示词" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="w-20 text-[11px] text-muted-foreground shrink-0">温度</label>
+                  <input type="number" step="0.1" min="0" max="1" value={draft.temperature}
+                    onChange={e => setDraft({ ...draft, temperature: Number(e.target.value) })}
+                    className="w-20 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none focus:ring-1 focus:ring-ring" />
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button size="sm" variant="outline" className="text-xs" onClick={() => setDraftKey(null)}>取消</Button>
+                  <Button size="sm" className="text-xs" onClick={async () => {
+                    await saveConfig(draft);
+                    setConfigSaved(true);
+                    setTimeout(() => setConfigSaved(false), 1500);
+                  }}>
+                    <Check className="h-3 w-3 mr-1" /> 保存该模型
+                  </Button>
+                </div>
               </div>
             )}
-            <div className="flex items-center gap-2">
-              <label className="w-16 text-[11px] text-muted-foreground shrink-0">Endpoint</label>
-              <input value={config.endpoint} onChange={e => setConfig({ ...config, endpoint: e.target.value })}
-                className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="w-16 text-[11px] text-muted-foreground shrink-0">System</label>
-              <textarea value={config.system_prompt} onChange={e => setConfig({ ...config, system_prompt: e.target.value })}
-                rows={3} className="flex-1 text-[11px] px-2 py-1 rounded border bg-transparent focus:outline-none resize-none"
-                placeholder="AI 系统提示词" />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="w-16 text-[11px] text-muted-foreground shrink-0">温度</label>
-              <input type="number" step="0.1" min="0" max="1" value={config.temperature}
-                onChange={e => setConfig({ ...config, temperature: Number(e.target.value) })}
-                className="w-20 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
-            </div>
           </div>
-          <DialogFooter>
-            <Button size="sm" className="text-xs" onClick={() => saveConfig()}>保存配置</Button>
+
+          <DialogFooter className="text-[10px] text-muted-foreground">
+            提示：保存的配置只作用于对应模型；切换模型使用各自保存的配置。
           </DialogFooter>
         </DialogContent>
       </Dialog>
