@@ -389,20 +389,11 @@ function MessageBubble({ message, loading }: { message: Message; loading?: boole
         {isUser ? <User className="h-3.5 w-3.5 text-blue-500" /> : <Bot className="h-3.5 w-3.5 text-primary" />}
       </div>
       <div className={cn(
-        'relative flex-1 min-w-0 rounded-lg px-3 py-2 text-xs leading-relaxed',
+        'flex-1 min-w-0 rounded-lg px-3 py-2 text-xs leading-relaxed',
         isUser
           ? 'bg-blue-500/5 text-foreground'
           : 'bg-muted/30 text-foreground'
       )}>
-        {!isUser && message.content && (
-          <button
-            onClick={handleCopy}
-            className="absolute top-1.5 right-1.5 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity"
-            title="复制"
-          >
-            {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-          </button>
-        )}
         {loading && !message.content ? (
           <div className="flex items-center gap-1 text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -411,34 +402,35 @@ function MessageBubble({ message, loading }: { message: Message; loading?: boole
         ) : isUser ? (
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
         ) : (
-          <div className="markdown-body">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                h1: ({ children }) => <h1 className="text-sm font-semibold my-1.5">{children}</h1>,
-                h2: ({ children }) => <h2 className="text-sm font-semibold my-1.5">{children}</h2>,
-                h3: ({ children }) => <h3 className="text-xs font-semibold my-1.5">{children}</h3>,
-                h4: ({ children }) => <h4 className="text-xs font-semibold my-1.5">{children}</h4>,
-                p: ({ children }) => <p className="my-1 leading-relaxed">{children}</p>,
-                ul: ({ children }) => <ul className="list-disc pl-4 my-1 space-y-0.5">{children}</ul>,
-                ol: ({ children }) => <ol className="list-decimal pl-4 my-1 space-y-0.5">{children}</ol>,
-                li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-                a: ({ children, href }) => (
-                  <a href={href} target="_blank" rel="noreferrer" className="text-primary underline">{children}</a>
-                ),
-                code: ({ className: _className, children }) => (
-                  <code className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">{children}</code>
-                ),
-                pre: ({ children }) => (
-                  <pre className="bg-muted rounded p-2 my-1.5 overflow-x-auto text-[10px] font-mono leading-relaxed">{children}</pre>
-                ),
-                table: ({ children }) => (
-                  <div className="overflow-x-auto my-1.5">
-                    <table className="border-collapse text-[11px] w-full">{children}</table>
-                  </div>
-                ),
-                th: ({ children }) => <th className="border border-border px-1.5 py-0.5 text-left font-semibold bg-muted/40">{children}</th>,
-                td: ({ children }) => <td className="border border-border px-1.5 py-0.5">{children}</td>,
+          <>
+            <div className="markdown-body">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  h1: ({ children }) => <h1 className="text-sm font-semibold my-1.5">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-sm font-semibold my-1.5">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-xs font-semibold my-1.5">{children}</h3>,
+                  h4: ({ children }) => <h4 className="text-xs font-semibold my-1.5">{children}</h4>,
+                  p: ({ children }) => <p className="my-1 leading-relaxed">{children}</p>,
+                  ul: ({ children }) => <ul className="list-disc pl-4 my-1 space-y-0.5">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal pl-4 my-1 space-y-0.5">{children}</ol>,
+                  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                  a: ({ children, href }) => (
+                    <a href={href} target="_blank" rel="noreferrer" className="text-primary underline">{children}</a>
+                  ),
+                  code: ({ className: _className, children }) => (
+                    <code className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">{children}</code>
+                  ),
+                  pre: ({ children }) => (
+                    <pre className="bg-muted rounded p-2 my-1.5 overflow-x-auto text-[10px] font-mono leading-relaxed">{children}</pre>
+                  ),
+                  table: ({ children }) => (
+                    <div className="overflow-x-auto my-1.5">
+                      <table className="border-collapse text-[11px] w-full">{children}</table>
+                    </div>
+                  ),
+                  th: ({ children }) => <th className="border border-border px-1.5 py-0.5 text-left font-semibold bg-muted/40">{children}</th>,
+                  td: ({ children }) => <td className="border border-border px-1.5 py-0.5">{children}</td>,
                 blockquote: ({ children }) => (
                   <blockquote className="border-l-2 border-muted pl-2 my-1 text-muted-foreground">{children}</blockquote>
                 ),
@@ -447,7 +439,19 @@ function MessageBubble({ message, loading }: { message: Message; loading?: boole
             >
               {message.content}
             </ReactMarkdown>
-          </div>
+            </div>
+            {/* Copy button below the message */}
+            <div className="flex justify-end mt-1">
+              <button
+                onClick={handleCopy}
+                className="flex items-center gap-1 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity text-muted-foreground"
+                title="复制"
+              >
+                {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                <span className="text-[10px]">{copied ? '已复制' : '复制'}</span>
+              </button>
+            </div>
+          </>
         )}
       </div>
     </div>
