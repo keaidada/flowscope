@@ -4656,12 +4656,18 @@ async fn gov_get_ai_config(
     State(state): State<Arc<AppState>>,
     Query(q): Query<GovProjectIdQuery>,
 ) -> impl IntoResponse {
+    eprintln!("[ai] GET config project={}", q.project_id);
     let conn = match state.gov_db.lock() {
         Ok(c) => c,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
     };
     let active = super::governance::ai::get_ai_config(&conn, &q.project_id);
     let models = super::governance::ai::list_model_configs(&conn, &q.project_id);
+    eprintln!(
+        "[ai] GET config active={}/{} models={}",
+        active.provider, active.model,
+        models.len()
+    );
     Json(serde_json::json!({
         "active": {
             "provider": active.provider,
@@ -4691,6 +4697,16 @@ async fn gov_save_ai_config(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SaveAiConfigRequest>,
 ) -> impl IntoResponse {
+    eprintln!(
+        "[ai] PUT config project={} provider={:?} model={:?} api_key={:?} endpoint={:?} sys={} temp={:?}",
+        req.project_id,
+        req.provider,
+        req.model,
+        req.api_key.as_ref().map(|k| if k.is_empty() { "(empty)" } else { "(set)" }),
+        req.endpoint,
+        req.system_prompt.is_some(),
+        req.temperature
+    );
     let conn = match state.gov_db.lock() {
         Ok(c) => c,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
@@ -4716,21 +4732,31 @@ async fn gov_save_ai_config(
         if let Some(s) = req.system_prompt { cfg.system_prompt = s; }
         if let Some(t) = req.temperature { cfg.temperature = t; }
         if let Err(e) = super::governance::ai::save_model_config(&conn, &req.project_id, &cfg) {
+            eprintln!("[ai] PUT save_model_config FAILED: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response();
         }
         if let Err(e) = super::governance::ai::set_active_model(&conn, &req.project_id, &provider, &model) {
+            eprintln!("[ai] PUT set_active_model FAILED: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response();
         }
+        eprintln!("[ai] PUT saved+activated {provider}/{model}");
         return Json(serde_json::json!({"ok": true})).into_response();
     }
 
     // Only provider+model → just switch active model.
     if let (Some(p), Some(m)) = (req.provider, req.model) {
         match super::governance::ai::set_active_model(&conn, &req.project_id, &p, &m) {
-            Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
-            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response(),
+            Ok(()) => {
+                eprintln!("[ai] PUT switched active to {p}/{m}");
+                Json(serde_json::json!({"ok": true})).into_response()
+            }
+            Err(e) => {
+                eprintln!("[ai] PUT switch active FAILED: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("Save failed: {e}")).into_response()
+            }
         }
     } else {
+        eprintln!("[ai] PUT bad request: provider/model required");
         (StatusCode::BAD_REQUEST, "provider and model required").into_response()
     }
 }
@@ -4748,9 +4774,17 @@ async fn gov_ai_chat(
         };
         super::governance::ai::get_ai_config(&conn, &req.project_id)
     };
+    eprintln!(
+        "[ai] chat project={} using provider={} model={} api_key={}",
+        req.project_id,
+        cfg.provider,
+        cfg.model,
+        if cfg.api_key.is_empty() { "(empty)" } else { "(set)" }
+    );
 
     // Validate config.
     if cfg.provider != "ollama" && cfg.api_key.is_empty() {
+        eprintln!("[ai] chat REJECTED: api_key empty for provider={}", cfg.provider);
         return error_sse("AI 未配置 API Key，请在设置中配置。".into());
     }
 

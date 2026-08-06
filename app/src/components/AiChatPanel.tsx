@@ -103,9 +103,11 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
   // Load config on mount / project change.
   useEffect(() => {
     if (!projectId) return;
+    console.log('[ai] GET config for project=', projectId);
     fetch(`${apiBase()}/api/ai/config?project_id=${projectId}`)
       .then(r => r.json())
       .then(c => {
+        console.log('[ai] GET config response active=', JSON.stringify(c.active), 'models=', c.models?.length ?? 0);
         const m = c.models || [];
         const map: Record<string, ModelConfig> = {};
         for (const item of m) {
@@ -128,13 +130,20 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
 
   const saveConfig = async (cfg?: ModelConfig) => {
     if (!projectId) return;
+    console.log('[ai] saveConfig called, projectId=', projectId, 'cfg=', cfg ? `${cfg.provider}/${cfg.model}` : 'null(active)');
     try {
       const c = cfg ?? activeConfig;
-      await fetch(`${apiBase()}/api/ai/config`, {
+      console.log('[ai] saveConfig PUT body=', JSON.stringify({ project_id: projectId, ...c }));
+      const res = await fetch(`${apiBase()}/api/ai/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId, ...c }),
       });
+      console.log('[ai] saveConfig response status=', res.status);
+      if (!res.ok) {
+        const text = await res.text();
+        console.log('[ai] saveConfig FAILED:', res.status, text);
+      }
       if (cfg) {
         // Save just this model's config.
         setModels(prev => ({ ...prev, [modelKey(cfg.provider, cfg.model)]: cfg }));
@@ -142,17 +151,18 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
         // Saving settings dialog: model stays active, but merge into map.
         setModels(prev => ({ ...prev, [modelKey(activeConfig.provider, activeConfig.model)]: activeConfig }));
       }
-    } catch (e) { console.error('save config failed', e); }
+    } catch (e) { console.error('[ai] saveConfig threw:', e); }
   };
 
   // Quick model switch: only change the active pointer, keep each model's own config.
   const quickSwitchModel = (provider: string, model: string) => {
+    console.log('[ai] quickSwitchModel', provider, model, 'projectId=', projectId);
     setActiveKey(modelKey(provider, model));
     fetch(`${apiBase()}/api/ai/config`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ project_id: projectId, provider, model }),
-    }).catch(() => {});
+    }).then(r => console.log('[ai] quickSwitch response', r.status)).catch(e => console.error('[ai] quickSwitch failed', e));
   };
 
   // Auto-scroll to bottom on new messages.
@@ -500,6 +510,7 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
                 <div className="flex justify-end gap-2 pt-1">
                   <Button size="sm" variant="outline" className="text-xs" onClick={() => setDraftKey(null)}>取消</Button>
                   <Button size="sm" className="text-xs" onClick={async () => {
+                    console.log('[ai] 保存该模型 clicked, draft=', draft);
                     await saveConfig(draft);
                     setConfigSaved(true);
                     setTimeout(() => setConfigSaved(false), 1500);
