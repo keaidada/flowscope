@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
@@ -162,8 +163,11 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
       .catch(() => {});
   }, [projectId]);
 
-  const saveConfig = async (cfg?: ModelConfig) => {
-    if (!projectId) return;
+  const saveConfig = async (cfg?: ModelConfig): Promise<boolean> => {
+    if (!projectId) {
+      console.warn('[ai] saveConfig skipped: no projectId');
+      return false;
+    }
     console.log('[ai] saveConfig called, projectId=', projectId, 'cfg=', cfg ? `${cfg.provider}/${cfg.model}` : 'null(active)');
     try {
       const c = cfg ?? activeConfig;
@@ -177,6 +181,7 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
       if (!res.ok) {
         const text = await res.text();
         console.log('[ai] saveConfig FAILED:', res.status, text);
+        return false;
       }
       if (cfg) {
         // Save just this model's config.
@@ -185,7 +190,11 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
         // Saving settings dialog: model stays active, but merge into map.
         setModels(prev => ({ ...prev, [modelKey(activeConfig.provider, activeConfig.model)]: activeConfig }));
       }
-    } catch (e) { console.error('[ai] saveConfig threw:', e); }
+      return true;
+    } catch (e) {
+      console.error('[ai] saveConfig threw:', e);
+      return false;
+    }
   };
 
   // Quick model switch: only change the active pointer, keep each model's own config.
@@ -558,9 +567,16 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
                   <Button size="sm" variant="outline" className="text-xs" onClick={() => setDraftKey(null)}>取消</Button>
                   <Button size="sm" className="text-xs" onClick={async () => {
                     console.log('[ai] 保存该模型 clicked, draft=', draft);
-                    await saveConfig(draft);
-                    setConfigSaved(true);
-                    setTimeout(() => setConfigSaved(false), 1500);
+                    if (!draft) { toast.error('没有可保存的模型配置'); return; }
+                    const ok = await saveConfig(draft);
+                    if (ok) {
+                      toast.success(`已保存 ${draft.provider}/${draft.model} 的配置`);
+                      setDraftKey(null);
+                      setConfigSaved(true);
+                      setTimeout(() => setConfigSaved(false), 1500);
+                    } else {
+                      toast.error(`保存 ${draft.provider}/${draft.model} 失败，请检查后端服务`);
+                    }
                   }}>
                     <Check className="h-3 w-3 mr-1" /> 保存该模型
                   </Button>
