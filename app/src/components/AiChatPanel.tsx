@@ -67,7 +67,41 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
   const [activeKey, setActiveKey] = useState('ollama|qwen2.5:3b');
   const [models, setModels] = useState<Record<string, ModelConfig>>({});
   const [configSaved, setConfigSaved] = useState(false);
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('ai-panel-width') : null;
+    const n = saved ? Number(saved) : 400;
+    return n >= 320 && n <= 720 ? n : 400;
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  const widthRef = useRef(panelWidth);
+  useEffect(() => { widthRef.current = panelWidth; }, [panelWidth]);
+
+  // Draggable left-edge resize: width is unconstrained so long tables can expand.
+  const startDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    const startX = e.clientX;
+    const startW = widthRef.current;
+    const onMove = (ev: MouseEvent) => {
+      const dx = startX - ev.clientX;
+      const next = Math.min(720, Math.max(320, startW + dx));
+      widthRef.current = next;
+      setPanelWidth(next);
+    };
+    const onUp = () => {
+      draggingRef.current = false;
+      localStorage.setItem('ai-panel-width', String(widthRef.current));
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   // Preset models for quick switching (each keeps its own config).
   const PRESETS = [
@@ -234,24 +268,28 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
           while ((sepIdx = sseBuffer.indexOf('\n\n')) !== -1) {
             const event = sseBuffer.slice(0, sepIdx);
             sseBuffer = sseBuffer.slice(sepIdx + 2);
+            // Collect all data: lines and rejoin with \n (axum splits
+            // embedded newlines in content into separate data: lines, so
+            // rejoining restores the original newlines).
+            const dataParts: string[] = [];
             for (const line of event.split('\n')) {
-              if (!line.startsWith('data:')) continue;
-              const data = line.slice(5).trim();
-              if (data === '[DONE]') { sseBuffer = ''; break; }
-              if (data.startsWith('[ERROR]')) {
-                setError(data.slice(7));
-                fullContent += `\n\n❌ ${data.slice(7)}`;
-                sseBuffer = '';
-                break;
-              }
-              if (data) {
-                fullContent += data;
-                setMessages(prev => {
-                  const copy = [...prev];
-                  copy[copy.length - 1] = { role: 'assistant', content: fullContent };
-                  return copy;
-                });
-              }
+              if (line.startsWith('data:')) dataParts.push(line.slice(5).trim());
+            }
+            const data = dataParts.join('\n');
+            if (data === '[DONE]') { sseBuffer = ''; break; }
+            if (data.startsWith('[ERROR]')) {
+              setError(data.slice(7));
+              fullContent += `\n\n❌ ${data.slice(7)}`;
+              sseBuffer = '';
+              break;
+            }
+            if (data) {
+              fullContent += data;
+              setMessages(prev => {
+                const copy = [...prev];
+                copy[copy.length - 1] = { role: 'assistant', content: fullContent };
+                return copy;
+              });
             }
           }
         }
@@ -293,7 +331,13 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
   if (!open) return null;
 
   return (
-    <div className="flex flex-col h-full border-l bg-background shrink-0" style={{ width: '400px' }}>
+    <div className="relative flex flex-col h-full border-l bg-background shrink-0" style={{ width: `${panelWidth}px` }}>
+      {/* Left-edge drag handle */}
+      <div
+        onMouseDown={startDrag}
+        className="absolute -left-[2px] top-0 bottom-0 w-[5px] cursor-col-resize z-20 hover:bg-primary/30 transition-colors group/aihandle"
+        title="拖拽调整宽度"
+      />
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b shrink-0">
         <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-gradient-to-br from-primary to-indigo-400 shadow-sm">
@@ -596,7 +640,7 @@ function MessageBubble({ message, loading }: { message: Message; loading?: boole
                   ),
                   table: ({ children }) => (
                     <div className="overflow-x-auto my-1.5">
-                      <table className="border-collapse text-[11px] w-full">{children}</table>
+                      <table className="border-collapse text-[11px] w-full min-w-fit">{children}</table>
                     </div>
                   ),
                   th: ({ children }) => <th className="border border-border px-1.5 py-0.5 text-left font-semibold bg-muted/40">{children}</th>,
