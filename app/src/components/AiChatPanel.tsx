@@ -10,8 +10,8 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  Sparkles, Send, Loader2, X,
-  Bot, User, AlertCircle,
+  Sparkles, Send, Loader2, X, Settings,
+  Bot, User, AlertCircle, Check,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -42,7 +42,45 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const [config, setConfig] = useState({
+    provider: 'ollama',
+    api_key: '',
+    model: 'qwen2.5:3b',
+    endpoint: 'http://localhost:11434',
+  });
+  const [configSaved, setConfigSaved] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Load config on mount / project change.
+  useEffect(() => {
+    if (!projectId) return;
+    fetch(`${apiBase()}/api/ai/config?project_id=${projectId}`)
+      .then(r => r.json())
+      .then(c => {
+        setConfig({
+          provider: c.provider || 'ollama',
+          api_key: c.api_key || '',
+          model: c.model || 'qwen2.5:3b',
+          endpoint: c.endpoint || 'http://localhost:11434',
+        });
+      })
+      .catch(() => {});
+  }, [projectId]);
+
+  const saveConfig = async () => {
+    if (!projectId) return;
+    try {
+      await fetch(`${apiBase()}/api/ai/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, ...config }),
+      });
+      setConfigSaved(true);
+      setShowSettings(false);
+      setTimeout(() => setConfigSaved(false), 1500);
+    } catch (e) { console.error('save config failed', e); }
+  };
 
   // Auto-scroll to bottom on new messages.
   useEffect(() => {
@@ -158,15 +196,58 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
           <Sparkles className="h-3.5 w-3.5 text-primary" />
         </div>
         <span className="font-semibold text-sm">AI 助手</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{config.provider}</span>
         {currentFilePath && (
-          <span className="text-[10px] text-muted-foreground truncate max-w-[120px]" title={currentFilePath}>
+          <span className="text-[10px] text-muted-foreground truncate max-w-[100px]" title={currentFilePath}>
             · {currentFilePath.split('/').pop()}
           </span>
         )}
-        <button onClick={onClose} className="ml-auto p-1 rounded hover:bg-accent">
-          <X className="h-4 w-4" />
-        </button>
+        <div className="ml-auto flex items-center gap-0.5">
+          {configSaved && <span className="text-[10px] text-green-600 flex items-center gap-0.5 mr-1"><Check className="h-3 w-3" /></span>}
+          <button onClick={() => setShowSettings(!showSettings)} className={cn('p-1 rounded hover:bg-accent', showSettings && 'bg-accent')} title="设置">
+            <Settings className="h-4 w-4" />
+          </button>
+          <button onClick={onClose} className="p-1 rounded hover:bg-accent">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
+
+      {/* Settings panel */}
+      {showSettings && (
+        <div className="border-b px-3 py-3 space-y-2.5 bg-muted/10 shrink-0">
+          <div className="flex items-center gap-2">
+            <label className="w-16 text-[11px] text-muted-foreground shrink-0">Provider</label>
+            <select value={config.provider} onChange={e => {
+              const p = e.target.value;
+              if (p === 'ollama') setConfig({ ...config, provider: p, endpoint: 'http://localhost:11434', model: 'qwen2.5:3b', api_key: 'ollama' });
+              else if (p === 'deepseek') setConfig({ ...config, provider: p, endpoint: 'https://api.deepseek.com', model: 'deepseek-chat', api_key: '' });
+              else setConfig({ ...config, provider: p });
+            }} className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none">
+              <option value="ollama">Ollama (本地)</option>
+              <option value="deepseek">DeepSeek</option>
+            </select>
+          </div>
+          {config.provider !== 'ollama' && (
+            <div className="flex items-center gap-2">
+              <label className="w-16 text-[11px] text-muted-foreground shrink-0">API Key</label>
+              <input type="password" value={config.api_key} onChange={e => setConfig({ ...config, api_key: e.target.value })}
+                placeholder="sk-..." className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <label className="w-16 text-[11px] text-muted-foreground shrink-0">Model</label>
+            <input value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })}
+              className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="w-16 text-[11px] text-muted-foreground shrink-0">Endpoint</label>
+            <input value={config.endpoint} onChange={e => setConfig({ ...config, endpoint: e.target.value })}
+              className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
+          </div>
+          <Button size="sm" className="h-7 w-full text-xs mt-1" onClick={saveConfig}>保存配置</Button>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-auto px-3 py-3 space-y-3">
