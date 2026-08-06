@@ -17,6 +17,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog';
 
 interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -245,26 +248,12 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
           <Sparkles className="h-3.5 w-3.5 text-primary" />
         </div>
         <span className="font-semibold text-sm">AI 助手</span>
-        {/* Model quick-switch dropdown */}
-        <select
-          value={`${config.provider}|${config.model}`}
-          onChange={e => {
-            const preset = PRESETS.find(p => `${p.provider}|${p.model}` === e.target.value);
-            if (preset) quickSwitchModel(preset);
-          }}
-          className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border focus:outline-none max-w-[130px]"
-          title="切换模型"
-        >
-          {PRESETS.map(p => (
-            <option key={`${p.provider}|${p.model}`} value={`${p.provider}|${p.model}`}>{p.label}</option>
-          ))}
-        </select>
         <div className="ml-auto flex items-center gap-0.5">
           {configSaved && <span className="text-[10px] text-green-600 flex items-center gap-0.5 mr-1"><Check className="h-3 w-3" /></span>}
           <button onClick={() => setMessages([{ role: 'assistant', content: '对话已清空，可以开始新的提问。' }])} className="p-1 rounded hover:bg-accent" title="清空对话">
             <Trash2 className="h-4 w-4" />
           </button>
-          <button onClick={() => setShowSettings(!showSettings)} className={cn('p-1 rounded hover:bg-accent', showSettings && 'bg-accent')} title="设置">
+          <button onClick={() => setShowSettings(true)} className="p-1 rounded hover:bg-accent" title="设置">
             <Settings className="h-4 w-4" />
           </button>
           <button onClick={onClose} className="p-1 rounded hover:bg-accent">
@@ -272,40 +261,6 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
           </button>
         </div>
       </div>
-
-      {/* Settings panel */}
-      {showSettings && (
-        <div className="border-b px-3 py-3 space-y-2.5 bg-muted/10 shrink-0">
-          <div className="text-[11px] text-muted-foreground mb-1">
-            当前模型：{config.provider} / {config.model}
-          </div>
-          {config.provider === 'deepseek' && (
-            <div className="flex items-center gap-2">
-              <label className="w-16 text-[11px] text-muted-foreground shrink-0">API Key</label>
-              <input type="password" value={config.api_key} onChange={e => setConfig({ ...config, api_key: e.target.value })}
-                placeholder="sk-..." className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <label className="w-16 text-[11px] text-muted-foreground shrink-0">Endpoint</label>
-            <input value={config.endpoint} onChange={e => setConfig({ ...config, endpoint: e.target.value })}
-              className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="w-16 text-[11px] text-muted-foreground shrink-0">System</label>
-            <textarea value={config.system_prompt} onChange={e => setConfig({ ...config, system_prompt: e.target.value })}
-              rows={3} className="flex-1 text-[11px] px-2 py-1 rounded border bg-transparent focus:outline-none resize-none"
-              placeholder="AI 系统提示词" />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="w-16 text-[11px] text-muted-foreground shrink-0">温度</label>
-            <input type="number" step="0.1" min="0" max="1" value={config.temperature}
-              onChange={e => setConfig({ ...config, temperature: Number(e.target.value) })}
-              className="w-20 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
-          </div>
-          <Button size="sm" className="h-7 w-full text-xs mt-1" onClick={() => saveConfig()}>保存配置</Button>
-        </div>
-      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-auto px-3 py-3 space-y-3">
@@ -350,7 +305,7 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
           </Button>
         </div>
         {/* Quick prompts */}
-        <div className="flex flex-wrap gap-1 mt-1.5">
+        <div className="flex flex-wrap items-center gap-1 mt-1.5">
           {['解释这个脚本', '读了哪些表？', '优化建议'].map(prompt => (
             <button
               key={prompt}
@@ -361,8 +316,63 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
               {prompt}
             </button>
           ))}
+          {/* Model switch */}
+          <select
+            value={`${config.provider}|${config.model}`}
+            onChange={e => {
+              const preset = PRESETS.find(p => `${p.provider}|${p.model}` === e.target.value);
+              if (preset) quickSwitchModel(preset);
+            }}
+            className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full border bg-muted text-muted-foreground focus:outline-none max-w-[140px]"
+            title="切换模型"
+          >
+            {PRESETS.map(p => (
+              <option key={`${p.provider}|${p.model}`} value={`${p.provider}|${p.model}`}>{p.label}</option>
+            ))}
+          </select>
         </div>
       </div>
+
+      {/* Settings Dialog (standalone modal, independent of panel) */}
+      <Dialog open={showSettings} onOpenChange={setShowSettings}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>AI 设置</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2.5">
+            <div className="text-[11px] text-muted-foreground">
+              当前模型：{config.provider} / {config.model}
+            </div>
+            {config.provider === 'deepseek' && (
+              <div className="flex items-center gap-2">
+                <label className="w-16 text-[11px] text-muted-foreground shrink-0">API Key</label>
+                <input type="password" value={config.api_key} onChange={e => setConfig({ ...config, api_key: e.target.value })}
+                  placeholder="sk-..." className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <label className="w-16 text-[11px] text-muted-foreground shrink-0">Endpoint</label>
+              <input value={config.endpoint} onChange={e => setConfig({ ...config, endpoint: e.target.value })}
+                className="flex-1 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="w-16 text-[11px] text-muted-foreground shrink-0">System</label>
+              <textarea value={config.system_prompt} onChange={e => setConfig({ ...config, system_prompt: e.target.value })}
+                rows={3} className="flex-1 text-[11px] px-2 py-1 rounded border bg-transparent focus:outline-none resize-none"
+                placeholder="AI 系统提示词" />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="w-16 text-[11px] text-muted-foreground shrink-0">温度</label>
+              <input type="number" step="0.1" min="0" max="1" value={config.temperature}
+                onChange={e => setConfig({ ...config, temperature: Number(e.target.value) })}
+                className="w-20 text-xs px-2 py-1 rounded border bg-transparent focus:outline-none" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button size="sm" className="text-xs" onClick={() => saveConfig()}>保存配置</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
