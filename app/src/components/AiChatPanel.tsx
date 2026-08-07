@@ -479,7 +479,7 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-indigo-400 flex items-center justify-center shadow-lg mb-5">
               <Sparkles className="h-8 w-8 text-primary-foreground" />
             </div>
-            <h2 className="text-xl font-bold">你好，我是 FlowScope AI</h2>
+            <h2 className="text-xl font-bold">你好，我是 Capybara AI</h2>
             <p className="text-xs text-muted-foreground mt-2 mb-6 max-w-[260px] leading-relaxed">
               SQL 血缘分析助手，帮你理解脚本、梳理字段来源、优化查询。
             </p>
