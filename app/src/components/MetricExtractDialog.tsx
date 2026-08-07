@@ -248,10 +248,16 @@ function formatAiSummary(metrics: AiMetricSet): string {
   });
 
   sec('业务限定', metrics.qualifiers.length);
-  metrics.qualifiers.forEach((q, i) => lines.push(`${i + 1}. ${q.name || q.expr}${q.field ? `（字段 ${q.field}）` : ''}`));
+  metrics.qualifiers.forEach((q, i) => {
+    const label = q.name && q.name !== q.expr ? `${q.name}：${q.expr}` : (q.name || q.expr);
+    lines.push(`${i + 1}. ${label}${q.field ? `（字段 ${q.field}）` : ''}`);
+  });
 
   sec('周期限定', metrics.periods.length);
-  metrics.periods.forEach((p, i) => lines.push(`${i + 1}. ${p.name || p.expr}${p.label ? `（${p.label}）` : ''}`));
+  metrics.periods.forEach((p, i) => {
+    const label = p.name && p.name !== p.expr ? `${p.name}：${p.expr}` : (p.name || p.expr);
+    lines.push(`${i + 1}. ${label}${p.label ? `（${p.label}）` : ''}`);
+  });
 
   sec('维度', metrics.dimensions.length);
   metrics.dimensions.forEach((d, i) => lines.push(`${i + 1}. ${d.name}${d.type ? `（${d.type}）` : ''}${d.desc ? ` — ${d.desc}` : ''}`));
