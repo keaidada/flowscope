@@ -232,46 +232,102 @@ async function requestAiExtract(projectId: string, filePath: string, sql: string
   }
 }
 
-/** Render the AI-extracted metric system as plain text (5 categories). */
-function formatAiSummary(metrics: AiMetricSet): string {
-  const lines: string[] = [];
-  const sec = (title: string, n: number) => lines.push(`【${title} (${n})】`);
+/** Collapsible section for one AI-extracted metric category. */
+function AiSection({ title, count, open, onToggle, children }: {
+  title: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-md border bg-muted/20 overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-muted/40 transition-colors"
+      >
+        <ChevronDown className={cn('h-3 w-3 text-muted-foreground transition-transform', !open && '-rotate-90')} />
+        <span className="flex-1 text-[11px] font-semibold text-foreground">{title}</span>
+        <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">{count}</span>
+      </button>
+      {open && <div className="px-2.5 pb-2">{children}</div>}
+    </div>
+  );
+}
 
-  sec('原子指标', metrics.atomics.length);
-  metrics.atomics.forEach((a, i) => {
-    const bits = [`${a.agg_func}(${a.column})`];
-    if (a.source_table) bits.push(`来源 ${a.source_table}`);
-    lines.push(`${i + 1}. ${a.name} — ${bits.join('；')}`);
-    if (a.expression && a.expression !== `${a.agg_func}(${a.column})`) {
-      lines.push(`   表达式: ${a.expression}`);
-    }
-  });
+function AiAtomicsList({ metrics }: { metrics: AiMetricSet }) {
+  return (
+    <ol className="space-y-1.5">
+      {metrics.atomics.map((a, i) => (
+        <li key={i} className="text-[11px] leading-snug">
+          <span className="font-medium">{a.name}</span>
+          {a.expression && <span className="text-muted-foreground"> — {a.expression}</span>}
+          {a.source_table && (
+            <span className="block text-[10px] text-muted-foreground">来源 {a.source_table}{a.column ? ` · ${a.column}` : ''}</span>
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
 
-  sec('业务限定', metrics.qualifiers.length);
-  metrics.qualifiers.forEach((q, i) => {
-    const label = q.name && q.name !== q.expr ? `${q.name}：${q.expr}` : (q.name || q.expr);
-    lines.push(`${i + 1}. ${label}${q.field ? `（字段 ${q.field}）` : ''}`);
-  });
+function AiQualifiersList({ metrics }: { metrics: AiMetricSet }) {
+  return (
+    <ol className="space-y-1">
+      {metrics.qualifiers.map((q, i) => (
+        <li key={i} className="text-[11px] leading-snug">
+          <span className="font-medium">{q.name || q.expr}</span>
+          {q.expr && q.name !== q.expr && <span className="text-muted-foreground">：{q.expr}</span>}
+          {q.field && <span className="text-[10px] text-muted-foreground">（字段 {q.field}）</span>}
+        </li>
+      ))}
+    </ol>
+  );
+}
 
-  sec('周期限定', metrics.periods.length);
-  metrics.periods.forEach((p, i) => {
-    const label = p.name && p.name !== p.expr ? `${p.name}：${p.expr}` : (p.name || p.expr);
-    lines.push(`${i + 1}. ${label}${p.label ? `（${p.label}）` : ''}`);
-  });
+function AiPeriodsList({ metrics }: { metrics: AiMetricSet }) {
+  return (
+    <ol className="space-y-1">
+      {metrics.periods.map((p, i) => (
+        <li key={i} className="text-[11px] leading-snug">
+          <span className="font-medium">{p.name || p.expr}</span>
+          {p.expr && p.name !== p.expr && <span className="text-muted-foreground">：{p.expr}</span>}
+          {p.label && <span className="text-[10px] text-muted-foreground">（{p.label}）</span>}
+        </li>
+      ))}
+    </ol>
+  );
+}
 
-  sec('维度', metrics.dimensions.length);
-  metrics.dimensions.forEach((d, i) => lines.push(`${i + 1}. ${d.name}${d.type ? `（${d.type}）` : ''}${d.desc ? ` — ${d.desc}` : ''}`));
+function AiDimensionsList({ metrics }: { metrics: AiMetricSet }) {
+  return (
+    <ol className="space-y-1">
+      {metrics.dimensions.map((d, i) => (
+        <li key={i} className="text-[11px] leading-snug">
+          <span className="font-medium">{d.name}</span>
+          {d.type && <span className="text-muted-foreground">（{d.type}）</span>}
+          {d.desc && <span className="text-[10px] text-muted-foreground"> — {d.desc}</span>}
+        </li>
+      ))}
+    </ol>
+  );
+}
 
-  sec('派生指标', metrics.derived.length);
-  metrics.derived.forEach((d, i) => {
-    const bits = [`原子 ${d.atomic}`];
-    if (d.qualifiers.length) bits.push(`限定 ${d.qualifiers.join('、')}`);
-    if (d.periodExpr) bits.push(`周期 ${d.periodExpr}`);
-    if (d.gran) bits.push(`粒度 ${d.gran}`);
-    lines.push(`${i + 1}. ${d.name} — ${bits.join('；')}`);
-  });
-
-  return lines.join('\n');
+function AiDerivedList({ metrics }: { metrics: AiMetricSet }) {
+  return (
+    <ol className="space-y-1.5">
+      {metrics.derived.map((d, i) => (
+        <li key={i} className="text-[11px] leading-snug">
+          <span className="font-medium">{d.name}</span>
+          <span className="text-muted-foreground"> — 原子 {d.atomic}</span>
+          {d.qualifiers.length > 0 && <span className="text-muted-foreground">；限定 {d.qualifiers.join('、')}</span>}
+          {d.periodExpr && <span className="text-muted-foreground">；周期 {d.periodExpr}</span>}
+          {d.gran && <span className="text-muted-foreground">；粒度 {d.gran}</span>}
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlContent }: MetricExtractDialogProps) {
@@ -286,7 +342,8 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
   const [showSql, setShowSql] = useState(false);
   const [err, setErr] = useState('');
   const [aiErr, setAiErr] = useState('');
-  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiResult, setAiResult] = useState<AiMetricSet | null>(null);
+  const [aiOpen, setAiOpen] = useState<Record<string, boolean>>({});
   const [mock, setMock] = useState<{ atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; dimensions: MockDimension[]; derived: MockDerived[] }>({
     atomics: [], qualifiers: [], periods: [], dimensions: [], derived: [],
   });
@@ -348,7 +405,8 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
     if (!sqlContent) return;
     setAiLoading(true);
     setAiErr('');
-    setAiSummary(null);
+    setAiResult(null);
+    setAiOpen({});
     try {
       const metrics = await requestAiExtract(projectId, filePath, sqlContent);
       if (metrics.atomics.length === 0 && metrics.qualifiers.length === 0
@@ -356,7 +414,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
         && metrics.derived.length === 0) {
         throw new Error('AI 未提取到任何指标');
       }
-      setAiSummary(formatAiSummary(metrics));
+      setAiResult(metrics);
     } catch (e) {
       setAiErr(String(e instanceof Error ? e.message : e));
     } finally {
@@ -609,18 +667,19 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
           </div>
 
           {/* AI extract panel — only appears once AI extract is triggered */}
-          {(aiLoading || aiErr || aiSummary !== null) && (
+          {(aiLoading || aiErr || aiResult !== null) && (
           <div className="w-80 border-l flex flex-col shrink-0">
             <div className="flex items-center gap-1.5 px-3 py-1.5 border-b bg-muted/20 text-[10px] font-semibold text-muted-foreground">
               <Sparkles className="h-3 w-3 text-primary" />
               AI 提取结果
-              {aiSummary !== null && (
+              {aiResult !== null && (
                 <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">
-                  {aiSummary.split('\n').filter(l => l.trim()).length} 项
+                  {aiResult.atomics.length + aiResult.qualifiers.length + aiResult.periods.length
+                    + aiResult.dimensions.length + aiResult.derived.length} 项
                 </span>
               )}
             </div>
-            <div className="flex-1 overflow-auto p-3">
+            <div className="flex-1 overflow-auto p-2.5 space-y-2">
               {aiLoading ? (
                 <div className="flex items-center justify-center h-full text-muted-foreground text-xs text-center p-4">
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -631,8 +690,34 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
                   <p className="font-medium mb-1">AI 提取失败</p>
                   <pre className="whitespace-pre-wrap text-[10px]">{aiErr}</pre>
                 </div>
-              ) : aiSummary !== null ? (
-                <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed">{aiSummary}</pre>
+              ) : aiResult !== null ? (
+                <>
+                  <AiSection title="原子指标" count={aiResult.atomics.length}
+                    open={aiOpen.atomics ?? true}
+                    onToggle={() => setAiOpen(v => ({ ...v, atomics: !(v.atomics ?? true) }))}>
+                    <AiAtomicsList metrics={aiResult} />
+                  </AiSection>
+                  <AiSection title="业务限定" count={aiResult.qualifiers.length}
+                    open={aiOpen.qualifiers ?? true}
+                    onToggle={() => setAiOpen(v => ({ ...v, qualifiers: !(v.qualifiers ?? true) }))}>
+                    <AiQualifiersList metrics={aiResult} />
+                  </AiSection>
+                  <AiSection title="周期限定" count={aiResult.periods.length}
+                    open={aiOpen.periods ?? true}
+                    onToggle={() => setAiOpen(v => ({ ...v, periods: !(v.periods ?? true) }))}>
+                    <AiPeriodsList metrics={aiResult} />
+                  </AiSection>
+                  <AiSection title="维度" count={aiResult.dimensions.length}
+                    open={aiOpen.dimensions ?? true}
+                    onToggle={() => setAiOpen(v => ({ ...v, dimensions: !(v.dimensions ?? true) }))}>
+                    <AiDimensionsList metrics={aiResult} />
+                  </AiSection>
+                  <AiSection title="派生指标" count={aiResult.derived.length}
+                    open={aiOpen.derived ?? true}
+                    onToggle={() => setAiOpen(v => ({ ...v, derived: !(v.derived ?? true) }))}>
+                    <AiDerivedList metrics={aiResult} />
+                  </AiSection>
+                </>
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground text-xs text-center p-4">
                   点击「AI 提取」生成指标体系
