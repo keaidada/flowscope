@@ -693,27 +693,27 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
               ) : aiResult !== null ? (
                 <>
                   <AiSection title="原子指标" count={aiResult.atomics.length}
-                    open={aiOpen.atomics ?? true}
+                    open={aiOpen.atomics ?? false}
                     onToggle={() => setAiOpen(v => ({ ...v, atomics: !(v.atomics ?? true) }))}>
                     <AiAtomicsList metrics={aiResult} />
                   </AiSection>
                   <AiSection title="业务限定" count={aiResult.qualifiers.length}
-                    open={aiOpen.qualifiers ?? true}
+                    open={aiOpen.qualifiers ?? false}
                     onToggle={() => setAiOpen(v => ({ ...v, qualifiers: !(v.qualifiers ?? true) }))}>
                     <AiQualifiersList metrics={aiResult} />
                   </AiSection>
                   <AiSection title="周期限定" count={aiResult.periods.length}
-                    open={aiOpen.periods ?? true}
+                    open={aiOpen.periods ?? false}
                     onToggle={() => setAiOpen(v => ({ ...v, periods: !(v.periods ?? true) }))}>
                     <AiPeriodsList metrics={aiResult} />
                   </AiSection>
                   <AiSection title="维度" count={aiResult.dimensions.length}
-                    open={aiOpen.dimensions ?? true}
+                    open={aiOpen.dimensions ?? false}
                     onToggle={() => setAiOpen(v => ({ ...v, dimensions: !(v.dimensions ?? true) }))}>
                     <AiDimensionsList metrics={aiResult} />
                   </AiSection>
                   <AiSection title="派生指标" count={aiResult.derived.length}
-                    open={aiOpen.derived ?? true}
+                    open={aiOpen.derived ?? false}
                     onToggle={() => setAiOpen(v => ({ ...v, derived: !(v.derived ?? true) }))}>
                     <AiDerivedList metrics={aiResult} />
                   </AiSection>
