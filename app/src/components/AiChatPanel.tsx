@@ -152,6 +152,12 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
   const widthRef = useRef(panelWidth);
   useEffect(() => { widthRef.current = panelWidth; }, [panelWidth]);
 
+  // Chat history recall: ArrowUp/ArrowDown walks previously sent user messages.
+  const historyRef = useRef<string[]>([]);
+  const historyIdxRef = useRef(-1); // -1 = not recalling; 0..len-1 = current position
+  const historyDraftRef = useRef(''); // input content before recall started
+  const historyRestoringRef = useRef(false);
+
   // Draggable left-edge resize: width is unconstrained so long tables can expand.
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -326,6 +332,9 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
     if (!input.trim() || loading || !projectId) return;
 
     const userMsg: Message = { role: 'user', content: input.trim() };
+    historyRef.current.push(userMsg.content);
+    historyIdxRef.current = -1;
+    historyDraftRef.current = '';
     const newMessages = [...messages.filter(m => m.role !== 'system'), userMsg];
     setMessages([...newMessages, { role: 'assistant', content: '' }]);
     setInput('');
@@ -541,11 +550,48 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
         <div className="flex items-end gap-2">
           <textarea
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={e => {
+              if (!historyRestoringRef.current) historyIdxRef.current = -1;
+              historyRestoringRef.current = false;
+              setInput(e.target.value);
+            }}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 handleSend();
+                return;
+              }
+              // ArrowUp: recall previous user message (start of line only).
+              if (e.key === 'ArrowUp' && !e.shiftKey && e.currentTarget.selectionStart === 0) {
+                e.preventDefault();
+                const hist = historyRef.current;
+                if (hist.length === 0) return;
+                if (historyIdxRef.current === -1) {
+                  historyDraftRef.current = input;
+                  historyIdxRef.current = hist.length - 1;
+                } else if (historyIdxRef.current > 0) {
+                  historyIdxRef.current -= 1;
+                } else {
+                  return;
+                }
+                historyRestoringRef.current = true;
+                setInput(hist[historyIdxRef.current]);
+                return;
+              }
+              // ArrowDown: forward through history, restore draft at the end.
+              if (e.key === 'ArrowDown' && !e.shiftKey
+                && e.currentTarget.selectionStart === e.currentTarget.value.length) {
+                e.preventDefault();
+                const hist = historyRef.current;
+                if (historyIdxRef.current === -1) return;
+                historyRestoringRef.current = true;
+                if (historyIdxRef.current < hist.length - 1) {
+                  historyIdxRef.current += 1;
+                  setInput(hist[historyIdxRef.current]);
+                } else {
+                  historyIdxRef.current = -1;
+                  setInput(historyDraftRef.current);
+                }
               }
             }}
             placeholder="问问 FlowScope AI…"
@@ -596,7 +642,7 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
             </DropdownMenuContent>
           </DropdownMenu>
           <span className="ml-auto text-[10px] text-muted-foreground">
-            Enter 发送 · Shift+Enter 换行
+            Enter 发送 · Shift+Enter 换行 · ↑/↓ 回溯
           </span>
         </div>
       </div>
