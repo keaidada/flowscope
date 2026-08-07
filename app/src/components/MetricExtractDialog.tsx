@@ -537,7 +537,8 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
             </div>
           </div>
 
-          {/* AI extract panel */}
+          {/* AI extract panel — only appears once AI extract is triggered */}
+          {(aiLoading || aiErr || aiSummary !== null) && (
           <div className="w-80 border-l flex flex-col shrink-0">
             <div className="flex items-center gap-1.5 px-3 py-1.5 border-b bg-muted/20 text-[10px] font-semibold text-muted-foreground">
               <Sparkles className="h-3 w-3 text-primary" />
@@ -568,6 +569,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
               )}
             </div>
           </div>
+          )}
         </div>
 
         {/* ===== Bottom: full SQL script ===== */}
