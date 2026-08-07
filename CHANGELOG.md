@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-07
+
 ### Added
 
 #### Matrix View (LayeredFlowDiagram)
@@ -115,6 +117,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were never persisted to the same `file_path`.
 - Stale rows in `table_metadata` surviving re-analysis when the new
   resolved schema no longer contained them.
+
+#### AI 助手 (AI Assistant)
+- **AI 对话面板**：DeepSeek / Ollama 双供应商聊天，SSE 流式输出，Markdown
+  (react-markdown + GFM) 渲染，思考过程三点动画。
+- **每模型独立配置**：`ai_model_config` 表按 (project_id, provider, model)
+  保存 endpoint / api_key / system_prompt / temperature / output_template；
+  跨项目共享同模型配置（未配置时继承最近保存的配置）。
+- **输出模板**：4 个内置模板（脚本分析报告 / SQL 解释 / 优化建议 / 血缘
+  分析），选择后自动拼入 system prompt。
+- **AI 提取指标**：工具栏「提取指标」弹窗内新增「AI 提取」，非流式调用
+  LLM 从脚本提取指标体系（原子 / 限定 / 周期 / 维度 / 派生），模型可在
+  弹窗内切换；修复 deepseek-reasoner 流式中断导致的 JSON 截断问题。
+- **Trae 风格 UI**：欢迎页能力卡片、用户右侧气泡、AI 左侧无气泡、输入区
+  模型选择器、设置独立 Dialog、面板可拖拽调宽 (320-720px)。
 
 ## [1.0.0] - 2026-03-22
 

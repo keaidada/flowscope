@@ -1,6 +1,6 @@
 {
   "name": "@pondpilot/capybara-react",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "React components for Capybara SQL lineage visualization",
   "type": "module",
   "main": "dist/index.js",
@@ -30,7 +30,7 @@
     "lint:fix": "eslint src --fix"
   },
   "peerDependencies": {
-    "@pondpilot/capybara-core": "^1.0.0",
+    "@pondpilot/capybara-core": "^2.0.0",
     "i18next": ">=23.0.0",
     "react": ">=19.0.0",
     "react-dom": ">=19.0.0",
