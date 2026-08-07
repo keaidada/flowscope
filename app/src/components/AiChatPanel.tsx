@@ -155,7 +155,6 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
   // Chat history recall: ArrowUp/ArrowDown walks previously sent user messages.
   const historyRef = useRef<string[]>([]);
   const historyIdxRef = useRef(-1); // -1 = not recalling; 0..len-1 = current position
-  const historyDraftRef = useRef(''); // input content before recall started
   const historyRestoringRef = useRef(false);
 
   // Draggable left-edge resize: width is unconstrained so long tables can expand.
@@ -334,7 +333,6 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
     const userMsg: Message = { role: 'user', content: input.trim() };
     historyRef.current.push(userMsg.content);
     historyIdxRef.current = -1;
-    historyDraftRef.current = '';
     const newMessages = [...messages.filter(m => m.role !== 'system'), userMsg];
     setMessages([...newMessages, { role: 'assistant', content: '' }]);
     setInput('');
@@ -567,7 +565,6 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
                 const hist = historyRef.current;
                 if (hist.length === 0) return;
                 if (historyIdxRef.current === -1) {
-                  historyDraftRef.current = input;
                   historyIdxRef.current = hist.length - 1;
                 } else if (historyIdxRef.current > 0) {
                   historyIdxRef.current -= 1;
@@ -578,7 +575,7 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
                 setInput(hist[historyIdxRef.current]);
                 return;
               }
-              // ArrowDown: forward through history, restore draft at the end.
+              // ArrowDown: forward through history, clear input at the end.
               if (e.key === 'ArrowDown' && !e.shiftKey
                 && e.currentTarget.selectionStart === e.currentTarget.value.length) {
                 e.preventDefault();
@@ -590,7 +587,7 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
                   setInput(hist[historyIdxRef.current]);
                 } else {
                   historyIdxRef.current = -1;
-                  setInput(historyDraftRef.current);
+                  setInput('');
                 }
               }
             }}
