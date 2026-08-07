@@ -16,13 +16,13 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuRadioGroup, DropdownMenuRadioItem,
 } from '@/components/ui/dropdown-menu';
 import { SqlView } from '@pondpilot/capybara-react';
 import {
   FunctionSquare, Filter, Layers, BarChart3, Check, Copy, ArrowRight,
-  RefreshCw, Loader2, FileCode2, Clock, Grid3x3, Sparkles, Bot, ChevronDown,
+  RefreshCw, Loader2, FileCode2, Clock, Grid3x3, Sparkles, ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -364,22 +364,34 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
           </div>
           <div className="flex items-center gap-1.5">
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-1 px-2 py-1 rounded-lg border bg-background hover:bg-accent transition-colors text-[11px] text-foreground">
-                  <Bot className="h-3 w-3 text-primary" />
-                  <span className="max-w-[130px] truncate">
-                    {(() => {
-                      const [p, m] = aiModelKey.split('|');
-                      return AI_MODEL_PRESETS.find(x => x.provider === p && x.model === m)?.label
-                        ?? `${p}/${m}`;
-                    })()}
-                  </span>
-                  <ChevronDown className="h-3 w-3 text-muted-foreground" />
+              <div className="flex items-center rounded-lg border bg-background overflow-hidden">
+                <button
+                  className="flex items-center gap-1 h-7 px-2.5 text-[11px] hover:bg-accent transition-colors disabled:opacity-50"
+                  disabled={loading}
+                  onClick={() => {
+                    setLoading(true); setErr('');
+                    extractScriptMetrics(projectId, filePath)
+                      .then(r => setMock(deriveFromMetrics(r.metrics)))
+                      .catch(e => setErr(String(e)))
+                      .finally(() => setLoading(false));
+                  }}
+                >
+                  <RefreshCw className="h-3 w-3 mr-1" />重新提取
                 </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-64">
-                <DropdownMenuLabel>选择 AI 提取模型</DropdownMenuLabel>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center justify-center h-7 px-1.5 border-l hover:bg-accent transition-colors">
+                    <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+              </div>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem disabled={!sqlContent || aiLoading} onSelect={() => { void handleAiExtract(); }}>
+                  {aiLoading ? <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-2 text-primary" />}
+                  <span className="flex-1">AI 提取</span>
+                  <span className="text-[10px] text-muted-foreground">{aiLoading ? '提取中...' : '补充'}</span>
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
+                <DropdownMenuLabel>AI 提取模型</DropdownMenuLabel>
                 <DropdownMenuRadioGroup value={aiModelKey} onValueChange={switchAiModel}>
                   {aiModelOptions.map(o => (
                     <DropdownMenuRadioItem key={o.key} value={o.key}>
@@ -389,21 +401,6 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => {
-              setLoading(true); setErr('');
-              extractScriptMetrics(projectId, filePath)
-                .then(r => setMock(deriveFromMetrics(r.metrics)))
-                .catch(e => setErr(String(e)))
-                .finally(() => setLoading(false));
-            }}>
-              <RefreshCw className="h-3 w-3 mr-1" />重新提取
-            </Button>
-            <Button size="sm" disabled={!sqlContent || aiLoading}
-              onClick={handleAiExtract}
-              className={cn('h-7 text-[11px] gap-1 bg-gradient-to-r from-sky-500 to-violet-500 hover:from-sky-600 hover:to-violet-600 text-white border-0 shadow-sm')}>
-              {aiLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-              AI 提取
-            </Button>
             <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={handleCopy}>
               {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
               {copied ? '已复制' : '复制'}
