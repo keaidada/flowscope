@@ -417,115 +417,144 @@ pub async fn extract_metrics(
         EXTRACT_METRICS_PROMPT
     );
 
-    let messages = vec![
-        ChatMessage { role: "system".into(), content: sys },
-        ChatMessage { role: "user".into(), content: "请提取指标，只输出 JSON。".into() },
-    ];
-
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
 
     let url = provider_chat_url(&cfg);
-    let mut http_req = client.post(&url).header("Content-Type", "application/json");
-    if let Some(auth) = auth_header(&cfg) {
-        http_req = http_req.header("Authorization", auth);
-    }
-    let body = LlmRequestBody { model: cfg.model.clone(), messages, stream: false, temperature: cfg.temperature };
-    let response = http_req.json(&body).send().await.map_err(|e| format!("LLM 请求失败: {e}\n请检查 endpoint 和网络。"))?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let text = response.text().await.unwrap_or_default();
-        return Err(format!("LLM 返回错误 {status}: {text}"));
-    }
-    let v: serde_json::Value = response.json().await.map_err(|e| format!("LLM 响应解析失败: {e}"))?;
-    let content = v
-        .get("choices")
-        .and_then(|c| c.as_array())
-        .and_then(|c| c.first())
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .ok_or_else(|| "LLM 响应中没有 message content".to_string())?;
 
-    // Tolerate fenced code blocks and stray prose around the JSON object.
-    let cleaned: String = content
-        .chars()
-        .filter(|ch| !matches!(ch, '`'))
-        .collect();
-    let start = cleaned.find('{').ok_or_else(|| format!("AI 输出中未找到 JSON 对象:\n{}", content.chars().take(300).collect::<String>()))?;
-    let end = cleaned.rfind('}').ok_or_else(|| "AI 输出中未找到 JSON 对象".to_string())?;
-    let obj: serde_json::Value =
-        serde_json::from_str(&cleaned[start..=end]).map_err(|e| format!("AI 输出 JSON 解析失败: {e}"))?;
+    // Empty (all five categories) results are retried once — LLMs occasionally
+    // return `{"atomics":[], ...}` on the first pass.
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let user_msg = if attempt == 1 {
+            "请提取指标，只输出 JSON。".to_string()
+        } else {
+            "上次输出中五个分类（atomics/qualifiers/periods/dimensions/derived）全部为空，请仔细分析 SQL，务必输出完整指标 JSON，不要返回空数组。".to_string()
+        };
+        let messages = vec![
+            ChatMessage { role: "system".into(), content: sys.clone() },
+            ChatMessage { role: "user".into(), content: user_msg },
+        ];
 
-    // New format: 5-category object {atomics, qualifiers, periods, dimensions, derived}.
-    if obj.get("atomics").is_some() {
-        return Ok(obj);
-    }
-    // Legacy format: flat {metrics: [...]} — upgrade to the 5-category shape.
-    let metrics = obj.get("metrics").cloned().unwrap_or(obj);
-    if !metrics.is_array() {
-        return Err("AI 输出中缺少 metrics 数组".into());
-    }
-    let mut atomics = Vec::new();
-    let mut qualifiers = Vec::new();
-    let mut periods = Vec::new();
-    let mut dimensions = Vec::new();
-    let mut seen_qual = std::collections::HashSet::new();
-    let mut seen_period = std::collections::HashSet::new();
-    let mut seen_dim = std::collections::HashSet::new();
-    for m in metrics.as_array().unwrap() {
-        let name = m.get("name").and_then(|v| v.as_str()).unwrap_or("metric");
-        atomics.push(serde_json::json!({
-            "name": name,
-            "expression": m.get("expression").or_else(|| m.get("expr")).and_then(|v| v.as_str()).unwrap_or(""),
-            "agg_func": m.get("agg_func").or_else(|| m.get("agg")).and_then(|v| v.as_str()).unwrap_or("sum"),
-            "distinct": m.get("distinct").and_then(|v| v.as_bool()).unwrap_or(false),
-            "source_table": m.get("source_table").or_else(|| m.get("sourceTable")).and_then(|v| v.as_str()).unwrap_or(""),
-            "column": m.get("column").and_then(|v| v.as_str()).unwrap_or(""),
-        }));
-        if let Some(bf) = m.get("business_filter").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            for part in bf.split(" AND ") {
-                let part = part.trim();
-                if part.is_empty() || !seen_qual.insert(part.to_string()) { continue; }
-                let field = part.split(['=', '<', '>', ' ', '!']).next().unwrap_or(part).trim();
-                qualifiers.push(serde_json::json!({
-                    "name": part.chars().take(24).collect::<String>(),
-                    "expr": part,
-                    "field": field,
-                }));
-            }
+        let mut http_req = client.post(&url).header("Content-Type", "application/json");
+        if let Some(auth) = auth_header(&cfg) {
+            http_req = http_req.header("Authorization", auth);
         }
-        if let Some(p) = m.get("period").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            if seen_period.insert(p.to_string()) {
-                periods.push(serde_json::json!({
-                    "name": p,
-                    "expr": p,
-                    "unit": "daily",
-                    "label": "按日",
-                }));
-            }
+        let body = LlmRequestBody { model: cfg.model.clone(), messages, stream: false, temperature: cfg.temperature };
+        let response = http_req.json(&body).send().await.map_err(|e| format!("LLM 请求失败: {e}\n请检查 endpoint 和网络。"))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(format!("LLM 返回错误 {status}: {text}"));
         }
-        if let Some(dims) = m.get("dimensions").and_then(|v| v.as_array()) {
-            for d in dims {
-                if let Some(ds) = d.as_str() {
-                    if seen_dim.insert(ds.to_string()) {
-                        dimensions.push(serde_json::json!({
-                            "name": ds,
-                            "type": "string",
-                            "desc": "GROUP BY 字段",
-                        }));
+        let v: serde_json::Value = response.json().await.map_err(|e| format!("LLM 响应解析失败: {e}"))?;
+        let content = v
+            .get("choices")
+            .and_then(|c| c.as_array())
+            .and_then(|c| c.first())
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .ok_or_else(|| "LLM 响应中没有 message content".to_string())?;
+
+        // Tolerate fenced code blocks and stray prose around the JSON object.
+        let cleaned: String = content
+            .chars()
+            .filter(|ch| !matches!(ch, '`'))
+            .collect();
+        let start = cleaned.find('{').ok_or_else(|| format!("AI 输出中未找到 JSON 对象:\n{}", content.chars().take(300).collect::<String>()))?;
+        let end = cleaned.rfind('}').ok_or_else(|| "AI 输出中未找到 JSON 对象".to_string())?;
+        let obj: serde_json::Value =
+            serde_json::from_str(&cleaned[start..=end]).map_err(|e| format!("AI 输出 JSON 解析失败: {e}"))?;
+
+        // New format: 5-category object {atomics, qualifiers, periods, dimensions, derived}.
+        if obj.get("atomics").is_some() {
+            let all_empty = ["atomics", "qualifiers", "periods", "dimensions", "derived"]
+                .iter()
+                .all(|k| obj.get(k).and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()));
+            if all_empty {
+                if attempt < 2 {
+                    eprintln!("[ai] empty 5-category result, retry #{attempt}");
+                    continue;
+                }
+                return Err("AI 输出中五个分类全部为空，请重试或更换模型。".into());
+            }
+            return Ok(obj);
+        }
+        // Legacy format: flat {metrics: [...]} — upgrade to the 5-category shape.
+        let metrics = obj.get("metrics").cloned().unwrap_or(obj);
+        if !metrics.is_array() {
+            return Err("AI 输出中缺少 metrics 数组".into());
+        }
+        let mut atomics = Vec::new();
+        let mut qualifiers = Vec::new();
+        let mut periods = Vec::new();
+        let mut dimensions = Vec::new();
+        let mut seen_qual = std::collections::HashSet::new();
+        let mut seen_period = std::collections::HashSet::new();
+        let mut seen_dim = std::collections::HashSet::new();
+        for m in metrics.as_array().unwrap() {
+            let name = m.get("name").and_then(|v| v.as_str()).unwrap_or("metric");
+            atomics.push(serde_json::json!({
+                "name": name,
+                "expression": m.get("expression").or_else(|| m.get("expr")).and_then(|v| v.as_str()).unwrap_or(""),
+                "agg_func": m.get("agg_func").or_else(|| m.get("agg")).and_then(|v| v.as_str()).unwrap_or("sum"),
+                "distinct": m.get("distinct").and_then(|v| v.as_bool()).unwrap_or(false),
+                "source_table": m.get("source_table").or_else(|| m.get("sourceTable")).and_then(|v| v.as_str()).unwrap_or(""),
+                "column": m.get("column").and_then(|v| v.as_str()).unwrap_or(""),
+            }));
+            if let Some(bf) = m.get("business_filter").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                for part in bf.split(" AND ") {
+                    let part = part.trim();
+                    if part.is_empty() || !seen_qual.insert(part.to_string()) { continue; }
+                    let field = part.split(['=', '<', '>', ' ', '!']).next().unwrap_or(part).trim();
+                    qualifiers.push(serde_json::json!({
+                        "name": part.chars().take(24).collect::<String>(),
+                        "expr": part,
+                        "field": field,
+                    }));
+                }
+            }
+            if let Some(p) = m.get("period").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                if seen_period.insert(p.to_string()) {
+                    periods.push(serde_json::json!({
+                        "name": p,
+                        "expr": p,
+                        "unit": "daily",
+                        "label": "按日",
+                    }));
+                }
+            }
+            if let Some(dims) = m.get("dimensions").and_then(|v| v.as_array()) {
+                for d in dims {
+                    if let Some(ds) = d.as_str() {
+                        if seen_dim.insert(ds.to_string()) {
+                            dimensions.push(serde_json::json!({
+                                "name": ds,
+                                "type": "string",
+                                "desc": "GROUP BY 字段",
+                            }));
+                        }
                     }
                 }
             }
         }
+        if atomics.is_empty() && qualifiers.is_empty() && periods.is_empty() && dimensions.is_empty() {
+            if attempt < 2 {
+                eprintln!("[ai] empty legacy result, retry #{attempt}");
+                continue;
+            }
+            return Err("AI 输出中未提取到任何指标，请重试或更换模型。".into());
+        }
+        return Ok(serde_json::json!({
+            "atomics": atomics,
+            "qualifiers": qualifiers,
+            "periods": periods,
+            "dimensions": dimensions,
+            "derived": [],
+        }));
     }
-    Ok(serde_json::json!({
-        "atomics": atomics,
-        "qualifiers": qualifiers,
-        "periods": periods,
-        "dimensions": dimensions,
-        "derived": [],
-    }))
 }
