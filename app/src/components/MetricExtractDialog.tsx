@@ -15,10 +15,14 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuRadioGroup, DropdownMenuRadioItem,
+} from '@/components/ui/dropdown-menu';
 import { SqlView } from '@pondpilot/capybara-react';
 import {
   FunctionSquare, Filter, Layers, BarChart3, Check, Copy, ArrowRight,
-  RefreshCw, Loader2, FileCode2, Clock, Grid3x3, Sparkles,
+  RefreshCw, Loader2, FileCode2, Clock, Grid3x3, Sparkles, Bot, ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -160,6 +164,12 @@ const AI_EXTRACT_PROMPT = `你是 SQL 指标提取专家。请从下方 SQL 脚�
 3. business_filter 填 WHERE 中的过滤条件（时间分区条件放入 period）
 4. 没有对应项就输出空字符串/空数组，不要臆造`;
 
+const AI_MODEL_PRESETS = [
+  { label: 'Ollama · qwen2.5:3b', provider: 'ollama', model: 'qwen2.5:3b', endpoint: 'http://localhost:11434', api_key: 'ollama' },
+  { label: 'DeepSeek · deepseek-chat', provider: 'deepseek', model: 'deepseek-chat', endpoint: 'https://api.deepseek.com', api_key: '' },
+  { label: 'DeepSeek · deepseek-reasoner', provider: 'deepseek', model: 'deepseek-reasoner', endpoint: 'https://api.deepseek.com', api_key: '' },
+] as const;
+
 /** Collect the full text from the SSE chat stream. */
 async function streamAiChat(body: unknown): Promise<string> {
   const res = await fetch(`${apiBase()}/api/ai/chat`, {
@@ -231,6 +241,8 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiModelKey, setAiModelKey] = useState('ollama|qwen2.5:3b');
+  const [aiSavedModels, setAiSavedModels] = useState<Record<string, { provider: string; model: string; endpoint?: string }>>({});
   const [tab, setTab] = useState<'atomic' | 'qualifier' | 'period' | 'dimension' | 'derived'>('atomic');
   const [selected, setSelected] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -253,6 +265,39 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
   }, [open, projectId, filePath]);
+
+  // Load saved model configs + active model for the AI extract model picker.
+  useEffect(() => {
+    if (!open || !projectId) return;
+    fetch(`${apiBase()}/api/ai/config?project_id=${projectId}`)
+      .then(r => r.json())
+      .then(c => {
+        const map: Record<string, { provider: string; model: string; endpoint?: string }> = {};
+        for (const item of c.models || []) {
+          map[`${item.provider}|${item.model}`] = {
+            provider: item.provider,
+            model: item.model,
+            endpoint: item.endpoint || '',
+          };
+        }
+        setAiSavedModels(map);
+        if (c.active?.provider && c.active?.model) {
+          setAiModelKey(`${c.active.provider}|${c.active.model}`);
+        }
+      })
+      .catch(() => {});
+  }, [open, projectId]);
+
+  /** Switch the active model pointer (same semantics as the chat panel's quick switch). */
+  const switchAiModel = (key: string) => {
+    const [p, m] = key.split('|');
+    setAiModelKey(key);
+    fetch(`${apiBase()}/api/ai/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId, provider: p, model: m }),
+    }).catch(e => console.error('[ai] switch failed', e));
+  };
 
   const totalAtomic = mock.atomics.length;
   const totalQualifier = mock.qualifiers.length;
@@ -340,6 +385,39 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
             })}
           </div>
           <div className="flex items-center gap-1.5">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-1 px-2 py-1 rounded-lg border bg-background hover:bg-accent transition-colors text-[11px] text-foreground">
+                  <Bot className="h-3 w-3 text-primary" />
+                  <span className="max-w-[130px] truncate">
+                    {(() => {
+                      const [p, m] = aiModelKey.split('|');
+                      return AI_MODEL_PRESETS.find(x => x.provider === p && x.model === m)?.label
+                        ?? `${p}/${m}`;
+                    })()}
+                  </span>
+                  <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64">
+                <DropdownMenuLabel>选择 AI 提取模型</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuRadioGroup value={aiModelKey} onValueChange={switchAiModel}>
+                  {Object.values(aiSavedModels).map(sm => (
+                    <DropdownMenuRadioItem key={`${sm.provider}|${sm.model}`} value={`${sm.provider}|${sm.model}`}>
+                      {AI_MODEL_PRESETS.find(x => x.provider === sm.provider && x.model === sm.model)?.label
+                        ?? `${sm.provider} · ${sm.model}`}
+                    </DropdownMenuRadioItem>
+                  ))}
+                  {Object.keys(aiSavedModels).length > 0 && <DropdownMenuSeparator />}
+                  {AI_MODEL_PRESETS.map(p => (
+                    <DropdownMenuRadioItem key={`${p.provider}|${p.model}`} value={`${p.provider}|${p.model}`}>
+                      {p.label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => {
               setLoading(true); setErr('');
               extractScriptMetrics(projectId, filePath)
