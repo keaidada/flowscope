@@ -137,6 +137,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/extract-script-metrics", post(gov_extract_script_metrics))
         // AI assistant
         .route("/ai/config", get(gov_get_ai_config).put(gov_save_ai_config))
+        .route("/ai/extract-metrics", post(gov_extract_metrics))
         .route("/ai/chat", post(gov_ai_chat))
         }
 
@@ -4760,6 +4761,37 @@ async fn gov_save_ai_config(
     } else {
         eprintln!("[ai] PUT bad request: provider/model required");
         (StatusCode::BAD_REQUEST, "provider and model required").into_response()
+    }
+}
+
+/// POST /api/ai/extract-metrics — extract metrics from a script via the
+/// active model. Non-streaming so JSON output arrives intact.
+#[derive(Deserialize)]
+struct ExtractMetricsRequest {
+    project_id: String,
+    file_path: Option<String>,
+    sql: String,
+}
+
+async fn gov_extract_metrics(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ExtractMetricsRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let cfg = {
+        let conn = match state.gov_db.lock() {
+            Ok(c) => c,
+            Err(e) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"ok": false, "error": format!("DB lock: {e}")})))
+            }
+        };
+        super::governance::ai::get_ai_config(&conn, &req.project_id)
+    };
+    match super::governance::ai::extract_metrics(&cfg, req.file_path.as_deref().unwrap_or(""), &req.sql).await {
+        Ok(metrics) => (StatusCode::OK, Json(serde_json::json!({"ok": true, "metrics": metrics}))),
+        Err(e) => {
+            eprintln!("[ai] extract FAILED: {e}");
+            (StatusCode::OK, Json(serde_json::json!({"ok": false, "error": e})))
+        }
     }
 }
 

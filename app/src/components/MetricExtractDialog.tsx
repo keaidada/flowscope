@@ -156,85 +156,45 @@ function apiBase(): string {
   return '';
 }
 
-const AI_EXTRACT_PROMPT = `你是 SQL 指标提取专家。请从下方 SQL 脚本中提取指标体系，并严格输出 JSON（不要 markdown 围栏、不要任何解释文字），格式如下：
-{"metrics":[{"name":"指标名","expression":"聚合表达式","agg_func":"sum|count|avg|min|max","distinct":false,"source_table":"来源表名","column":"聚合字段","business_filter":"业务限定条件(多条用 AND 连接，无则空字符串)","period":"daily|monthly|weekly 等或空字符串","dimensions":["GROUP BY 字段"]}]}
-要求：
-1. 只提取含聚合函数(sum/count/avg/min/max/count distinct)的指标
-2. source_table 填字段所在表
-3. business_filter 填 WHERE 中的过滤条件（时间分区条件放入 period）
-4. 没有对应项就输出空字符串/空数组，不要臆造`;
-
 const AI_MODEL_PRESETS = [
   { label: 'Ollama · qwen2.5:3b', provider: 'ollama', model: 'qwen2.5:3b', endpoint: 'http://localhost:11434', api_key: 'ollama' },
   { label: 'DeepSeek · deepseek-chat', provider: 'deepseek', model: 'deepseek-chat', endpoint: 'https://api.deepseek.com', api_key: '' },
   { label: 'DeepSeek · deepseek-reasoner', provider: 'deepseek', model: 'deepseek-reasoner', endpoint: 'https://api.deepseek.com', api_key: '' },
 ] as const;
 
-/** Collect the full text from the SSE chat stream. */
-async function streamAiChat(body: unknown): Promise<string> {
-  const res = await fetch(`${apiBase()}/api/ai/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`AI 请求失败: ${res.status} ${text}`);
-  }
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error('无法读取 AI 响应流');
-  const decoder = new TextDecoder();
-  let full = '';
-  let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let sepIdx;
-    while ((sepIdx = buffer.indexOf('\n\n')) !== -1) {
-      const event = buffer.slice(0, sepIdx);
-      buffer = buffer.slice(sepIdx + 2);
-      const dataParts: string[] = [];
-      for (const line of event.split('\n')) {
-        if (line.startsWith('data:')) dataParts.push(line.slice(5).trim());
-      }
-      const data = dataParts.join('\n');
-      if (data === '[DONE]') return full;
-      if (data.startsWith('[ERROR]')) throw new Error(data.slice(7));
-      if (data) full += data;
-    }
-  }
-  if (buffer.startsWith('data:')) {
-    const data = buffer.slice(5).trim();
-    if (data && data !== '[DONE]') full += data;
-  }
-  return full;
-}
-
-/** Parse an LLM JSON answer (tolerates fenced code blocks and stray prose). */
-function parseMetricsJson(raw: string): Array<{
+/** Request metric extraction from the backend (non-streaming LLM call). */
+async function requestAiExtract(projectId: string, filePath: string, sql: string): Promise<Array<{
   name: string; expression: string; agg_func: string; distinct: boolean;
   source_table: string; column: string; business_filter: string; period: string;
   dimensions: string[];
-}> {
-  const cleaned = raw.replace(/```(?:json)?/g, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('AI 输出中未找到 JSON 对象');
-  const obj = JSON.parse(cleaned.slice(start, end + 1));
-  const arr = obj.metrics ?? obj;
-  if (!Array.isArray(arr)) throw new Error('AI 输出中缺少 metrics 数组');
-  return arr.map((m: Record<string, unknown>) => ({
-    name: String(m.name ?? 'metric'),
-    expression: String(m.expression ?? m.expr ?? ''),
-    agg_func: String(m.agg_func ?? m.agg ?? 'sum'),
-    distinct: Boolean(m.distinct),
-    source_table: String(m.source_table ?? m.sourceTable ?? ''),
-    column: String(m.column ?? ''),
-    business_filter: String(m.business_filter ?? m.businessFilter ?? ''),
-    period: String(m.period ?? ''),
-    dimensions: Array.isArray(m.dimensions) ? m.dimensions.map(String) : [],
-  }));
+}>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 150_000);
+  try {
+    const res = await fetch(`${apiBase()}/api/ai/extract-metrics`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({ project_id: projectId, file_path: filePath, sql }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || `AI 请求失败: ${res.status}`);
+    const arr: unknown = data.metrics;
+    if (!Array.isArray(arr)) throw new Error('AI 输出中缺少 metrics 数组');
+    return arr.map((m: Record<string, unknown>) => ({
+      name: String(m.name ?? 'metric'),
+      expression: String(m.expression ?? m.expr ?? ''),
+      agg_func: String(m.agg_func ?? m.agg ?? 'sum'),
+      distinct: Boolean(m.distinct),
+      source_table: String(m.source_table ?? m.sourceTable ?? ''),
+      column: String(m.column ?? ''),
+      business_filter: String(m.business_filter ?? m.businessFilter ?? ''),
+      period: String(m.period ?? ''),
+      dimensions: Array.isArray(m.dimensions) ? m.dimensions.map(String) : [],
+    }));
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlContent }: MetricExtractDialogProps) {
@@ -311,12 +271,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
     setErr('');
     setLoading(true);
     try {
-      const raw = await streamAiChat({
-        project_id: projectId,
-        messages: [{ role: 'user', content: AI_EXTRACT_PROMPT }],
-        context: { file_path: filePath, sql: sqlContent },
-      });
-      const metrics = parseMetricsJson(raw);
+      const metrics = await requestAiExtract(projectId, filePath, sqlContent);
       if (metrics.length === 0) throw new Error('AI 未提取到任何指标');
       setMock(deriveFromMetrics(metrics));
       setTab('atomic');

@@ -381,3 +381,84 @@ pub fn parse_sse_delta(line: &str) -> Option<String> {
     }
     Some(content.to_string())
 }
+
+const EXTRACT_METRICS_PROMPT: &str = r#"你是 SQL 指标提取专家。请从下方 SQL 脚本中提取指标体系，并严格输出 JSON（不要 markdown 围栏、不要任何解释文字），格式如下：
+{"metrics":[{"name":"指标名","expression":"聚合表达式","agg_func":"sum|count|avg|min|max","distinct":false,"source_table":"来源表名","column":"聚合字段","business_filter":"业务限定条件(多条用 AND 连接，无则空字符串)","period":"daily|monthly|weekly 等或空字符串","dimensions":["GROUP BY 字段"]}]}
+要求：
+1. 只提取含聚合函数(sum/count/avg/min/max/count distinct)的指标
+2. source_table 填字段所在表
+3. business_filter 填 WHERE 中的过滤条件（时间分区条件放入 period）
+4. 没有对应项就输出空字符串/空数组，不要臆造"#;
+
+/// Extract metrics from a SQL script via the active model (non-streaming).
+/// Returns the parsed `metrics` array.
+pub async fn extract_metrics(
+    cfg: &AiConfig,
+    file_path: &str,
+    sql: &str,
+) -> Result<serde_json::Value, String> {
+    eprintln!(
+        "[ai] extract using provider={} model={} api_key={}",
+        cfg.provider,
+        cfg.model,
+        if cfg.api_key.is_empty() { "(empty)" } else { "(set)" }
+    );
+    if cfg.provider != "ollama" && cfg.api_key.is_empty() {
+        return Err("AI 未配置 API Key，请在设置中配置。".into());
+    }
+
+    let sys = format!(
+        "{}\n\n当前打开的脚本: {}\n\n脚本 SQL 内容:\n```sql\n{}\n```\n\n{}",
+        cfg.system_prompt,
+        file_path,
+        sql.chars().take(4000).collect::<String>(),
+        EXTRACT_METRICS_PROMPT
+    );
+
+    let messages = vec![
+        ChatMessage { role: "system".into(), content: sys },
+        ChatMessage { role: "user".into(), content: "请提取指标，只输出 JSON。".into() },
+    ];
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("HTTP client error: {e}"))?;
+
+    let url = provider_chat_url(&cfg);
+    let mut http_req = client.post(&url).header("Content-Type", "application/json");
+    if let Some(auth) = auth_header(&cfg) {
+        http_req = http_req.header("Authorization", auth);
+    }
+    let body = LlmRequestBody { model: cfg.model.clone(), messages, stream: false, temperature: cfg.temperature };
+    let response = http_req.json(&body).send().await.map_err(|e| format!("LLM 请求失败: {e}\n请检查 endpoint 和网络。"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("LLM 返回错误 {status}: {text}"));
+    }
+    let v: serde_json::Value = response.json().await.map_err(|e| format!("LLM 响应解析失败: {e}"))?;
+    let content = v
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|c| c.first())
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .ok_or_else(|| "LLM 响应中没有 message content".to_string())?;
+
+    // Tolerate fenced code blocks and stray prose around the JSON object.
+    let cleaned: String = content
+        .chars()
+        .filter(|ch| !matches!(ch, '`'))
+        .collect();
+    let start = cleaned.find('{').ok_or_else(|| format!("AI 输出中未找到 JSON 对象:\n{}", content.chars().take(300).collect::<String>()))?;
+    let end = cleaned.rfind('}').ok_or_else(|| "AI 输出中未找到 JSON 对象".to_string())?;
+    let obj: serde_json::Value =
+        serde_json::from_str(&cleaned[start..=end]).map_err(|e| format!("AI 输出 JSON 解析失败: {e}"))?;
+    let metrics = obj.get("metrics").cloned().unwrap_or(obj);
+    if !metrics.is_array() {
+        return Err("AI 输出中缺少 metrics 数组".into());
+    }
+    Ok(metrics)
+}
