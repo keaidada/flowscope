@@ -17,7 +17,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { SqlView } from '@pondpilot/capybara-react';
 import {
-  FunctionSquare, Filter, Layers, Sparkles, Check, Copy, ArrowRight,
+  FunctionSquare, Filter, Layers, BarChart3, Check, Copy, ArrowRight,
   RefreshCw, Loader2, FileCode2, Clock, Grid3x3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -198,7 +198,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
         <DialogHeader className="px-3 pt-3 pb-0 shrink-0">
           <div className="flex items-center gap-1.5">
             <div className="flex items-center justify-center w-6 h-6 rounded-md bg-sky-500/10">
-              <Sparkles className="h-3.5 w-3.5 text-sky-500" />
+              <BarChart3 className="h-3.5 w-3.5 text-sky-500" />
             </div>
             <DialogTitle>{t('editor.extractMetrics', '提取指标')}</DialogTitle>
             <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">

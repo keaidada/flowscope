@@ -18,7 +18,7 @@ import {
   FileCode2,
   FileJson,
   Boxes,
-  Sparkles,
+  BarChart3,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -584,7 +584,7 @@ export function EditorToolbar({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onExtractMetrics}>
-                  <Sparkles className="h-3.5 w-3.5" />
+                  <BarChart3 className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
