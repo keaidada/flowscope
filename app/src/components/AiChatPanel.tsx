@@ -333,16 +333,31 @@ export function AiChatPanel({ open, onClose, projectId, currentFilePath, current
     setError('');
 
     try {
+      // Resolve the current script's SQL context. The panel receives
+      // currentSql from the project store, which is often meta-only
+      // (content ''), so fall back to fetching the file content directly.
+      let contextSql = currentSql;
+      if (!contextSql && currentFilePath && projectId) {
+        try {
+          const { loadFileContent } = await import('@/lib/file-storage');
+          const r = await loadFileContent(projectId, currentFilePath);
+          contextSql = r?.content ?? '';
+        } catch (e) {
+          console.error('[ai] load context sql failed', e);
+          contextSql = '';
+        }
+      }
+      const context = contextSql && currentFilePath
+        ? { file_path: currentFilePath, sql: contextSql }
+        : undefined;
+
       const res = await fetch(`${apiBase()}/api/ai/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: projectId,
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
-          context: currentSql ? {
-            file_path: currentFilePath,
-            sql: currentSql,
-          } : undefined,
+          context,
         }),
       });
 
