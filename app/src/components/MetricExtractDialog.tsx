@@ -9,7 +9,7 @@
  * 全部 mock 数据（基于脚本文件名生成），后续可接真实 API。
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -328,6 +328,29 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
     }
   };
 
+  /** Merge saved models + presets into one deduplicated list (saved first). */
+  const aiModelOptions = useMemo(() => {
+    const options: { key: string; label: string }[] = [];
+    const seen = new Set<string>();
+    for (const sm of Object.values(aiSavedModels)) {
+      const key = `${sm.provider}|${sm.model}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      options.push({
+        key,
+        label: AI_MODEL_PRESETS.find(x => x.provider === sm.provider && x.model === sm.model)?.label
+          ?? `${sm.provider} · ${sm.model}`,
+      });
+    }
+    for (const p of AI_MODEL_PRESETS) {
+      const key = `${p.provider}|${p.model}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      options.push({ key, label: p.label });
+    }
+    return options;
+  }, [aiSavedModels]);
+
   const handleCopy = () => {
     const lines = tab === 'atomic'
       ? mock.atomics.map(a => `-- ${a.name}\n--   ${a.expr}`).join('\n')
@@ -403,16 +426,9 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
                 <DropdownMenuLabel>选择 AI 提取模型</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuRadioGroup value={aiModelKey} onValueChange={switchAiModel}>
-                  {Object.values(aiSavedModels).map(sm => (
-                    <DropdownMenuRadioItem key={`${sm.provider}|${sm.model}`} value={`${sm.provider}|${sm.model}`}>
-                      {AI_MODEL_PRESETS.find(x => x.provider === sm.provider && x.model === sm.model)?.label
-                        ?? `${sm.provider} · ${sm.model}`}
-                    </DropdownMenuRadioItem>
-                  ))}
-                  {Object.keys(aiSavedModels).length > 0 && <DropdownMenuSeparator />}
-                  {AI_MODEL_PRESETS.map(p => (
-                    <DropdownMenuRadioItem key={`${p.provider}|${p.model}`} value={`${p.provider}|${p.model}`}>
-                      {p.label}
+                  {aiModelOptions.map(o => (
+                    <DropdownMenuRadioItem key={o.key} value={o.key}>
+                      {o.label}
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
