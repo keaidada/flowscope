@@ -162,12 +162,17 @@ const AI_MODEL_PRESETS = [
   { label: 'DeepSeek · deepseek-reasoner', provider: 'deepseek', model: 'deepseek-reasoner', endpoint: 'https://api.deepseek.com', api_key: '' },
 ] as const;
 
+/** AI-extracted metric system: 5 categories (mirrors the rule-based tabs). */
+interface AiMetricSet {
+  atomics: Array<{ name: string; expression: string; agg_func: string; distinct: boolean; source_table: string; column: string }>;
+  qualifiers: Array<{ name: string; expr: string; field: string }>;
+  periods: Array<{ name: string; expr: string; unit: string; label: string }>;
+  dimensions: Array<{ name: string; type: string; desc: string }>;
+  derived: Array<{ name: string; atomic: string; qualifiers: string[]; periodExpr: string; gran: string }>;
+}
+
 /** Request metric extraction from the backend (non-streaming LLM call). */
-async function requestAiExtract(projectId: string, filePath: string, sql: string): Promise<Array<{
-  name: string; expression: string; agg_func: string; distinct: boolean;
-  source_table: string; column: string; business_filter: string; period: string;
-  dimensions: string[];
-}>> {
+async function requestAiExtract(projectId: string, filePath: string, sql: string): Promise<AiMetricSet> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 150_000);
   try {
@@ -179,19 +184,49 @@ async function requestAiExtract(projectId: string, filePath: string, sql: string
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || `AI 请求失败: ${res.status}`);
-    const arr: unknown = data.metrics;
-    if (!Array.isArray(arr)) throw new Error('AI 输出中缺少 metrics 数组');
-    return arr.map((m: Record<string, unknown>) => ({
-      name: String(m.name ?? 'metric'),
-      expression: String(m.expression ?? m.expr ?? ''),
-      agg_func: String(m.agg_func ?? m.agg ?? 'sum'),
-      distinct: Boolean(m.distinct),
-      source_table: String(m.source_table ?? m.sourceTable ?? ''),
-      column: String(m.column ?? ''),
-      business_filter: String(m.business_filter ?? m.businessFilter ?? ''),
-      period: String(m.period ?? ''),
-      dimensions: Array.isArray(m.dimensions) ? m.dimensions.map(String) : [],
-    }));
+    const obj: Record<string, unknown> = data.metrics ?? data;
+    const arr = (v: unknown) => (Array.isArray(v) ? v : []) as Array<Record<string, unknown>>;
+    const s = (m: Record<string, unknown>, ...keys: string[]) => {
+      for (const k of keys) {
+        const v = m[k];
+        if (typeof v === 'string') return v;
+      }
+      return '';
+    };
+    const b = (m: Record<string, unknown>, k: string) => Boolean(m[k]);
+    return {
+      atomics: arr(obj.atomics).map(m => ({
+        name: s(m, 'name') || 'metric',
+        expression: s(m, 'expression', 'expr'),
+        agg_func: s(m, 'agg_func', 'agg') || 'sum',
+        distinct: b(m, 'distinct'),
+        source_table: s(m, 'source_table', 'sourceTable'),
+        column: s(m, 'column'),
+      })),
+      qualifiers: arr(obj.qualifiers).map(m => ({
+        name: s(m, 'name'),
+        expr: s(m, 'expr', 'expression'),
+        field: s(m, 'field'),
+      })),
+      periods: arr(obj.periods).map(m => ({
+        name: s(m, 'name'),
+        expr: s(m, 'expr', 'expression'),
+        unit: s(m, 'unit'),
+        label: s(m, 'label'),
+      })),
+      dimensions: arr(obj.dimensions).map(m => ({
+        name: s(m, 'name'),
+        type: s(m, 'type'),
+        desc: s(m, 'desc'),
+      })),
+      derived: arr(obj.derived).map(m => ({
+        name: s(m, 'name'),
+        atomic: s(m, 'atomic'),
+        qualifiers: Array.isArray(m.qualifiers) ? m.qualifiers.map(String) : [],
+        periodExpr: s(m, 'periodExpr', 'period_expr'),
+        gran: s(m, 'gran'),
+      })),
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -209,7 +244,9 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
   const [showSql, setShowSql] = useState(false);
   const [err, setErr] = useState('');
   const [aiErr, setAiErr] = useState('');
-  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiMetrics, setAiMetrics] = useState<AiMetricSet | null>(null);
+  const [aiTab, setAiTab] = useState<'atomic' | 'qualifier' | 'period' | 'dimension' | 'derived'>('atomic');
+  const [aiSelected, setAiSelected] = useState<string | null>(null);
   const [mock, setMock] = useState<{ atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; dimensions: MockDimension[]; derived: MockDerived[] }>({
     atomics: [], qualifiers: [], periods: [], dimensions: [], derived: [],
   });
@@ -271,21 +308,15 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
     if (!sqlContent) return;
     setAiLoading(true);
     setAiErr('');
-    setAiSummary(null);
+    setAiMetrics(null);
+    setAiSelected(null);
     try {
       const metrics = await requestAiExtract(projectId, filePath, sqlContent);
-      if (metrics.length === 0) throw new Error('AI 未提取到任何指标');
-      const lines: string[] = [];
-      metrics.forEach((m, i) => {
-        const parts: string[] = [];
-        if (m.expression) parts.push(`表达式 ${m.expression}`);
-        if (m.source_table) parts.push(`来源 ${m.source_table}`);
-        if (m.business_filter) parts.push(`限定 ${m.business_filter}`);
-        if (m.period) parts.push(`周期 ${m.period}`);
-        if (m.dimensions.length) parts.push(`维度 ${m.dimensions.join('、')}`);
-        lines.push(`${i + 1}. ${m.name}${parts.length ? ' — ' + parts.join('；') : ''}`);
-      });
-      setAiSummary(lines.join('\n'));
+      if (metrics.atomics.length === 0 && metrics.derived.length === 0) {
+        throw new Error('AI 未提取到任何指标');
+      }
+      setAiMetrics(metrics);
+      setAiTab('atomic');
     } catch (e) {
       setAiErr(String(e instanceof Error ? e.message : e));
     } finally {
@@ -538,14 +569,15 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
           </div>
 
           {/* AI extract panel — only appears once AI extract is triggered */}
-          {(aiLoading || aiErr || aiSummary !== null) && (
+          {(aiLoading || aiErr || aiMetrics !== null) && (
           <div className="w-80 border-l flex flex-col shrink-0">
             <div className="flex items-center gap-1.5 px-3 py-1.5 border-b bg-muted/20 text-[10px] font-semibold text-muted-foreground">
               <Sparkles className="h-3 w-3 text-primary" />
               AI 提取结果
-              {aiSummary !== null && (
+              {aiMetrics !== null && (
                 <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">
-                  {aiSummary.split('\n').filter(l => l.trim()).length} 个指标
+                  {aiMetrics.atomics.length + aiMetrics.qualifiers.length + aiMetrics.periods.length
+                    + aiMetrics.dimensions.length + aiMetrics.derived.length} 项
                 </span>
               )}
             </div>
@@ -560,11 +592,11 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
                   <p className="font-medium mb-1">AI 提取失败</p>
                   <pre className="whitespace-pre-wrap text-[10px]">{aiErr}</pre>
                 </div>
-              ) : aiSummary !== null ? (
-                <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed">{aiSummary}</pre>
+              ) : aiMetrics !== null ? (
+                <AiMetricBrowser metrics={aiMetrics} tab={aiTab} setTab={setAiTab} selected={aiSelected} setSelected={setAiSelected} />
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground text-xs text-center p-4">
-                  点击「AI 提取」生成指标文字描述
+                  点击「AI 提取」生成指标体系
                 </div>
               )}
             </div>
@@ -692,6 +724,132 @@ function DetailRow({ k, v, mono, code }: { k: string; v: string; mono?: boolean;
         <pre className="text-[10px] font-mono bg-muted rounded px-1.5 py-1 whitespace-pre-wrap break-all">{v}</pre>
       ) : (
         <div className={cn('text-[11px] break-all', mono && 'font-mono bg-muted rounded px-1.5 py-1')}>{v}</div>
+      )}
+    </div>
+  );
+}
+
+/** AI-extracted metric browser: 5-category tabs + item list + selected detail. */
+function AiMetricBrowser({ metrics, tab, setTab, selected, setSelected }: {
+  metrics: AiMetricSet;
+  tab: 'atomic' | 'qualifier' | 'period' | 'dimension' | 'derived';
+  setTab: (t: 'atomic' | 'qualifier' | 'period' | 'dimension' | 'derived') => void;
+  selected: string | null;
+  setSelected: (s: string | null) => void;
+}) {
+  const cats = [
+    { id: 'atomic' as const, label: `原子指标 (${metrics.atomics.length})`, color: 'text-sky-500' },
+    { id: 'qualifier' as const, label: `业务限定 (${metrics.qualifiers.length})`, color: 'text-amber-500' },
+    { id: 'period' as const, label: `周期限定 (${metrics.periods.length})`, color: 'text-violet-500' },
+    { id: 'dimension' as const, label: `维度 (${metrics.dimensions.length})`, color: 'text-purple-500' },
+    { id: 'derived' as const, label: `派生指标 (${metrics.derived.length})`, color: 'text-emerald-500' },
+  ];
+
+  const items: Array<{ id: string; title: string; sub: string; badge?: string; badgeColor: string }> =
+    tab === 'atomic' ? metrics.atomics.map(a => ({
+      id: a.name, title: a.name,
+      sub: a.source_table ? `来源: ${a.source_table}` : a.expression,
+      badge: `${a.distinct ? 'count distinct' : a.agg_func}(${a.column})`,
+      badgeColor: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-400',
+    })) : tab === 'qualifier' ? metrics.qualifiers.map(q => ({
+      id: q.name, title: q.name, sub: q.expr, badge: q.field,
+      badgeColor: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
+    })) : tab === 'period' ? metrics.periods.map(p => ({
+      id: p.name, title: p.name, sub: p.expr, badge: p.label,
+      badgeColor: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400',
+    })) : tab === 'dimension' ? metrics.dimensions.map(d => ({
+      id: d.name, title: d.name, sub: d.desc, badge: d.type,
+      badgeColor: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400',
+    })) : metrics.derived.map(d => ({
+      id: d.name, title: d.name, sub: `${d.atomic} · ${d.periodExpr}`, badge: d.gran,
+      badgeColor: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400',
+    }));
+
+  const detail = tab === 'atomic'
+    ? metrics.atomics.find(x => x.name === selected)
+    : tab === 'qualifier'
+      ? metrics.qualifiers.find(x => x.name === selected)
+      : tab === 'period'
+        ? metrics.periods.find(x => x.name === selected)
+        : tab === 'dimension'
+          ? metrics.dimensions.find(x => x.name === selected)
+          : metrics.derived.find(x => x.name === selected);
+
+  return (
+    <div className="space-y-2">
+      {/* Category tabs */}
+      <div className="flex flex-wrap items-center gap-0.5 rounded-md border bg-background p-0.5">
+        {cats.map(c => (
+          <button key={c.id} onClick={() => { setTab(c.id); setSelected(null); }}
+            className={cn('flex items-center gap-1 h-6 px-2 rounded text-[10px] font-medium transition-colors',
+              tab === c.id ? cn('bg-primary/10', c.color) : 'text-muted-foreground hover:text-foreground')}>
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Item list */}
+      <div className="space-y-1">
+        {items.length === 0 ? (
+          <div className="text-[11px] text-muted-foreground text-center py-4">该分类下没有提取到内容</div>
+        ) : items.map(it => (
+          <button key={it.id} onClick={() => setSelected(selected === it.id ? null : it.id)}
+            className={cn('w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border bg-card hover:border-sky-400/50 transition-colors text-left',
+              selected === it.id && 'border-sky-500/60 ring-1 ring-sky-500/30')}>
+            <div className="flex-1 min-w-0">
+              <div className="text-[11px] font-medium truncate">{it.title}</div>
+              <div className="text-[9px] text-muted-foreground truncate">{it.sub}</div>
+            </div>
+            {it.badge && (
+              <span className={cn('text-[9px] px-1.5 py-0.5 rounded-full shrink-0 max-w-[110px] truncate', it.badgeColor)}>{it.badge}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Selected detail */}
+      {detail && (
+        <div className="border-t pt-2 space-y-2">
+          {tab === 'atomic' && (
+            <>
+              <DetailRow k="指标名" v={detail.name} />
+              <DetailRow k="聚合函数" v={`${(detail as AiMetricSet['atomics'][number]).distinct ? 'count distinct' : (detail as AiMetricSet['atomics'][number]).agg_func}(${(detail as AiMetricSet['atomics'][number]).column})`} mono />
+              <DetailRow k="来源表" v={(detail as AiMetricSet['atomics'][number]).source_table} mono />
+              <DetailRow k="表达式" v={(detail as AiMetricSet['atomics'][number]).expression} mono code />
+            </>
+          )}
+          {tab === 'qualifier' && (
+            <>
+              <DetailRow k="限定名" v={detail.name} />
+              <DetailRow k="条件字段" v={(detail as AiMetricSet['qualifiers'][number]).field} mono />
+              <DetailRow k="条件表达式" v={(detail as AiMetricSet['qualifiers'][number]).expr} mono code />
+            </>
+          )}
+          {tab === 'period' && (
+            <>
+              <DetailRow k="周期限定" v={detail.name} />
+              <DetailRow k="时间单位" v={(detail as AiMetricSet['periods'][number]).unit} mono />
+              <DetailRow k="周期标签" v={(detail as AiMetricSet['periods'][number]).label} />
+              <DetailRow k="周期表达式" v={(detail as AiMetricSet['periods'][number]).expr} mono code />
+            </>
+          )}
+          {tab === 'dimension' && (
+            <>
+              <DetailRow k="维度" v={detail.name} />
+              <DetailRow k="类型" v={(detail as AiMetricSet['dimensions'][number]).type} mono />
+              <DetailRow k="说明" v={(detail as AiMetricSet['dimensions'][number]).desc} />
+            </>
+          )}
+          {tab === 'derived' && (
+            <>
+              <DetailRow k="派生指标" v={detail.name} />
+              <DetailRow k="原子指标" v={(detail as AiMetricSet['derived'][number]).atomic} mono />
+              <DetailRow k="业务限定" v={(detail as AiMetricSet['derived'][number]).qualifiers.join(' AND ')} mono />
+              <DetailRow k="周期表达式" v={(detail as AiMetricSet['derived'][number]).periodExpr} mono />
+              <DetailRow k="统计粒度" v={(detail as AiMetricSet['derived'][number]).gran} />
+            </>
+          )}
+        </div>
       )}
     </div>
   );

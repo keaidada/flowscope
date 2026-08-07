@@ -383,12 +383,14 @@ pub fn parse_sse_delta(line: &str) -> Option<String> {
 }
 
 const EXTRACT_METRICS_PROMPT: &str = r#"你是 SQL 指标提取专家。请从下方 SQL 脚本中提取指标体系，并严格输出 JSON（不要 markdown 围栏、不要任何解释文字），格式如下：
-{"metrics":[{"name":"指标名","expression":"聚合表达式","agg_func":"sum|count|avg|min|max","distinct":false,"source_table":"来源表名","column":"聚合字段","business_filter":"业务限定条件(多条用 AND 连接，无则空字符串)","period":"daily|monthly|weekly 等或空字符串","dimensions":["GROUP BY 字段"]}]}
+{"atomics":[{"name":"原子指标名","expression":"聚合表达式","agg_func":"sum|count|avg|min|max","distinct":false,"source_table":"来源表名","column":"聚合字段"}],"qualifiers":[{"name":"业务限定名","expr":"限定条件","field":"字段"}],"periods":[{"name":"周期限定名","expr":"时间表达式","unit":"daily|monthly|weekly","label":"按日|按月|按周"}],"dimensions":[{"name":"维度名","type":"string|number|date","desc":"说明"}],"derived":[{"name":"派生指标名","atomic":"依赖的原子指标名","qualifiers":["业务限定名"],"periodExpr":"周期表达式","gran":"day|month|week"}]}
 要求：
-1. 只提取含聚合函数(sum/count/avg/min/max/count distinct)的指标
-2. source_table 填字段所在表
-3. business_filter 填 WHERE 中的过滤条件（时间分区条件放入 period）
-4. 没有对应项就输出空字符串/空数组，不要臆造"#;
+1. atomics 只提取含聚合函数(sum/count/avg/min/max/count distinct)的指标，expression 填完整聚合表达式，source_table 填字段所在表，column 填聚合字段
+2. qualifiers 提取 WHERE 中的业务过滤条件，expr 填完整条件表达式（如 "deal_status = 1"），field 填条件字段名（时间分区条件归入 periods）
+3. periods 提取时间分区/周期条件，label 填 按日|按月|按周
+4. dimensions 提取 GROUP BY 字段
+5. derived 是基于原子指标 + 业务限定 + 周期组合的派生指标（如无则空数组）
+6. 没有对应项就输出空数组，不要臆造"#;
 
 /// Extract metrics from a SQL script via the active model (non-streaming).
 /// Returns the parsed `metrics` array.
@@ -456,9 +458,74 @@ pub async fn extract_metrics(
     let end = cleaned.rfind('}').ok_or_else(|| "AI 输出中未找到 JSON 对象".to_string())?;
     let obj: serde_json::Value =
         serde_json::from_str(&cleaned[start..=end]).map_err(|e| format!("AI 输出 JSON 解析失败: {e}"))?;
+
+    // New format: 5-category object {atomics, qualifiers, periods, dimensions, derived}.
+    if obj.get("atomics").is_some() {
+        return Ok(obj);
+    }
+    // Legacy format: flat {metrics: [...]} — upgrade to the 5-category shape.
     let metrics = obj.get("metrics").cloned().unwrap_or(obj);
     if !metrics.is_array() {
         return Err("AI 输出中缺少 metrics 数组".into());
     }
-    Ok(metrics)
+    let mut atomics = Vec::new();
+    let mut qualifiers = Vec::new();
+    let mut periods = Vec::new();
+    let mut dimensions = Vec::new();
+    let mut seen_qual = std::collections::HashSet::new();
+    let mut seen_period = std::collections::HashSet::new();
+    let mut seen_dim = std::collections::HashSet::new();
+    for m in metrics.as_array().unwrap() {
+        let name = m.get("name").and_then(|v| v.as_str()).unwrap_or("metric");
+        atomics.push(serde_json::json!({
+            "name": name,
+            "expression": m.get("expression").or_else(|| m.get("expr")).and_then(|v| v.as_str()).unwrap_or(""),
+            "agg_func": m.get("agg_func").or_else(|| m.get("agg")).and_then(|v| v.as_str()).unwrap_or("sum"),
+            "distinct": m.get("distinct").and_then(|v| v.as_bool()).unwrap_or(false),
+            "source_table": m.get("source_table").or_else(|| m.get("sourceTable")).and_then(|v| v.as_str()).unwrap_or(""),
+            "column": m.get("column").and_then(|v| v.as_str()).unwrap_or(""),
+        }));
+        if let Some(bf) = m.get("business_filter").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            for part in bf.split(" AND ") {
+                let part = part.trim();
+                if part.is_empty() || !seen_qual.insert(part.to_string()) { continue; }
+                let field = part.split(['=', '<', '>', ' ', '!']).next().unwrap_or(part).trim();
+                qualifiers.push(serde_json::json!({
+                    "name": part.chars().take(24).collect::<String>(),
+                    "expr": part,
+                    "field": field,
+                }));
+            }
+        }
+        if let Some(p) = m.get("period").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            if seen_period.insert(p.to_string()) {
+                periods.push(serde_json::json!({
+                    "name": p,
+                    "expr": p,
+                    "unit": "daily",
+                    "label": "按日",
+                }));
+            }
+        }
+        if let Some(dims) = m.get("dimensions").and_then(|v| v.as_array()) {
+            for d in dims {
+                if let Some(ds) = d.as_str() {
+                    if seen_dim.insert(ds.to_string()) {
+                        dimensions.push(serde_json::json!({
+                            "name": ds,
+                            "type": "string",
+                            "desc": "GROUP BY 字段",
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    Ok(serde_json::json!({
+        "atomics": atomics,
+        "qualifiers": qualifiers,
+        "periods": periods,
+        "dimensions": dimensions,
+        "derived": [],
+    }))
 }
