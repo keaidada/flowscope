@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { SqlView } from '@pondpilot/capybara-react';
 import {
   FunctionSquare, Filter, Layers, BarChart3, Check, Copy, ArrowRight,
-  RefreshCw, Loader2, FileCode2, Clock, Grid3x3,
+  RefreshCw, Loader2, FileCode2, Clock, Grid3x3, Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -144,9 +144,93 @@ function deriveFromMetrics(ms: Array<{
   return { atomics, qualifiers, periods, dimensions, derived };
 }
 
+function apiBase(): string {
+  if (typeof window !== 'undefined') {
+    const port = (window as unknown as { __FSCOPE_PORT__?: number }).__FSCOPE_PORT__;
+    if (port) return `http://localhost:${port}`;
+  }
+  return '';
+}
+
+const AI_EXTRACT_PROMPT = `你是 SQL 指标提取专家。请从下方 SQL 脚本中提取指标体系，并严格输出 JSON（不要 markdown 围栏、不要任何解释文字），格式如下：
+{"metrics":[{"name":"指标名","expression":"聚合表达式","agg_func":"sum|count|avg|min|max","distinct":false,"source_table":"来源表名","column":"聚合字段","business_filter":"业务限定条件(多条用 AND 连接，无则空字符串)","period":"daily|monthly|weekly 等或空字符串","dimensions":["GROUP BY 字段"]}]}
+要求：
+1. 只提取含聚合函数(sum/count/avg/min/max/count distinct)的指标
+2. source_table 填字段所在表
+3. business_filter 填 WHERE 中的过滤条件（时间分区条件放入 period）
+4. 没有对应项就输出空字符串/空数组，不要臆造`;
+
+/** Collect the full text from the SSE chat stream. */
+async function streamAiChat(body: unknown): Promise<string> {
+  const res = await fetch(`${apiBase()}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`AI 请求失败: ${res.status} ${text}`);
+  }
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('无法读取 AI 响应流');
+  const decoder = new TextDecoder();
+  let full = '';
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sepIdx;
+    while ((sepIdx = buffer.indexOf('\n\n')) !== -1) {
+      const event = buffer.slice(0, sepIdx);
+      buffer = buffer.slice(sepIdx + 2);
+      const dataParts: string[] = [];
+      for (const line of event.split('\n')) {
+        if (line.startsWith('data:')) dataParts.push(line.slice(5).trim());
+      }
+      const data = dataParts.join('\n');
+      if (data === '[DONE]') return full;
+      if (data.startsWith('[ERROR]')) throw new Error(data.slice(7));
+      if (data) full += data;
+    }
+  }
+  if (buffer.startsWith('data:')) {
+    const data = buffer.slice(5).trim();
+    if (data && data !== '[DONE]') full += data;
+  }
+  return full;
+}
+
+/** Parse an LLM JSON answer (tolerates fenced code blocks and stray prose). */
+function parseMetricsJson(raw: string): Array<{
+  name: string; expression: string; agg_func: string; distinct: boolean;
+  source_table: string; column: string; business_filter: string; period: string;
+  dimensions: string[];
+}> {
+  const cleaned = raw.replace(/```(?:json)?/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('AI 输出中未找到 JSON 对象');
+  const obj = JSON.parse(cleaned.slice(start, end + 1));
+  const arr = obj.metrics ?? obj;
+  if (!Array.isArray(arr)) throw new Error('AI 输出中缺少 metrics 数组');
+  return arr.map((m: Record<string, unknown>) => ({
+    name: String(m.name ?? 'metric'),
+    expression: String(m.expression ?? m.expr ?? ''),
+    agg_func: String(m.agg_func ?? m.agg ?? 'sum'),
+    distinct: Boolean(m.distinct),
+    source_table: String(m.source_table ?? m.sourceTable ?? ''),
+    column: String(m.column ?? ''),
+    business_filter: String(m.business_filter ?? m.businessFilter ?? ''),
+    period: String(m.period ?? ''),
+    dimensions: Array.isArray(m.dimensions) ? m.dimensions.map(String) : [],
+  }));
+}
+
 export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlContent }: MetricExtractDialogProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
+  const [aiLoading, setAiLoading] = useState(false);
   const [tab, setTab] = useState<'atomic' | 'qualifier' | 'period' | 'dimension' | 'derived'>('atomic');
   const [selected, setSelected] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -175,6 +259,29 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
   const totalPeriod = mock.periods.length;
   const totalDimension = mock.dimensions.length;
   const totalDerived = mock.derived.length;
+
+  const handleAiExtract = async () => {
+    if (!sqlContent) return;
+    setAiLoading(true);
+    setErr('');
+    setLoading(true);
+    try {
+      const raw = await streamAiChat({
+        project_id: projectId,
+        messages: [{ role: 'user', content: AI_EXTRACT_PROMPT }],
+        context: { file_path: filePath, sql: sqlContent },
+      });
+      const metrics = parseMetricsJson(raw);
+      if (metrics.length === 0) throw new Error('AI 未提取到任何指标');
+      setMock(deriveFromMetrics(metrics));
+      setTab('atomic');
+    } catch (e) {
+      setErr(String(e instanceof Error ? e.message : e));
+    } finally {
+      setAiLoading(false);
+      setLoading(false);
+    }
+  };
 
   const handleCopy = () => {
     const lines = tab === 'atomic'
@@ -242,6 +349,12 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
             }}>
               <RefreshCw className="h-3 w-3 mr-1" />重新提取
             </Button>
+            <Button size="sm" disabled={!sqlContent || aiLoading}
+              onClick={handleAiExtract}
+              className={cn('h-7 text-[11px] gap-1 bg-gradient-to-r from-sky-500 to-violet-500 hover:from-sky-600 hover:to-violet-600 text-white border-0 shadow-sm')}>
+              {aiLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+              AI 提取
+            </Button>
             <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={handleCopy}>
               {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
               {copied ? '已复制' : '复制'}
@@ -254,7 +367,8 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
           <div className="flex-1 min-w-0 overflow-auto bg-sky-50/10 dark:bg-sky-950/5">
             {loading ? (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                <Loader2 className="h-5 w-5 mr-2 animate-spin" />{t('editor.generating', '生成中...')}
+                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                {aiLoading ? 'AI 提取中...（依赖 LLM 响应，请稍候）' : t('editor.generating', '生成中...')}
               </div>
             ) : err ? (
               <div className="p-4 text-sm text-destructive">
