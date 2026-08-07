@@ -208,6 +208,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
   const [copied, setCopied] = useState(false);
   const [showSql, setShowSql] = useState(false);
   const [err, setErr] = useState('');
+  const [aiErr, setAiErr] = useState('');
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [mock, setMock] = useState<{ atomics: MockAtomic[]; qualifiers: MockQualifier[]; periods: MockPeriod[]; dimensions: MockDimension[]; derived: MockDerived[] }>({
     atomics: [], qualifiers: [], periods: [], dimensions: [], derived: [],
@@ -269,7 +270,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
   const handleAiExtract = async () => {
     if (!sqlContent) return;
     setAiLoading(true);
-    setErr('');
+    setAiErr('');
     setAiSummary(null);
     try {
       const metrics = await requestAiExtract(projectId, filePath, sqlContent);
@@ -286,7 +287,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
       });
       setAiSummary(lines.join('\n'));
     } catch (e) {
-      setErr(String(e instanceof Error ? e.message : e));
+      setAiErr(String(e instanceof Error ? e.message : e));
     } finally {
       setAiLoading(false);
     }
@@ -363,7 +364,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
             ]).map(x => {
               const Icon = x.icon;
               return (
-                <button key={x.id} onClick={() => { setTab(x.id); setSelected(null); setAiSummary(null); }}
+                <button key={x.id} onClick={() => { setTab(x.id); setSelected(null); }}
                   className={cn('flex items-center gap-1 h-7 px-2.5 rounded text-[11px] font-medium transition-colors',
                     tab === x.id ? cn('bg-primary/10', x.color) : 'text-muted-foreground hover:text-foreground')}>
                   <Icon className="h-3.5 w-3.5" />{x.label}
@@ -399,7 +400,7 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
               </DropdownMenuContent>
             </DropdownMenu>
             <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => {
-              setLoading(true); setErr(''); setAiSummary(null);
+              setLoading(true); setErr('');
               extractScriptMetrics(projectId, filePath)
                 .then(r => setMock(deriveFromMetrics(r.metrics)))
                 .catch(e => setErr(String(e)))
@@ -427,22 +428,6 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 <Loader2 className="h-5 w-5 mr-2 animate-spin" />
                 {t('editor.generating', '生成中...')}
-              </div>
-            ) : aiLoading ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                AI 提取中...（依赖 LLM 响应，请稍候）
-              </div>
-            ) : aiSummary !== null ? (
-              <div className="p-4">
-                <div className="flex items-center gap-1.5 mb-3">
-                  <Sparkles className="h-3.5 w-3.5 text-primary" />
-                  <span className="text-xs font-medium">AI 提取结果</span>
-                  <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
-                    {aiSummary.split('\n').filter(l => l.trim()).length} 个指标
-                  </span>
-                </div>
-                <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed">{aiSummary}</pre>
               </div>
             ) : err ? (
               <div className="p-4 text-sm text-destructive">
@@ -547,6 +532,38 @@ export function MetricExtractDialog({ open, onClose, projectId, filePath, sqlCon
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground text-xs text-center p-4">
                   选择左侧指标查看表达式与完整 SQL
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* AI extract panel */}
+          <div className="w-80 border-l flex flex-col shrink-0">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 border-b bg-muted/20 text-[10px] font-semibold text-muted-foreground">
+              <Sparkles className="h-3 w-3 text-primary" />
+              AI 提取结果
+              {aiSummary !== null && (
+                <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">
+                  {aiSummary.split('\n').filter(l => l.trim()).length} 个指标
+                </span>
+              )}
+            </div>
+            <div className="flex-1 overflow-auto p-3">
+              {aiLoading ? (
+                <div className="flex items-center justify-center h-full text-muted-foreground text-xs text-center p-4">
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  AI 提取中...（依赖 LLM 响应，请稍候）
+                </div>
+              ) : aiErr ? (
+                <div className="text-xs text-destructive">
+                  <p className="font-medium mb-1">AI 提取失败</p>
+                  <pre className="whitespace-pre-wrap text-[10px]">{aiErr}</pre>
+                </div>
+              ) : aiSummary !== null ? (
+                <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed">{aiSummary}</pre>
+              ) : (
+                <div className="flex items-center justify-center h-full text-muted-foreground text-xs text-center p-4">
+                  点击「AI 提取」生成指标文字描述
                 </div>
               )}
             </div>
