@@ -282,6 +282,23 @@ pub struct ChatContext {
     pub lineage_summary: Option<String>,
 }
 
+/// Truncate very long SQL: keep head AND tail so later statements
+/// (INSERT/SELECT usually at the end of the script) are visible.
+/// Char-safe for UTF-8.
+fn truncate_sql(sql: &str) -> String {
+    const LIMIT: usize = 8000;
+    const HEAD: usize = 4000;
+    const TAIL: usize = 4000;
+    let total = sql.chars().count();
+    if total > LIMIT {
+        let head: String = sql.chars().take(HEAD).collect();
+        let tail: String = sql.chars().skip(total - TAIL).collect();
+        format!("{head}\n\n...(中间省略 {} 字符)...\n\n{tail}", total - HEAD - TAIL)
+    } else {
+        sql.to_string()
+    }
+}
+
 /// Build the messages array to send to the LLM, injecting context into
 /// the system prompt.
 pub fn build_llm_messages(cfg: &AiConfig, messages: &[ChatMessage], ctx: &Option<ChatContext>) -> Vec<ChatMessage> {
@@ -291,13 +308,7 @@ pub fn build_llm_messages(cfg: &AiConfig, messages: &[ChatMessage], ctx: &Option
             sys.push_str(&format!("\n\n当前打开的脚本: {fp}"));
         }
         if let Some(ref sql) = ctx.sql {
-            // Truncate very long SQL to ~4000 chars (char-safe for UTF-8).
-            let truncated = if sql.chars().count() > 4000 {
-                sql.chars().take(4000).collect::<String>()
-            } else {
-                sql.clone()
-            };
-            sys.push_str(&format!("\n\n脚本 SQL 内容:\n```sql\n{truncated}\n```"));
+            sys.push_str(&format!("\n\n脚本 SQL 内容:\n```sql\n{}\n```", truncate_sql(sql)));
         }
         if let Some(ref lin) = ctx.lineage_summary {
             sys.push_str(&format!("\n\n血缘摘要:\n{lin}"));
@@ -413,7 +424,7 @@ pub async fn extract_metrics(
         "{}\n\n当前打开的脚本: {}\n\n脚本 SQL 内容:\n```sql\n{}\n```\n\n{}",
         cfg.system_prompt,
         file_path,
-        sql.chars().take(4000).collect::<String>(),
+        truncate_sql(sql),
         EXTRACT_METRICS_PROMPT
     );
 
