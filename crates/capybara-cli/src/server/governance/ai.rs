@@ -50,7 +50,33 @@ fn get_active_model(conn: &Connection, project_id: &str) -> (String, String) {
 pub fn get_ai_config(conn: &Connection, project_id: &str) -> AiConfig {
     let (provider, model) = get_active_model(conn, project_id);
     get_model_config(conn, project_id, &provider, &model)
+        // Fallback: inherit the most recently saved config for the same
+        // provider+model from ANY project (endpoint/api_key are provider
+        // properties, not project properties).
+        .or_else(|| get_shared_config(conn, &provider, &model))
         .unwrap_or_else(|| default_config_for(&provider, &model))
+}
+
+/// Find the most recently saved config for provider+model across all projects.
+fn get_shared_config(conn: &Connection, provider: &str, model: &str) -> Option<AiConfig> {
+    conn.query_row(
+        "SELECT provider, api_key, model, endpoint, system_prompt, temperature, output_template
+         FROM ai_model_config WHERE provider = ?1 AND model = ?2
+         ORDER BY updated_at DESC LIMIT 1",
+        params![provider, model],
+        |row| {
+            Ok(AiConfig {
+                provider: row.get(0)?,
+                api_key: row.get(1)?,
+                model: row.get(2)?,
+                endpoint: row.get(3)?,
+                system_prompt: row.get(4)?,
+                temperature: row.get(5)?,
+                output_template: row.get(6)?,
+            })
+        },
+    )
+    .ok()
 }
 
 /// Provider-aware defaults so switching to a model that was never saved
@@ -124,6 +150,47 @@ pub fn list_model_configs(conn: &Connection, project_id: &str) -> Vec<AiConfig> 
         Err(_) => return Vec::new(),
     };
     rows.filter_map(Result::ok).collect()
+}
+
+/// List models for the project, supplemented by the most recently saved
+/// config for the same provider+model from any other project (so a model
+/// configured once is available everywhere).
+pub fn list_models_with_shared(conn: &Connection, project_id: &str) -> Vec<AiConfig> {
+    let mut stmt = match conn.prepare(
+        "SELECT provider, api_key, model, endpoint, system_prompt, temperature, output_template
+         FROM ai_model_config
+         WHERE project_id != ?1
+         ORDER BY updated_at DESC",
+    ) {
+        Ok(s) => s,
+        Err(_) => return list_model_configs(conn, project_id),
+    };
+    let rows: Vec<AiConfig> = match stmt.query_map(params![project_id], |row| {
+        Ok(AiConfig {
+            provider: row.get(0)?,
+            api_key: row.get(1)?,
+            model: row.get(2)?,
+            endpoint: row.get(3)?,
+            system_prompt: row.get(4)?,
+            temperature: row.get(5)?,
+            output_template: row.get(6)?,
+        })
+    }) {
+        Ok(rows) => rows.filter_map(Result::ok).collect(),
+        Err(_) => Vec::new(),
+    };
+
+    let mut own = list_model_configs(conn, project_id);
+    let mut seen: std::collections::HashSet<(String, String)> = own
+        .iter()
+        .map(|c| (c.provider.clone(), c.model.clone()))
+        .collect();
+    for c in rows {
+        if seen.insert((c.provider.clone(), c.model.clone())) {
+            own.push(c);
+        }
+    }
+    own
 }
 
 /// Save a specific model's config (upsert on project_id + provider + model).

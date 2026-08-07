@@ -4662,7 +4662,7 @@ async fn gov_get_ai_config(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB lock: {e}")).into_response(),
     };
     let active = super::governance::ai::get_ai_config(&conn, &q.project_id);
-    let models = super::governance::ai::list_model_configs(&conn, &q.project_id);
+    let models = super::governance::ai::list_models_with_shared(&conn, &q.project_id);
     eprintln!(
         "[ai] GET config active={}/{} models={}",
         active.provider, active.model,
