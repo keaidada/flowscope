@@ -1,4 +1,4 @@
-/* @ts-self-types="./flowscope_wasm.d.ts" */
+/* @ts-self-types="./capybara_wasm.d.ts" */
 
 /**
  * Analyze SQL and export to DuckDB SQL statements in one step.
@@ -548,7 +548,7 @@ function __wbg_get_imports() {
     };
     return {
         __proto__: null,
-        "./flowscope_wasm_bg.js": import0,
+        "./capybara_wasm_bg.js": import0,
     };
 }
 
@@ -728,7 +728,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (module_or_path === undefined) {
-        module_or_path = new URL('flowscope_wasm_bg.wasm', import.meta.url);
+        module_or_path = new URL('capybara_wasm_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
 

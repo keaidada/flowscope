@@ -19,7 +19,7 @@ use anyhow::{Context, Result};
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Query;
 use axum::http::HeaderMap;
-use axum::response::Html;
+use axum::response::{Html, IntoResponse};
 use axum::Router;
 use serde::Deserialize;
 use tower_http::cors::CorsLayer;
@@ -48,7 +48,12 @@ pub async fn run_server(config: ServerConfig) -> Result<()> {
 
     let app = build_router(state, config.port, config.db_only);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], config.port));
+    let addr: SocketAddr = match config.host.parse::<std::net::IpAddr>() {
+        Ok(ip) => SocketAddr::from((ip, config.port)),
+        Err(_) => {
+            anyhow::bail!("invalid --host value: {}", config.host);
+        }
+    };
 
     // Bind to port first to ensure it's available before opening browser
     let listener = tokio::net::TcpListener::bind(addr)
@@ -140,10 +145,24 @@ fn scalar_html(locale: &str, html_lang: &str, title: &str) -> String {
         data-url="/api/openapi.json"
         data-configuration='{{"localization":{{"locale":"{locale}"}}}}'>
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1"></script>
+    <script src="/api/docs/scalar.js"></script>
 </body>
 </html>"#
     )
+}
+
+/// Serve the Scalar API reference bundle locally (no CDN dependency).
+async fn scalar_js() -> axum::response::Response {
+    let content = include_str!("../../server-assets/scalar-standalone.js");
+    (
+        axum::http::StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, "application/javascript"),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+        ],
+        content.to_owned(),
+    )
+        .into_response()
 }
 
 /// Build the main router with all routes.
@@ -171,7 +190,8 @@ pub fn build_router(state: Arc<AppState>, port: u16, db_only: bool) -> Router {
     let router = Router::new()
         .nest("/api", api::api_routes())
         .route("/api/openapi.json", axum::routing::get(openapi_json))
-        .route("/api/docs", axum::routing::get(scalar_docs));
+        .route("/api/docs", axum::routing::get(scalar_docs))
+        .route("/api/docs/scalar.js", axum::routing::get(scalar_js));
 
     // Only serve static assets in full serve mode (not db-only)
     let router = if db_only {

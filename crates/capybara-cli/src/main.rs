@@ -141,6 +141,7 @@ fn run_serve_mode(args: Args) -> ExitCode {
         metadata_schema: None,
         schema_path: args.schema.clone(),
         port: args.port,
+        host: args.host,
         open_browser: args.open && !args.db_only,
         db_only: args.db_only,
         #[cfg(feature = "templating")]

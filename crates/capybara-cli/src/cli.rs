@@ -133,6 +133,13 @@ pub struct Args {
     #[arg(long, default_value = "3000")]
     pub port: u16,
 
+    /// Host/interface to bind for HTTP server (default: 0.0.0.0)
+    /// 0.0.0.0 allows access from other machines (LAN/external IP);
+    /// use 127.0.0.1 to restrict to localhost only
+    #[cfg(feature = "serve")]
+    #[arg(long, default_value = "0.0.0.0")]
+    pub host: String,
+
     /// Directories to watch for SQL files (can be repeated)
     #[cfg(feature = "serve")]
     #[arg(long, value_name = "DIR")]

@@ -10,6 +10,7 @@ pub fn export_html(
     project_name: &str,
     exported_at: DateTime<Utc>,
 ) -> String {
+    let mermaid_js = include_str!("../assets/mermaid.min.js");
     let script_view = export_mermaid(result, MermaidView::Script);
     let hybrid_view = export_mermaid(result, MermaidView::Hybrid);
     let table_view = export_mermaid(result, MermaidView::Table);
@@ -101,7 +102,7 @@ pub fn export_html(
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{title} - Lineage Export</title>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>{mermaid_js}</script>
   <style>
     :root {{
       --bg-primary: #ffffff;
@@ -279,6 +280,7 @@ pub fn export_html(
         hybrid_view = hybrid_view,
         table_view = table_view,
         column_view = column_view,
+        mermaid_js = mermaid_js,
         issues_section = issues_section,
         script_rows = script_rows,
         table_rows = table_rows,

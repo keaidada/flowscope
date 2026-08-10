@@ -50,17 +50,17 @@ fi
 echo "Copying WASM to app locations..."
 # Copy to app/public/wasm for the Vite dev server to serve
 mkdir -p app/public/wasm
-cp packages/core/wasm/flowscope_wasm_bg.wasm app/public/wasm/
-cp packages/core/wasm/flowscope_wasm.js app/public/wasm/
-cp packages/core/wasm/flowscope_wasm.d.ts app/public/wasm/
-cp packages/core/wasm/flowscope_wasm_bg.wasm.d.ts app/public/wasm/
+cp packages/core/wasm/capybara_wasm_bg.wasm app/public/wasm/
+cp packages/core/wasm/capybara_wasm.js app/public/wasm/
+cp packages/core/wasm/capybara_wasm.d.ts app/public/wasm/
+cp packages/core/wasm/capybara_wasm_bg.wasm.d.ts app/public/wasm/
 
 # Copy to app's node_modules when using yarn workspace linking
 # This ensures the app can resolve the WASM files from the linked package
 if [ -d "app/node_modules/@pondpilot/flowscope-core/wasm" ]; then
     echo "Copying WASM to app node_modules (workspace linking)..."
-    cp packages/core/wasm/flowscope_wasm_bg.wasm app/node_modules/@pondpilot/flowscope-core/wasm/
-    cp packages/core/wasm/flowscope_wasm.js app/node_modules/@pondpilot/flowscope-core/wasm/
+    cp packages/core/wasm/capybara_wasm_bg.wasm app/node_modules/@pondpilot/flowscope-core/wasm/
+    cp packages/core/wasm/capybara_wasm.js app/node_modules/@pondpilot/flowscope-core/wasm/
 else
     echo "Skipping app node_modules copy (directory not found - expected for fresh installs)"
 fi

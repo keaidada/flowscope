@@ -30,6 +30,8 @@ pub struct ServerConfig {
     pub metadata_schema: Option<String>,
     /// Port to listen on
     pub port: u16,
+    /// Host/interface to bind to (e.g. "127.0.0.1" or "0.0.0.0")
+    pub host: String,
     /// Whether to open browser on startup
     pub open_browser: bool,
     /// Optional schema DDL file path
