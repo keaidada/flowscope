@@ -61,8 +61,12 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     if current < 6 {
         migrate_v5_to_v6(conn)?;
-        migrate_v6_to_v7(conn)?;
     }
+
+    // Idempotent safety net: ensure the dbt_yaml column exists on project_files
+    // regardless of recorded schema version. Fresh DBs create the table after
+    // migrate() runs, and older v7 DBs may be missing the column, so re-check here.
+    migrate_v6_to_v7(conn)?;
 
     if current != SCHEMA_VERSION {
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
@@ -724,6 +728,7 @@ fn create_table_sql_for(table: &str) -> &'static str {
                 is_procedure        INTEGER NOT NULL DEFAULT 0,
                 transformed_content TEXT    NOT NULL DEFAULT '',
                 dbt_content         TEXT    NOT NULL DEFAULT '',
+                dbt_yaml            TEXT    NOT NULL DEFAULT '',
                 created_at          TEXT    NOT NULL DEFAULT '',
                 updated_at          TEXT    NOT NULL DEFAULT '',
                 status              INTEGER NOT NULL DEFAULT 1,
@@ -1005,6 +1010,7 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             is_procedure        INTEGER NOT NULL DEFAULT 0,
             transformed_content TEXT    NOT NULL DEFAULT '',
             dbt_content         TEXT    NOT NULL DEFAULT '',
+            dbt_yaml            TEXT    NOT NULL DEFAULT '',
             created_at          TEXT    NOT NULL DEFAULT '',
             updated_at          TEXT    NOT NULL DEFAULT '',
             status              INTEGER NOT NULL DEFAULT 1,
