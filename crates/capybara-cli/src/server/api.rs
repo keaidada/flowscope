@@ -2509,6 +2509,24 @@ pub(crate) async fn analyze_batch(
         if !all_nodes.is_empty() {
             let _ = store::save_lineage_batch(&db, &req.project_id, &all_nodes, &all_columns, &all_edges);
         }
+        // Record file_results so the file tree green-lineage badge shows after batch analysis.
+        // The full AnalyzeResult lives in analysis_cache (keyed by hash); here we persist the
+        // pointer row (status=1) only, keeping the payload small.
+        let now = chrono::Local::now().to_rfc3339();
+        let mut set_file_result_stmt = db
+            .prepare(
+                "INSERT INTO project_file_results (project_id, file_path, file_name, dir_path, result_json, content_hash, size_bytes, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1) ON CONFLICT(project_id, file_path) DO UPDATE SET file_name=excluded.file_name, dir_path=excluded.dir_path, result_json=excluded.result_json, content_hash=excluded.content_hash, size_bytes=excluded.size_bytes, updated_at=excluded.updated_at, status=1",
+            )
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        for r in &results {
+            if r.ok {
+                let (file_name, dir_path) = store::split_file_path(&r.path);
+                let hash = format!("batch:{}:{}", req.project_id, r.path);
+                let _ = set_file_result_stmt.execute(rusqlite::params![
+                    req.project_id, r.path, file_name, dir_path, "", hash, 0i64, now, now
+                ]);
+            }
+        }
         // Bulk save anomalies
         let anomaly_rows: Vec<store::LineageAnomalyRow> = results.iter()
             .filter(|r| !r.ok)

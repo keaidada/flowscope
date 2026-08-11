@@ -558,7 +558,9 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
           console.log(`[analysis] batch complete: success=${result.success}, errors=${result.errors}, empty=${result.empty}`);
           await refreshBackendFiles();
           if (activeProjectId) {
-            const { writeTableLevelEdges } = await import('@/lib/analysis-cache');
+            const { writeTableLevelEdges, invalidateFileResultCache } = await import('@/lib/analysis-cache');
+            // 后端 analyze_batch 已写 file_results, 使本地缓存失效以便刷新绿色血缘标识
+            invalidateFileResultCache(activeProjectId);
             await writeTableLevelEdges(activeProjectId);
           // For large batches, ask user if they want to render lineage
           const shouldRender = filePaths.length <= 100 || window.confirm(
@@ -577,6 +579,7 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
             fileCount: result.total,
             stage: 'done',
           });
+          setState((prev) => ({ ...prev, lastAnalyzedAt: Date.now() }));
           if (result.errors > 0) {
             setError(`批量分析完成：${result.success} 成功，${result.errors} 失败，${result.empty} 空文件`);
           }

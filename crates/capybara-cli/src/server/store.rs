@@ -610,7 +610,7 @@ fn migrate_v3_to_v4(conn: &Connection) -> Result<(), rusqlite::Error> {
 /// Split a file_path into (file_name, dir_path).
 /// Handles both `/` and `\` separators.
 /// Example: "etl/SUM_公共汇总库/B10.HQL" → ("B10.HQL", "etl/SUM_公共汇总库")
-fn split_file_path(file_path: &str) -> (String, String) {
+pub(crate) fn split_file_path(file_path: &str) -> (String, String) {
     let pos = file_path.rfind(|c| c == '/' || c == '\\');
     match pos {
         Some(i) => (file_path[i + 1..].to_string(), file_path[..i].to_string()),

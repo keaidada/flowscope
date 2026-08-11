@@ -140,6 +140,7 @@ export async function writeBatchFileResults(
   // Also store the full result once, keyed by hash
   const cacheKey = `result:${projectId}:hash:${contentHash || 'no_hash'}`;
   await serverDb.setCacheResult(cacheKey, result);
+  invalidateFileResultCache(projectId);
 }
 
 export async function writeFileResult(
@@ -158,6 +159,7 @@ export async function writeFileResult(
 
   const cacheKey = `result:${projectId}:hash:${contentHash || 'no_hash'}`;
   await serverDb.setCacheResult(cacheKey, result);
+  invalidateFileResultCache(projectId);
 }
 
 export async function readFileResultPaths(projectId: string): Promise<string[]> {
@@ -169,6 +171,19 @@ export async function readFileResultPaths(projectId: string): Promise<string[]> 
     _fileResultCache.set(projectId, rows);
   }
   return rows.map((r) => r.file_path);
+}
+
+/** 分析结果写入后调用, 使文件血缘标识缓存失效, 下次读取会拉最新状态 */
+export function invalidateFileResultCache(projectId?: string): void {
+  if (projectId) {
+    _fileResultCache.delete(projectId);
+    _promiseCache.delete(`fileResults:${projectId}`);
+  } else {
+    _fileResultCache.clear();
+    for (const k of Array.from(_promiseCache.keys())) {
+      if (k.startsWith('fileResults:')) _promiseCache.delete(k);
+    }
+  }
 }
 
 export async function readFileResult(
