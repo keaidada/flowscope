@@ -1114,9 +1114,34 @@ export function useAnalysis(backendReady: boolean, options?: UseAnalysisOptions)
     ]
   );
 
+  // DB-first loading for the lineage button: query the database for the
+  // current file's persisted lineage and load it directly without re-parsing.
+  // Does not consult the in-memory store, which may hold another script's result.
+  const loadLineageForFile = useCallback(
+    async (filePath: string): Promise<'db' | 'none'> => {
+      if (!backendReady || !activeProjectId) return 'none';
+      try {
+        const { readFileResult, hasMeaningfulLineage } = await import('@/lib/analysis-cache');
+        const dbResult = await readFileResult(activeProjectId, filePath);
+        if (dbResult && hasMeaningfulLineage(dbResult)) {
+          startTransition(() => {
+            setLineageResult(dbResult);
+          });
+          storeResult(activeProjectId, dbResult, hideCTEs);
+          return 'db';
+        }
+      } catch (e) {
+        console.warn('[useAnalysis] loadLineageForFile failed:', e);
+      }
+      return 'none';
+    },
+    [backendReady, activeProjectId, hideCTEs, setLineageResult, storeResult]
+  );
+
   return {
     ...state,
     runAnalysis,
     setError,
+    loadLineageForFile,
   };
 }

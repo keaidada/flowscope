@@ -30,6 +30,7 @@ interface EditorAnalysisState {
     options?: { runModeOverride?: RunMode }
   ) => Promise<void>;
   setError: (error: string | null) => void;
+  loadLineageForFile: (filePath: string) => Promise<'db' | 'none'>;
 }
 
 // Fallback component shown when SqlView encounters an error
@@ -119,7 +120,7 @@ export function EditorArea({
     setSqlViewMode('template');
   }, [currentProject?.activeFileId]);
 
-  const { isAnalyzing, error, runAnalysis, setError } = analysis;
+  const { isAnalyzing, error, runAnalysis, setError, loadLineageForFile } = analysis;
 
   // Show error toast when error occurs, keep visible until next analysis
   useEffect(() => {
@@ -341,14 +342,29 @@ export function EditorArea({
     }
   }, [activeFile, onRequestOpenLineage, runAnalysis, setActiveTab, setError]);
 
-  const handleOpenLineage = useCallback(() => {
+  const handleOpenLineage = useCallback(async () => {
     onRequestOpenLineage?.();
-    if (result) {
-      setActiveTab('lineage');
-      return;
+    // DB-first: load the current file's persisted lineage directly instead of
+    // trusting the in-memory store (which may hold another script's result).
+    const filePath = activeFile?.path || activeFile?.name;
+    if (activeProjectId && filePath) {
+      const source = await loadLineageForFile(filePath);
+      if (source === 'db') {
+        setActiveTab('lineage');
+        return;
+      }
     }
-    handleAnalyze();
-  }, [onRequestOpenLineage, result, setActiveTab, handleAnalyze]);
+    // No persisted lineage — parse the current file, then load.
+    handleAnalyzeActiveOnly();
+  }, [
+    activeProjectId,
+    activeFile?.path,
+    activeFile?.name,
+    handleAnalyzeActiveOnly,
+    loadLineageForFile,
+    onRequestOpenLineage,
+    setActiveTab,
+  ]);
 
   const handleOpenEtl = useCallback(() => {
     setInitialEtlContent(activeFile?.content || '');
